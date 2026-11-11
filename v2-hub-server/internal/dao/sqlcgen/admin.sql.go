@@ -11,6 +11,38 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const advanceAdminTOTPStep = `-- name: AdvanceAdminTOTPStep :execrows
+UPDATE admin SET totp_last_step = $1 WHERE id = $2 AND totp_last_step < $1
+`
+
+type AdvanceAdminTOTPStepParams struct {
+	Step int64
+	ID   int64
+}
+
+// 原子地推进已用步长；返回 0 行表示该步长已被用过（并发重放）
+func (q *Queries) AdvanceAdminTOTPStep(ctx context.Context, arg AdvanceAdminTOTPStepParams) (int64, error) {
+	result, err := q.db.Exec(ctx, advanceAdminTOTPStep, arg.Step, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const clearAdminTOTP = `-- name: ClearAdminTOTP :execrows
+UPDATE admin
+SET totp_secret_enc = NULL, totp_pending_enc = NULL, totp_last_step = 0, updated_at = now()
+WHERE id = $1
+`
+
+func (q *Queries) ClearAdminTOTP(ctx context.Context, id int64) (int64, error) {
+	result, err := q.db.Exec(ctx, clearAdminTOTP, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const countAdmins = `-- name: CountAdmins :one
 SELECT COUNT(*) FROM admin
 `
@@ -76,8 +108,26 @@ func (q *Queries) DeleteAdminRoles(ctx context.Context, adminID int64) error {
 	return err
 }
 
+const enableAdminTOTP = `-- name: EnableAdminTOTP :exec
+UPDATE admin
+SET totp_secret_enc = $2, totp_pending_enc = NULL, totp_last_step = $3, updated_at = now()
+WHERE id = $1
+`
+
+type EnableAdminTOTPParams struct {
+	ID            int64
+	TotpSecretEnc []byte
+	TotpLastStep  int64
+}
+
+// 待定密钥已由调用方校验并重新加密为正式密钥后传入
+func (q *Queries) EnableAdminTOTP(ctx context.Context, arg EnableAdminTOTPParams) error {
+	_, err := q.db.Exec(ctx, enableAdminTOTP, arg.ID, arg.TotpSecretEnc, arg.TotpLastStep)
+	return err
+}
+
 const getAdminByID = `-- name: GetAdminByID :one
-SELECT id, username, is_disabled, last_login_at, created_at
+SELECT id, username, is_disabled, (totp_secret_enc IS NOT NULL)::boolean AS totp_enabled, last_login_at, created_at
 FROM admin
 WHERE id = $1
 `
@@ -86,6 +136,7 @@ type GetAdminByIDRow struct {
 	ID          int64
 	Username    string
 	IsDisabled  bool
+	TotpEnabled bool
 	LastLoginAt pgtype.Timestamptz
 	CreatedAt   pgtype.Timestamptz
 }
@@ -97,6 +148,7 @@ func (q *Queries) GetAdminByID(ctx context.Context, id int64) (GetAdminByIDRow, 
 		&i.ID,
 		&i.Username,
 		&i.IsDisabled,
+		&i.TotpEnabled,
 		&i.LastLoginAt,
 		&i.CreatedAt,
 	)
@@ -104,16 +156,18 @@ func (q *Queries) GetAdminByID(ctx context.Context, id int64) (GetAdminByIDRow, 
 }
 
 const getAdminByUsername = `-- name: GetAdminByUsername :one
-SELECT id, username, password_hash, is_disabled
+SELECT id, username, password_hash, is_disabled, totp_secret_enc, totp_last_step
 FROM admin
 WHERE username = $1
 `
 
 type GetAdminByUsernameRow struct {
-	ID           int64
-	Username     string
-	PasswordHash string
-	IsDisabled   bool
+	ID            int64
+	Username      string
+	PasswordHash  string
+	IsDisabled    bool
+	TotpSecretEnc []byte
+	TotpLastStep  int64
 }
 
 func (q *Queries) GetAdminByUsername(ctx context.Context, username string) (GetAdminByUsernameRow, error) {
@@ -124,7 +178,28 @@ func (q *Queries) GetAdminByUsername(ctx context.Context, username string) (GetA
 		&i.Username,
 		&i.PasswordHash,
 		&i.IsDisabled,
+		&i.TotpSecretEnc,
+		&i.TotpLastStep,
 	)
+	return i, err
+}
+
+const getAdminTOTP = `-- name: GetAdminTOTP :one
+
+SELECT totp_secret_enc, totp_pending_enc, totp_last_step FROM admin WHERE id = $1
+`
+
+type GetAdminTOTPRow struct {
+	TotpSecretEnc  []byte
+	TotpPendingEnc []byte
+	TotpLastStep   int64
+}
+
+// 两步验证（docs/03 §4.3）---------------------------------------------------
+func (q *Queries) GetAdminTOTP(ctx context.Context, id int64) (GetAdminTOTPRow, error) {
+	row := q.db.QueryRow(ctx, getAdminTOTP, id)
+	var i GetAdminTOTPRow
+	err := row.Scan(&i.TotpSecretEnc, &i.TotpPendingEnc, &i.TotpLastStep)
 	return i, err
 }
 
@@ -144,7 +219,7 @@ func (q *Queries) InsertAdminRoles(ctx context.Context, arg InsertAdminRolesPara
 }
 
 const listAdmins = `-- name: ListAdmins :many
-SELECT id, username, is_disabled, last_login_at, created_at
+SELECT id, username, is_disabled, (totp_secret_enc IS NOT NULL)::boolean AS totp_enabled, last_login_at, created_at
 FROM admin
 ORDER BY id
 LIMIT $1 OFFSET $2
@@ -159,6 +234,7 @@ type ListAdminsRow struct {
 	ID          int64
 	Username    string
 	IsDisabled  bool
+	TotpEnabled bool
 	LastLoginAt pgtype.Timestamptz
 	CreatedAt   pgtype.Timestamptz
 }
@@ -176,6 +252,7 @@ func (q *Queries) ListAdmins(ctx context.Context, arg ListAdminsParams) ([]ListA
 			&i.ID,
 			&i.Username,
 			&i.IsDisabled,
+			&i.TotpEnabled,
 			&i.LastLoginAt,
 			&i.CreatedAt,
 		); err != nil {
@@ -229,6 +306,20 @@ SELECT id FROM role WHERE code = 'super_admin' FOR UPDATE
 // R5 的并发保护：改动可能影响 super_admin 数量的事务先锁住该角色行，串行化判断。
 func (q *Queries) LockSuperAdminRole(ctx context.Context) error {
 	_, err := q.db.Exec(ctx, lockSuperAdminRole)
+	return err
+}
+
+const setAdminTOTPPending = `-- name: SetAdminTOTPPending :exec
+UPDATE admin SET totp_pending_enc = $2, updated_at = now() WHERE id = $1
+`
+
+type SetAdminTOTPPendingParams struct {
+	ID             int64
+	TotpPendingEnc []byte
+}
+
+func (q *Queries) SetAdminTOTPPending(ctx context.Context, arg SetAdminTOTPPendingParams) error {
+	_, err := q.db.Exec(ctx, setAdminTOTPPending, arg.ID, arg.TotpPendingEnc)
 	return err
 }
 

@@ -11,14 +11,16 @@ import (
 )
 
 type Admin struct {
-	ID            int64
-	Username      string
-	PasswordHash  string
-	TotpSecretEnc []byte
-	IsDisabled    bool
-	LastLoginAt   pgtype.Timestamptz
-	CreatedAt     pgtype.Timestamptz
-	UpdatedAt     pgtype.Timestamptz
+	ID             int64
+	Username       string
+	PasswordHash   string
+	TotpSecretEnc  []byte
+	TotpPendingEnc []byte
+	TotpLastStep   int64
+	IsDisabled     bool
+	LastLoginAt    pgtype.Timestamptz
+	CreatedAt      pgtype.Timestamptz
+	UpdatedAt      pgtype.Timestamptz
 }
 
 type AdminRole struct {

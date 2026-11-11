@@ -45,13 +45,14 @@ type AuthConfig struct {
 type AuthService struct {
 	store
 	cfg       AuthConfig
+	sealer    *crypto.Sealer
 	guard     *ratelimit.FailureGuard
 	now       func() time.Time
 	dummyHash string
 }
 
-// NewAuthService 创建认证服务；now 为 nil 时用 time.Now。
-func NewAuthService(pool *pgxpool.Pool, cfg AuthConfig, now func() time.Time) (*AuthService, error) {
+// NewAuthService 创建认证服务；sealer 用于加解密 TOTP 密钥；now 为 nil 时用 time.Now。
+func NewAuthService(pool *pgxpool.Pool, cfg AuthConfig, sealer *crypto.Sealer, now func() time.Time) (*AuthService, error) {
 	if now == nil {
 		now = time.Now
 	}
@@ -65,13 +66,14 @@ func NewAuthService(pool *pgxpool.Pool, cfg AuthConfig, now func() time.Time) (*
 		Lockout:     cfg.LoginLockout,
 		MaxKeys:     cfg.LoginMaxTrackedKeys,
 	}, now)
-	return &AuthService{store: newStore(pool), cfg: cfg, guard: guard, now: now, dummyHash: dummy}, nil
+	return &AuthService{store: newStore(pool), cfg: cfg, sealer: sealer, guard: guard, now: now, dummyHash: dummy}, nil
 }
 
 // LoginInput 是登录请求。
 type LoginInput struct {
 	Username  string
 	Password  string
+	TOTPCode  string // 已开启两步验证的账号必填（docs/03 §4.3）
 	ClientIP  *netip.Addr
 	UserAgent string
 }
@@ -98,13 +100,29 @@ func (s *AuthService) Login(ctx context.Context, in LoginInput) (*LoginResult, e
 	if err != nil {
 		return nil, err
 	}
-	if !verified {
+	failure := func(reason, message string) error {
 		s.guard.RecordFailure(userKey)
 		if ipKey != "" {
 			s.guard.RecordFailure(ipKey)
 		}
-		s.auditLoginFailure(ctx, in, admin)
-		return nil, newError(CodeUnauthenticated, msgBadCredentials)
+		s.auditLoginFailure(ctx, in, admin, reason)
+		return newError(CodeUnauthenticated, message)
+	}
+	if !verified {
+		return nil, failure("credentials", msgBadCredentials)
+	}
+	if admin.TotpSecretEnc != nil {
+		// 口令已正确：未带验证码时提示补交，不计失败（docs/03 §4.3）
+		if in.TOTPCode == "" {
+			return nil, newError(CodeTOTPRequired, msgTOTPRequired)
+		}
+		ok, err := s.consumeTOTP(ctx, admin.ID, admin.TotpSecretEnc, admin.TotpLastStep, in.TOTPCode)
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			return nil, failure("totp", msgTOTPInvalid)
+		}
 	}
 	s.guard.Reset(userKey)
 	if ipKey != "" {
@@ -142,6 +160,7 @@ func (s *AuthService) Login(ctx context.Context, in LoginInput) (*LoginResult, e
 			return err
 		}
 		p.CSRFToken = csrf
+		p.TOTPEnabled = admin.TotpSecretEnc != nil
 		principal = p
 		return writeAudit(ctx, q, AuditEntry{
 			ActorType: ActorAdmin, ActorID: admin.ID, Action: ActionAdminLogin,
@@ -174,10 +193,10 @@ func (s *AuthService) verifyCredentials(ctx context.Context, username, password 
 	return &row, ok && !row.IsDisabled, nil
 }
 
-func (s *AuthService) auditLoginFailure(ctx context.Context, in LoginInput, admin *sqlcgen.GetAdminByUsernameRow) {
+func (s *AuthService) auditLoginFailure(ctx context.Context, in LoginInput, admin *sqlcgen.GetAdminByUsernameRow, reason string) {
 	entry := AuditEntry{
 		ActorType: ActorAdmin, Action: ActionAdminLoginFailed, ClientIP: in.ClientIP,
-		Detail: map[string]any{"username": truncate(in.Username, maxAuditUsernameLen)},
+		Detail: map[string]any{"username": truncate(in.Username, maxAuditUsernameLen), "reason": reason},
 	}
 	if admin != nil {
 		entry.ActorID = admin.ID
@@ -220,6 +239,7 @@ func (s *AuthService) Authenticate(ctx context.Context, token string) (*AdminPri
 	}
 	p.SessionID = row.ID
 	p.CSRFToken = row.CsrfToken
+	p.TOTPEnabled = row.TotpEnabled
 	return p, nil
 }
 

@@ -1,10 +1,10 @@
 -- name: GetAdminByUsername :one
-SELECT id, username, password_hash, is_disabled
+SELECT id, username, password_hash, is_disabled, totp_secret_enc, totp_last_step
 FROM admin
 WHERE username = $1;
 
 -- name: GetAdminByID :one
-SELECT id, username, is_disabled, last_login_at, created_at
+SELECT id, username, is_disabled, (totp_secret_enc IS NOT NULL)::boolean AS totp_enabled, last_login_at, created_at
 FROM admin
 WHERE id = $1;
 
@@ -23,7 +23,7 @@ UPDATE admin SET password_hash = $2, updated_at = now() WHERE id = $1;
 UPDATE admin SET last_login_at = now() WHERE id = $1;
 
 -- name: ListAdmins :many
-SELECT id, username, is_disabled, last_login_at, created_at
+SELECT id, username, is_disabled, (totp_secret_enc IS NOT NULL)::boolean AS totp_enabled, last_login_at, created_at
 FROM admin
 ORDER BY id
 LIMIT $1 OFFSET $2;
@@ -57,3 +57,26 @@ WHERE ar.role_id = sqlc.arg(role_id)
 -- name: LockSuperAdminRole :exec
 -- R5 的并发保护：改动可能影响 super_admin 数量的事务先锁住该角色行，串行化判断。
 SELECT id FROM role WHERE code = 'super_admin' FOR UPDATE;
+
+-- 两步验证（docs/03 §4.3）---------------------------------------------------
+
+-- name: GetAdminTOTP :one
+SELECT totp_secret_enc, totp_pending_enc, totp_last_step FROM admin WHERE id = $1;
+
+-- name: SetAdminTOTPPending :exec
+UPDATE admin SET totp_pending_enc = $2, updated_at = now() WHERE id = $1;
+
+-- name: EnableAdminTOTP :exec
+-- 待定密钥已由调用方校验并重新加密为正式密钥后传入
+UPDATE admin
+SET totp_secret_enc = $2, totp_pending_enc = NULL, totp_last_step = $3, updated_at = now()
+WHERE id = $1;
+
+-- name: ClearAdminTOTP :execrows
+UPDATE admin
+SET totp_secret_enc = NULL, totp_pending_enc = NULL, totp_last_step = 0, updated_at = now()
+WHERE id = $1;
+
+-- name: AdvanceAdminTOTPStep :execrows
+-- 原子地推进已用步长；返回 0 行表示该步长已被用过（并发重放）
+UPDATE admin SET totp_last_step = sqlc.arg(step) WHERE id = sqlc.arg(id) AND totp_last_step < sqlc.arg(step);

@@ -11,6 +11,9 @@ import (
 )
 
 type Querier interface {
+	// 原子地推进已用步长；返回 0 行表示该步长已被用过（并发重放）
+	AdvanceAdminTOTPStep(ctx context.Context, arg AdvanceAdminTOTPStepParams) (int64, error)
+	ClearAdminTOTP(ctx context.Context, id int64) (int64, error)
 	CountAdmins(ctx context.Context) (int64, error)
 	CountAdminsByRole(ctx context.Context, roleID int64) (int64, error)
 	CountAuditLogs(ctx context.Context) (int64, error)
@@ -27,10 +30,14 @@ type Querier interface {
 	DeleteExpiredAdminSessions(ctx context.Context, expiresAt pgtype.Timestamptz) (int64, error)
 	DeleteRole(ctx context.Context, id int64) error
 	DeleteRolePermissions(ctx context.Context, roleID int64) error
+	// 待定密钥已由调用方校验并重新加密为正式密钥后传入
+	EnableAdminTOTP(ctx context.Context, arg EnableAdminTOTPParams) error
 	GetAdminByID(ctx context.Context, id int64) (GetAdminByIDRow, error)
 	GetAdminByUsername(ctx context.Context, username string) (GetAdminByUsernameRow, error)
 	// 同时取管理员状态：被禁用的管理员会话视为无效（R7）。
 	GetAdminSessionByTokenHash(ctx context.Context, tokenHash []byte) (GetAdminSessionByTokenHashRow, error)
+	// 两步验证（docs/03 §4.3）---------------------------------------------------
+	GetAdminTOTP(ctx context.Context, id int64) (GetAdminTOTPRow, error)
 	GetRoleByCode(ctx context.Context, code string) (GetRoleByCodeRow, error)
 	GetRoleByID(ctx context.Context, id int64) (GetRoleByIDRow, error)
 	InsertAdminRoles(ctx context.Context, arg InsertAdminRolesParams) error
@@ -47,6 +54,7 @@ type Querier interface {
 	ListRolesByCodes(ctx context.Context, codes []string) ([]ListRolesByCodesRow, error)
 	// R5 的并发保护：改动可能影响 super_admin 数量的事务先锁住该角色行，串行化判断。
 	LockSuperAdminRole(ctx context.Context) error
+	SetAdminTOTPPending(ctx context.Context, arg SetAdminTOTPPendingParams) error
 	TouchAdminSession(ctx context.Context, arg TouchAdminSessionParams) error
 	UpdateAdminDisabled(ctx context.Context, arg UpdateAdminDisabledParams) error
 	UpdateAdminLastLogin(ctx context.Context, id int64) error

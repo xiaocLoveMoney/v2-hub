@@ -23,6 +23,7 @@ import (
 	"v2-hub-server/internal/config"
 	"v2-hub-server/internal/dao"
 	"v2-hub-server/internal/job"
+	"v2-hub-server/internal/manager/crypto"
 	"v2-hub-server/internal/service"
 )
 
@@ -30,6 +31,8 @@ const (
 	defaultConfigPath = "etc/hub-server.yaml"
 	// envDatabaseURL 是 PostgreSQL 连接串（含口令）的环境变量名，不写进配置文件（Ruling-2）。
 	envDatabaseURL = "HUB_DATABASE_URL"
+	// envEncryptionKey 是 AES-256-GCM 主密钥（Base64 的 32 字节），加密 TOTP 密钥等（docs/03 §4.3）。
+	envEncryptionKey = "HUB_ENCRYPTION_KEY"
 	// envInsecureDevCookie=1 时关闭会话 Cookie 的 Secure 属性，只供本机 HTTP 开发与联调。
 	envInsecureDevCookie = "HUB_INSECURE_DEV_COOKIE"
 	cmdAdminCreate       = "admin-create"
@@ -84,7 +87,11 @@ func runServer(args []string) error {
 	if err != nil {
 		return err
 	}
-	auth, err := service.NewAuthService(pool, toAuthConfig(cfg.Auth), nil)
+	sealer, err := crypto.NewSealer(os.Getenv(envEncryptionKey))
+	if err != nil {
+		return fmt.Errorf("init encryption (env %s): %w", envEncryptionKey, err)
+	}
+	auth, err := service.NewAuthService(pool, toAuthConfig(cfg.Auth), sealer, nil)
 	if err != nil {
 		return err
 	}

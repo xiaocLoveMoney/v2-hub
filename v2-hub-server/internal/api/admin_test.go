@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"context"
+	"encoding/base32"
 	"encoding/json"
 	"net/http"
 	"net/http/cookiejar"
@@ -12,6 +13,8 @@ import (
 	"time"
 
 	"v2-hub-server/internal/dao/daotest"
+	"v2-hub-server/internal/manager/crypto"
+	"v2-hub-server/internal/manager/totp"
 	"v2-hub-server/internal/service"
 )
 
@@ -33,10 +36,14 @@ type apiResult struct {
 func newAPIServer(t *testing.T) (*httptest.Server, *service.RBACService) {
 	t.Helper()
 	pool := daotest.NewPool(t)
+	sealer, err := crypto.NewSealer("KioqKioqKioqKioqKioqKioqKioqKioqKioqKioqKio=")
+	if err != nil {
+		t.Fatalf("NewSealer: %v", err)
+	}
 	auth, err := service.NewAuthService(pool, service.AuthConfig{
 		SessionIdleTimeout: 2 * time.Hour, SessionMaxAge: 24 * time.Hour, SessionTouchInterval: time.Minute,
 		LoginMaxFailures: 5, LoginWindow: 15 * time.Minute, LoginLockout: 15 * time.Minute, LoginMaxTrackedKeys: 100,
-	}, nil)
+	}, sealer, nil)
 	if err != nil {
 		t.Fatalf("NewAuthService: %v", err)
 	}
@@ -187,6 +194,42 @@ func TestAdminRBACEndpoints(t *testing.T) {
 	var auditPage pageVO[auditLogVO]
 	if err := json.Unmarshal(logs.Data, &auditPage); err != nil || auditPage.Total == 0 {
 		t.Fatalf("audit page = %+v, %v", auditPage, err)
+	}
+}
+
+func TestAdminTOTPEndpoints(t *testing.T) {
+	srv, rbac := newAPIServer(t)
+	if _, err := rbac.BootstrapSuperAdmin(context.Background(), "root", cred); err != nil {
+		t.Fatalf("bootstrap: %v", err)
+	}
+	c := newClient(t, srv.URL)
+	if s := c.login("root"); s.TOTPEnabled {
+		t.Fatal("totp should be off initially")
+	}
+
+	setup := c.do(http.MethodPost, "/api/admin/auth/totp/setup", nil)
+	expectStatus(t, setup, http.StatusOK, codeOK)
+	var vo totpSetupVO
+	if err := json.Unmarshal(setup.Data, &vo); err != nil || vo.Secret == "" || vo.OtpauthURI == "" {
+		t.Fatalf("setup = %+v, %v", vo, err)
+	}
+	expectStatus(t, c.do(http.MethodPost, "/api/admin/auth/totp/enable", map[string]string{"code": "abc"}),
+		http.StatusBadRequest, string(service.CodeInvalidArgument))
+	raw, err := base32.StdEncoding.WithPadding(base32.NoPadding).DecodeString(vo.Secret)
+	if err != nil {
+		t.Fatalf("decode secret: %v", err)
+	}
+	code := totp.CodeAt(raw, totp.Step(time.Now()))
+	expectStatus(t, c.do(http.MethodPost, "/api/admin/auth/totp/enable", map[string]string{"code": code}), http.StatusOK, codeOK)
+
+	// 新会话：口令正确但缺验证码 → 401 totp_required
+	other := newClient(t, srv.URL)
+	expectStatus(t, other.do(http.MethodPost, "/api/admin/auth/login", map[string]string{"username": "root", "password": cred}),
+		http.StatusUnauthorized, string(service.CodeTOTPRequired))
+	me := c.do(http.MethodGet, "/api/admin/auth/me", nil)
+	var s sessionVO
+	if err := json.Unmarshal(me.Data, &s); err != nil || !s.TOTPEnabled {
+		t.Fatalf("me after enable = %+v, %v", s, err)
 	}
 }
 
