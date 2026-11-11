@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: v2-hub API
-  version: 0.2.0
+  version: 0.2.1
   description: |
     v2-hub 对外接口契约（hub-server 提供，v2-hub-admin-web / v2-hub-user-web 消费）。
     - 管理端接口前缀 /api/admin，客户端接口前缀 /api/user，订阅端点前缀 /sub。
@@ -9,6 +9,7 @@ info:
     - 业务接口统一响应信封 Envelope；错误码表见 docs/03 §5。授权规则 R1–R7 见 docs/03 §4.1。
     版本纪律：additive 变更升修订号，破坏性变更升次版本号并在同一 PR 改引用方。
     0.2.0：新增管理员认证、管理员 / 角色 / 权限、审计日志接口。
+    0.2.1：两步验证（docs/03 §4.3）——登录可带 totpCode，新增 totp_required 错误码与 TOTP 开启 / 关闭 / 重置接口。
 servers:
   - url: http://127.0.0.1:8080
     description: 本地开发
@@ -82,7 +83,11 @@ paths:
               schema:
                 $ref: "#/components/schemas/SessionEnvelope"
         "400": { $ref: "#/components/responses/InvalidArgument" }
-        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "401":
+          description: unauthenticated（用户名或口令错误）或 totp_required（需再提交验证码）
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Envelope" }
         "429": { $ref: "#/components/responses/RateLimited" }
   /api/admin/auth/logout:
     post:
@@ -108,6 +113,66 @@ paths:
               schema:
                 $ref: "#/components/schemas/SessionEnvelope"
         "401": { $ref: "#/components/responses/Unauthenticated" }
+
+  /api/admin/auth/totp/setup:
+    post:
+      tags: [admin-auth]
+      operationId: adminTotpSetup
+      summary: 生成待确认的 TOTP 密钥，返回 otpauth 地址与 Base32 密钥（只返回这一次）
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      responses:
+        "200":
+          description: 待确认的密钥
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/TotpSetup" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /api/admin/auth/totp/enable:
+    post:
+      tags: [admin-auth]
+      operationId: adminTotpEnable
+      summary: 提交验证码确认并开启两步验证
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TotpCodeInput" }
+      responses:
+        "200": { $ref: "#/components/responses/Ok" }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /api/admin/auth/totp/disable:
+    post:
+      tags: [admin-auth]
+      operationId: adminTotpDisable
+      summary: 提交当前验证码关闭两步验证
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TotpCodeInput" }
+      responses:
+        "200": { $ref: "#/components/responses/Ok" }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "429": { $ref: "#/components/responses/RateLimited" }
 
   /api/admin/permissions:
     get:
@@ -306,6 +371,21 @@ paths:
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "403": { $ref: "#/components/responses/PermissionDenied" }
         "404": { $ref: "#/components/responses/NotFound" }
+  /api/admin/admins/{id}/totp:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    delete:
+      tags: [admin-rbac]
+      operationId: resetAdminTotp
+      summary: 清除他人的两步验证（遗失设备时；admin:write，R3、R4；对方全部会话失效）
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      responses:
+        "200": { $ref: "#/components/responses/Ok" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
   /api/admin/audit-logs:
     get:
       tags: [admin-audit]
@@ -433,6 +513,21 @@ components:
       properties:
         username: { $ref: "#/components/schemas/Username" }
         password: { type: string, minLength: 1, maxLength: 128 }
+        totpCode: { $ref: "#/components/schemas/TotpCode" }
+    TotpCode:
+      type: string
+      pattern: "^[0-9]{6}$"
+    TotpCodeInput:
+      type: object
+      required: [code]
+      properties:
+        code: { $ref: "#/components/schemas/TotpCode" }
+    TotpSetup:
+      type: object
+      required: [secret, otpauthUri]
+      properties:
+        secret: { type: string, description: Base32 密钥，供无法扫码时手动输入 }
+        otpauthUri: { type: string, description: "otpauth://totp/... 地址，前端渲染为二维码" }
     AdminBrief:
       type: object
       required: [id, username]
@@ -441,9 +536,10 @@ components:
         username: { type: string }
     Session:
       type: object
-      required: [admin, permissions, csrfToken]
+      required: [admin, permissions, csrfToken, totpEnabled]
       properties:
         admin: { $ref: "#/components/schemas/AdminBrief" }
+        totpEnabled: { type: boolean }
         permissions:
           type: array
           description: 有效权限码（super_admin 返回全部）
@@ -493,11 +589,12 @@ components:
             data: { $ref: "#/components/schemas/Role" }
     Admin:
       type: object
-      required: [id, username, isDisabled, roles, createdAt]
+      required: [id, username, isDisabled, totpEnabled, roles, createdAt]
       properties:
         id: { type: integer, format: int64 }
         username: { type: string }
         isDisabled: { type: boolean }
+        totpEnabled: { type: boolean }
         roles:
           type: array
           items: { type: string, description: 角色 code }
