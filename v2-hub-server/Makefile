@@ -1,4 +1,7 @@
-.PHONY: run test build lint
+.PHONY: run test build lint sqlc admin-create
+
+REPO_ROOT := $(abspath ..)
+SQLC_IMAGE := sqlc/sqlc:1.31.1
 
 # 开发库连接串：未显式设置 HUB_DATABASE_URL 时，从契约目录的 deploy/.env（init_env.sh 生成）拼出。
 DEV_ENV_FILE := contract/deploy/.env
@@ -14,6 +17,11 @@ test:
 
 build:
 	CGO_ENABLED=0 go build -trimpath -o bin/hub ./cmd/hub
+
+# 由 contract/deploy/init.sql + internal/dao/queries 生成 internal/dao/sqlcgen（生成物入库，Ruling-1）。
+# 挂载仓库根，让 contract 符号链接在容器内也能解析。
+sqlc:
+	docker run --rm -v $(REPO_ROOT):/src -w /src/v2-hub-server $(SQLC_IMAGE) generate
 
 lint:
 	go vet ./...
