@@ -22,6 +22,7 @@ export const ROUTES = {
 /** 权限码，与 docs/03 §4 权限码表一致。 */
 export const PERMISSIONS = {
   ADMIN_READ: 'admin:read',
+  ADMIN_WRITE: 'admin:write',
   AUDIT_READ: 'audit:read',
   SERVER_READ: 'server:read',
   NODE_READ: 'node:read',
