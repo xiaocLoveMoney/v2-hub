@@ -24,6 +24,8 @@ const HEADER_CSRF = 'X-CSRF-Token'
 const SAFE_METHODS = new Set(['GET', 'HEAD'])
 const FALLBACK_MESSAGE = '网络异常，请稍后重试'
 export const CODE_UNAUTHENTICATED = 'unauthenticated'
+/** 口令正确但需要两步验证码（docs/03 §4.3）。 */
+export const CODE_TOTP_REQUIRED = 'totp_required'
 
 let csrfToken = ''
 

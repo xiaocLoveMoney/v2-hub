@@ -7,8 +7,10 @@ export type SessionStatus = 'loading' | 'anonymous' | 'authenticated'
 export interface SessionContextValue {
   status: SessionStatus
   session: Session | null
-  /** 登录；成功返回 null，失败返回可展示的错误。 */
-  login: (username: string, credential: string) => Promise<ApiError | null>
+  /** 登录；成功返回 null，失败返回可展示的错误（code 为 totp_required 时需补交验证码再调一次）。 */
+  login: (username: string, credential: string, totpCode?: string) => Promise<ApiError | null>
+  /** 重新拉取 /me（如开启或关闭两步验证后）。 */
+  refresh: () => Promise<void>
   logout: () => Promise<void>
   /** 是否拥有权限码（只影响展示，鉴权以后端为准）。 */
   can: (permission: string) => boolean
