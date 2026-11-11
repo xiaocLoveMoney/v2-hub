@@ -1,4 +1,5 @@
 # v2-hub-server：本模块或契约目录变动时跑；main 每次合入全量跑。
+# 起一个 PostgreSQL 服务容器，让真实数据库用例（每个用例独立 schema）在 CI 里也执行。
 name: v2-hub-server
 on:
   push:
@@ -13,6 +14,20 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: hub
+          POSTGRES_PASSWORD: ${{ github.run_id }}-ci
+          POSTGRES_DB: v2hub_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U hub -d v2hub_test"
+          --health-interval 5s
+          --health-retries 20
+    env:
+      HUB_TEST_DATABASE_URL: postgres://hub:${{ github.run_id }}-ci@127.0.0.1:5432/v2hub_test?sslmode=disable
     defaults:
       run:
         working-directory: v2-hub-server

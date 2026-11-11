@@ -20,6 +20,16 @@ const (
 	defaultShutdownTimeout = 15 * time.Second
 	defaultDBMaxConns      = 10
 	defaultDBPingTimeout   = 2 * time.Second
+
+	// 会话与登录频控默认值，语义见 docs/03 §4.2
+	defaultSessionIdleTimeout   = 2 * time.Hour
+	defaultSessionMaxAge        = 7 * 24 * time.Hour
+	defaultSessionTouchInterval = time.Minute
+	defaultSessionCleanup       = 10 * time.Minute
+	defaultLoginMaxFailures     = 5
+	defaultLoginWindow          = 15 * time.Minute
+	defaultLoginLockout         = 15 * time.Minute
+	defaultLoginMaxTrackedKeys  = 10000
 )
 
 // ErrInvalidConfig 表示配置内容不合法。
@@ -29,6 +39,22 @@ var ErrInvalidConfig = errors.New("invalid config")
 type Config struct {
 	Server   ServerConfig   `yaml:"server"`
 	Database DatabaseConfig `yaml:"database"`
+	Auth     AuthConfig     `yaml:"auth"`
+}
+
+// AuthConfig 是管理员会话与登录频控参数（docs/03 §4.2）。
+type AuthConfig struct {
+	// SecureCookie 为 true 时会话 Cookie 只经 HTTPS 发送；本机 HTTP 开发由环境变量 HUB_INSECURE_DEV_COOKIE=1 关闭。
+	SecureCookie         bool          `yaml:"secureCookie"`
+	SessionIdleTimeout   time.Duration `yaml:"sessionIdleTimeout"`
+	SessionMaxAge        time.Duration `yaml:"sessionMaxAge"`
+	SessionTouchInterval time.Duration `yaml:"sessionTouchInterval"`
+	// SessionCleanupInterval 是清理过期会话的周期。
+	SessionCleanupInterval time.Duration `yaml:"sessionCleanupInterval"`
+	LoginMaxFailures       int           `yaml:"loginMaxFailures"`
+	LoginWindow            time.Duration `yaml:"loginWindow"`
+	LoginLockout           time.Duration `yaml:"loginLockout"`
+	LoginMaxTrackedKeys    int           `yaml:"loginMaxTrackedKeys"`
 }
 
 // DatabaseConfig 是 PostgreSQL 连接池参数。连接串（含口令）只从环境变量 HUB_DATABASE_URL 读（Ruling-2）。
@@ -49,6 +75,8 @@ type ServerConfig struct {
 	WriteTimeout time.Duration `yaml:"writeTimeout"`
 	// ShutdownTimeout 优雅退出时等待在途请求的最长时间。
 	ShutdownTimeout time.Duration `yaml:"shutdownTimeout"`
+	// TrustedProxies 是可采信 X-Forwarded-For 的直连网段（CIDR），如 Caddy 所在 docker 网络。
+	TrustedProxies []string `yaml:"trustedProxies"`
 }
 
 // Load 读取并校验 path 指向的 YAML 配置，未填写的字段使用默认值。
@@ -76,6 +104,16 @@ func defaults() Config {
 	}, Database: DatabaseConfig{
 		MaxConns:    defaultDBMaxConns,
 		PingTimeout: defaultDBPingTimeout,
+	}, Auth: AuthConfig{
+		SecureCookie:           true,
+		SessionIdleTimeout:     defaultSessionIdleTimeout,
+		SessionMaxAge:          defaultSessionMaxAge,
+		SessionTouchInterval:   defaultSessionTouchInterval,
+		SessionCleanupInterval: defaultSessionCleanup,
+		LoginMaxFailures:       defaultLoginMaxFailures,
+		LoginWindow:            defaultLoginWindow,
+		LoginLockout:           defaultLoginLockout,
+		LoginMaxTrackedKeys:    defaultLoginMaxTrackedKeys,
 	}}
 }
 
@@ -88,6 +126,14 @@ func (c Config) validate() error {
 	}
 	if c.Database.MaxConns <= 0 || c.Database.PingTimeout <= 0 {
 		return fmt.Errorf("%w: database.maxConns and database.pingTimeout must be positive", ErrInvalidConfig)
+	}
+	a := c.Auth
+	if a.SessionIdleTimeout <= 0 || a.SessionMaxAge < a.SessionIdleTimeout ||
+		a.SessionTouchInterval <= 0 || a.SessionTouchInterval >= a.SessionIdleTimeout || a.SessionCleanupInterval <= 0 {
+		return fmt.Errorf("%w: auth session durations out of range", ErrInvalidConfig)
+	}
+	if a.LoginMaxFailures <= 0 || a.LoginWindow <= 0 || a.LoginLockout <= 0 || a.LoginMaxTrackedKeys <= 0 {
+		return fmt.Errorf("%w: auth login rate limit must be positive", ErrInvalidConfig)
 	}
 	return nil
 }
