@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"flag"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -13,9 +14,14 @@ import (
 
 	"v2-hub-server/internal/api"
 	"v2-hub-server/internal/config"
+	"v2-hub-server/internal/dao"
 )
 
-const defaultConfigPath = "etc/hub-server.yaml"
+const (
+	defaultConfigPath = "etc/hub-server.yaml"
+	// envDatabaseURL 是 PostgreSQL 连接串（含口令）的环境变量名，不写进配置文件（Ruling-2）。
+	envDatabaseURL = "HUB_DATABASE_URL"
+)
 
 func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
@@ -39,9 +45,15 @@ func run(configPath string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	pool, err := dao.NewPool(ctx, os.Getenv(envDatabaseURL), dao.PoolConfig{MaxConns: cfg.Database.MaxConns})
+	if err != nil {
+		return fmt.Errorf("init database (env %s): %w", envDatabaseURL, err)
+	}
+	defer pool.Close()
+
 	srv := &http.Server{
 		Addr:              cfg.Server.ListenAddr,
-		Handler:           api.NewRouter(),
+		Handler:           api.NewRouter(api.Deps{Database: pool, PingTimeout: cfg.Database.PingTimeout}),
 		ReadHeaderTimeout: cfg.Server.ReadTimeout,
 		ReadTimeout:       cfg.Server.ReadTimeout,
 		WriteTimeout:      cfg.Server.WriteTimeout,

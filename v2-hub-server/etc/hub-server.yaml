@@ -4,3 +4,7 @@ server:
   readTimeout: 10s
   writeTimeout: 30s
   shutdownTimeout: 15s
+# 连接串（含口令）只从环境变量 HUB_DATABASE_URL 读；make run 会从 contract/deploy/.env 拼出开发库地址。
+database:
+  maxConns: 10
+  pingTimeout: 2s

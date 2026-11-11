@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: v2-hub API
-  version: 0.1.0
+  version: 0.1.1
   description: |
     v2-hub 对外接口契约（hub-server 提供，v2-hub-admin-web / v2-hub-user-web 消费）。
     - 管理端接口前缀 /api/admin，客户端接口前缀 /api/user，订阅端点前缀 /sub。
@@ -28,6 +28,25 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Health"
+  /readyz:
+    get:
+      tags: [system]
+      operationId: getReadyz
+      summary: 就绪探针（数据库可达才返回 200；失败原因只写服务端日志）
+      security: []
+      responses:
+        "200":
+          description: 依赖就绪
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Health"
+        "503":
+          description: 依赖不可用
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Health"
 components:
   securitySchemes:
     adminSession:
@@ -45,7 +64,7 @@ components:
       properties:
         status:
           type: string
-          enum: [ok]
+          enum: [ok, unavailable]
     Envelope:
       type: object
       description: 业务接口统一响应信封（/healthz 与 /sub 除外）
