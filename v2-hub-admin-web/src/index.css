@@ -1,5 +1,4 @@
 :root {
-  color-scheme: light dark;
   font-family: system-ui, -apple-system, 'Segoe UI', 'PingFang SC', sans-serif;
   line-height: 1.5;
 }
@@ -8,8 +7,48 @@ body {
   margin: 0;
 }
 
-.app {
-  max-width: 960px;
-  margin: 0 auto;
-  padding: 32px 16px;
+.login-page {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: #f5f7fa;
+}
+
+.login-card {
+  width: 100%;
+  max-width: 380px;
+}
+
+.login-alert {
+  margin-bottom: 16px;
+}
+
+.admin-layout {
+  min-height: 100vh;
+}
+
+.admin-brand {
+  height: 56px;
+  display: flex;
+  align-items: center;
+  padding: 0 24px;
+  font-weight: 600;
+  font-size: 18px;
+}
+
+.admin-header {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  background: #fff;
+  padding: 0 16px;
+}
+
+.admin-content {
+  margin: 16px;
+  padding: 24px;
+  background: #fff;
+  border-radius: 8px;
 }

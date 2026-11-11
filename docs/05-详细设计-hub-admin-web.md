@@ -17,7 +17,8 @@ v2-hub-admin-web/
 
 ## 2. 模块划分与依赖方向
 
-`pages → components → api`；页面不直接 `fetch`，统一经 `src/api`。路由、布局、状态库在 M0 登录任务中选定并登记决议。
+`pages → components → api`；页面不直接 `fetch`，统一经 `src/api`。UI 用 antd 6，路由 react-router 8，接口类型由契约生成（Ruling-13）。会话放 React Context（`src/auth`），不引入额外状态库；
+菜单表 `src/menu.tsx` 同时驱动左侧菜单与路由守卫，增减菜单只改这张表。
 
 ## 3. 关键不变式
 

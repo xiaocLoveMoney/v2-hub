@@ -7,6 +7,7 @@ make run    # Vite 开发服务器，/api 与 /healthz 代理到 127.0.0.1:8080
 make test   # 类型检查 + Vitest
 make build  # 产出 dist/
 make lint   # oxlint
+npm run gen:api   # 契约 hub-api.yaml 变更后重新生成 src/api/generated/schema.d.ts（入库，Ruling-1）
 ```
 
 发布：`make build` 后执行 `bash ../v2-hub-contract/deploy/publish_web.sh dist web-admin`，产物进 MinIO（Ruling-6）。
