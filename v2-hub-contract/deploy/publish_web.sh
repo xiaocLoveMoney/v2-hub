@@ -7,7 +7,7 @@ DEPLOY_DIR="$(cd "$(dirname "$0")" && pwd)"
 DIST_DIR="$(cd "${1:?用法: publish_web.sh <dist 目录> <桶名> [compose 文件]}" && pwd)"
 BUCKET="${2:?缺桶名}"
 COMPOSE_FILE="${3:-docker-compose.yml}"
-MC_IMAGE="pgsty/mc:latest"
+MC_IMAGE="pgsty/mc:RELEASE.2026-10-26T00-00-00Z"
 
 case "$BUCKET" in
   web-admin|web-user) ;;
