@@ -1,0 +1,28 @@
+# v2-hub-user-web：本模块或契约目录变动时跑；main 每次合入全量跑。
+name: v2-hub-user-web
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - "v2-hub-user-web/**"
+      - "v2-hub-contract/**"
+      - ".github/workflows/user-web.yml"
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: v2-hub-user-web
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: v2-hub-user-web/package-lock.json
+      - run: make lint
+      - run: make test
+      - run: make build

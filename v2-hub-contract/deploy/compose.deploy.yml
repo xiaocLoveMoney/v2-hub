@@ -1,0 +1,56 @@
+# 生产编排（单台独立服务器）：hub-server + Caddy + PostgreSQL + MinIO。
+# v2-hub 只做控制面，不转发代理流量；对外只开 80/443。
+# 用法：cd deploy && docker compose -f compose.deploy.yml --env-file .env up -d
+name: v2-hub
+services:
+  hub-server:
+    image: v2-hub-server:${IMAGE_TAG:-dev}
+    restart: unless-stopped
+    environment:
+      HUB_DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable
+    depends_on:
+      postgres: { condition: service_healthy }
+
+  caddy:
+    image: caddy:2.10-alpine
+    restart: unless-stopped
+    ports: ["80:80", "443:443", "443:443/udp"]
+    environment:
+      HUB_ADMIN_DOMAIN: ${HUB_ADMIN_DOMAIN}
+      HUB_USER_DOMAIN: ${HUB_USER_DOMAIN}
+      ACME_EMAIL: ${ACME_EMAIL:-}
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on: [hub-server, minio]
+
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes: ["pg-data:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      retries: 20
+
+  minio:
+    image: pgsty/minio:RELEASE.2026-08-04T00-00-00Z
+    restart: unless-stopped
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    # 控制台只绑本机，运维经 SSH 隧道访问
+    ports: ["127.0.0.1:9001:9001"]
+    volumes: ["minio-data:/data"]
+
+volumes:
+  caddy-data:
+  caddy-config:
+  pg-data:
+  minio-data:

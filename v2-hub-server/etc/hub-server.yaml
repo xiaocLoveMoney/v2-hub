@@ -1,0 +1,6 @@
+# hub-server 配置（入库，本地与部署共用）。凭据只从环境变量读，见 ../v2-hub-contract/deploy/.env.example。
+server:
+  listenAddr: ":8080"
+  readTimeout: 10s
+  writeTimeout: 30s
+  shutdownTimeout: 15s

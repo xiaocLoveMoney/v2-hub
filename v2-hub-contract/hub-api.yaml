@@ -1,0 +1,71 @@
+openapi: 3.1.0
+info:
+  title: v2-hub API
+  version: 0.1.0
+  description: |
+    v2-hub 对外接口契约（hub-server 提供，v2-hub-admin-web / v2-hub-user-web 消费）。
+    - 管理端接口前缀 /api/admin，客户端接口前缀 /api/user，订阅端点前缀 /sub。
+    - 会话用 HttpOnly + SameSite=Lax Cookie；非 GET 请求必须带 X-CSRF-Token。
+    - 统一响应信封见 components.schemas.Envelope；错误码表见 docs/03-业务语义.md。
+    版本纪律：additive 变更升修订号，破坏性变更升次版本号并在同一 PR 改引用方。
+servers:
+  - url: http://127.0.0.1:8080
+    description: 本地开发
+tags:
+  - name: system
+    description: 探活与系统信息
+paths:
+  /healthz:
+    get:
+      tags: [system]
+      operationId: getHealthz
+      summary: 存活探针（只说明进程在跑，不探测依赖）
+      security: []
+      responses:
+        "200":
+          description: 进程存活
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Health"
+components:
+  securitySchemes:
+    adminSession:
+      type: apiKey
+      in: cookie
+      name: hub_admin_session
+    userSession:
+      type: apiKey
+      in: cookie
+      name: hub_user_session
+  schemas:
+    Health:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [ok]
+    Envelope:
+      type: object
+      description: 业务接口统一响应信封（/healthz 与 /sub 除外）
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          description: 0 表示成功，其余取值见 docs/03 错误码表
+        message:
+          type: string
+        data: {}
+    PageQuery:
+      type: object
+      properties:
+        page:
+          type: integer
+          minimum: 1
+          default: 1
+        pageSize:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 20

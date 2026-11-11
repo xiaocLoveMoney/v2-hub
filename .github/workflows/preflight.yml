@@ -1,0 +1,20 @@
+# 所有分支：提交信息 / 分支名格式、CODEOWNERS 覆盖每个模块目录。
+name: preflight
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: 提交信息与分支名
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: bash scripts/ci/check_commits.sh
+      - name: CODEOWNERS 覆盖
+        run: bash scripts/ci/check_codeowners.sh

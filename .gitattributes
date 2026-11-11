@@ -1,0 +1,9 @@
+# Git LFS —— 先立规矩再有文件:大二进制一旦以普通对象进来,改 LFS 要改写历史(所有人重新 clone)。
+# 例外要写明理由(如构建层没装 git-lfs,指针文件会悄悄变成加载不出来的模型)。
+*.glb  filter=lfs diff=lfs merge=lfs -text
+*.gltf filter=lfs diff=lfs merge=lfs -text
+*.fbx  filter=lfs diff=lfs merge=lfs -text
+*.hdr  filter=lfs diff=lfs merge=lfs -text
+*.pt   filter=lfs diff=lfs merge=lfs -text
+*.onnx filter=lfs diff=lfs merge=lfs -text
+*.sh   text eol=lf

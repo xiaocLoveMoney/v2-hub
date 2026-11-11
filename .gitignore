@@ -1,0 +1,32 @@
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
+._*
+
+# Claude Code 本机工作目录:worktrees/ 下挂着整份仓库副本(自带 .git),误 add 等于往仓库里塞仓库。
+# 项目级规约与 dev server 定义要多人一致,放行。
+.claude/*
+!.claude/rules/
+!.claude/launch.json
+
+# 凭据只在这里,不入库;模板是 .env.example
+.env
+*.env.local
+
+# 根目录误跑 npm install 的产物(各子工程自己的 .gitignore 管不到根)
+node_modules/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+.ruff_cache/
+
+# 构建与运行态产物
+dist/
+build/
+coverage/
+*.log
+v2-hub-contract/deploy/runtime/

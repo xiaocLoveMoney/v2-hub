@@ -1,0 +1,10 @@
+# 顶层目录 → 负责人。当前为个人 + agent 并行开发（Ruling-10），全部归 @xiaoclux。
+# 增加成员后：契约目录与业务语义篇改为全体，模块目录改为各自负责人。
+/v2-hub-contract/           @xiaoclux
+/docs/03-业务语义.md         @xiaoclux
+/v2-hub-server/             @xiaoclux
+/v2-hub-admin-web/          @xiaoclux
+/v2-hub-user-web/           @xiaoclux
+/.github/                   @xiaoclux
+/CODEOWNERS                 @xiaoclux
+/CLAUDE.md                  @xiaoclux

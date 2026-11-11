@@ -1,0 +1,27 @@
+# v2-hub-server：本模块或契约目录变动时跑；main 每次合入全量跑。
+name: v2-hub-server
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - "v2-hub-server/**"
+      - "v2-hub-contract/**"
+      - ".github/workflows/server.yml"
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: v2-hub-server
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: v2-hub-server/go.mod
+          cache-dependency-path: v2-hub-server/go.sum
+      - run: make lint
+      - run: make test
+      - run: make build

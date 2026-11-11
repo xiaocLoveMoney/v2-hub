@@ -1,0 +1,36 @@
+# 生产入口（Ruling-5、Ruling-6）：Caddy 负责 HTTPS；/api 与 /sub 反代到 hub-server，
+# 其余请求从 MinIO 桶读取前端静态文件。无扩展名的路径回退到 index.html（SPA 路由）。
+{
+	email {$ACME_EMAIL}
+}
+
+(spa_from_minio) {
+	@asset path_regexp \.[A-Za-z0-9]+$
+	handle @asset {
+		rewrite * /{args[0]}{path}
+		reverse_proxy minio:9000
+	}
+	handle {
+		rewrite * /{args[0]}/index.html
+		reverse_proxy minio:9000
+	}
+}
+
+{$HUB_ADMIN_DOMAIN} {
+	encode zstd gzip
+	handle /api/* {
+		reverse_proxy hub-server:8080
+	}
+	import spa_from_minio web-admin
+}
+
+{$HUB_USER_DOMAIN} {
+	encode zstd gzip
+	handle /api/* {
+		reverse_proxy hub-server:8080
+	}
+	handle /sub/* {
+		reverse_proxy hub-server:8080
+	}
+	import spa_from_minio web-user
+}
