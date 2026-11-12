@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: v2-hub API
-  version: 0.2.1
+  version: 0.2.2
   description: |
     v2-hub 对外接口契约（hub-server 提供，v2-hub-admin-web / v2-hub-user-web 消费）。
     - 管理端接口前缀 /api/admin，客户端接口前缀 /api/user，订阅端点前缀 /sub。
@@ -9,6 +9,7 @@ info:
     - 业务接口统一响应信封 Envelope；错误码表见 docs/03 §5。授权规则 R1–R7 见 docs/03 §4.1。
     版本纪律：additive 变更升修订号，破坏性变更升次版本号并在同一 PR 改引用方。
     0.2.0：新增管理员认证、管理员 / 角色 / 权限、审计日志接口。
+    0.2.2：M1 服务器接入、入站增删改查、Host 端点、节点目录与节点组；错误响应 UpstreamUnavailable（502）。
     0.2.1：两步验证（docs/03 §4.3）——登录可带 totpCode，新增 totp_required 错误码与 TOTP 开启 / 关闭 / 重置接口。
 servers:
   - url: http://127.0.0.1:8080
@@ -22,6 +23,8 @@ tags:
     description: 管理员、角色、权限码（需 admin:read / admin:write）
   - name: admin-audit
     description: 审计日志（需 audit:read）
+  - name: admin-panel
+    description: 服务器（server:*）、入站与节点（node:*），docs/03 §5.1
 security:
   - adminSession: []
 paths:
@@ -416,6 +419,487 @@ paths:
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "403": { $ref: "#/components/responses/PermissionDenied" }
 
+  /api/admin/servers:
+    get:
+      tags: [admin-panel]
+      operationId: listServers
+      summary: 全部服务器及其连接状态（server:read）
+      responses:
+        "200":
+          description: 服务器列表
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: "#/components/schemas/Server" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+    post:
+      tags: [admin-panel]
+      operationId: createServer
+      summary: 接入一台面板（server:write）；保存前先探测，探测失败不保存
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ServerInput" }
+      responses:
+        "200":
+          description: 新接入的服务器（已完成一次同步）
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ServerEnvelope" }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "502": { $ref: "#/components/responses/UpstreamUnavailable" }
+  /api/admin/servers/test:
+    post:
+      tags: [admin-panel]
+      operationId: testServer
+      summary: 用未保存的接入信息探测面板（server:write），返回面板版本等信息
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ServerConnInput" }
+      responses:
+        "200":
+          description: 探测成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/PanelInfo" }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "502": { $ref: "#/components/responses/UpstreamUnavailable" }
+  /api/admin/servers/cert-fingerprint:
+    post:
+      tags: [admin-panel]
+      operationId: serverCertFingerprint
+      summary: 不校验证书地连接 https 面板，返回叶子证书 SHA-256（Base64），供 tlsMode=pin 使用（server:write）
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [baseUrl]
+              properties:
+                baseUrl: { $ref: "#/components/schemas/PanelBaseUrl" }
+      responses:
+        "200":
+          description: 证书指纹
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        required: [sha256]
+                        properties:
+                          sha256: { type: string }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "502": { $ref: "#/components/responses/UpstreamUnavailable" }
+  /api/admin/servers/{id}:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    get:
+      tags: [admin-panel]
+      operationId: getServer
+      summary: 服务器详情（server:read）
+      responses:
+        "200":
+          description: 服务器
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ServerEnvelope" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    put:
+      tags: [admin-panel]
+      operationId: updateServer
+      summary: 修改服务器（server:write）；apiToken 留空表示沿用原值；连接信息变化时先探测
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ServerInput" }
+      responses:
+        "200":
+          description: 修改后的服务器
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ServerEnvelope" }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "502": { $ref: "#/components/responses/UpstreamUnavailable" }
+    delete:
+      tags: [admin-panel]
+      operationId: deleteServer
+      summary: 移除服务器及其入站、节点的平台记录（server:write）；不改动面板本身
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      responses:
+        "200": { $ref: "#/components/responses/Ok" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/admin/servers/{id}/sync:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    post:
+      tags: [admin-panel]
+      operationId: syncServer
+      summary: 立即探测并同步该服务器的入站与 Host（server:write）
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      responses:
+        "200":
+          description: 同步结果
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/SyncResult" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "502": { $ref: "#/components/responses/UpstreamUnavailable" }
+  /api/admin/servers/{id}/inbounds:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    get:
+      tags: [admin-panel]
+      operationId: listServerInbounds
+      summary: 该服务器的入站（平台缓存，node:read）
+      responses:
+        "200":
+          description: 入站列表
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: "#/components/schemas/Inbound" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    post:
+      tags: [admin-panel]
+      operationId: createInbound
+      summary: 在该服务器上新建入站（node:write）：按模板或高级 JSON；写入面板后回读落库并生成直连节点
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/InboundCreateInput" }
+      responses:
+        "200":
+          description: 新建的入站
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/InboundEnvelope" }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "502": { $ref: "#/components/responses/UpstreamUnavailable" }
+  /api/admin/servers/{id}/endpoints:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    post:
+      tags: [admin-panel]
+      operationId: createEndpoint
+      summary: 为该服务器的入站添加对外地址（3x-ui Host，node:write），每个地址生成一个节点
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/EndpointInput" }
+      responses:
+        "200": { $ref: "#/components/responses/Ok" }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "502": { $ref: "#/components/responses/UpstreamUnavailable" }
+  /api/admin/inbounds/{id}:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    get:
+      tags: [admin-panel]
+      operationId: getInbound
+      summary: 入站详情（缓存副本，敏感字段已删除；node:read）
+      responses:
+        "200":
+          description: 入站
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/InboundEnvelope" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    put:
+      tags: [admin-panel]
+      operationId: updateInbound
+      summary: 修改入站（node:write）；config 省略的敏感字段与面板现有 clients 由服务端保留
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/InboundUpdateInput" }
+      responses:
+        "200":
+          description: 修改后的入站
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/InboundEnvelope" }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "502": { $ref: "#/components/responses/UpstreamUnavailable" }
+    delete:
+      tags: [admin-panel]
+      operationId: deleteInbound
+      summary: 删除入站（node:write）：先删面板，再删平台记录与节点
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      responses:
+        "200": { $ref: "#/components/responses/Ok" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "502": { $ref: "#/components/responses/UpstreamUnavailable" }
+  /api/admin/inbounds/{id}/enabled:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    put:
+      tags: [admin-panel]
+      operationId: setInboundEnabled
+      summary: 启用或停用入站（写面板，node:write）
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [enabled]
+              properties:
+                enabled: { type: boolean }
+      responses:
+        "200":
+          description: 修改后的入站
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/InboundEnvelope" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "502": { $ref: "#/components/responses/UpstreamUnavailable" }
+  /api/admin/inbounds/{id}/drift/ack:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    post:
+      tags: [admin-panel]
+      operationId: ackInboundDrift
+      summary: 确认面板侧改动（清除漂移标记，以当前面板配置为准；node:write）
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      responses:
+        "200": { $ref: "#/components/responses/Ok" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/admin/endpoints/{id}:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    delete:
+      tags: [admin-panel]
+      operationId: deleteEndpoint
+      summary: 删除对外地址所在的整个 Host 组（面板上同组的地址一并删除，node:write）
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      responses:
+        "200": { $ref: "#/components/responses/Ok" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "502": { $ref: "#/components/responses/UpstreamUnavailable" }
+  /api/admin/nodes:
+    get:
+      tags: [admin-panel]
+      operationId: listNodes
+      summary: 节点目录（node:read），可按服务器、节点组过滤
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+        - { name: serverId, in: query, schema: { type: integer, format: int64, minimum: 1 } }
+        - { name: groupId, in: query, schema: { type: integer, format: int64, minimum: 1 } }
+      responses:
+        "200":
+          description: 节点分页
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        required: [items, total]
+                        properties:
+                          items:
+                            type: array
+                            items: { $ref: "#/components/schemas/Node" }
+                          total: { type: integer, format: int64 }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+  /api/admin/nodes/{id}:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    put:
+      tags: [admin-panel]
+      operationId: updateNode
+      summary: 修改节点的展示属性（只影响平台，node:write）
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/NodeInput" }
+      responses:
+        "200": { $ref: "#/components/responses/Ok" }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/admin/node-groups:
+    get:
+      tags: [admin-panel]
+      operationId: listNodeGroups
+      summary: 全部节点组（node:read）
+      responses:
+        "200":
+          description: 节点组列表
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: "#/components/schemas/NodeGroup" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+    post:
+      tags: [admin-panel]
+      operationId: createNodeGroup
+      summary: 新建节点组（node:write）
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/NodeGroupInput" }
+      responses:
+        "200":
+          description: 新建的节点组
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/NodeGroup" }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /api/admin/node-groups/{id}:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    put:
+      tags: [admin-panel]
+      operationId: updateNodeGroup
+      summary: 修改节点组名称、备注与成员（整体替换成员，node:write）
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/NodeGroupInput" }
+      responses:
+        "200": { $ref: "#/components/responses/Ok" }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+    delete:
+      tags: [admin-panel]
+      operationId: deleteNodeGroup
+      summary: 删除节点组（不删除节点，node:write）
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      responses:
+        "200": { $ref: "#/components/responses/Ok" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
 components:
   securitySchemes:
     adminSession:
@@ -473,6 +957,11 @@ components:
           schema: { $ref: "#/components/schemas/Envelope" }
     Conflict:
       description: conflict
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Envelope" }
+    UpstreamUnavailable:
+      description: upstream_unavailable（面板不可达、拒绝 token 或返回异常）
       content:
         application/json:
           schema: { $ref: "#/components/schemas/Envelope" }
@@ -638,3 +1127,212 @@ components:
         detail: { type: [object, "null"] }
         clientIp: { type: [string, "null"] }
         createdAt: { type: string, format: date-time }
+    PanelBaseUrl:
+      type: string
+      maxLength: 512
+      description: 面板根地址，含 scheme、端口与 web base path，如 https://panel.example.com:2053/abc
+    TlsMode:
+      type: string
+      enum: [verify, pin, skip]
+    ServerConnInput:
+      type: object
+      required: [providerType, baseUrl, apiToken, tlsMode]
+      properties:
+        providerType: { type: string, enum: [xui] }
+        baseUrl: { $ref: "#/components/schemas/PanelBaseUrl" }
+        apiToken: { type: string, maxLength: 512, description: 只写；更新时留空表示沿用原值 }
+        tlsMode: { $ref: "#/components/schemas/TlsMode" }
+        certPinSha256: { type: string, maxLength: 128 }
+    ServerInput:
+      allOf:
+        - $ref: "#/components/schemas/ServerConnInput"
+        - type: object
+          required: [name]
+          properties:
+            name: { type: string, minLength: 1, maxLength: 64 }
+            region: { type: string, maxLength: 64 }
+            remark: { type: string, maxLength: 255 }
+            isDisabled: { type: boolean }
+    PanelInfo:
+      type: object
+      required: [version, guid]
+      properties:
+        version: { type: string }
+        guid: { type: string }
+        status:
+          type: [object, "null"]
+          description: 资源快照（cpu、mem、uptime、xray 运行状态等，原样透传，字段随面板而定）
+    Server:
+      type: object
+      required: [id, name, providerType, baseUrl, tlsMode, region, remark, isDisabled, status, lastError, panelVersion, inboundCount, createdAt]
+      properties:
+        id: { type: integer, format: int64 }
+        name: { type: string }
+        providerType: { type: string }
+        baseUrl: { type: string }
+        tlsMode: { $ref: "#/components/schemas/TlsMode" }
+        certPinSha256: { type: [string, "null"] }
+        region: { type: string }
+        remark: { type: string }
+        isDisabled: { type: boolean }
+        status: { type: string, enum: [unknown, online, offline, auth_failed] }
+        lastError: { type: string }
+        lastSeenAt: { type: [string, "null"], format: date-time }
+        lastSyncedAt: { type: [string, "null"], format: date-time }
+        panelVersion: { type: string }
+        statusSnapshot: { type: [object, "null"] }
+        inboundCount: { type: integer }
+        createdAt: { type: string, format: date-time }
+    ServerEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/Envelope"
+        - type: object
+          properties:
+            data: { $ref: "#/components/schemas/Server" }
+    SyncResult:
+      type: object
+      required: [inbounds, added, updated, missing, drifted]
+      properties:
+        inbounds: { type: integer, description: 面板上的入站总数 }
+        added: { type: integer }
+        updated: { type: integer }
+        missing: { type: integer, description: 平台有、面板已不存在的入站数 }
+        drifted: { type: integer, description: 本次发现面板侧改动的入站数 }
+    Endpoint:
+      type: object
+      required: [id, address, port, remark, isDisabled, isMissing]
+      properties:
+        id: { type: integer, format: int64 }
+        address: { type: string }
+        port: { type: integer, description: 0 表示沿用入站端口 }
+        remark: { type: string }
+        isDisabled: { type: boolean }
+        isMissing: { type: boolean }
+    Inbound:
+      type: object
+      required: [id, serverId, remoteRef, protocol, port, listen, tag, remark, isEnabled, network, security, coreType, config, clientCount, isMissing, endpoints, createdAt]
+      properties:
+        id: { type: integer, format: int64 }
+        serverId: { type: integer, format: int64 }
+        remoteRef: { type: string }
+        protocol: { type: string }
+        port: { type: integer }
+        listen: { type: string }
+        tag: { type: string }
+        remark: { type: string }
+        isEnabled: { type: boolean }
+        network: { type: string }
+        security: { type: string }
+        coreType: { type: string, enum: [xray] }
+        config: { type: object, description: 面板配置副本（settings、streamSettings、sniffing），敏感字段已删除 }
+        clientCount: { type: integer }
+        driftDetectedAt: { type: [string, "null"], format: date-time }
+        isMissing: { type: boolean }
+        endpoints:
+          type: array
+          items: { $ref: "#/components/schemas/Endpoint" }
+        createdAt: { type: string, format: date-time }
+    InboundEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/Envelope"
+        - type: object
+          properties:
+            data: { $ref: "#/components/schemas/Inbound" }
+    InboundTemplate:
+      type: string
+      enum: [vless-reality, vmess-ws, shadowsocks-2022]
+    InboundCreateInput:
+      type: object
+      required: [remark, port]
+      description: template 与 config 二选一；template 时按其参数生成配置与密钥，config 为高级 JSON（settings、streamSettings、sniffing）
+      properties:
+        remark: { type: string, minLength: 1, maxLength: 255 }
+        port: { type: integer, minimum: 1, maximum: 65535 }
+        listen: { type: string, maxLength: 64 }
+        enabled: { type: boolean, default: true }
+        template: { $ref: "#/components/schemas/InboundTemplate" }
+        templateParams:
+          type: object
+          description: vless-reality 需 target（如 www.cloudflare.com:443）与 serverNames；vmess-ws 需 path；shadowsocks-2022 可选 method
+          additionalProperties: true
+        protocol: { type: string, maxLength: 32, description: 高级 JSON 模式必填 }
+        config: { type: object, description: 高级 JSON 模式必填 }
+    InboundUpdateInput:
+      type: object
+      required: [remark, port]
+      properties:
+        remark: { type: string, minLength: 1, maxLength: 255 }
+        port: { type: integer, minimum: 1, maximum: 65535 }
+        listen: { type: string, maxLength: 64 }
+        config: { type: object, description: 省略则不改配置；提供时整体替换（敏感字段与 clients 由服务端补回） }
+    EndpointInput:
+      type: object
+      required: [inboundIds, addresses]
+      properties:
+        inboundIds:
+          type: array
+          minItems: 1
+          maxItems: 64
+          items: { type: integer, format: int64 }
+        addresses:
+          type: array
+          minItems: 1
+          maxItems: 32
+          items: { type: string, maxLength: 255 }
+        port: { type: integer, minimum: 0, maximum: 65535, description: 0 表示沿用入站端口 }
+        remark: { type: string, maxLength: 255 }
+    Node:
+      type: object
+      required: [id, inboundId, serverId, serverName, protocol, address, port, displayName, region, tags, sortOrder, isEnabled, isMissing, groupIds]
+      properties:
+        id: { type: integer, format: int64 }
+        inboundId: { type: integer, format: int64 }
+        endpointId: { type: [integer, "null"], format: int64 }
+        serverId: { type: integer, format: int64 }
+        serverName: { type: string }
+        protocol: { type: string }
+        address: { type: string, description: 直连节点为面板主机名，Host 节点为对外地址 }
+        port: { type: integer }
+        displayName: { type: string }
+        region: { type: string }
+        tags:
+          type: array
+          items: { type: string }
+        sortOrder: { type: integer }
+        isEnabled: { type: boolean }
+        isMissing: { type: boolean, description: 来源入站或地址在面板上已不存在 }
+        groupIds:
+          type: array
+          items: { type: integer, format: int64 }
+    NodeInput:
+      type: object
+      required: [displayName, region, tags, sortOrder, isEnabled]
+      properties:
+        displayName: { type: string, minLength: 1, maxLength: 128 }
+        region: { type: string, maxLength: 64 }
+        tags:
+          type: array
+          maxItems: 16
+          items: { type: string, maxLength: 32 }
+        sortOrder: { type: integer, minimum: -100000, maximum: 100000 }
+        isEnabled: { type: boolean }
+    NodeGroup:
+      type: object
+      required: [id, name, remark, nodeIds]
+      properties:
+        id: { type: integer, format: int64 }
+        name: { type: string }
+        remark: { type: string }
+        nodeIds:
+          type: array
+          items: { type: integer, format: int64 }
+    NodeGroupInput:
+      type: object
+      required: [name, nodeIds]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 64 }
+        remark: { type: string, maxLength: 255 }
+        nodeIds:
+          type: array
+          maxItems: 5000
+          items: { type: integer, format: int64 }
