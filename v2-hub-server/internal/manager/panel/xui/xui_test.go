@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -19,11 +21,12 @@ const testToken = "test-token-value"
 
 // fakePanel 按 3x-ui v3.11.0 的真实响应形状（本地容器实测）模拟面板 API。
 type fakePanel struct {
-	mu       sync.Mutex
-	inbounds map[int64]map[string]any
-	hosts    []map[string]any
-	nextID   int64
-	status   int // 非 0 时所有请求返回该状态码
+	mu        sync.Mutex
+	inbounds  map[int64]map[string]any
+	hosts     []map[string]any // Host 组对象，形状同 /hosts/get
+	nextID    int64
+	nextGroup int
+	status    int // 非 0 时所有请求返回该状态码
 }
 
 func newFakePanel() *fakePanel {
@@ -63,6 +66,8 @@ func (f *fakePanel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case path == "/server/status":
 		f.reply(w, true, "", map[string]any{"panelVersion": "3.11.0", "panelGuid": "guid-1", "cpu": 3.2, "publicIP": map[string]any{"ipv4": "203.0.113.1"}})
+	case path == "/server/getNewX25519Cert":
+		f.reply(w, true, "", map[string]any{"privateKey": "NEW-PRIV", "publicKey": "NEW-PUB"})
 	case path == "/inbounds/list":
 		list := make([]map[string]any, 0, len(f.inbounds))
 		for id := int64(1); id < f.nextID; id++ {
@@ -104,20 +109,64 @@ func (f *fakePanel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		delete(f.inbounds, idFrom("/inbounds/del/"))
 		f.reply(w, true, "Inbound has been successfully deleted.", nil)
 	case path == "/hosts/raw":
-		f.reply(w, true, "", f.hosts)
+		rows := make([]map[string]any, 0, len(f.hosts))
+		for _, g := range f.hosts {
+			rows = append(rows, hostRowsOf(g)...)
+		}
+		f.reply(w, true, "", rows)
 	case path == "/hosts/add":
-		for _, id := range body["inboundIds"].([]any) {
-			for _, h := range body["hosts"].([]any) {
-				f.hosts = append(f.hosts, map[string]any{"groupId": "g1", "inboundId": id, "address": h, "port": body["port"], "remark": body["remark"], "isDisabled": false})
+		f.nextGroup++
+		body["groupId"] = "g" + strconv.Itoa(f.nextGroup)
+		f.hosts = append(f.hosts, body)
+		f.reply(w, true, "Host added successfully", hostRowsOf(body))
+	case strings.HasPrefix(path, "/hosts/get/"):
+		g := f.group(strings.TrimPrefix(path, "/hosts/get/"))
+		if g == nil {
+			f.reply(w, false, "Failed to load host (host not found\n)", nil)
+			return
+		}
+		f.reply(w, true, "", g)
+	case strings.HasPrefix(path, "/hosts/update/"):
+		id := strings.TrimPrefix(path, "/hosts/update/")
+		for i, g := range f.hosts {
+			if g["groupId"] == id {
+				body["groupId"] = id
+				f.hosts[i] = body
 			}
 		}
-		f.reply(w, true, "Host added successfully", nil)
+		f.reply(w, true, "Host updated successfully", hostRowsOf(body))
 	case strings.HasPrefix(path, "/hosts/del/"):
-		f.hosts = nil
+		id := strings.TrimPrefix(path, "/hosts/del/")
+		f.hosts = slices.DeleteFunc(f.hosts, func(g map[string]any) bool { return g["groupId"] == id })
 		f.reply(w, true, "Host deleted successfully", nil)
 	default:
 		w.WriteHeader(http.StatusNotFound)
 	}
+}
+
+func (f *fakePanel) group(id string) map[string]any {
+	for _, g := range f.hosts {
+		if g["groupId"] == id {
+			return g
+		}
+	}
+	return nil
+}
+
+// hostRowsOf 按 3x-ui 的存法把组展开成“入站 × 地址”的行；地址可带 :port，覆盖组端口。
+func hostRowsOf(g map[string]any) []map[string]any {
+	var rows []map[string]any
+	for _, h := range g["hosts"].([]any) {
+		addr, port := h.(string), g["port"]
+		if host, p, err := net.SplitHostPort(addr); err == nil {
+			n, _ := strconv.Atoi(p)
+			addr, port = host, float64(n)
+		}
+		for _, id := range g["inboundIds"].([]any) {
+			rows = append(rows, map[string]any{"groupId": g["groupId"], "inboundId": id, "address": addr, "port": port, "remark": g["remark"], "isDisabled": false})
+		}
+	}
+	return rows
 }
 
 func newTestClient(t *testing.T, fp *fakePanel, token string) (*Client, *httptest.Server) {
@@ -233,8 +282,128 @@ func TestEndpoints(t *testing.T) {
 	if err != nil || len(eps) != 1 || eps[0].GroupRef != "g1" || eps[0].InboundRef != "1" || eps[0].Port != 8443 {
 		t.Fatalf("ListEndpoints = %+v, %v", eps, err)
 	}
-	if err := c.DeleteEndpointGroup(ctx, "g1"); err != nil {
-		t.Fatalf("DeleteEndpointGroup: %v", err)
+	if moves, err := c.RemoveEndpoint(ctx, panel.EndpointKey{GroupRef: "g1", InboundRef: "1", Address: "cdn.example.com"}); err != nil || len(moves) != 0 {
+		t.Fatalf("RemoveEndpoint last pair = %v, %v", moves, err)
+	}
+	if len(fp.hosts) != 0 {
+		t.Fatalf("group with its last pair removed should be deleted: %v", fp.hosts)
+	}
+	if _, err := c.RemoveEndpoint(ctx, panel.EndpointKey{GroupRef: "g1", InboundRef: "1", Address: "cdn.example.com"}); !errors.Is(err, panel.ErrNotFound) {
+		t.Fatalf("remove twice err = %v", err)
+	}
+}
+
+// pairsOf 把面板现有的 Host 行整理成“组|入站|地址”集合，便于断言。
+func pairsOf(t *testing.T, c *Client) map[string]bool {
+	t.Helper()
+	eps, err := c.ListEndpoints(context.Background())
+	if err != nil {
+		t.Fatalf("ListEndpoints: %v", err)
+	}
+	out := make(map[string]bool, len(eps))
+	for _, e := range eps {
+		out[e.GroupRef+"|"+e.InboundRef+"|"+e.Address] = true
+	}
+	return out
+}
+
+// TestRemoveEndpointKeepsTheRest 覆盖 docs/03 §5.1 删除对外地址的几种组形状：只删所点的一对，其余保留、设置不丢。
+func TestRemoveEndpointKeepsTheRest(t *testing.T) {
+	ctx := context.Background()
+	newGroup := func(t *testing.T, refs []string, hosts []string) (*fakePanel, *Client) {
+		fp := newFakePanel()
+		c, _ := newTestClient(t, fp, testToken)
+		if err := c.CreateEndpoints(ctx, panel.EndpointSpec{InboundRefs: refs, Addresses: hosts, Port: 443, Remark: "cdn"}); err != nil {
+			t.Fatalf("CreateEndpoints: %v", err)
+		}
+		fp.mu.Lock()
+		fp.hosts[0]["sni"] = "keep.example.com"
+		fp.mu.Unlock()
+		return fp, c
+	}
+	key := func(group, ref, addr string) panel.EndpointKey {
+		return panel.EndpointKey{GroupRef: group, InboundRef: ref, Address: addr}
+	}
+
+	t.Run("one inbound, two addresses: shrink hosts", func(t *testing.T) {
+		_, c := newGroup(t, []string{"1"}, []string{"a.example.com", "b.example.com"})
+		if moves, err := c.RemoveEndpoint(ctx, key("g1", "1", "a.example.com")); err != nil || len(moves) != 0 {
+			t.Fatalf("RemoveEndpoint = %v, %v", moves, err)
+		}
+		if got := pairsOf(t, c); len(got) != 1 || !got["g1|1|b.example.com"] {
+			t.Fatalf("pairs = %v", got)
+		}
+	})
+
+	t.Run("two inbounds, one address: shrink inbounds", func(t *testing.T) {
+		_, c := newGroup(t, []string{"1", "2"}, []string{"a.example.com:8443"})
+		if moves, err := c.RemoveEndpoint(ctx, key("g1", "1", "a.example.com")); err != nil || len(moves) != 0 {
+			t.Fatalf("RemoveEndpoint = %v, %v", moves, err)
+		}
+		if got := pairsOf(t, c); len(got) != 1 || !got["g1|2|a.example.com"] {
+			t.Fatalf("pairs = %v", got)
+		}
+	})
+
+	t.Run("2x2: split, moving the fewer pairs and copying settings", func(t *testing.T) {
+		fp, c := newGroup(t, []string{"1", "2"}, []string{"a.example.com", "b.example.com"})
+		moves, err := c.RemoveEndpoint(ctx, key("g1", "1", "a.example.com"))
+		if err != nil || len(moves) != 1 || moves[0].NewGroupRef != "g2" {
+			t.Fatalf("RemoveEndpoint = %v, %v", moves, err)
+		}
+		want := map[string]bool{"g1|2|a.example.com": true, "g1|2|b.example.com": true, "g2|1|b.example.com": true}
+		if got := pairsOf(t, c); len(got) != len(want) || !got["g1|2|a.example.com"] || !got["g1|2|b.example.com"] || !got["g2|1|b.example.com"] {
+			t.Fatalf("pairs = %v, want %v", got, want)
+		}
+		if moves[0].InboundRef != "1" || moves[0].Address != "b.example.com" {
+			t.Fatalf("moves = %+v", moves)
+		}
+		if fp.group("g2")["sni"] != "keep.example.com" {
+			t.Fatalf("split group must copy settings: %v", fp.group("g2"))
+		}
+	})
+
+	t.Run("2 inbounds x 3 addresses: move the other inbound's copy of the address", func(t *testing.T) {
+		_, c := newGroup(t, []string{"1", "2"}, []string{"a.example.com", "b.example.com", "c.example.com"})
+		moves, err := c.RemoveEndpoint(ctx, key("g1", "1", "a.example.com"))
+		if err != nil || len(moves) != 1 || moves[0].InboundRef != "2" || moves[0].Address != "a.example.com" {
+			t.Fatalf("RemoveEndpoint = %v, %v", moves, err)
+		}
+		got := pairsOf(t, c)
+		if len(got) != 5 || got["g1|1|a.example.com"] || !got["g2|2|a.example.com"] || !got["g1|1|c.example.com"] {
+			t.Fatalf("pairs = %v", got)
+		}
+	})
+}
+
+// TestInboundConfigAndKeys 覆盖 Ruling-16：编辑表单拿到含密钥、不含 clients 的完整配置；密钥由面板生成。
+func TestInboundConfigAndKeys(t *testing.T) {
+	fp := newFakePanel()
+	c, _ := newTestClient(t, fp, testToken)
+	ctx := context.Background()
+	created, err := c.CreateInbound(ctx, panel.InboundSpec{Protocol: "vless", Port: 24443, Remark: "r1", Enabled: true, Config: json.RawMessage(realityConfig)})
+	if err != nil {
+		t.Fatalf("CreateInbound: %v", err)
+	}
+	cfg, err := c.GetInboundConfig(ctx, created.Ref)
+	if err != nil {
+		t.Fatalf("GetInboundConfig: %v", err)
+	}
+	if !strings.Contains(string(cfg.Config), "PRIV") || strings.Contains(string(cfg.Config), "uuid-1") {
+		t.Fatalf("config must keep secrets and drop clients: %s", cfg.Config)
+	}
+	if cfg.Protocol != "vless" || cfg.Port != 24443 || cfg.Remark != "r1" || !cfg.Enabled {
+		t.Fatalf("cfg = %+v", cfg)
+	}
+	if strings.Contains(string(created.Config), "decryption") {
+		t.Fatalf("cached copy must not keep vless decryption: %s", created.Config)
+	}
+	keys, err := c.GenerateKeys(ctx, panel.KeyX25519)
+	if err != nil || !strings.Contains(string(keys), "NEW-PUB") {
+		t.Fatalf("GenerateKeys = %s, %v", keys, err)
+	}
+	if _, err := c.GenerateKeys(ctx, panel.KeyKind("rsa")); !errors.Is(err, panel.ErrRejected) {
+		t.Fatalf("unknown kind err = %v", err)
 	}
 }
 
@@ -306,8 +475,9 @@ func TestLive(t *testing.T) {
 	if err != nil || len(eps) == 0 {
 		t.Fatalf("ListEndpoints = %+v, %v", eps, err)
 	}
-	if err := p.DeleteEndpointGroup(ctx, eps[0].GroupRef); err != nil {
-		t.Fatalf("DeleteEndpointGroup: %v", err)
+	ep := eps[len(eps)-1]
+	if _, err := p.RemoveEndpoint(ctx, panel.EndpointKey{GroupRef: ep.GroupRef, InboundRef: ep.InboundRef, Address: ep.Address}); err != nil {
+		t.Fatalf("RemoveEndpoint: %v", err)
 	}
 	got, err := p.GetInbound(ctx, in.Ref)
 	if err != nil || got.Remark != "live-test-2" || got.Enabled {

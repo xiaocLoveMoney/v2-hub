@@ -34,7 +34,7 @@ type Querier interface {
 	DeleteAdminSessionByID(ctx context.Context, id int64) error
 	DeleteAdminSessionByTokenHash(ctx context.Context, tokenHash []byte) error
 	DeleteAdminSessionsByAdmin(ctx context.Context, adminID int64) error
-	DeleteEndpointGroupLocal(ctx context.Context, arg DeleteEndpointGroupLocalParams) error
+	DeleteEndpoint(ctx context.Context, id int64) error
 	DeleteExpiredAdminSessions(ctx context.Context, expiresAt pgtype.Timestamptz) (int64, error)
 	DeleteInbound(ctx context.Context, id int64) error
 	DeleteNodeGroup(ctx context.Context, id int64) (int64, error)
@@ -84,6 +84,10 @@ type Querier interface {
 	LockSuperAdminRole(ctx context.Context) error
 	MarkEndpointsMissing(ctx context.Context, arg MarkEndpointsMissingParams) (int64, error)
 	MarkInboundsMissing(ctx context.Context, arg MarkInboundsMissingParams) (int64, error)
+	// 删除对外地址拆分了面板上的组：被挪到新组的地址改写组标识，保留原记录与节点（docs/03 §5.1）
+	RepointEndpoint(ctx context.Context, arg RepointEndpointParams) error
+	// 面板把该标识分给了新入站：仍挂着它的未缺失记录对应的旧入站已被删，标记缺失（docs/03 §5.1 面板标识复用）
+	RetireInboundByRef(ctx context.Context, arg RetireInboundByRefParams) ([]int64, error)
 	SetAdminTOTPPending(ctx context.Context, arg SetAdminTOTPPendingParams) error
 	SetInboundEnabledLocal(ctx context.Context, arg SetInboundEnabledLocalParams) error
 	// T1–T3 的落库：status、last_error 由调用方按转移表算好；is_online 时才刷新版本、GUID、快照与最近在线时间
@@ -94,7 +98,7 @@ type Querier interface {
 	UpdateAdminDisabled(ctx context.Context, arg UpdateAdminDisabledParams) error
 	UpdateAdminLastLogin(ctx context.Context, id int64) error
 	UpdateAdminPasswordHash(ctx context.Context, arg UpdateAdminPasswordHashParams) (int64, error)
-	// 同步时以面板为准刷新缓存；drift_detected_at 由调用方按漂移规则给出（保留已有标记）
+	// 同步时以面板为准刷新缓存；drift_detected_at 由调用方按漂移规则给出（保留已有标记）。缺失是终态，不刷新
 	UpdateInboundFromSync(ctx context.Context, arg UpdateInboundFromSyncParams) error
 	UpdateNode(ctx context.Context, arg UpdateNodeParams) (int64, error)
 	UpdateNodeGroup(ctx context.Context, arg UpdateNodeGroupParams) (int64, error)

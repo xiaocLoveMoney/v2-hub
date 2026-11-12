@@ -30,6 +30,8 @@ type PanelManager interface {
 	UpdateInbound(ctx context.Context, actor *service.AdminPrincipal, id int64, in service.InboundUpdateInput, ip *netip.Addr) (*service.Inbound, error)
 	SetInboundEnabled(ctx context.Context, actor *service.AdminPrincipal, id int64, enabled bool, ip *netip.Addr) (*service.Inbound, error)
 	AckInboundDrift(ctx context.Context, actor *service.AdminPrincipal, id int64, ip *netip.Addr) error
+	GetInboundPanelConfig(ctx context.Context, actor *service.AdminPrincipal, id int64, ip *netip.Addr) (*service.InboundPanelConfig, error)
+	GeneratePanelKeys(ctx context.Context, actor *service.AdminPrincipal, serverID int64, kind string, ip *netip.Addr) (json.RawMessage, error)
 	DeleteInbound(ctx context.Context, actor *service.AdminPrincipal, id int64, ip *netip.Addr) error
 	CreateEndpoints(ctx context.Context, actor *service.AdminPrincipal, serverID int64, in service.EndpointInput, ip *netip.Addr) error
 	DeleteEndpoint(ctx context.Context, actor *service.AdminPrincipal, id int64, ip *netip.Addr) error
@@ -452,6 +454,54 @@ func (h *handlers) ackInboundDrift(w http.ResponseWriter, r *http.Request, p *se
 		return
 	}
 	writeOK(w, nil)
+}
+
+// inboundPanelConfigVO 对应 hub-api.yaml InboundPanelConfig。
+type inboundPanelConfigVO struct {
+	Protocol string          `json:"protocol"`
+	Port     int             `json:"port"`
+	Listen   string          `json:"listen"`
+	Remark   string          `json:"remark"`
+	Enabled  bool            `json:"enabled"`
+	Config   json.RawMessage `json:"config"`
+}
+
+func (h *handlers) getInboundPanelConfig(w http.ResponseWriter, r *http.Request, p *service.AdminPrincipal) {
+	id, err := pathID(r)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	cfg, err := h.panels.GetInboundPanelConfig(r.Context(), p, id, clientIP(r, h.trustedProxies))
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeOK(w, inboundPanelConfigVO{Protocol: cfg.Protocol, Port: cfg.Port, Listen: cfg.Listen, Remark: cfg.Remark, Enabled: cfg.Enabled, Config: cfg.Config})
+}
+
+// panelKeysRequest 对应 generatePanelKeys 的请求体。
+type panelKeysRequest struct {
+	Kind string `json:"kind"`
+}
+
+func (h *handlers) generatePanelKeys(w http.ResponseWriter, r *http.Request, p *service.AdminPrincipal) {
+	id, err := pathID(r)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	var req panelKeysRequest
+	if err := decodeJSON(w, r, &req); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	keys, err := h.panels.GeneratePanelKeys(r.Context(), p, id, req.Kind, clientIP(r, h.trustedProxies))
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeOK(w, keys)
 }
 
 func (h *handlers) deleteInbound(w http.ResponseWriter, r *http.Request, p *service.AdminPrincipal) {

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/netip"
 	"net/url"
 	"regexp"
@@ -29,6 +30,7 @@ const (
 	maxEndpointAddrs   = 32
 	maxEndpointInbound = 64
 	msgInboundNotFound = "入站不存在"
+	msgInboundMissing  = "该入站在面板上已不存在，只能删除"
 	nodeNameSeparator  = " · "
 
 	ActionInboundCreate   = "inbound.create"
@@ -36,6 +38,8 @@ const (
 	ActionInboundEnable   = "inbound.enable"
 	ActionInboundDelete   = "inbound.delete"
 	ActionInboundDriftAck = "inbound.drift_ack"
+	ActionInboundConfig   = "inbound.config_read"
+	ActionPanelKeys       = "server.keys_generate"
 	ActionEndpointCreate  = "endpoint.create"
 	ActionEndpointDelete  = "endpoint.delete"
 	targetInbound         = "inbound"
@@ -282,9 +286,12 @@ func (s *PanelService) applySync(ctx context.Context, q *sqlcgen.Queries, server
 	if err != nil {
 		return nil, fmt.Errorf("list cached inbounds of server %d: %w", serverID, err)
 	}
+	// 缺失是终态：只按未缺失的记录对号，同一标识再出现就是新入站（docs/03 §5.1 缺失入站）
 	byRef := make(map[string]sqlcgen.ListInboundsByServerRow, len(existing))
 	for _, r := range existing {
-		byRef[r.RemoteRef] = r
+		if !r.IsMissing {
+			byRef[r.RemoteRef] = r
+		}
 	}
 	now := s.now()
 	result := &SyncResult{Inbounds: len(inbounds)}
@@ -295,6 +302,14 @@ func (s *PanelService) applySync(ctx context.Context, q *sqlcgen.Queries, server
 		presentRefs = append(presentRefs, in.Ref)
 		nameByRef[in.Ref] = in.Remark
 		row, ok := byRef[in.Ref]
+		if ok && row.Protocol != in.Protocol {
+			// 同一标识换了协议：面板删了旧入站又把标识分给了新入站（docs/03 §5.1 面板标识复用）
+			if _, err := q.RetireInboundByRef(ctx, sqlcgen.RetireInboundByRefParams{ServerID: serverID, RemoteRef: in.Ref}); err != nil {
+				return nil, fmt.Errorf("retire inbound %d of server %d: %w", row.ID, serverID, err)
+			}
+			result.Missing++
+			ok = false
+		}
 		if !ok {
 			id, err := savePlatformWrite(ctx, q, serverID, serverName, in)
 			if err != nil {
@@ -315,7 +330,7 @@ func (s *PanelService) applySync(ctx context.Context, q *sqlcgen.Queries, server
 			// 面板侧又改回了已确认的配置，漂移自然消除
 			drift = pgtype.Timestamptz{}
 		}
-		if hashChanged || row.IsMissing {
+		if hashChanged {
 			result.Updated++
 		}
 		if err := q.UpdateInboundFromSync(ctx, sqlcgen.UpdateInboundFromSyncParams{
@@ -333,7 +348,7 @@ func (s *PanelService) applySync(ctx context.Context, q *sqlcgen.Queries, server
 	if err != nil {
 		return nil, fmt.Errorf("mark missing inbounds of server %d: %w", serverID, err)
 	}
-	result.Missing = int(missing)
+	result.Missing += int(missing)
 
 	presentEndpoints := make([]int64, 0, len(endpoints))
 	for _, ep := range endpoints {
@@ -439,9 +454,22 @@ func (s *PanelService) loadInbound(ctx context.Context, id int64) (sqlcgen.GetIn
 	return row, nil
 }
 
-// writeInbound 执行一次面板写入并落库、记审计。
+// loadLiveInbound 读取入站并拒绝面板上已不存在的：它的面板标识可能已分给别的入站，再写就会改到别人（docs/03 §5.1 缺失入站）。
+func (s *PanelService) loadLiveInbound(ctx context.Context, id int64) (sqlcgen.GetInboundRow, error) {
+	row, err := s.loadInbound(ctx, id)
+	if err != nil {
+		return row, err
+	}
+	if row.IsMissing {
+		return row, newError(CodeConflict, msgInboundMissing)
+	}
+	return row, nil
+}
+
+// writeInbound 执行一次面板写入并落库、记审计。isNew 表示面板新建了入站：
+// 若它的标识还挂在某条未缺失的记录上，那条记录的入站已在面板上被删，先标记缺失（docs/03 §5.1 面板标识复用）。
 func (s *PanelService) writeInbound(ctx context.Context, actor *AdminPrincipal, serverID int64, serverName, action string,
-	ip *netip.Addr, detail map[string]any, write func() (panel.Inbound, error)) (*Inbound, error) {
+	ip *netip.Addr, detail map[string]any, isNew bool, write func() (panel.Inbound, error)) (*Inbound, error) {
 	in, err := write()
 	if err != nil {
 		return nil, panelError(err)
@@ -449,6 +477,15 @@ func (s *PanelService) writeInbound(ctx context.Context, actor *AdminPrincipal, 
 	var id int64
 	err = s.inTx(ctx, func(q *sqlcgen.Queries) error {
 		var err error
+		if isNew {
+			retired, err := q.RetireInboundByRef(ctx, sqlcgen.RetireInboundByRefParams{ServerID: serverID, RemoteRef: in.Ref})
+			if err != nil {
+				return fmt.Errorf("retire stale inbound %s of server %d: %w", in.Ref, serverID, err)
+			}
+			if len(retired) > 0 {
+				detail["retiredInboundIds"] = retired
+			}
+		}
 		if id, err = savePlatformWrite(ctx, q, serverID, serverName, in); err != nil {
 			return err
 		}
@@ -474,7 +511,7 @@ func (s *PanelService) CreateInbound(ctx context.Context, actor *AdminPrincipal,
 		return nil, err
 	}
 	detail := map[string]any{"serverId": serverID, "protocol": spec.Protocol, "port": spec.Port, "template": in.Template}
-	return s.writeInbound(ctx, actor, serverID, row.Name, ActionInboundCreate, ip, detail, func() (panel.Inbound, error) {
+	return s.writeInbound(ctx, actor, serverID, row.Name, ActionInboundCreate, ip, detail, true, func() (panel.Inbound, error) {
 		return p.CreateInbound(ctx, spec)
 	})
 }
@@ -489,7 +526,7 @@ func (s *PanelService) UpdateInbound(ctx context.Context, actor *AdminPrincipal,
 			return nil, err
 		}
 	}
-	row, err := s.loadInbound(ctx, id)
+	row, err := s.loadLiveInbound(ctx, id)
 	if err != nil {
 		return nil, err
 	}
@@ -502,14 +539,14 @@ func (s *PanelService) UpdateInbound(ctx context.Context, actor *AdminPrincipal,
 		Enabled: row.IsEnabled, Config: in.Config,
 	}
 	detail := map[string]any{"port": in.Port, "configChanged": len(in.Config) > 0}
-	return s.writeInbound(ctx, actor, row.ServerID, srv.Name, ActionInboundUpdate, ip, detail, func() (panel.Inbound, error) {
+	return s.writeInbound(ctx, actor, row.ServerID, srv.Name, ActionInboundUpdate, ip, detail, false, func() (panel.Inbound, error) {
 		return p.UpdateInbound(ctx, row.RemoteRef, spec)
 	})
 }
 
 // SetInboundEnabled 启用或停用入站。
 func (s *PanelService) SetInboundEnabled(ctx context.Context, actor *AdminPrincipal, id int64, enabled bool, ip *netip.Addr) (*Inbound, error) {
-	row, err := s.loadInbound(ctx, id)
+	row, err := s.loadLiveInbound(ctx, id)
 	if err != nil {
 		return nil, err
 	}
@@ -517,7 +554,7 @@ func (s *PanelService) SetInboundEnabled(ctx context.Context, actor *AdminPrinci
 	if err != nil {
 		return nil, err
 	}
-	return s.writeInbound(ctx, actor, row.ServerID, srv.Name, ActionInboundEnable, ip, map[string]any{"enabled": enabled},
+	return s.writeInbound(ctx, actor, row.ServerID, srv.Name, ActionInboundEnable, ip, map[string]any{"enabled": enabled}, false,
 		func() (panel.Inbound, error) {
 			if err := p.SetInboundEnabled(ctx, row.RemoteRef, enabled); err != nil {
 				return panel.Inbound{}, err
@@ -528,7 +565,7 @@ func (s *PanelService) SetInboundEnabled(ctx context.Context, actor *AdminPrinci
 
 // AckInboundDrift 以面板当前配置为准，清除漂移标记。
 func (s *PanelService) AckInboundDrift(ctx context.Context, actor *AdminPrincipal, id int64, ip *netip.Addr) error {
-	row, err := s.loadInbound(ctx, id)
+	row, err := s.loadLiveInbound(ctx, id)
 	if err != nil {
 		return err
 	}
@@ -536,13 +573,74 @@ func (s *PanelService) AckInboundDrift(ctx context.Context, actor *AdminPrincipa
 	if err != nil {
 		return err
 	}
-	_, err = s.writeInbound(ctx, actor, row.ServerID, srv.Name, ActionInboundDriftAck, ip, nil, func() (panel.Inbound, error) {
+	_, err = s.writeInbound(ctx, actor, row.ServerID, srv.Name, ActionInboundDriftAck, ip, nil, false, func() (panel.Inbound, error) {
 		return p.GetInbound(ctx, row.RemoteRef)
 	})
 	return err
 }
 
+// InboundPanelConfig 是面板上入站的完整配置（含密钥、不含 clients），供编辑表单回显（Ruling-16）。
+type InboundPanelConfig struct {
+	Protocol string
+	Port     int
+	Listen   string
+	Remark   string
+	Enabled  bool
+	Config   json.RawMessage
+}
+
+// GetInboundPanelConfig 从面板实时读取入站完整配置。结果含私钥与口令，所以只给有写权限的管理员，且每次读取记审计。
+func (s *PanelService) GetInboundPanelConfig(ctx context.Context, actor *AdminPrincipal, id int64, ip *netip.Addr) (*InboundPanelConfig, error) {
+	row, err := s.loadLiveInbound(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	p, _, err := s.openProvider(ctx, row.ServerID)
+	if err != nil {
+		return nil, err
+	}
+	cfg, err := p.GetInboundConfig(ctx, row.RemoteRef)
+	if err != nil {
+		return nil, panelError(err)
+	}
+	if err := s.writeAuditOnly(ctx, AuditEntry{
+		ActorType: ActorAdmin, ActorID: actor.AdminID, Action: ActionInboundConfig, TargetType: targetInbound,
+		TargetID: fmt.Sprint(id), ClientIP: ip, Detail: map[string]any{"serverId": row.ServerID},
+	}); err != nil {
+		return nil, err
+	}
+	return &InboundPanelConfig{
+		Protocol: cfg.Protocol, Port: cfg.Port, Listen: cfg.Listen, Remark: cfg.Remark, Enabled: cfg.Enabled, Config: cfg.Config,
+	}, nil
+}
+
+// GeneratePanelKeys 让服务器的面板生成一组密钥并原样返回（Ruling-16）。种类走白名单，结果不落库、不进日志。
+func (s *PanelService) GeneratePanelKeys(ctx context.Context, actor *AdminPrincipal, serverID int64, kind string, ip *netip.Addr) (json.RawMessage, error) {
+	k := panel.KeyKind(kind)
+	switch k {
+	case panel.KeyX25519, panel.KeyMLDSA65, panel.KeyVLESSEnc:
+	default:
+		return nil, newError(CodeInvalidArgument, "不支持的密钥种类："+kind)
+	}
+	p, _, err := s.openEnabledProvider(ctx, serverID)
+	if err != nil {
+		return nil, err
+	}
+	out, err := p.GenerateKeys(ctx, k)
+	if err != nil {
+		return nil, panelError(err)
+	}
+	if err := s.writeAuditOnly(ctx, AuditEntry{
+		ActorType: ActorAdmin, ActorID: actor.AdminID, Action: ActionPanelKeys, TargetType: targetServer,
+		TargetID: fmt.Sprint(serverID), ClientIP: ip, Detail: map[string]any{"kind": kind},
+	}); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // DeleteInbound 先删面板再删平台记录（节点级联删除）；面板上已不存在也视为成功。
+// 缺失入站只删平台记录：它的面板标识可能已分给别的入站（docs/03 §5.1 缺失入站）。
 func (s *PanelService) DeleteInbound(ctx context.Context, actor *AdminPrincipal, id int64, ip *netip.Addr) error {
 	row, err := s.loadInbound(ctx, id)
 	if err != nil {
@@ -605,6 +703,9 @@ func (s *PanelService) CreateEndpoints(ctx context.Context, actor *AdminPrincipa
 		if r.ServerID != serverID {
 			return newError(CodeInvalidArgument, "所选入站不属于该服务器")
 		}
+		if r.IsMissing {
+			return newError(CodeConflict, msgInboundMissing)
+		}
 		refs = append(refs, r.RemoteRef)
 	}
 	unique := make(map[int64]struct{}, len(in.InboundIDs))
@@ -638,7 +739,8 @@ func (s *PanelService) writeAuditOnly(ctx context.Context, e AuditEntry) error {
 	return writeAudit(ctx, s.q, e)
 }
 
-// DeleteEndpoint 删除地址所在的整个 Host 组（面板与平台），对应节点级联删除。
+// DeleteEndpoint 只删这一个对外地址（docs/03 §5.1 删除对外地址）。面板组被拆分时，挪到新组的地址改写组标识，
+// 保留平台记录、节点与节点组成员关系。地址或其入站在面板上已不存在时只删平台记录。
 func (s *PanelService) DeleteEndpoint(ctx context.Context, actor *AdminPrincipal, id int64, ip *netip.Addr) error {
 	ep, err := s.q.GetEndpoint(ctx, id)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -647,20 +749,34 @@ func (s *PanelService) DeleteEndpoint(ctx context.Context, actor *AdminPrincipal
 	if err != nil {
 		return fmt.Errorf("get endpoint %d: %w", id, err)
 	}
-	p, _, err := s.openEnabledProvider(ctx, ep.ServerID)
-	if err != nil {
-		return err
-	}
-	if err := p.DeleteEndpointGroup(ctx, ep.RemoteGroupRef); err != nil && !errors.Is(err, panel.ErrNotFound) {
-		return panelError(err)
+	var moves []panel.EndpointMove
+	if !ep.IsMissing && !ep.InboundMissing {
+		p, _, err := s.openEnabledProvider(ctx, ep.ServerID)
+		if err != nil {
+			return err
+		}
+		key := panel.EndpointKey{GroupRef: ep.RemoteGroupRef, InboundRef: ep.InboundRef, Address: ep.Address}
+		if moves, err = p.RemoveEndpoint(ctx, key); err != nil && !errors.Is(err, panel.ErrNotFound) {
+			slog.Error("remove endpoint on panel", "endpoint_id", id, "server_id", ep.ServerID, "group_ref", ep.RemoteGroupRef, "err", err)
+			return panelError(err)
+		}
 	}
 	return s.inTx(ctx, func(q *sqlcgen.Queries) error {
-		if err := q.DeleteEndpointGroupLocal(ctx, sqlcgen.DeleteEndpointGroupLocalParams{ServerID: ep.ServerID, GroupRef: ep.RemoteGroupRef}); err != nil {
-			return fmt.Errorf("delete endpoint group %s: %w", ep.RemoteGroupRef, err)
+		if err := q.DeleteEndpoint(ctx, id); err != nil {
+			return fmt.Errorf("delete endpoint %d: %w", id, err)
+		}
+		for _, m := range moves {
+			if err := q.RepointEndpoint(ctx, sqlcgen.RepointEndpointParams{
+				NewGroupRef: m.NewGroupRef, ServerID: ep.ServerID, InboundRef: m.InboundRef,
+				OldGroupRef: ep.RemoteGroupRef, Address: m.Address,
+			}); err != nil {
+				return fmt.Errorf("repoint endpoint %s of inbound %s: %w", m.Address, m.InboundRef, err)
+			}
 		}
 		return writeAudit(ctx, q, AuditEntry{
 			ActorType: ActorAdmin, ActorID: actor.AdminID, Action: ActionEndpointDelete, TargetType: targetEndpoint,
-			TargetID: fmt.Sprint(id), ClientIP: ip, Detail: map[string]any{"address": ep.Address},
+			TargetID: fmt.Sprint(id), ClientIP: ip,
+			Detail: map[string]any{"address": ep.Address, "inboundId": ep.InboundID, "regrouped": len(moves)},
 		})
 	})
 }

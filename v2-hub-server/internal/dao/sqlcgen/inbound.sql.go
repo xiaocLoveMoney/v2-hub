@@ -11,19 +11,12 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const deleteEndpointGroupLocal = `-- name: DeleteEndpointGroupLocal :exec
-DELETE FROM endpoint e
-USING inbound i
-WHERE i.id = e.inbound_id AND i.server_id = $1 AND e.remote_group_ref = $2
+const deleteEndpoint = `-- name: DeleteEndpoint :exec
+DELETE FROM endpoint WHERE id = $1
 `
 
-type DeleteEndpointGroupLocalParams struct {
-	ServerID int64
-	GroupRef string
-}
-
-func (q *Queries) DeleteEndpointGroupLocal(ctx context.Context, arg DeleteEndpointGroupLocalParams) error {
-	_, err := q.db.Exec(ctx, deleteEndpointGroupLocal, arg.ServerID, arg.GroupRef)
+func (q *Queries) DeleteEndpoint(ctx context.Context, id int64) error {
+	_, err := q.db.Exec(ctx, deleteEndpoint, id)
 	return err
 }
 
@@ -37,7 +30,8 @@ func (q *Queries) DeleteInbound(ctx context.Context, id int64) error {
 }
 
 const getEndpoint = `-- name: GetEndpoint :one
-SELECT e.id, e.inbound_id, e.remote_group_ref, e.address, i.server_id
+SELECT e.id, e.inbound_id, e.remote_group_ref, e.address, e.is_missing, i.server_id,
+       i.remote_ref AS inbound_ref, i.is_missing AS inbound_missing
 FROM endpoint e
 JOIN inbound i ON i.id = e.inbound_id
 WHERE e.id = $1
@@ -48,7 +42,10 @@ type GetEndpointRow struct {
 	InboundID      int64
 	RemoteGroupRef string
 	Address        string
+	IsMissing      bool
 	ServerID       int64
+	InboundRef     string
+	InboundMissing bool
 }
 
 func (q *Queries) GetEndpoint(ctx context.Context, id int64) (GetEndpointRow, error) {
@@ -59,7 +56,10 @@ func (q *Queries) GetEndpoint(ctx context.Context, id int64) (GetEndpointRow, er
 		&i.InboundID,
 		&i.RemoteGroupRef,
 		&i.Address,
+		&i.IsMissing,
 		&i.ServerID,
+		&i.InboundRef,
+		&i.InboundMissing,
 	)
 	return i, err
 }
@@ -167,13 +167,14 @@ func (q *Queries) ListEndpointsByServer(ctx context.Context, serverID int64) ([]
 }
 
 const listInboundsByIDs = `-- name: ListInboundsByIDs :many
-SELECT id, server_id, remote_ref FROM inbound WHERE id = ANY($1::bigint[])
+SELECT id, server_id, remote_ref, is_missing FROM inbound WHERE id = ANY($1::bigint[])
 `
 
 type ListInboundsByIDsRow struct {
 	ID        int64
 	ServerID  int64
 	RemoteRef string
+	IsMissing bool
 }
 
 func (q *Queries) ListInboundsByIDs(ctx context.Context, ids []int64) ([]ListInboundsByIDsRow, error) {
@@ -185,7 +186,12 @@ func (q *Queries) ListInboundsByIDs(ctx context.Context, ids []int64) ([]ListInb
 	items := []ListInboundsByIDsRow{}
 	for rows.Next() {
 		var i ListInboundsByIDsRow
-		if err := rows.Scan(&i.ID, &i.ServerID, &i.RemoteRef); err != nil {
+		if err := rows.Scan(
+			&i.ID,
+			&i.ServerID,
+			&i.RemoteRef,
+			&i.IsMissing,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -304,6 +310,65 @@ func (q *Queries) MarkInboundsMissing(ctx context.Context, arg MarkInboundsMissi
 	return result.RowsAffected(), nil
 }
 
+const repointEndpoint = `-- name: RepointEndpoint :exec
+UPDATE endpoint e SET remote_group_ref = $1, updated_at = now()
+FROM inbound i
+WHERE i.id = e.inbound_id AND i.server_id = $2 AND i.remote_ref = $3 AND NOT i.is_missing
+  AND e.remote_group_ref = $4 AND e.address = $5
+`
+
+type RepointEndpointParams struct {
+	NewGroupRef string
+	ServerID    int64
+	InboundRef  string
+	OldGroupRef string
+	Address     string
+}
+
+// 删除对外地址拆分了面板上的组：被挪到新组的地址改写组标识，保留原记录与节点（docs/03 §5.1）
+func (q *Queries) RepointEndpoint(ctx context.Context, arg RepointEndpointParams) error {
+	_, err := q.db.Exec(ctx, repointEndpoint,
+		arg.NewGroupRef,
+		arg.ServerID,
+		arg.InboundRef,
+		arg.OldGroupRef,
+		arg.Address,
+	)
+	return err
+}
+
+const retireInboundByRef = `-- name: RetireInboundByRef :many
+UPDATE inbound SET is_missing = TRUE, drift_detected_at = NULL, updated_at = now()
+WHERE server_id = $1 AND remote_ref = $2 AND NOT is_missing
+RETURNING id
+`
+
+type RetireInboundByRefParams struct {
+	ServerID  int64
+	RemoteRef string
+}
+
+// 面板把该标识分给了新入站：仍挂着它的未缺失记录对应的旧入站已被删，标记缺失（docs/03 §5.1 面板标识复用）
+func (q *Queries) RetireInboundByRef(ctx context.Context, arg RetireInboundByRefParams) ([]int64, error) {
+	rows, err := q.db.Query(ctx, retireInboundByRef, arg.ServerID, arg.RemoteRef)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []int64{}
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const setInboundEnabledLocal = `-- name: SetInboundEnabledLocal :exec
 UPDATE inbound SET is_enabled = $2, updated_at = now() WHERE id = $1
 `
@@ -321,9 +386,8 @@ func (q *Queries) SetInboundEnabledLocal(ctx context.Context, arg SetInboundEnab
 const updateInboundFromSync = `-- name: UpdateInboundFromSync :exec
 UPDATE inbound
 SET protocol = $2, port = $3, listen = $4, tag = $5, remark = $6, is_enabled = $7, network = $8,
-    security = $9, core_type = $10, config = $11, client_count = $12, drift_detected_at = $13,
-    is_missing = FALSE, updated_at = now()
-WHERE id = $1
+    security = $9, core_type = $10, config = $11, client_count = $12, drift_detected_at = $13, updated_at = now()
+WHERE id = $1 AND NOT is_missing
 `
 
 type UpdateInboundFromSyncParams struct {
@@ -342,7 +406,7 @@ type UpdateInboundFromSyncParams struct {
 	DriftDetectedAt pgtype.Timestamptz
 }
 
-// 同步时以面板为准刷新缓存；drift_detected_at 由调用方按漂移规则给出（保留已有标记）
+// 同步时以面板为准刷新缓存；drift_detected_at 由调用方按漂移规则给出（保留已有标记）。缺失是终态，不刷新
 func (q *Queries) UpdateInboundFromSync(ctx context.Context, arg UpdateInboundFromSyncParams) error {
 	_, err := q.db.Exec(ctx, updateInboundFromSync,
 		arg.ID,
@@ -398,12 +462,12 @@ const upsertInboundFromPlatform = `-- name: UpsertInboundFromPlatform :one
 INSERT INTO inbound (server_id, remote_ref, protocol, port, listen, tag, remark, is_enabled, network, security,
                      core_type, config, client_count, synced_hash, drift_detected_at, is_missing)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NULL, FALSE)
-ON CONFLICT (server_id, remote_ref) DO UPDATE
+ON CONFLICT (server_id, remote_ref) WHERE NOT is_missing DO UPDATE
 SET protocol = EXCLUDED.protocol, port = EXCLUDED.port, listen = EXCLUDED.listen, tag = EXCLUDED.tag,
     remark = EXCLUDED.remark, is_enabled = EXCLUDED.is_enabled, network = EXCLUDED.network,
     security = EXCLUDED.security, core_type = EXCLUDED.core_type, config = EXCLUDED.config,
     client_count = EXCLUDED.client_count, synced_hash = EXCLUDED.synced_hash,
-    drift_detected_at = NULL, is_missing = FALSE, updated_at = now()
+    drift_detected_at = NULL, updated_at = now()
 RETURNING id
 `
 

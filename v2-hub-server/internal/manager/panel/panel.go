@@ -67,6 +67,28 @@ type Inbound struct {
 	ClientCount int
 }
 
+// InboundConfig 是面板上入站的完整配置，含私钥与口令、settings 不含 clients，只供编辑表单回显（Ruling-16）。
+type InboundConfig struct {
+	Protocol string
+	Port     int
+	Listen   string
+	Remark   string
+	Enabled  bool
+	Config   json.RawMessage
+}
+
+// KeyKind 是可请求面板生成的密钥种类（Ruling-16）。
+type KeyKind string
+
+const (
+	// KeyX25519 是 Reality 的 x25519 密钥对。
+	KeyX25519 KeyKind = "x25519"
+	// KeyMLDSA65 是 Reality 的 ML-DSA-65 种子与校验值。
+	KeyMLDSA65 KeyKind = "mldsa65"
+	// KeyVLESSEnc 是 VLESS encryption 的服务端 decryption 与客户端 encryption 串。
+	KeyVLESSEnc KeyKind = "vlessenc"
+)
+
 // InboundSpec 是新建或修改入站的期望状态。Config 是内核相关的 JSON 对象，
 // 对 Xray 为 {settings, streamSettings, sniffing}；修改时省略的敏感字段由实现从面板原值补回。
 type InboundSpec struct {
@@ -78,7 +100,7 @@ type InboundSpec struct {
 	Config   json.RawMessage
 }
 
-// Endpoint 是一个对外地址（3x-ui 的一行 Host）。同一 GroupRef 的地址在面板上同生同灭。
+// Endpoint 是一个对外地址（3x-ui 的一行 Host）。同一 GroupRef 的地址共享端口以外的设置。
 type Endpoint struct {
 	GroupRef   string
 	InboundRef string
@@ -96,6 +118,20 @@ type EndpointSpec struct {
 	Remark      string
 }
 
+// EndpointKey 标识一个对外地址：某个组里、挂在某个入站上的某个地址。
+type EndpointKey struct {
+	GroupRef   string
+	InboundRef string
+	Address    string
+}
+
+// EndpointMove 是删除对外地址时因原组拆分而换到新组的地址；地址本身不变，平台据此改写组标识以保留记录与节点。
+type EndpointMove struct {
+	InboundRef  string
+	Address     string
+	NewGroupRef string
+}
+
 // Provider 是一台面板的操作集合。实现必须并发安全。
 // M1 覆盖探测、入站与对外地址；client 相关方法在 M2 加入。
 type Provider interface {
@@ -107,11 +143,17 @@ type Provider interface {
 	CreateInbound(ctx context.Context, spec InboundSpec) (Inbound, error)
 	UpdateInbound(ctx context.Context, ref string, spec InboundSpec) (Inbound, error)
 	SetInboundEnabled(ctx context.Context, ref string, enabled bool) error
+	// GetInboundConfig 读取面板上入站的完整配置（含密钥，不含 clients）。
+	GetInboundConfig(ctx context.Context, ref string) (InboundConfig, error)
+	// GenerateKeys 让面板生成一组密钥，返回面板给出的 JSON 对象。
+	GenerateKeys(ctx context.Context, kind KeyKind) (json.RawMessage, error)
 	DeleteInbound(ctx context.Context, ref string) error
 
 	ListEndpoints(ctx context.Context) ([]Endpoint, error)
 	CreateEndpoints(ctx context.Context, spec EndpointSpec) error
-	DeleteEndpointGroup(ctx context.Context, groupRef string) error
+	// RemoveEndpoint 只删除 key 指定的一个地址，同组其它地址保留（docs/03 §5.1 删除对外地址）。
+	// 组或地址已不存在时返回 ErrNotFound；组被拆分时返回换到新组的地址。
+	RemoveEndpoint(ctx context.Context, key EndpointKey) ([]EndpointMove, error)
 }
 
 // ErrorKind 是面板错误的分类，service 层据此决定状态转移（docs/03 T2、T3）与对外错误码。
