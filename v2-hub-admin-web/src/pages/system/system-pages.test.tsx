@@ -19,9 +19,10 @@ function sessionWith(permissions: string[]): SessionContextValue {
   const granted = new Set(permissions)
   return {
     status: 'authenticated',
-    session: { admin: { id: SELF_ID, username: 'root' }, permissions, csrfToken: CSRF },
+    session: { admin: { id: SELF_ID, username: 'root' }, permissions, csrfToken: CSRF, totpEnabled: false },
     login: async () => null,
     logout: async () => undefined,
+    refresh: async () => undefined,
     can: (p) => granted.has(p),
   }
 }
@@ -72,8 +73,8 @@ afterEach(() => {
 describe('AdminsPage', () => {
   it('列出管理员；自己那行不能编辑；新建时带 CSRF 头与表单内容', async () => {
     const admins = [
-      { id: SELF_ID, username: 'root', isDisabled: false, roles: ['super_admin'], lastLoginAt: null, createdAt: '2026-11-11T00:00:00Z' },
-      { id: 2, username: 'ops', isDisabled: true, roles: [], lastLoginAt: null, createdAt: '2026-11-11T00:00:00Z' },
+      { id: SELF_ID, username: 'root', isDisabled: false, totpEnabled: false, roles: ['super_admin'], lastLoginAt: null, createdAt: '2026-11-11T00:00:00Z' },
+      { id: 2, username: 'ops', isDisabled: true, totpEnabled: true, roles: [], lastLoginAt: null, createdAt: '2026-11-11T00:00:00Z' },
     ]
     const calls = mockServer({
       'GET /api/admin/admins': () => ok({ items: admins, total: 2 }),

@@ -21,6 +21,7 @@ type AdminManager interface {
 	CreateAdmin(ctx context.Context, actor *service.AdminPrincipal, in service.AdminCreateInput, ip *netip.Addr) (*service.Admin, error)
 	UpdateAdmin(ctx context.Context, actor *service.AdminPrincipal, id int64, in service.AdminUpdateInput, ip *netip.Addr) (*service.Admin, error)
 	ResetAdminPassword(ctx context.Context, actor *service.AdminPrincipal, id int64, password string, ip *netip.Addr) error
+	ResetAdminTOTP(ctx context.Context, actor *service.AdminPrincipal, id int64, ip *netip.Addr) error
 	ListAuditLogs(ctx context.Context, pq service.PageQuery) (*service.Page[service.AuditLog], error)
 }
 
@@ -43,6 +44,7 @@ type adminVO struct {
 	ID          int64      `json:"id"`
 	Username    string     `json:"username"`
 	IsDisabled  bool       `json:"isDisabled"`
+	TOTPEnabled bool       `json:"totpEnabled"`
 	Roles       []string   `json:"roles"`
 	LastLoginAt *time.Time `json:"lastLoginAt"`
 	CreatedAt   time.Time  `json:"createdAt"`
@@ -70,7 +72,10 @@ func toRoleVO(r service.Role) roleVO {
 }
 
 func toAdminVO(a service.Admin) adminVO {
-	return adminVO{ID: a.ID, Username: a.Username, IsDisabled: a.IsDisabled, Roles: a.Roles, LastLoginAt: a.LastLoginAt, CreatedAt: a.CreatedAt}
+	return adminVO{
+		ID: a.ID, Username: a.Username, IsDisabled: a.IsDisabled, TOTPEnabled: a.TOTPEnabled,
+		Roles: a.Roles, LastLoginAt: a.LastLoginAt, CreatedAt: a.CreatedAt,
+	}
 }
 
 func toAuditLogVO(l service.AuditLog) auditLogVO {
@@ -265,4 +270,17 @@ func (h *handlers) listAuditLogs(w http.ResponseWriter, r *http.Request, _ *serv
 		return
 	}
 	writeOK(w, pageVO[auditLogVO]{Items: mapSlice(page.Items, toAuditLogVO), Total: page.Total})
+}
+
+func (h *handlers) resetAdminTOTP(w http.ResponseWriter, r *http.Request, p *service.AdminPrincipal) {
+	id, err := pathID(r)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	if err := h.rbac.ResetAdminTOTP(r.Context(), p, id, clientIP(r, h.trustedProxies)); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeOK(w, nil)
 }

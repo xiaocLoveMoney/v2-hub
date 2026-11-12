@@ -37,10 +37,12 @@ export function SessionProvider({ children }: SessionProviderProps) {
   }, [apply])
 
   const login = useCallback(
-    async (username: string, credential: string): Promise<ApiError | null> => {
+    async (username: string, credential: string, totpCode?: string): Promise<ApiError | null> => {
       const pw = credential
       try {
-        const { data, error } = await api.POST('/api/admin/auth/login', { body: { username, password: pw } })
+        const { data, error } = await api.POST('/api/admin/auth/login', {
+          body: { username, password: pw, ...(totpCode === undefined ? {} : { totpCode }) },
+        })
         if (error !== undefined || data?.data === undefined) {
           return toApiError(error)
         }
@@ -65,10 +67,19 @@ export function SessionProvider({ children }: SessionProviderProps) {
     }
   }, [apply, session])
 
+  const refresh = useCallback(async () => {
+    try {
+      const { data } = await api.GET('/api/admin/auth/me')
+      apply(data?.data ?? null)
+    } catch (err) {
+      reportError(err)
+    }
+  }, [apply])
+
   const value = useMemo<SessionContextValue>(() => {
     const granted = new Set(session?.permissions ?? [])
-    return { status, session, login, logout, can: (permission: string) => granted.has(permission) }
-  }, [status, session, login, logout])
+    return { status, session, login, logout, refresh, can: (permission: string) => granted.has(permission) }
+  }, [status, session, login, logout, refresh])
 
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>
 }

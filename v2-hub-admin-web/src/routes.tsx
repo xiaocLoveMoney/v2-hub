@@ -7,12 +7,14 @@ import { ComingSoonPage, DashboardPage, NotFoundPage, RequirePermission } from '
 import { AdminsPage } from './pages/system/AdminsPage'
 import { AuditLogsPage } from './pages/system/AuditLogsPage'
 import { RolesPage } from './pages/system/RolesPage'
+import { SecurityPage } from './pages/SecurityPage'
 
 /** 已实现的页面；菜单表里其余路径显示交付里程碑占位。 */
 const PAGE_BY_PATH: Record<string, ReactNode> = {
   [ROUTES.ADMINS]: <AdminsPage />,
   [ROUTES.ROLES]: <RolesPage />,
   [ROUTES.AUDIT_LOGS]: <AuditLogsPage />,
+  [ROUTES.SECURITY]: <SecurityPage />,
 }
 
 const MILESTONE_BY_PATH: Record<string, string> = {

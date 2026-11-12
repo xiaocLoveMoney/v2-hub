@@ -92,6 +92,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/admin/auth/totp/setup": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 生成待确认的 TOTP 密钥，返回 otpauth 地址与 Base32 密钥（只返回这一次） */
+        post: operations["adminTotpSetup"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/auth/totp/enable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 提交验证码确认并开启两步验证 */
+        post: operations["adminTotpEnable"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/auth/totp/disable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 提交当前验证码关闭两步验证 */
+        post: operations["adminTotpDisable"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/admin/permissions": {
         parameters: {
             query?: never;
@@ -203,6 +254,25 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/admin/admins/{id}/totp": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** 清除他人的两步验证（遗失设备时；admin:write，R3、R4；对方全部会话失效） */
+        delete: operations["resetAdminTotp"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/admin/audit-logs": {
         parameters: {
             query?: never;
@@ -240,6 +310,17 @@ export interface components {
         LoginRequest: {
             username: components["schemas"]["Username"];
             password: string;
+            totpCode?: components["schemas"]["TotpCode"];
+        };
+        TotpCode: string;
+        TotpCodeInput: {
+            code: components["schemas"]["TotpCode"];
+        };
+        TotpSetup: {
+            /** @description Base32 密钥，供无法扫码时手动输入 */
+            secret: string;
+            /** @description otpauth://totp/... 地址，前端渲染为二维码 */
+            otpauthUri: string;
         };
         AdminBrief: {
             /** Format: int64 */
@@ -248,6 +329,7 @@ export interface components {
         };
         Session: {
             admin: components["schemas"]["AdminBrief"];
+            totpEnabled: boolean;
             /** @description 有效权限码（super_admin 返回全部） */
             permissions: string[];
             csrfToken: string;
@@ -281,6 +363,7 @@ export interface components {
             id: number;
             username: string;
             isDisabled: boolean;
+            totpEnabled: boolean;
             roles: string[];
             /** Format: date-time */
             lastLoginAt?: string | null;
@@ -465,7 +548,15 @@ export interface operations {
                 };
             };
             400: components["responses"]["InvalidArgument"];
-            401: components["responses"]["Unauthenticated"];
+            /** @description unauthenticated（用户名或口令错误）或 totp_required（需再提交验证码） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"];
+                };
+            };
             429: components["responses"]["RateLimited"];
         };
     };
@@ -504,6 +595,79 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthenticated"];
+        };
+    };
+    adminTotpSetup: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 待确认的密钥 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["TotpSetup"];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    adminTotpEnable: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TotpCodeInput"];
+            };
+        };
+        responses: {
+            200: components["responses"]["Ok"];
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            409: components["responses"]["Conflict"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    adminTotpDisable: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TotpCodeInput"];
+            };
+        };
+        responses: {
+            200: components["responses"]["Ok"];
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            409: components["responses"]["Conflict"];
+            429: components["responses"]["RateLimited"];
         };
     };
     listPermissions: {
@@ -756,6 +920,26 @@ export interface operations {
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["PermissionDenied"];
             404: components["responses"]["NotFound"];
+        };
+    };
+    resetAdminTotp: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["Ok"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
         };
     };
     listAuditLogs: {

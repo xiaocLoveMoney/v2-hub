@@ -9,9 +9,12 @@ DEV_ENV_FILE := contract/deploy/.env
 DEV_DB_URL = $$( [ -f $(DEV_ENV_FILE) ] && set -a && . ./$(DEV_ENV_FILE) && set +a && \
 	echo "postgres://$$POSTGRES_USER:$$POSTGRES_PASSWORD@127.0.0.1:$$POSTGRES_PORT/$$POSTGRES_DB?sslmode=disable" )
 
-# 本机 HTTP 开发：关闭会话 Cookie 的 Secure（生产不设置该变量）
+DEV_ENC_KEY = $$( [ -f $(DEV_ENV_FILE) ] && set -a && . ./$(DEV_ENV_FILE) && set +a && echo "$$HUB_ENCRYPTION_KEY" )
+
+# 本机 HTTP 开发：关闭会话 Cookie 的 Secure（生产不设置该变量）；加密主密钥取自 contract/deploy/.env
 run:
-	@HUB_INSECURE_DEV_COOKIE=1 HUB_DATABASE_URL="$${HUB_DATABASE_URL:-$(DEV_DB_URL)}" go run ./cmd/hub -f $(CONFIG)
+	@HUB_INSECURE_DEV_COOKIE=1 HUB_DATABASE_URL="$${HUB_DATABASE_URL:-$(DEV_DB_URL)}" \
+		HUB_ENCRYPTION_KEY="$${HUB_ENCRYPTION_KEY:-$(DEV_ENC_KEY)}" go run ./cmd/hub -f $(CONFIG)
 
 # 创建超级管理员：make admin-create USERNAME=root（口令在终端无回显输入，或经管道传入一行）
 admin-create:

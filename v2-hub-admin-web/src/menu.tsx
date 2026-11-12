@@ -3,6 +3,7 @@ import {
   ClusterOutlined,
   DashboardOutlined,
   DeploymentUnitOutlined,
+  LockOutlined,
   SafetyOutlined,
   TeamOutlined,
 } from '@ant-design/icons'
@@ -17,6 +18,7 @@ export const ROUTES = {
   ADMINS: '/system/admins',
   ROLES: '/system/roles',
   AUDIT_LOGS: '/system/audit-logs',
+  SECURITY: '/account/security',
 } as const
 
 /** 权限码，与 docs/03 §4 权限码表一致。 */
@@ -39,6 +41,7 @@ export interface MenuEntry {
 }
 
 const GROUP_SYSTEM = '系统'
+const GROUP_ACCOUNT = '账号'
 
 /** 左侧菜单表：增减菜单只改这张表，菜单显示与路由守卫都以它为准。 */
 export const MENU: readonly MenuEntry[] = [
@@ -48,6 +51,7 @@ export const MENU: readonly MenuEntry[] = [
   { path: ROUTES.ADMINS, label: '管理员', icon: <TeamOutlined />, permission: PERMISSIONS.ADMIN_READ, group: GROUP_SYSTEM },
   { path: ROUTES.ROLES, label: '角色与权限', icon: <SafetyOutlined />, permission: PERMISSIONS.ADMIN_READ, group: GROUP_SYSTEM },
   { path: ROUTES.AUDIT_LOGS, label: '审计日志', icon: <AuditOutlined />, permission: PERMISSIONS.AUDIT_READ, group: GROUP_SYSTEM },
+  { path: ROUTES.SECURITY, label: '账号安全', icon: <LockOutlined />, group: GROUP_ACCOUNT },
 ]
 
 /** 按权限过滤菜单表，返回新数组。 */

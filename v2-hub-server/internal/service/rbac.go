@@ -68,6 +68,7 @@ type Admin struct {
 	ID          int64
 	Username    string
 	IsDisabled  bool
+	TOTPEnabled bool
 	Roles       []string
 	LastLoginAt *time.Time
 	CreatedAt   time.Time
@@ -460,7 +461,7 @@ func (s *RBACService) ListAdmins(ctx context.Context, pq PageQuery) (*Page[Admin
 	}
 	items := make([]Admin, 0, len(rows))
 	for _, r := range rows {
-		a := Admin{ID: r.ID, Username: r.Username, IsDisabled: r.IsDisabled, Roles: roles[r.ID], CreatedAt: r.CreatedAt.Time}
+		a := Admin{ID: r.ID, Username: r.Username, IsDisabled: r.IsDisabled, TOTPEnabled: r.TotpEnabled, Roles: roles[r.ID], CreatedAt: r.CreatedAt.Time}
 		if a.Roles == nil {
 			a.Roles = []string{}
 		}
@@ -587,7 +588,7 @@ func getAdminWithRoles(ctx context.Context, q *sqlcgen.Queries, id int64) (*Admi
 		return nil, nil, fmt.Errorf("list roles of admin %d: %w", id, err)
 	}
 	slices.Sort(roles)
-	a := &Admin{ID: row.ID, Username: row.Username, IsDisabled: row.IsDisabled, Roles: roles, CreatedAt: row.CreatedAt.Time}
+	a := &Admin{ID: row.ID, Username: row.Username, IsDisabled: row.IsDisabled, TOTPEnabled: row.TotpEnabled, Roles: roles, CreatedAt: row.CreatedAt.Time}
 	if row.LastLoginAt.Valid {
 		t := row.LastLoginAt.Time
 		a.LastLoginAt = &t

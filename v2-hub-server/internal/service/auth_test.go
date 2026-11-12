@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"v2-hub-server/internal/dao/daotest"
+	"v2-hub-server/internal/manager/crypto"
 )
 
 // cred 是测试用口令（仅测试库内有效）；bad 是错误口令。
@@ -17,6 +18,18 @@ const (
 	cred = "correct-horse-battery"
 	bad  = "wrong-guess-123"
 )
+
+// testMasterKey 是测试专用主密钥（32 个 0x2a 的 Base64），只用于测试库。
+const testMasterKey = "KioqKioqKioqKioqKioqKioqKioqKioqKioqKioqKio="
+
+func testSealer(t *testing.T) *crypto.Sealer {
+	t.Helper()
+	s, err := crypto.NewSealer(testMasterKey)
+	if err != nil {
+		t.Fatalf("NewSealer: %v", err)
+	}
+	return s
+}
 
 type testClock struct{ t time.Time }
 
@@ -46,7 +59,7 @@ func newFixture(t *testing.T) *fixture {
 	t.Helper()
 	pool := daotest.NewPool(t)
 	clock := &testClock{t: time.Now()}
-	auth, err := NewAuthService(pool, testAuthConfig(), clock.now)
+	auth, err := NewAuthService(pool, testAuthConfig(), testSealer(t), clock.now)
 	if err != nil {
 		t.Fatalf("NewAuthService: %v", err)
 	}

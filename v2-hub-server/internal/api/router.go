@@ -62,6 +62,9 @@ func NewRouter(deps Deps) http.Handler {
 	mux.HandleFunc("POST /api/admin/auth/login", h.login)
 	mux.HandleFunc("POST /api/admin/auth/logout", h.requireAdmin("", h.logout))
 	mux.HandleFunc("GET /api/admin/auth/me", h.requireAdmin("", h.me))
+	mux.HandleFunc("POST /api/admin/auth/totp/setup", h.requireAdmin("", h.totpSetup))
+	mux.HandleFunc("POST /api/admin/auth/totp/enable", h.requireAdmin("", h.totpEnable))
+	mux.HandleFunc("POST /api/admin/auth/totp/disable", h.requireAdmin("", h.totpDisable))
 
 	mux.HandleFunc("GET /api/admin/permissions", h.requireAdmin(service.PermAdminRead, h.listPermissions))
 	mux.HandleFunc("GET /api/admin/roles", h.requireAdmin(service.PermAdminRead, h.listRoles))
@@ -72,6 +75,7 @@ func NewRouter(deps Deps) http.Handler {
 	mux.HandleFunc("POST /api/admin/admins", h.requireAdmin(service.PermAdminWrite, h.createAdmin))
 	mux.HandleFunc("PUT /api/admin/admins/{id}", h.requireAdmin(service.PermAdminWrite, h.updateAdmin))
 	mux.HandleFunc("PUT /api/admin/admins/{id}/password", h.requireAdmin(service.PermAdminWrite, h.resetAdminCredential))
+	mux.HandleFunc("DELETE /api/admin/admins/{id}/totp", h.requireAdmin(service.PermAdminWrite, h.resetAdminTOTP))
 	mux.HandleFunc("GET /api/admin/audit-logs", h.requireAdmin(service.PermAuditRead, h.listAuditLogs))
 	return withSecurityHeaders(mux)
 }

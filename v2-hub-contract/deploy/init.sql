@@ -8,7 +8,9 @@ CREATE TABLE admin (
     id              BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     username        VARCHAR(64)  NOT NULL,
     password_hash   VARCHAR(255) NOT NULL,           -- argon2id 编码串，含盐与参数
-    totp_secret_enc BYTEA,                           -- AES-GCM 加密后的 TOTP 密钥；NULL = 未启用 2FA
+    totp_secret_enc BYTEA,                           -- AES-GCM 加密后的 TOTP 密钥；NULL = 未启用 2FA（docs/03 §4.3）
+    totp_pending_enc BYTEA,                          -- 开启流程中待确认的密钥；确认后转存 totp_secret_enc
+    totp_last_step  BIGINT       NOT NULL DEFAULT 0, -- 最近一次成功使用的 TOTP 步长，防重放
     is_disabled     BOOLEAN      NOT NULL DEFAULT FALSE,
     last_login_at   TIMESTAMPTZ,
     created_at      TIMESTAMPTZ  NOT NULL DEFAULT now(),

@@ -14,6 +14,7 @@ const (
 	CodeNotFound         Code = "not_found"
 	CodeConflict         Code = "conflict"
 	CodeRateLimited      Code = "rate_limited"
+	CodeTOTPRequired     Code = "totp_required"
 	CodeInternal         Code = "internal"
 )
 
@@ -41,6 +42,7 @@ var (
 	ErrNotFound         = &Error{Code: CodeNotFound}
 	ErrConflict         = &Error{Code: CodeConflict}
 	ErrRateLimited      = &Error{Code: CodeRateLimited}
+	ErrTOTPRequired     = &Error{Code: CodeTOTPRequired}
 )
 
 func newError(code Code, message string) *Error {
@@ -52,4 +54,6 @@ const (
 	msgLoginRequired  = "请先登录"
 	msgNoPermission   = "没有权限执行该操作"
 	msgTooManyLogin   = "登录失败次数过多，请稍后再试"
+	msgTOTPRequired   = "请输入两步验证码"
+	msgTOTPInvalid    = "验证码错误"
 )

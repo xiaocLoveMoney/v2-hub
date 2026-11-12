@@ -41,6 +41,7 @@ var statusByCode = map[service.Code]int{
 	service.CodeNotFound:         http.StatusNotFound,
 	service.CodeConflict:         http.StatusConflict,
 	service.CodeRateLimited:      http.StatusTooManyRequests,
+	service.CodeTOTPRequired:     http.StatusUnauthorized,
 }
 
 func writeOK(w http.ResponseWriter, data any) {

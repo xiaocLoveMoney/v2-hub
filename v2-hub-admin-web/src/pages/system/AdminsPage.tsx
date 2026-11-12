@@ -1,5 +1,5 @@
 import { PlusOutlined } from '@ant-design/icons'
-import { Alert, App, Button, Form, Input, Modal, Select, Space, Switch, Table, Tag, Typography, type TableProps } from 'antd'
+import { Alert, App, Button, Form, Input, Modal, Popconfirm, Select, Space, Switch, Table, Tag, Typography, type TableProps } from 'antd'
 import { useCallback, useState } from 'react'
 import { api, csrfHeader, type Admin, type ApiError, type PageData, type Role } from '../../api/client'
 import { useSession } from '../../auth/session-context'
@@ -103,6 +103,17 @@ export function AdminsPage() {
     finish(err, '口令已重置，对方需重新登录')
   }
 
+  const handleResetTotp = async (admin: Admin) => {
+    const id = admin.id
+    const err = await mutate(() => api.DELETE('/api/admin/admins/{id}/totp', { params: { ...csrfHeader(), path: { id } } }))
+    if (err !== null) {
+      void message.error(err.message)
+      return
+    }
+    void message.success('已清除两步验证')
+    admins.reload()
+  }
+
   const columns: TableProps<Admin>['columns'] = [
     { title: '用户名', dataIndex: 'username' },
     {
@@ -111,6 +122,7 @@ export function AdminsPage() {
       render: (codes: string[]) => (codes.length === 0 ? <Typography.Text type="secondary">无</Typography.Text> : codes.map((c) => <Tag key={c}>{c}</Tag>)),
     },
     { title: '状态', dataIndex: 'isDisabled', render: (isDisabled: boolean) => (isDisabled ? <Tag color="red">已禁用</Tag> : <Tag color="green">启用</Tag>) },
+    { title: '两步验证', dataIndex: 'totpEnabled', render: (on: boolean) => (on ? <Tag color="blue">已开启</Tag> : <Tag>未开启</Tag>) },
     { title: '最近登录', dataIndex: 'lastLoginAt', render: (v: string | null | undefined) => formatTime(v) },
     { title: '创建时间', dataIndex: 'createdAt', render: (v: string) => formatTime(v) },
   ]
@@ -129,6 +141,15 @@ export function AdminsPage() {
             <Button size="small" onClick={() => setResetting(admin)}>
               重置口令
             </Button>
+            {admin.totpEnabled && !isSelf && (
+              <Popconfirm
+                title={`清除 ${admin.username} 的两步验证？`}
+                description="用于对方遗失验证器设备；清除后其全部会话失效"
+                onConfirm={() => handleResetTotp(admin)}
+              >
+                <Button size="small">清除两步验证</Button>
+              </Popconfirm>
+            )}
           </Space>
         )
       },

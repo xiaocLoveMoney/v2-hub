@@ -11,6 +11,8 @@ while IFS= read -r line; do
   case "$line" in
     *_PASSWORD=)
       printf '%s%s\n' "$line" "$(openssl rand -hex 16)" ;;
+    *_KEY=)
+      printf '%s%s\n' "$line" "$(openssl rand -base64 32)" ;;
     *)
       printf '%s\n' "$line" ;;
   esac

@@ -70,6 +70,7 @@ type AdminPrincipal struct {
 	SessionID    int64
 	CSRFToken    string
 	IsSuperAdmin bool
+	TOTPEnabled  bool
 	Permissions  PermissionSet
 }
 
