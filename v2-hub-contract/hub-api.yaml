@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: v2-hub API
-  version: 0.2.2
+  version: 0.2.4
   description: |
     v2-hub 对外接口契约（hub-server 提供，v2-hub-admin-web / v2-hub-user-web 消费）。
     - 管理端接口前缀 /api/admin，客户端接口前缀 /api/user，订阅端点前缀 /sub。
@@ -11,6 +11,8 @@ info:
     0.2.0：新增管理员认证、管理员 / 角色 / 权限、审计日志接口。
     0.2.2：M1 服务器接入、入站增删改查、Host 端点、节点目录与节点组；错误响应 UpstreamUnavailable（502）。
     0.2.1：两步验证（docs/03 §4.3）——登录可带 totpCode，新增 totp_required 错误码与 TOTP 开启 / 关闭 / 重置接口。
+    0.2.3：删除对外地址只删所点的那一个；对“面板上已不存在”的入站做编辑 / 启停 / 确认漂移 / 添加对外地址返回 409（docs/03 §5.1）。
+    0.2.4：入站表单与 3x-ui 同构（Ruling-16）——新增读取面板完整入站配置、代理面板生成密钥两个接口。
 servers:
   - url: http://127.0.0.1:8080
     description: 本地开发
@@ -662,6 +664,7 @@ paths:
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "403": { $ref: "#/components/responses/PermissionDenied" }
         "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
         "502": { $ref: "#/components/responses/UpstreamUnavailable" }
   /api/admin/inbounds/{id}:
     parameters:
@@ -700,6 +703,7 @@ paths:
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "403": { $ref: "#/components/responses/PermissionDenied" }
         "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
         "502": { $ref: "#/components/responses/UpstreamUnavailable" }
     delete:
       tags: [admin-panel]
@@ -740,6 +744,7 @@ paths:
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "403": { $ref: "#/components/responses/PermissionDenied" }
         "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
         "502": { $ref: "#/components/responses/UpstreamUnavailable" }
   /api/admin/inbounds/{id}/drift/ack:
     parameters:
@@ -755,13 +760,76 @@ paths:
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "403": { $ref: "#/components/responses/PermissionDenied" }
         "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "502": { $ref: "#/components/responses/UpstreamUnavailable" }
+  /api/admin/inbounds/{id}/panel-config:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    get:
+      tags: [admin-panel]
+      operationId: getInboundPanelConfig
+      summary: 从面板实时读取入站完整配置（含私钥与口令、不含 clients），供编辑表单使用；每次读取记审计（Ruling-16，node:write）
+      responses:
+        "200":
+          description: 面板上的入站配置
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/InboundPanelConfig" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "502": { $ref: "#/components/responses/UpstreamUnavailable" }
+  /api/admin/servers/{id}/keys:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    post:
+      tags: [admin-panel]
+      operationId: generatePanelKeys
+      summary: 让该服务器的面板生成一组密钥（Reality x25519、ML-DSA-65、VLESS encryption），原样返回给表单（Ruling-16，node:write）
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [kind]
+              properties:
+                kind: { $ref: "#/components/schemas/PanelKeyKind" }
+      responses:
+        "200":
+          description: 面板生成的密钥
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        additionalProperties: true
+                        description: x25519 → {privateKey, publicKey}；mldsa65 → {seed, verify}；vlessenc → {auths:[{label, decryption, encryption}]}
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "502": { $ref: "#/components/responses/UpstreamUnavailable" }
   /api/admin/endpoints/{id}:
     parameters:
       - $ref: "#/components/parameters/IdPath"
     delete:
       tags: [admin-panel]
       operationId: deleteEndpoint
-      summary: 删除对外地址所在的整个 Host 组（面板上同组的地址一并删除，node:write）
+      summary: 只删除这一个对外地址（该入站上的这个地址；同组其它地址保留，docs/03 §5.1，node:write）
       parameters:
         - $ref: "#/components/parameters/CsrfHeader"
       responses:
@@ -1258,6 +1326,19 @@ components:
           additionalProperties: true
         protocol: { type: string, maxLength: 32, description: 高级 JSON 模式必填 }
         config: { type: object, additionalProperties: true, description: 高级 JSON 模式必填 }
+    InboundPanelConfig:
+      type: object
+      required: [protocol, port, listen, remark, enabled, config]
+      properties:
+        protocol: { type: string }
+        port: { type: integer }
+        listen: { type: string }
+        remark: { type: string }
+        enabled: { type: boolean }
+        config: { type: object, additionalProperties: true, description: 面板上的 settings / streamSettings / sniffing（含密钥，settings 不含 clients） }
+    PanelKeyKind:
+      type: string
+      enum: [x25519, mldsa65, vlessenc]
     InboundUpdateInput:
       type: object
       required: [remark, port]

@@ -125,9 +125,10 @@ CREATE TABLE inbound (
     drift_detected_at TIMESTAMPTZ,
     is_missing        BOOLEAN      NOT NULL DEFAULT FALSE, -- 面板上已不存在
     created_at        TIMESTAMPTZ  NOT NULL DEFAULT now(),
-    updated_at        TIMESTAMPTZ  NOT NULL DEFAULT now(),
-    CONSTRAINT uk_inbound_server_remote UNIQUE (server_id, remote_ref)
+    updated_at        TIMESTAMPTZ  NOT NULL DEFAULT now()
 );
+-- 面板会复用已删入站的标识：只要求“未缺失”的记录唯一，缺失记录作为历史保留（docs/03 §5.1 面板标识复用）
+CREATE UNIQUE INDEX uk_inbound_server_remote ON inbound (server_id, remote_ref) WHERE NOT is_missing;
 
 CREATE TABLE endpoint (
     id               BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
