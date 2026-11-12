@@ -18,6 +18,8 @@ const (
 	defaultReadTimeout     = 10 * time.Second
 	defaultWriteTimeout    = 30 * time.Second
 	defaultShutdownTimeout = 15 * time.Second
+	defaultDBMaxConns      = 10
+	defaultDBPingTimeout   = 2 * time.Second
 )
 
 // ErrInvalidConfig 表示配置内容不合法。
@@ -25,7 +27,16 @@ var ErrInvalidConfig = errors.New("invalid config")
 
 // Config 是 hub-server 的完整配置。
 type Config struct {
-	Server ServerConfig `yaml:"server"`
+	Server   ServerConfig   `yaml:"server"`
+	Database DatabaseConfig `yaml:"database"`
+}
+
+// DatabaseConfig 是 PostgreSQL 连接池参数。连接串（含口令）只从环境变量 HUB_DATABASE_URL 读（Ruling-2）。
+type DatabaseConfig struct {
+	// MaxConns 连接池最大连接数。
+	MaxConns int32 `yaml:"maxConns"`
+	// PingTimeout 是 /readyz 探测数据库的超时。
+	PingTimeout time.Duration `yaml:"pingTimeout"`
 }
 
 // ServerConfig 是 HTTP 服务相关配置。
@@ -62,6 +73,9 @@ func defaults() Config {
 		ReadTimeout:     defaultReadTimeout,
 		WriteTimeout:    defaultWriteTimeout,
 		ShutdownTimeout: defaultShutdownTimeout,
+	}, Database: DatabaseConfig{
+		MaxConns:    defaultDBMaxConns,
+		PingTimeout: defaultDBPingTimeout,
 	}}
 }
 
@@ -71,6 +85,9 @@ func (c Config) validate() error {
 	}
 	if c.Server.ReadTimeout <= 0 || c.Server.WriteTimeout <= 0 || c.Server.ShutdownTimeout <= 0 {
 		return fmt.Errorf("%w: server timeouts must be positive", ErrInvalidConfig)
+	}
+	if c.Database.MaxConns <= 0 || c.Database.PingTimeout <= 0 {
+		return fmt.Errorf("%w: database.maxConns and database.pingTimeout must be positive", ErrInvalidConfig)
 	}
 	return nil
 }

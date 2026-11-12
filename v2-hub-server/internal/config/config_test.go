@@ -29,6 +29,7 @@ func TestLoad(t *testing.T) {
 		{name: "override listen", content: "server:\n  listenAddr: 127.0.0.1:9090\n", wantListen: "127.0.0.1:9090", wantRead: defaultReadTimeout},
 		{name: "reject empty listen", content: "server:\n  listenAddr: \"\"\n", wantErr: ErrInvalidConfig},
 		{name: "reject non-positive timeout", content: "server:\n  readTimeout: 0s\n", wantErr: ErrInvalidConfig},
+		{name: "reject non-positive max conns", content: "database:\n  maxConns: 0\n", wantErr: ErrInvalidConfig},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
