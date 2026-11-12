@@ -4,7 +4,20 @@ server:
   readTimeout: 10s
   writeTimeout: 30s
   shutdownTimeout: 15s
+  # 只有来自这些网段的直连请求才采信 X-Forwarded-For（生产为 Caddy 所在 docker 网络；8080 不对外暴露）
+  trustedProxies: ["127.0.0.1/32", "::1/128", "172.16.0.0/12"]
 # 连接串（含口令）只从环境变量 HUB_DATABASE_URL 读；make run 会从 contract/deploy/.env 拼出开发库地址。
 database:
   maxConns: 10
   pingTimeout: 2s
+# 会话与登录频控，语义见 docs/03 §4.2。本机 HTTP 开发由 make run 设置 HUB_INSECURE_DEV_COOKIE=1 关闭 Secure。
+auth:
+  secureCookie: true
+  sessionIdleTimeout: 2h
+  sessionMaxAge: 168h
+  sessionTouchInterval: 1m
+  sessionCleanupInterval: 10m
+  loginMaxFailures: 5
+  loginWindow: 15m
+  loginLockout: 15m
+  loginMaxTrackedKeys: 10000

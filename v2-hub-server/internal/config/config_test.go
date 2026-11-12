@@ -30,6 +30,8 @@ func TestLoad(t *testing.T) {
 		{name: "reject empty listen", content: "server:\n  listenAddr: \"\"\n", wantErr: ErrInvalidConfig},
 		{name: "reject non-positive timeout", content: "server:\n  readTimeout: 0s\n", wantErr: ErrInvalidConfig},
 		{name: "reject non-positive max conns", content: "database:\n  maxConns: 0\n", wantErr: ErrInvalidConfig},
+		{name: "reject touch interval >= idle", content: "auth:\n  sessionIdleTimeout: 1m\n  sessionTouchInterval: 1m\n", wantErr: ErrInvalidConfig},
+		{name: "reject zero login failures", content: "auth:\n  loginMaxFailures: 0\n", wantErr: ErrInvalidConfig},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

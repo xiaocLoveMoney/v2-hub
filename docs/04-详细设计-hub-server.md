@@ -24,7 +24,9 @@ v2-hub-server/
 └── Makefile / Dockerfile
 ```
 
-目前已有：`cmd/hub`、`internal/api`（/healthz）、`internal/config`。其余目录在对应任务里创建，不预建空目录。
+目前已有：`cmd/hub`（服务 + `admin-create` 子命令）、`internal/api`（探活、管理员认证与 RBAC 接口、会话 / CSRF / 权限中间件）、
+`internal/service`（AuthService、RBACService）、`internal/manager/{crypto,ratelimit}`、`internal/dao`（连接池、sqlc 生成物、daotest）、
+`internal/job`（过期会话清理）、`internal/config`。其余目录在对应任务里创建，不预建空目录。
 
 ## 2. 模块划分与依赖方向
 
@@ -69,7 +71,8 @@ type CoreConfigurator interface { GetCoreConfig / ApplyCoreConfig / RestartCore 
 ## 5. 配置与启动
 
 - `etc/hub-server.yaml`：监听地址、超时（已有）；数据库、轮询间隔、并发上限随任务补。
-- 环境变量：`HUB_DATABASE_URL`、`HUB_ENCRYPTION_KEY`（M0 起）。
+- 环境变量：`HUB_DATABASE_URL`；`HUB_INSECURE_DEV_COOKIE=1` 仅本机 HTTP 开发（`make run` 自动设置）；`HUB_ENCRYPTION_KEY`（M1 存面板 token 时引入）。
+- 首个超管：`make admin-create USERNAME=<名称>`，口令终端无回显输入或经管道传入一行。
 - `make run / test / build / lint`。
 
 ## 6. 测试策略

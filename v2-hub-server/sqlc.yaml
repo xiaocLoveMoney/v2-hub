@@ -1,0 +1,21 @@
+# sqlc 配置：表结构以契约目录 init.sql 为准，查询写在 internal/dao/queries/，
+# 生成物落 internal/dao/sqlcgen/ 并入库（Ruling-1）。用 `make sqlc` 经 docker 生成，本机无需安装 sqlc。
+version: "2"
+sql:
+  - engine: postgresql
+    schema: contract/deploy/init.sql
+    queries: internal/dao/queries
+    gen:
+      go:
+        package: sqlcgen
+        out: internal/dao/sqlcgen
+        sql_package: pgx/v5
+        emit_interface: true
+        emit_empty_slices: true
+        overrides:
+          - db_type: inet
+            nullable: true
+            go_type:
+              import: net/netip
+              type: Addr
+              pointer: true
