@@ -1,8 +1,18 @@
 import createClient, { type Middleware } from 'openapi-fetch'
 import type { components, paths } from './generated/schema'
 
-/** 契约里的会话结构（hub-api.yaml components.schemas.Session）。 */
+/** 契约里的数据结构（hub-api.yaml components.schemas）。 */
 export type Session = components['schemas']['Session']
+export type Admin = components['schemas']['Admin']
+export type Role = components['schemas']['Role']
+export type Permission = components['schemas']['Permission']
+export type AuditLog = components['schemas']['AuditLog']
+
+/** 分页结果（hub-api.yaml 各分页接口的 data 形状）。 */
+export interface PageData<T> {
+  items: T[]
+  total: number
+}
 
 /** 统一响应信封里的错误信息。 */
 export interface ApiError {
@@ -20,6 +30,14 @@ let csrfToken = ''
 /** 登录或刷新会话后由会话层写入；非 GET/HEAD 请求自动带上（docs/03 §4.2）。 */
 export function setCsrfToken(token: string) {
   csrfToken = token
+}
+
+/**
+ * 契约把 X-CSRF-Token 声明为写接口的必填头，生成的类型因此要求传入；
+ * 实际值以中间件写入的为准，这里只是满足类型并保持与当前 token 一致。
+ */
+export function csrfHeader() {
+  return { header: { 'X-CSRF-Token': csrfToken } }
 }
 
 const csrfMiddleware: Middleware = {
