@@ -69,7 +69,7 @@ describe('管理端登录流程', () => {
     fireEvent.click(screen.getByRole('button', { name: /登\s*录/ }))
 
     // 登录后回到原本想访问的节点页
-    expect(await screen.findByText('该页面在 M1 交付')).toBeDefined()
+    expect(await screen.findByRole('tab', { name: '节点目录' })).toBeDefined()
     expect(screen.getAllByText('节点').length).toBeGreaterThan(0)
     expect(screen.queryByText('管理员')).toBeNull()
     expect(screen.queryByText('审计日志')).toBeNull()

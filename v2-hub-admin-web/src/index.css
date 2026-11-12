@@ -56,6 +56,35 @@ body {
   margin-bottom: 16px;
 }
 
+.page-filters {
+  margin-bottom: 16px;
+}
+
+.filter-select {
+  min-width: 200px;
+}
+
+.full-width {
+  width: 100%;
+}
+
+.form-hint {
+  margin-top: 12px;
+}
+
+.mono {
+  font-family: ui-monospace, 'SFMono-Regular', Menlo, monospace;
+}
+
+.config-preview {
+  max-height: 240px;
+  overflow: auto;
+  padding: 12px;
+  background: #f6f8fa;
+  border-radius: 6px;
+  font-size: 12px;
+}
+
 .security-card {
   max-width: 640px;
 }

@@ -14,6 +14,7 @@ export const ROUTES = {
   LOGIN: '/login',
   DASHBOARD: '/',
   SERVERS: '/servers',
+  SERVER_DETAIL: '/servers/:id',
   NODES: '/nodes',
   ADMINS: '/system/admins',
   ROLES: '/system/roles',
@@ -27,7 +28,9 @@ export const PERMISSIONS = {
   ADMIN_WRITE: 'admin:write',
   AUDIT_READ: 'audit:read',
   SERVER_READ: 'server:read',
+  SERVER_WRITE: 'server:write',
   NODE_READ: 'node:read',
+  NODE_WRITE: 'node:write',
 } as const
 
 /** 一个菜单项；permission 为空表示登录即可见。 */
