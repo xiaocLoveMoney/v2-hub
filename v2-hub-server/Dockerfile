@@ -1,5 +1,6 @@
 # 多阶段构建：编译阶段用官方 Go 镜像，运行阶段用 distroless 非 root。
-FROM golang:1.27 AS build
+# Go 补丁版本与 go.mod 的 go 指令保持一致，本机、CI、镜像用同一个标准库；升级由 make vuln 的结果驱动。
+FROM golang:1.27.4 AS build
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download

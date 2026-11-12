@@ -38,5 +38,6 @@ jobs:
           go-version-file: v2-hub-server/go.mod
           cache-dependency-path: v2-hub-server/go.sum
       - run: make lint
+      - run: make vuln
       - run: make test
       - run: make build
