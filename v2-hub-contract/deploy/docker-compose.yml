@@ -32,21 +32,18 @@ services:
       interval: 5s
       retries: 20
 
-  # 两台 3x-ui 面板，供 M1 起的 Provider 集成测试与联调使用；默认不起：
-  #   docker compose -f deploy/docker-compose.yml --profile xui up -d
+  # 两台 3x-ui 面板，供 Provider 集成测试与联调（IT-3）使用；默认不起：
+  #   docker compose -f deploy/docker-compose.yml --profile xui up -d --force-recreate
+  # 不挂数据卷：每次重建都是全新面板（首次启动在日志里打印随机管理员账号），联调可重复。
   xui-a:
     image: ghcr.io/mhsanaei/3x-ui:v3.11.0
     profiles: ["xui"]
     ports: ["127.0.0.1:${XUI_A_PORT:-12053}:2053"]
-    volumes: ["xui-a-db:/etc/x-ui"]
   xui-b:
     image: ghcr.io/mhsanaei/3x-ui:v3.11.0
     profiles: ["xui"]
     ports: ["127.0.0.1:${XUI_B_PORT:-12054}:2053"]
-    volumes: ["xui-b-db:/etc/x-ui"]
 
 volumes:
   pg-data:
   minio-data:
-  xui-a-db:
-  xui-b-db:
