@@ -480,6 +480,44 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/admin/inbounds/{id}/panel-config": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        /** 从面板实时读取入站完整配置（含私钥与口令、不含 clients），供编辑表单使用；每次读取记审计（Ruling-16，node:write） */
+        get: operations["getInboundPanelConfig"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/servers/{id}/keys": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 让该服务器的面板生成一组密钥（Reality x25519、ML-DSA-65、VLESS encryption），原样返回给表单（Ruling-16，node:write） */
+        post: operations["generatePanelKeys"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/admin/endpoints/{id}": {
         parameters: {
             query?: never;
@@ -492,7 +530,7 @@ export interface paths {
         get?: never;
         put?: never;
         post?: never;
-        /** 删除对外地址所在的整个 Host 组（面板上同组的地址一并删除，node:write） */
+        /** 只删除这一个对外地址（该入站上的这个地址；同组其它地址保留，docs/03 §5.1，node:write） */
         delete: operations["deleteEndpoint"];
         options?: never;
         head?: never;
@@ -810,6 +848,19 @@ export interface components {
                 [key: string]: unknown;
             };
         };
+        InboundPanelConfig: {
+            protocol: string;
+            port: number;
+            listen: string;
+            remark: string;
+            enabled: boolean;
+            /** @description 面板上的 settings / streamSettings / sniffing（含密钥，settings 不含 clients） */
+            config: {
+                [key: string]: unknown;
+            };
+        };
+        /** @enum {string} */
+        PanelKeyKind: "x25519" | "mldsa65" | "vlessenc";
         InboundUpdateInput: {
             remark: string;
             port: number;
@@ -1767,6 +1818,7 @@ export interface operations {
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["PermissionDenied"];
             404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
             502: components["responses"]["UpstreamUnavailable"];
         };
     };
@@ -1825,6 +1877,7 @@ export interface operations {
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["PermissionDenied"];
             404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
             502: components["responses"]["UpstreamUnavailable"];
         };
     };
@@ -1879,6 +1932,7 @@ export interface operations {
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["PermissionDenied"];
             404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
             502: components["responses"]["UpstreamUnavailable"];
         };
     };
@@ -1899,6 +1953,78 @@ export interface operations {
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["PermissionDenied"];
             404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            502: components["responses"]["UpstreamUnavailable"];
+        };
+    };
+    getInboundPanelConfig: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 面板上的入站配置 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["InboundPanelConfig"];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            502: components["responses"]["UpstreamUnavailable"];
+        };
+    };
+    generatePanelKeys: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    kind: components["schemas"]["PanelKeyKind"];
+                };
+            };
+        };
+        responses: {
+            /** @description 面板生成的密钥 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        /** @description x25519 → {privateKey, publicKey}；mldsa65 → {seed, verify}；vlessenc → {auths:[{label, decryption, encryption}]} */
+                        data?: {
+                            [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            502: components["responses"]["UpstreamUnavailable"];
         };
     };
     deleteEndpoint: {

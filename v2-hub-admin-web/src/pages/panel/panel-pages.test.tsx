@@ -125,7 +125,7 @@ describe('ServersPage', () => {
 })
 
 describe('ServerDetailPage', () => {
-  it('显示漂移与缺失标记；按模板新建入站只提交模板参数，不含任何密钥', async () => {
+  it('显示漂移与缺失标记；新建入站与 3x-ui 同构：切到 Reality 由面板生成密钥，提交完整配置', async () => {
     const inbound = {
       id: 10, serverId: 1, remoteRef: '3', protocol: 'vless', port: 443, listen: '', tag: 't', remark: 'reality', isEnabled: true,
       network: 'tcp', security: 'reality', coreType: 'xray', config: {}, clientCount: 0, driftDetectedAt: '2026-11-12T00:00:00Z',
@@ -134,6 +134,7 @@ describe('ServerDetailPage', () => {
     const calls = mockServer({
       'GET /api/admin/servers/1': () => ok({ ...server, status: 'online', lastError: '' }),
       'GET /api/admin/servers/1/inbounds': () => ok([inbound, { ...inbound, id: 11, remoteRef: '4', remark: 'gone', isMissing: true, driftDetectedAt: null }]),
+      'POST /api/admin/servers/1/keys': () => ok({ privateKey: 'PANEL-PRIV', publicKey: 'PANEL-PUB' }),
       'POST /api/admin/servers/1/inbounds': () => ok({ ...inbound, id: 12 }),
     })
     renderWith(<ServerDetailPage />, '/servers/1', '/servers/:id')
@@ -142,15 +143,86 @@ describe('ServerDetailPage', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /新建入站/ }))
     const dialog = await screen.findByRole('dialog')
+    for (const tab of ['基础配置', '协议', '传输', '安全', '嗅探', '高级配置']) {
+      expect(within(dialog).getByRole('tab', { name: tab })).toBeDefined()
+    }
     fireEvent.change(within(dialog).getByLabelText('备注'), { target: { value: 'new-reality' } })
     fireEvent.change(within(dialog).getByLabelText('端口'), { target: { value: '8443' } })
-    fireEvent.change(within(dialog).getByLabelText('伪装目标'), { target: { value: 'www.cloudflare.com:443' } })
+    fireEvent.click(within(dialog).getByRole('tab', { name: '安全' }))
+    fireEvent.click(await within(dialog).findByRole('radio', { name: 'Reality' }))
+    await waitFor(() => expect((within(dialog).getByLabelText('私钥') as HTMLInputElement).value).toBe('PANEL-PRIV'))
+    fireEvent.change(within(dialog).getByLabelText('目标'), { target: { value: 'www.cloudflare.com:443' } })
     fireEvent.click(within(dialog).getByRole('button', { name: /创\s*建/ }))
 
-    await waitFor(() => expect(calls.some((c) => c.method === 'POST')).toBe(true))
-    const post = calls.find((c) => c.method === 'POST')
-    expect(post?.body).toMatchObject({ remark: 'new-reality', port: 8443, template: 'vless-reality', templateParams: { target: 'www.cloudflare.com:443' } })
-    expect(JSON.stringify(post?.body)).not.toContain('privateKey')
+    await waitFor(() => expect(calls.some((c) => c.path === '/api/admin/servers/1/inbounds' && c.method === 'POST')).toBe(true))
+    expect(calls.find((c) => c.path === '/api/admin/servers/1/keys')?.body).toEqual({ kind: 'x25519' })
+    const post = calls.find((c) => c.path === '/api/admin/servers/1/inbounds' && c.method === 'POST')
+    expect(post?.csrf).toBe(CSRF)
+    expect(post?.body).toMatchObject({
+      remark: 'new-reality', port: 8443, protocol: 'vless', enabled: true,
+      config: {
+        settings: { decryption: 'none' },
+        streamSettings: { network: 'tcp', security: 'reality', realitySettings: { target: 'www.cloudflare.com:443', privateKey: 'PANEL-PRIV', settings: { publicKey: 'PANEL-PUB' } } },
+        sniffing: { enabled: false },
+      },
+    })
+  })
+
+  it('编辑入站时从面板读出完整配置（含私钥）回显，保存提交修改后的配置', async () => {
+    const inbound = {
+      id: 10, serverId: 1, remoteRef: '3', protocol: 'shadowsocks', port: 443, listen: '', tag: 't', remark: 'ss', isEnabled: true,
+      network: 'tcp', security: 'none', coreType: 'xray', config: {}, clientCount: 0, driftDetectedAt: null,
+      isMissing: false, endpoints: [], createdAt: '2026-11-12T00:00:00Z',
+    }
+    const panelConfig = {
+      protocol: 'shadowsocks', port: 443, listen: '', remark: 'ss', enabled: true,
+      config: { settings: { method: '2022-blake3-aes-256-gcm', password: 'PANEL-KEY', network: 'tcp,udp' }, streamSettings: { network: 'tcp', security: 'none', tcpSettings: {} }, sniffing: {} },
+    }
+    const calls = mockServer({
+      'GET /api/admin/servers/1': () => ok({ ...server, status: 'online', lastError: '' }),
+      'GET /api/admin/servers/1/inbounds': () => ok([inbound]),
+      'GET /api/admin/inbounds/10/panel-config': () => ok(panelConfig),
+      'PUT /api/admin/inbounds/10': () => ok(inbound),
+    })
+    renderWith(<ServerDetailPage />, '/servers/1', '/servers/:id')
+    fireEvent.click(await screen.findByRole('button', { name: /编\s*辑/ }))
+    const dialog = await screen.findByRole('dialog')
+    await waitFor(() => expect((within(dialog).getByLabelText('备注') as HTMLInputElement).value).toBe('ss'))
+    fireEvent.click(within(dialog).getByRole('tab', { name: '协议' }))
+    expect((await within(dialog).findByLabelText('服务端密钥') as HTMLInputElement).value).toBe('PANEL-KEY')
+    fireEvent.change(within(dialog).getByLabelText('服务端密钥'), { target: { value: 'NEW-KEY' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: /保\s*存/ }))
+
+    await waitFor(() => expect(calls.some((c) => c.method === 'PUT')).toBe(true))
+    expect(calls.find((c) => c.method === 'PUT')?.body).toMatchObject({ remark: 'ss', port: 443, config: { settings: { password: 'NEW-KEY', method: '2022-blake3-aes-256-gcm' } } })
+  })
+
+  it('点对外地址的 × 先二次确认，确认后只删这一个地址', async () => {
+    const endpoint = { id: 7, address: 'cdn-a.example.com', port: 443, remark: '', isDisabled: false, isMissing: false }
+    const inbound = {
+      id: 10, serverId: 1, remoteRef: '3', protocol: 'vless', port: 443, listen: '', tag: 't', remark: 'reality', isEnabled: true,
+      network: 'tcp', security: 'reality', coreType: 'xray', config: {}, clientCount: 0, driftDetectedAt: null,
+      isMissing: false, endpoints: [endpoint, { ...endpoint, id: 8, address: 'cdn-b.example.com' }], createdAt: '2026-11-12T00:00:00Z',
+    }
+    const calls = mockServer({
+      'GET /api/admin/servers/1': () => ok({ ...server, status: 'online', lastError: '' }),
+      'GET /api/admin/servers/1/inbounds': () => ok([inbound]),
+      'DELETE /api/admin/endpoints/7': () => ok(null),
+    })
+    renderWith(<ServerDetailPage />, '/servers/1', '/servers/:id')
+    const tag = await screen.findByText('cdn-a.example.com:443')
+    fireEvent.click(within(tag.closest('.ant-tag') as HTMLElement).getAllByLabelText(/close/i)[0])
+
+    expect(await screen.findByText('删除对外地址 cdn-a.example.com:443？')).toBeDefined()
+    expect(screen.getByText('只删除入站「reality」上的这个地址，其它地址保留')).toBeDefined()
+    expect(calls.some((c) => c.method === 'DELETE')).toBe(false)
+
+    fireEvent.click(screen.getByRole('button', { name: /确\s*定|OK/ }))
+    await waitFor(() => expect(calls.some((c) => c.method === 'DELETE')).toBe(true))
+    const del = calls.filter((c) => c.method === 'DELETE')
+    expect(del).toHaveLength(1)
+    expect(del[0].path).toBe('/api/admin/endpoints/7')
+    expect(del[0].csrf).toBe(CSRF)
   })
 
   it('新建入站弹窗关闭后立刻再打开，不带出上一次填的值', async () => {

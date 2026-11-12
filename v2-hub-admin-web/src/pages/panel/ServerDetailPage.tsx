@@ -7,8 +7,47 @@ import { useSession } from '../../auth/session-context'
 import { mutate, useRemote } from '../../hooks/use-remote'
 import { PERMISSIONS, ROUTES } from '../../menu'
 import { TABLE_SCROLL, formatTime } from '../system/format'
-import { CreateInboundModal, EditInboundModal, EndpointModal } from './InboundModals'
+import { EndpointModal } from './InboundModals'
+import { InboundFormModal } from './inbound-form/InboundFormModal'
 import { ServerStatusTag } from './status'
+
+interface EndpointTagProps {
+  endpoint: Endpoint
+  inboundRemark: string
+  canDelete: boolean
+  onDelete: () => Promise<void>
+}
+
+/** 一个对外地址；可删时点 × 先二次确认，只删这一个地址（docs/03 §5.1 删除对外地址）。 */
+function EndpointTag({ endpoint, inboundRemark, canDelete, onDelete }: EndpointTagProps) {
+  const [isConfirming, setIsConfirming] = useState(false)
+  const label = endpoint.port > 0 ? `${endpoint.address}:${endpoint.port}` : endpoint.address
+  const color = endpoint.isMissing ? 'red' : undefined
+  if (!canDelete) {
+    return <Tag color={color}>{label}</Tag>
+  }
+  // Tag 的 × 会阻止事件冒泡，所以由 onClose 显式打开确认框，并阻止 Tag 自行隐藏
+  return (
+    <Popconfirm
+      title={`删除对外地址 ${label}？`}
+      description={endpoint.isMissing ? '面板上已不存在，只删除平台记录与节点' : `只删除入站「${inboundRemark}」上的这个地址，其它地址保留`}
+      open={isConfirming}
+      onOpenChange={setIsConfirming}
+      onConfirm={onDelete}
+    >
+      <Tag
+        color={color}
+        closable
+        onClose={(ev) => {
+          ev.preventDefault()
+          setIsConfirming(true)
+        }}
+      >
+        {label}
+      </Tag>
+    </Popconfirm>
+  )
+}
 
 /** 服务器详情与入站管理（node:read 查看，node:write 增删改；写入一律先写面板，docs/03 §5.1）。 */
 export function ServerDetailPage() {
@@ -69,17 +108,17 @@ export function ServerDetailPage() {
     {
       title: '对外地址',
       dataIndex: 'endpoints',
-      render: (eps: Endpoint[]) =>
+      render: (eps: Endpoint[], i: Inbound) =>
         eps.length === 0
           ? '—'
           : eps.map((e) => (
-              <Tag key={e.id} color={e.isMissing ? 'red' : undefined} closable={canWrite} onClose={(ev) => {
-                ev.preventDefault()
-                void run(e.id, () => api.DELETE('/api/admin/endpoints/{id}', { params: { ...csrfHeader(), path: { id: e.id } } }), '已删除对外地址所在的 Host 组')
-              }}>
-                {e.address}
-                {e.port > 0 ? `:${e.port}` : ''}
-              </Tag>
+              <EndpointTag
+                key={e.id}
+                endpoint={e}
+                inboundRemark={i.remark}
+                canDelete={canWrite}
+                onDelete={() => run(e.id, () => api.DELETE('/api/admin/endpoints/{id}', { params: { ...csrfHeader(), path: { id: e.id } } }), '已删除对外地址')}
+              />
             )),
     },
     { title: '用户数', dataIndex: 'clientCount' },
@@ -162,19 +201,16 @@ export function ServerDetailPage() {
       {inbounds.error !== null && <Alert type="error" title={inbounds.error.message} showIcon className="page-alert" />}
       <Table<Inbound> rowKey="id" scroll={TABLE_SCROLL} loading={inbounds.isLoading} columns={columns} dataSource={inbounds.data ?? []} pagination={false} />
 
-      <CreateInboundModal
+      <InboundFormModal
         serverId={serverId}
-        isOpen={isCreating}
-        onClose={() => setIsCreating(false)}
+        inbound={editing}
+        isOpen={isCreating || editing !== null}
+        onClose={() => {
+          setIsCreating(false)
+          setEditing(null)
+        }}
         onSaved={() => {
           setIsCreating(false)
-          reloadAll()
-        }}
-      />
-      <EditInboundModal
-        inbound={editing}
-        onClose={() => setEditing(null)}
-        onSaved={() => {
           setEditing(null)
           reloadAll()
         }}
