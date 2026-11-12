@@ -97,6 +97,8 @@ func NewRouter(deps Deps) http.Handler {
 	mux.HandleFunc("DELETE /api/admin/inbounds/{id}", h.requireAdmin(service.PermNodeWrite, h.deleteInbound))
 	mux.HandleFunc("PUT /api/admin/inbounds/{id}/enabled", h.requireAdmin(service.PermNodeWrite, h.setInboundEnabled))
 	mux.HandleFunc("POST /api/admin/inbounds/{id}/drift/ack", h.requireAdmin(service.PermNodeWrite, h.ackInboundDrift))
+	mux.HandleFunc("GET /api/admin/inbounds/{id}/panel-config", h.requireAdmin(service.PermNodeWrite, h.getInboundPanelConfig))
+	mux.HandleFunc("POST /api/admin/servers/{id}/keys", h.requireAdmin(service.PermNodeWrite, h.generatePanelKeys))
 	mux.HandleFunc("DELETE /api/admin/endpoints/{id}", h.requireAdmin(service.PermNodeWrite, h.deleteEndpoint))
 	mux.HandleFunc("GET /api/admin/nodes", h.requireAdmin(service.PermNodeRead, h.listNodes))
 	mux.HandleFunc("PUT /api/admin/nodes/{id}", h.requireAdmin(service.PermNodeWrite, h.updateNode))

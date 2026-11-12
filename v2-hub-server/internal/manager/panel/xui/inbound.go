@@ -48,9 +48,19 @@ type configWire struct {
 // 每项是从 configWire 根开始的路径；"*" 表示数组的每个元素。
 var sensitivePaths = [][]string{
 	{keyStreamSettings, "realitySettings", "privateKey"},
+	{keyStreamSettings, "realitySettings", "mldsa65Seed"},
 	{keyStreamSettings, "tlsSettings", "certificates", "*", "key"},
+	{keyStreamSettings, "tlsSettings", "echServerKeys"},
 	{keySettings, "password"},
 	{keySettings, "secretKey"},
+	{keySettings, "decryption"},
+}
+
+// keyGenPaths 是各类密钥在面板上的生成接口。
+var keyGenPaths = map[panel.KeyKind]string{
+	panel.KeyX25519:   "/server/getNewX25519Cert",
+	panel.KeyMLDSA65:  "/server/getNewmldsa65",
+	panel.KeyVLESSEnc: "/server/getNewVlessEnc",
 }
 
 // toNeutral 把一条 3x-ui 入站 JSON 转成中立模型：计算摘要、删除敏感字段与 clients。
@@ -153,6 +163,47 @@ func (c *Client) GetInbound(ctx context.Context, ref string) (panel.Inbound, err
 		return panel.Inbound{}, err
 	}
 	return neutralFromMap(raw)
+}
+
+// GetInboundConfig 实现 panel.Provider：原样取面板上的三段配置，只去掉 clients / peers（归 M2 下发对账）。
+func (c *Client) GetInboundConfig(ctx context.Context, ref string) (panel.InboundConfig, error) {
+	raw, err := c.getRaw(ctx, ref)
+	if err != nil {
+		return panel.InboundConfig{}, err
+	}
+	encoded, err := json.Marshal(raw)
+	if err != nil {
+		return panel.InboundConfig{}, fmt.Errorf("encode inbound: %w", err)
+	}
+	var w inboundWire
+	var cfg configWire
+	if err := json.Unmarshal(encoded, &w); err != nil {
+		return panel.InboundConfig{}, &panel.Error{Kind: panel.KindUnreachable, Message: "面板返回的入站格式与预期不符", Err: err}
+	}
+	if err := json.Unmarshal(encoded, &cfg); err != nil {
+		return panel.InboundConfig{}, &panel.Error{Kind: panel.KindUnreachable, Message: "面板返回的入站格式与预期不符", Err: err}
+	}
+	cfg.Settings = withoutKeys(cfg.Settings, keyClients, keyPeers)
+	configJSON, err := json.Marshal(cfg)
+	if err != nil {
+		return panel.InboundConfig{}, fmt.Errorf("encode inbound config: %w", err)
+	}
+	return panel.InboundConfig{
+		Protocol: w.Protocol, Port: w.Port, Listen: w.Listen, Remark: w.Remark, Enabled: w.Enable, Config: configJSON,
+	}, nil
+}
+
+// GenerateKeys 实现 panel.Provider，调用面板自带的密钥生成接口。
+func (c *Client) GenerateKeys(ctx context.Context, kind panel.KeyKind) (json.RawMessage, error) {
+	path, ok := keyGenPaths[kind]
+	if !ok {
+		return nil, &panel.Error{Kind: panel.KindRejected, Message: "不支持的密钥种类"}
+	}
+	var out json.RawMessage
+	if err := c.call(ctx, http.MethodGet, path, nil, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func neutralFromMap(raw map[string]any) (panel.Inbound, error) {

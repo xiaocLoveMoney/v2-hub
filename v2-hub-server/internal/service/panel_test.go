@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -274,6 +275,244 @@ func TestInboundCRUDThroughPanel(t *testing.T) {
 	}
 	if nodes, err := f.panels.ListNodes(ctx, NodeFilter{ServerID: srv.ID}, PageQuery{}); err != nil || nodes.Total != 0 {
 		t.Fatalf("nodes after delete = %+v, %v", nodes, err)
+	}
+}
+
+// inboundsByID 列出服务器的全部入站（含缺失的），按平台 id 索引。
+func inboundsByID(t *testing.T, f *panelFixture, serverID int64) map[int64]Inbound {
+	t.Helper()
+	list, err := f.panels.ListServerInbounds(context.Background(), serverID)
+	if err != nil {
+		t.Fatalf("ListServerInbounds: %v", err)
+	}
+	out := make(map[int64]Inbound, len(list))
+	for _, in := range list {
+		out[in.ID] = in
+	}
+	return out
+}
+
+func directNodeOf(t *testing.T, f *panelFixture, serverID, inboundID int64) Node {
+	t.Helper()
+	nodes, err := f.panels.ListNodes(context.Background(), NodeFilter{ServerID: serverID}, PageQuery{})
+	if err != nil {
+		t.Fatalf("ListNodes: %v", err)
+	}
+	for _, n := range nodes.Items {
+		if n.InboundID == inboundID && n.EndpointID == nil {
+			return n
+		}
+	}
+	t.Fatalf("no direct node for inbound %d in %+v", inboundID, nodes.Items)
+	return Node{}
+}
+
+// TestPanelRefReuse 覆盖 docs/03 §5.1 面板标识复用与缺失入站：面板把已删入站的 id 分给新入站时，
+// 旧记录标记缺失并保留节点与节点组，新入站另起一条记录；缺失入站不能再写，删除时不碰面板。
+func TestPanelRefReuse(t *testing.T) {
+	f := newPanelFixture(t)
+	ctx := context.Background()
+	fake := f.fleet.get(fakeBase)
+	seedInbound(fake, "1", 45904, "ss-old")
+	srv, err := f.panels.CreateServer(ctx, f.actor, serverInput("hk-1"), nil)
+	if err != nil {
+		t.Fatalf("CreateServer: %v", err)
+	}
+	var oldID int64
+	for id := range inboundsByID(t, f, srv.ID) {
+		oldID = id
+	}
+	oldNode := directNodeOf(t, f, srv.ID, oldID)
+	if _, err := f.panels.CreateNodeGroup(ctx, f.actor, NodeGroupInput{Name: "basic", NodeIDs: []int64{oldNode.ID}}, nil); err != nil {
+		t.Fatalf("CreateNodeGroup: %v", err)
+	}
+
+	// 有人在面板上删了 SS，再从平台新建入站：面板复用了 id 1
+	fake.RemoveInbound("1")
+	fake.SetNextRef(1)
+	created, err := f.panels.CreateInbound(ctx, f.actor, srv.ID, InboundCreateInput{Remark: "new-vmess", Port: 2000, Enabled: true, Template: inboundtpl.VmessWS}, nil)
+	if err != nil {
+		t.Fatalf("CreateInbound: %v", err)
+	}
+	if created.ID == oldID || created.RemoteRef != "1" {
+		t.Fatalf("new inbound must get its own record: created = %+v, old id %d", created, oldID)
+	}
+	all := inboundsByID(t, f, srv.ID)
+	if old := all[oldID]; !old.IsMissing || old.Remark != "ss-old" || old.Protocol != "vless" {
+		t.Fatalf("stale record must be kept as missing, unchanged: %+v", old)
+	}
+	groups, err := f.panels.ListNodeGroups(ctx)
+	if err != nil || len(groups) != 1 || len(groups[0].NodeIDs) != 1 || groups[0].NodeIDs[0] != oldNode.ID {
+		t.Fatalf("group membership must stay on the old node: %+v, %v", groups, err)
+	}
+	if directNodeOf(t, f, srv.ID, created.ID).ID == oldNode.ID {
+		t.Fatal("new inbound must get a new direct node")
+	}
+
+	// 缺失入站只能删除：写操作返回 409，删除不调用面板（否则会删掉占用同一 id 的新入站）
+	if _, err := f.panels.UpdateInbound(ctx, f.actor, oldID, InboundUpdateInput{Remark: "x", Port: 45904}, nil); !errors.Is(err, ErrConflict) {
+		t.Fatalf("update missing inbound err = %v", err)
+	}
+	if _, err := f.panels.SetInboundEnabled(ctx, f.actor, oldID, false, nil); !errors.Is(err, ErrConflict) {
+		t.Fatalf("enable missing inbound err = %v", err)
+	}
+	if err := f.panels.AckInboundDrift(ctx, f.actor, oldID, nil); !errors.Is(err, ErrConflict) {
+		t.Fatalf("ack drift on missing inbound err = %v", err)
+	}
+	if err := f.panels.CreateEndpoints(ctx, f.actor, srv.ID, EndpointInput{InboundIDs: []int64{oldID}, Addresses: []string{"cdn.example.com"}}, nil); !errors.Is(err, ErrConflict) {
+		t.Fatalf("endpoint on missing inbound err = %v", err)
+	}
+	if err := f.panels.DeleteInbound(ctx, f.actor, oldID, nil); err != nil {
+		t.Fatalf("DeleteInbound missing: %v", err)
+	}
+	if _, err := fake.GetInbound(ctx, "1"); err != nil {
+		t.Fatalf("deleting the missing record must not touch the panel inbound now holding id 1: %v", err)
+	}
+
+	// 面板侧发生同样的事（两次同步之间删了再建，协议不同）：同步按“旧的缺失 + 新的新增”处理
+	fake.RemoveInbound("1")
+	seedInbound(fake, "1", 3000, "made-on-panel")
+	res, err := f.panels.SyncServer(ctx, f.actor, srv.ID, nil)
+	if err != nil || res.Added != 1 || res.Missing != 1 {
+		t.Fatalf("sync after reuse = %+v, %v", res, err)
+	}
+	all = inboundsByID(t, f, srv.ID)
+	if !all[created.ID].IsMissing || all[created.ID].Remark != "new-vmess" || len(all) != 2 {
+		t.Fatalf("after sync = %+v", all)
+	}
+
+	// 缺失是终态：同一标识再出现，也是新记录
+	fake.RemoveInbound("1")
+	if _, err := f.panels.SyncServer(ctx, f.actor, srv.ID, nil); err != nil {
+		t.Fatalf("SyncServer: %v", err)
+	}
+	seedInbound(fake, "1", 3000, "made-on-panel")
+	if res, err := f.panels.SyncServer(ctx, f.actor, srv.ID, nil); err != nil || res.Added != 1 {
+		t.Fatalf("reappearing ref must be added as new: %+v, %v", res, err)
+	}
+	if all = inboundsByID(t, f, srv.ID); len(all) != 3 {
+		t.Fatalf("inbounds = %+v", all)
+	}
+}
+
+// TestDeleteEndpointRemovesOnlyThatAddress 覆盖 docs/03 §5.1 删除对外地址：2 个入站 × 2 个地址的组里删一个，
+// 其余 3 个地址的记录、节点与节点组成员关系都不变，面板组被拆分后再同步也不产生缺失。
+func TestDeleteEndpointRemovesOnlyThatAddress(t *testing.T) {
+	f := newPanelFixture(t)
+	ctx := context.Background()
+	fake := f.fleet.get(fakeBase)
+	seedInbound(fake, "1", 443, "a")
+	seedInbound(fake, "2", 8443, "b")
+	srv, err := f.panels.CreateServer(ctx, f.actor, serverInput("hk-1"), nil)
+	if err != nil {
+		t.Fatalf("CreateServer: %v", err)
+	}
+	ids := make([]int64, 0, 2)
+	for id := range inboundsByID(t, f, srv.ID) {
+		ids = append(ids, id)
+	}
+	if err := f.panels.CreateEndpoints(ctx, f.actor, srv.ID, EndpointInput{InboundIDs: ids, Addresses: []string{"cdn-a.example.com", "cdn-b.example.com"}, Port: 443}, nil); err != nil {
+		t.Fatalf("CreateEndpoints: %v", err)
+	}
+	endpointNodes := func() map[int64]Node {
+		nodes, err := f.panels.ListNodes(ctx, NodeFilter{ServerID: srv.ID}, PageQuery{})
+		if err != nil {
+			t.Fatalf("ListNodes: %v", err)
+		}
+		out := map[int64]Node{}
+		for _, n := range nodes.Items {
+			if n.EndpointID != nil {
+				out[n.ID] = n
+			}
+		}
+		return out
+	}
+	before := endpointNodes()
+	if len(before) != 4 {
+		t.Fatalf("endpoint nodes = %+v", before)
+	}
+	nodeIDs := make([]int64, 0, len(before))
+	var target Node
+	for id, n := range before {
+		nodeIDs = append(nodeIDs, id)
+		if n.InboundID == ids[0] && n.Address == "cdn-a.example.com" {
+			target = n
+		}
+	}
+	if _, err := f.panels.CreateNodeGroup(ctx, f.actor, NodeGroupInput{Name: "cdn", NodeIDs: nodeIDs}, nil); err != nil {
+		t.Fatalf("CreateNodeGroup: %v", err)
+	}
+
+	if err := f.panels.DeleteEndpoint(ctx, f.actor, *target.EndpointID, nil); err != nil {
+		t.Fatalf("DeleteEndpoint: %v", err)
+	}
+	if eps, _ := fake.ListEndpoints(ctx); len(eps) != 3 {
+		t.Fatalf("panel should keep 3 addresses: %+v", eps)
+	}
+	check := func(stage string) {
+		after := endpointNodes()
+		if len(after) != 3 {
+			t.Fatalf("%s: endpoint nodes = %+v", stage, after)
+		}
+		for id, n := range after {
+			if _, ok := before[id]; !ok || n.IsMissing || id == target.ID {
+				t.Fatalf("%s: node %d = %+v (remaining nodes must keep their identity)", stage, id, n)
+			}
+		}
+		groups, err := f.panels.ListNodeGroups(ctx)
+		if err != nil || len(groups) != 1 || len(groups[0].NodeIDs) != 3 {
+			t.Fatalf("%s: groups = %+v, %v", stage, groups, err)
+		}
+	}
+	check("after delete")
+	res, err := f.panels.SyncServer(ctx, f.actor, srv.ID, nil)
+	if err != nil {
+		t.Fatalf("SyncServer: %v", err)
+	}
+	check("after sync")
+	if res.Missing != 0 {
+		t.Fatalf("sync after split = %+v", res)
+	}
+}
+
+// TestInboundPanelConfigAndKeys 覆盖 Ruling-16：编辑表单从面板读完整配置（记审计），密钥由面板生成；缺失入站不可读。
+func TestInboundPanelConfigAndKeys(t *testing.T) {
+	f := newPanelFixture(t)
+	ctx := context.Background()
+	fake := f.fleet.get(fakeBase)
+	fake.PutInbound(panel.Inbound{
+		Ref: "1", Protocol: "vless", Port: 443, Remark: "r", Enabled: true, CoreType: panel.CoreXray, Network: "tcp",
+		Config: json.RawMessage(`{"streamSettings":{"realitySettings":{"privateKey":"PRIV"}}}`),
+	})
+	srv, err := f.panels.CreateServer(ctx, f.actor, serverInput("hk-1"), nil)
+	if err != nil {
+		t.Fatalf("CreateServer: %v", err)
+	}
+	var id int64
+	for k := range inboundsByID(t, f, srv.ID) {
+		id = k
+	}
+	cfg, err := f.panels.GetInboundPanelConfig(ctx, f.actor, id, nil)
+	if err != nil || !bytes.Contains(cfg.Config, []byte("PRIV")) || cfg.Port != 443 {
+		t.Fatalf("GetInboundPanelConfig = %+v, %v", cfg, err)
+	}
+	var reads int
+	if err := f.pool.QueryRow(ctx, "SELECT COUNT(*) FROM audit_log WHERE action = $1 AND target_id = $2", ActionInboundConfig, fmt.Sprint(id)).Scan(&reads); err != nil || reads != 1 {
+		t.Fatalf("config read must be audited: %d, %v", reads, err)
+	}
+	keys, err := f.panels.GeneratePanelKeys(ctx, f.actor, srv.ID, string(panel.KeyX25519), nil)
+	if err != nil || string(keys) != paneltest.FakeX25519 {
+		t.Fatalf("GeneratePanelKeys = %s, %v", keys, err)
+	}
+	if _, err := f.panels.GeneratePanelKeys(ctx, f.actor, srv.ID, "rsa", nil); !errors.Is(err, ErrInvalidArgument) {
+		t.Fatalf("unknown kind err = %v", err)
+	}
+	fake.RemoveInbound("1")
+	if _, err := f.panels.SyncServer(ctx, f.actor, srv.ID, nil); err != nil {
+		t.Fatalf("SyncServer: %v", err)
+	}
+	if _, err := f.panels.GetInboundPanelConfig(ctx, f.actor, id, nil); !errors.Is(err, ErrConflict) {
+		t.Fatalf("missing inbound config err = %v", err)
 	}
 }
 
