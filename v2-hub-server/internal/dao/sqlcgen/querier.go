@@ -14,37 +14,63 @@ type Querier interface {
 	// 原子地推进已用步长；返回 0 行表示该步长已被用过（并发重放）
 	AdvanceAdminTOTPStep(ctx context.Context, arg AdvanceAdminTOTPStepParams) (int64, error)
 	ClearAdminTOTP(ctx context.Context, id int64) (int64, error)
+	ClearNodeGroupItems(ctx context.Context, nodeGroupID int64) error
 	CountAdmins(ctx context.Context) (int64, error)
 	CountAdminsByRole(ctx context.Context, roleID int64) (int64, error)
 	CountAuditLogs(ctx context.Context) (int64, error)
 	// 用于 R5：除 excluded_admin_id 外，仍持有该角色且启用的管理员数。
 	CountEnabledAdminsWithRoleExcluding(ctx context.Context, arg CountEnabledAdminsWithRoleExcludingParams) (int64, error)
+	CountGroupMembershipsByInbound(ctx context.Context, inboundID int64) (int64, error)
+	CountNodes(ctx context.Context, arg CountNodesParams) (int64, error)
+	CountNodesByIDs(ctx context.Context, ids []int64) (int64, error)
 	CountPermissionsByCodes(ctx context.Context, codes []string) (int64, error)
 	CreateAdmin(ctx context.Context, arg CreateAdminParams) (CreateAdminRow, error)
 	CreateAdminSession(ctx context.Context, arg CreateAdminSessionParams) error
+	CreateNodeGroup(ctx context.Context, arg CreateNodeGroupParams) (int64, error)
 	CreateRole(ctx context.Context, arg CreateRoleParams) (int64, error)
+	// token 密文依赖 id 作关联数据，先写占位，同一事务内再 SetServerToken
+	CreateServer(ctx context.Context, arg CreateServerParams) (int64, error)
 	DeleteAdminRoles(ctx context.Context, adminID int64) error
 	DeleteAdminSessionByID(ctx context.Context, id int64) error
 	DeleteAdminSessionByTokenHash(ctx context.Context, tokenHash []byte) error
 	DeleteAdminSessionsByAdmin(ctx context.Context, adminID int64) error
+	DeleteEndpointGroupLocal(ctx context.Context, arg DeleteEndpointGroupLocalParams) error
 	DeleteExpiredAdminSessions(ctx context.Context, expiresAt pgtype.Timestamptz) (int64, error)
+	DeleteInbound(ctx context.Context, id int64) error
+	DeleteNodeGroup(ctx context.Context, id int64) (int64, error)
 	DeleteRole(ctx context.Context, id int64) error
 	DeleteRolePermissions(ctx context.Context, roleID int64) error
+	DeleteServer(ctx context.Context, id int64) (int64, error)
 	// 待定密钥已由调用方校验并重新加密为正式密钥后传入
 	EnableAdminTOTP(ctx context.Context, arg EnableAdminTOTPParams) error
+	// 节点与节点组（docs/03 §5.1）-----------------------------------------------
+	// 同一来源（入站 × 对外地址）只生成一个节点；已存在时保留管理员改过的展示属性
+	EnsureNode(ctx context.Context, arg EnsureNodeParams) error
 	GetAdminByID(ctx context.Context, id int64) (GetAdminByIDRow, error)
 	GetAdminByUsername(ctx context.Context, username string) (GetAdminByUsernameRow, error)
 	// 同时取管理员状态：被禁用的管理员会话视为无效（R7）。
 	GetAdminSessionByTokenHash(ctx context.Context, tokenHash []byte) (GetAdminSessionByTokenHashRow, error)
 	// 两步验证（docs/03 §4.3）---------------------------------------------------
 	GetAdminTOTP(ctx context.Context, id int64) (GetAdminTOTPRow, error)
+	GetEndpoint(ctx context.Context, id int64) (GetEndpointRow, error)
+	GetInbound(ctx context.Context, id int64) (GetInboundRow, error)
 	GetRoleByCode(ctx context.Context, code string) (GetRoleByCodeRow, error)
 	GetRoleByID(ctx context.Context, id int64) (GetRoleByIDRow, error)
+	GetServer(ctx context.Context, id int64) (GetServerRow, error)
+	GetServerConn(ctx context.Context, id int64) (GetServerConnRow, error)
 	InsertAdminRoles(ctx context.Context, arg InsertAdminRolesParams) error
 	InsertAuditLog(ctx context.Context, arg InsertAuditLogParams) error
+	InsertNodeGroupItems(ctx context.Context, arg InsertNodeGroupItemsParams) error
 	InsertRolePermissions(ctx context.Context, arg InsertRolePermissionsParams) error
 	ListAdmins(ctx context.Context, arg ListAdminsParams) ([]ListAdminsRow, error)
 	ListAuditLogs(ctx context.Context, arg ListAuditLogsParams) ([]AuditLog, error)
+	ListEnabledServerIDs(ctx context.Context) ([]int64, error)
+	ListEndpointsByServer(ctx context.Context, serverID int64) ([]ListEndpointsByServerRow, error)
+	ListInboundsByIDs(ctx context.Context, ids []int64) ([]ListInboundsByIDsRow, error)
+	// 入站与对外地址缓存（docs/03 §5.1）------------------------------------------
+	ListInboundsByServer(ctx context.Context, serverID int64) ([]ListInboundsByServerRow, error)
+	ListNodeGroups(ctx context.Context) ([]ListNodeGroupsRow, error)
+	ListNodes(ctx context.Context, arg ListNodesParams) ([]ListNodesRow, error)
 	ListPermissionCodesForAdmin(ctx context.Context, adminID int64) ([]string, error)
 	ListPermissions(ctx context.Context) ([]ListPermissionsRow, error)
 	ListRoleCodesByAdminIDs(ctx context.Context, adminIds []int64) ([]ListRoleCodesByAdminIDsRow, error)
@@ -52,14 +78,31 @@ type Querier interface {
 	ListRolePermissionCodes(ctx context.Context) ([]ListRolePermissionCodesRow, error)
 	ListRoles(ctx context.Context) ([]ListRolesRow, error)
 	ListRolesByCodes(ctx context.Context, codes []string) ([]ListRolesByCodesRow, error)
+	// 服务器（docs/03 §2、§3 T1–T4、§5.1）---------------------------------------
+	ListServers(ctx context.Context) ([]ListServersRow, error)
 	// R5 的并发保护：改动可能影响 super_admin 数量的事务先锁住该角色行，串行化判断。
 	LockSuperAdminRole(ctx context.Context) error
+	MarkEndpointsMissing(ctx context.Context, arg MarkEndpointsMissingParams) (int64, error)
+	MarkInboundsMissing(ctx context.Context, arg MarkInboundsMissingParams) (int64, error)
 	SetAdminTOTPPending(ctx context.Context, arg SetAdminTOTPPendingParams) error
+	SetInboundEnabledLocal(ctx context.Context, arg SetInboundEnabledLocalParams) error
+	// T1–T3 的落库：status、last_error 由调用方按转移表算好；is_online 时才刷新版本、GUID、快照与最近在线时间
+	SetServerProbeResult(ctx context.Context, arg SetServerProbeResultParams) error
+	SetServerSynced(ctx context.Context, id int64) error
+	SetServerToken(ctx context.Context, arg SetServerTokenParams) error
 	TouchAdminSession(ctx context.Context, arg TouchAdminSessionParams) error
 	UpdateAdminDisabled(ctx context.Context, arg UpdateAdminDisabledParams) error
 	UpdateAdminLastLogin(ctx context.Context, id int64) error
 	UpdateAdminPasswordHash(ctx context.Context, arg UpdateAdminPasswordHashParams) (int64, error)
+	// 同步时以面板为准刷新缓存；drift_detected_at 由调用方按漂移规则给出（保留已有标记）
+	UpdateInboundFromSync(ctx context.Context, arg UpdateInboundFromSyncParams) error
+	UpdateNode(ctx context.Context, arg UpdateNodeParams) (int64, error)
+	UpdateNodeGroup(ctx context.Context, arg UpdateNodeGroupParams) (int64, error)
 	UpdateRoleName(ctx context.Context, arg UpdateRoleNameParams) error
+	UpdateServer(ctx context.Context, arg UpdateServerParams) (int64, error)
+	UpsertEndpoint(ctx context.Context, arg UpsertEndpointParams) (int64, error)
+	// 平台写入面板成功后的落库：摘要即“已确认”状态，清除漂移与缺失标记
+	UpsertInboundFromPlatform(ctx context.Context, arg UpsertInboundFromPlatformParams) (int64, error)
 }
 
 var _ Querier = (*Queries)(nil)

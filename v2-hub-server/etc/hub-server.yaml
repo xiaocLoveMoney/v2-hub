@@ -21,3 +21,9 @@ auth:
   loginWindow: 15m
   loginLockout: 15m
   loginMaxTrackedKeys: 10000
+# 面板探测与同步，语义见 docs/03 §5.1
+panel:
+  probeInterval: 30s
+  syncInterval: 5m
+  requestTimeout: 15s
+  concurrency: 8

@@ -33,8 +33,9 @@ services:
       retries: 20
 
   # 两台 3x-ui 面板，供 Provider 集成测试与联调（IT-3）使用；默认不起：
-  #   docker compose -f deploy/docker-compose.yml --profile xui up -d --force-recreate
-  # 不挂数据卷：每次重建都是全新面板（首次启动在日志里打印随机管理员账号），联调可重复。
+  #   docker compose -f deploy/docker-compose.yml --profile xui up -d --force-recreate --renew-anon-volumes
+  # 不挂具名数据卷；镜像自带的匿名卷要用 --renew-anon-volumes 才会换新，换新后即全新面板
+  # （首次启动在日志里打印随机管理员账号），联调可重复。
   xui-a:
     image: ghcr.io/mhsanaei/3x-ui:v3.11.0
     profiles: ["xui"]

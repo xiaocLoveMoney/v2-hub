@@ -52,6 +52,67 @@ type AuditLog struct {
 	CreatedAt  pgtype.Timestamptz
 }
 
+type Endpoint struct {
+	ID             int64
+	InboundID      int64
+	RemoteGroupRef string
+	Address        string
+	Port           int32
+	Remark         string
+	IsDisabled     bool
+	IsMissing      bool
+	CreatedAt      pgtype.Timestamptz
+	UpdatedAt      pgtype.Timestamptz
+}
+
+type Inbound struct {
+	ID              int64
+	ServerID        int64
+	RemoteRef       string
+	Protocol        string
+	Port            int32
+	Listen          string
+	Tag             string
+	Remark          string
+	IsEnabled       bool
+	Network         string
+	Security        string
+	CoreType        string
+	Config          []byte
+	ClientCount     int32
+	SyncedHash      string
+	DriftDetectedAt pgtype.Timestamptz
+	IsMissing       bool
+	CreatedAt       pgtype.Timestamptz
+	UpdatedAt       pgtype.Timestamptz
+}
+
+type Node struct {
+	ID          int64
+	InboundID   int64
+	EndpointID  pgtype.Int8
+	DisplayName string
+	Region      string
+	Tags        []string
+	SortOrder   int32
+	IsEnabled   bool
+	CreatedAt   pgtype.Timestamptz
+	UpdatedAt   pgtype.Timestamptz
+}
+
+type NodeGroup struct {
+	ID        int64
+	Name      string
+	Remark    string
+	CreatedAt pgtype.Timestamptz
+	UpdatedAt pgtype.Timestamptz
+}
+
+type NodeGroupItem struct {
+	NodeGroupID int64
+	NodeID      int64
+}
+
 type Permission struct {
 	ID        int64
 	Code      string
@@ -71,4 +132,26 @@ type Role struct {
 type RolePermission struct {
 	RoleID       int64
 	PermissionID int64
+}
+
+type Server struct {
+	ID             int64
+	Name           string
+	ProviderType   string
+	BaseUrl        string
+	ApiTokenEnc    []byte
+	TlsMode        string
+	CertPinSha256  pgtype.Text
+	Region         string
+	Remark         string
+	IsDisabled     bool
+	Status         string
+	LastError      string
+	LastSeenAt     pgtype.Timestamptz
+	PanelVersion   string
+	PanelGuid      string
+	StatusSnapshot []byte
+	LastSyncedAt   pgtype.Timestamptz
+	CreatedAt      pgtype.Timestamptz
+	UpdatedAt      pgtype.Timestamptz
 }

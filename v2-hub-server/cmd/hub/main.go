@@ -24,6 +24,8 @@ import (
 	"v2-hub-server/internal/dao"
 	"v2-hub-server/internal/job"
 	"v2-hub-server/internal/manager/crypto"
+	"v2-hub-server/internal/manager/panel"
+	"v2-hub-server/internal/manager/panel/xui"
 	"v2-hub-server/internal/service"
 )
 
@@ -102,6 +104,13 @@ func runServer(args []string) error {
 
 	go job.RunSessionCleanup(ctx, auth, cfg.Auth.SessionCleanupInterval)
 
+	// 面板实现注册表：新增面板类型（如 S-UI）只在这里加一行（Ruling-8）
+	registry := panel.NewRegistry(map[string]panel.Factory{xui.ProviderType: xui.New})
+	panels := service.NewPanelService(pool, sealer, registry, service.PanelConfig{RequestTimeout: cfg.Panel.RequestTimeout}, nil)
+	go job.RunPanelPolling(ctx, panels, job.PanelPollConfig{
+		ProbeInterval: cfg.Panel.ProbeInterval, SyncInterval: cfg.Panel.SyncInterval, Concurrency: cfg.Panel.Concurrency,
+	})
+
 	srv := &http.Server{
 		Addr: cfg.Server.ListenAddr,
 		Handler: api.NewRouter(api.Deps{
@@ -109,6 +118,7 @@ func runServer(args []string) error {
 			PingTimeout:    cfg.Database.PingTimeout,
 			Auth:           auth,
 			RBAC:           service.NewRBACService(pool),
+			Panels:         panels,
 			Cookie:         api.CookieConfig{Secure: secureCookie},
 			TrustedProxies: trusted,
 		}),
