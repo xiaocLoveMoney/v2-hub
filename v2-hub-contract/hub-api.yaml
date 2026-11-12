@@ -1124,7 +1124,7 @@ components:
         action: { type: string }
         targetType: { type: [string, "null"] }
         targetId: { type: [string, "null"] }
-        detail: { type: [object, "null"] }
+        detail: { type: [object, "null"], additionalProperties: true }
         clientIp: { type: [string, "null"] }
         createdAt: { type: string, format: date-time }
     PanelBaseUrl:
@@ -1161,6 +1161,7 @@ components:
         guid: { type: string }
         status:
           type: [object, "null"]
+          additionalProperties: true
           description: 资源快照（cpu、mem、uptime、xray 运行状态等，原样透传，字段随面板而定）
     Server:
       type: object
@@ -1180,7 +1181,7 @@ components:
         lastSeenAt: { type: [string, "null"], format: date-time }
         lastSyncedAt: { type: [string, "null"], format: date-time }
         panelVersion: { type: string }
-        statusSnapshot: { type: [object, "null"] }
+        statusSnapshot: { type: [object, "null"], additionalProperties: true }
         inboundCount: { type: integer }
         createdAt: { type: string, format: date-time }
     ServerEnvelope:
@@ -1224,7 +1225,7 @@ components:
         network: { type: string }
         security: { type: string }
         coreType: { type: string, enum: [xray] }
-        config: { type: object, description: 面板配置副本（settings、streamSettings、sniffing），敏感字段已删除 }
+        config: { type: object, additionalProperties: true, description: 面板配置副本（settings、streamSettings、sniffing），敏感字段已删除 }
         clientCount: { type: integer }
         driftDetectedAt: { type: [string, "null"], format: date-time }
         isMissing: { type: boolean }
@@ -1256,7 +1257,7 @@ components:
           description: vless-reality 需 target（如 www.cloudflare.com:443）与 serverNames；vmess-ws 需 path；shadowsocks-2022 可选 method
           additionalProperties: true
         protocol: { type: string, maxLength: 32, description: 高级 JSON 模式必填 }
-        config: { type: object, description: 高级 JSON 模式必填 }
+        config: { type: object, additionalProperties: true, description: 高级 JSON 模式必填 }
     InboundUpdateInput:
       type: object
       required: [remark, port]
@@ -1264,7 +1265,7 @@ components:
         remark: { type: string, minLength: 1, maxLength: 255 }
         port: { type: integer, minimum: 1, maximum: 65535 }
         listen: { type: string, maxLength: 64 }
-        config: { type: object, description: 省略则不改配置；提供时整体替换（敏感字段与 clients 由服务端补回） }
+        config: { type: object, additionalProperties: true, description: 省略则不改配置；提供时整体替换（敏感字段与 clients 由服务端补回） }
     EndpointInput:
       type: object
       required: [inboundIds, addresses]

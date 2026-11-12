@@ -7,6 +7,15 @@ export type Admin = components['schemas']['Admin']
 export type Role = components['schemas']['Role']
 export type Permission = components['schemas']['Permission']
 export type AuditLog = components['schemas']['AuditLog']
+export type Server = components['schemas']['Server']
+export type Inbound = components['schemas']['Inbound']
+export type Endpoint = components['schemas']['Endpoint']
+export type PanelNode = components['schemas']['Node']
+export type NodeGroup = components['schemas']['NodeGroup']
+export type SyncResult = components['schemas']['SyncResult']
+export type InboundTemplate = components['schemas']['InboundTemplate']
+export type TlsMode = components['schemas']['TlsMode']
+export type ProviderType = components['schemas']['ServerConnInput']['providerType']
 
 /** 分页结果（hub-api.yaml 各分页接口的 data 形状）。 */
 export interface PageData<T> {

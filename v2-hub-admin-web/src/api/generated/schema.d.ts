@@ -290,6 +290,289 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/admin/servers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 全部服务器及其连接状态（server:read） */
+        get: operations["listServers"];
+        put?: never;
+        /** 接入一台面板（server:write）；保存前先探测，探测失败不保存 */
+        post: operations["createServer"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/servers/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 用未保存的接入信息探测面板（server:write），返回面板版本等信息 */
+        post: operations["testServer"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/servers/cert-fingerprint": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 不校验证书地连接 https 面板，返回叶子证书 SHA-256（Base64），供 tlsMode=pin 使用（server:write） */
+        post: operations["serverCertFingerprint"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/servers/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        /** 服务器详情（server:read） */
+        get: operations["getServer"];
+        /** 修改服务器（server:write）；apiToken 留空表示沿用原值；连接信息变化时先探测 */
+        put: operations["updateServer"];
+        post?: never;
+        /** 移除服务器及其入站、节点的平台记录（server:write）；不改动面板本身 */
+        delete: operations["deleteServer"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/servers/{id}/sync": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 立即探测并同步该服务器的入站与 Host（server:write） */
+        post: operations["syncServer"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/servers/{id}/inbounds": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        /** 该服务器的入站（平台缓存，node:read） */
+        get: operations["listServerInbounds"];
+        put?: never;
+        /** 在该服务器上新建入站（node:write）：按模板或高级 JSON；写入面板后回读落库并生成直连节点 */
+        post: operations["createInbound"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/servers/{id}/endpoints": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 为该服务器的入站添加对外地址（3x-ui Host，node:write），每个地址生成一个节点 */
+        post: operations["createEndpoint"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/inbounds/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        /** 入站详情（缓存副本，敏感字段已删除；node:read） */
+        get: operations["getInbound"];
+        /** 修改入站（node:write）；config 省略的敏感字段与面板现有 clients 由服务端保留 */
+        put: operations["updateInbound"];
+        post?: never;
+        /** 删除入站（node:write）：先删面板，再删平台记录与节点 */
+        delete: operations["deleteInbound"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/inbounds/{id}/enabled": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /** 启用或停用入站（写面板，node:write） */
+        put: operations["setInboundEnabled"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/inbounds/{id}/drift/ack": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 确认面板侧改动（清除漂移标记，以当前面板配置为准；node:write） */
+        post: operations["ackInboundDrift"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/endpoints/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** 删除对外地址所在的整个 Host 组（面板上同组的地址一并删除，node:write） */
+        delete: operations["deleteEndpoint"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/nodes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 节点目录（node:read），可按服务器、节点组过滤 */
+        get: operations["listNodes"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/nodes/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /** 修改节点的展示属性（只影响平台，node:write） */
+        put: operations["updateNode"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/node-groups": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 全部节点组（node:read） */
+        get: operations["listNodeGroups"];
+        put?: never;
+        /** 新建节点组（node:write） */
+        post: operations["createNodeGroup"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/node-groups/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /** 修改节点组名称、备注与成员（整体替换成员，node:write） */
+        put: operations["updateNodeGroup"];
+        post?: never;
+        /** 删除节点组（不删除节点，node:write） */
+        delete: operations["deleteNodeGroup"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -392,10 +675,198 @@ export interface components {
             action: string;
             targetType?: string | null;
             targetId?: string | null;
-            detail?: Record<string, never> | null;
+            detail?: {
+                [key: string]: unknown;
+            } | null;
             clientIp?: string | null;
             /** Format: date-time */
             createdAt: string;
+        };
+        /** @description 面板根地址，含 scheme、端口与 web base path，如 https://panel.example.com:2053/abc */
+        PanelBaseUrl: string;
+        /** @enum {string} */
+        TlsMode: "verify" | "pin" | "skip";
+        ServerConnInput: {
+            /** @enum {string} */
+            providerType: "xui";
+            baseUrl: components["schemas"]["PanelBaseUrl"];
+            /** @description 只写；更新时留空表示沿用原值 */
+            apiToken: string;
+            tlsMode: components["schemas"]["TlsMode"];
+            certPinSha256?: string;
+        };
+        ServerInput: components["schemas"]["ServerConnInput"] & {
+            name: string;
+            region?: string;
+            remark?: string;
+            isDisabled?: boolean;
+        };
+        PanelInfo: {
+            version: string;
+            guid: string;
+            /** @description 资源快照（cpu、mem、uptime、xray 运行状态等，原样透传，字段随面板而定） */
+            status?: {
+                [key: string]: unknown;
+            } | null;
+        };
+        Server: {
+            /** Format: int64 */
+            id: number;
+            name: string;
+            providerType: string;
+            baseUrl: string;
+            tlsMode: components["schemas"]["TlsMode"];
+            certPinSha256?: string | null;
+            region: string;
+            remark: string;
+            isDisabled: boolean;
+            /** @enum {string} */
+            status: "unknown" | "online" | "offline" | "auth_failed";
+            lastError: string;
+            /** Format: date-time */
+            lastSeenAt?: string | null;
+            /** Format: date-time */
+            lastSyncedAt?: string | null;
+            panelVersion: string;
+            statusSnapshot?: {
+                [key: string]: unknown;
+            } | null;
+            inboundCount: number;
+            /** Format: date-time */
+            createdAt: string;
+        };
+        ServerEnvelope: components["schemas"]["Envelope"] & {
+            data?: components["schemas"]["Server"];
+        };
+        SyncResult: {
+            /** @description 面板上的入站总数 */
+            inbounds: number;
+            added: number;
+            updated: number;
+            /** @description 平台有、面板已不存在的入站数 */
+            missing: number;
+            /** @description 本次发现面板侧改动的入站数 */
+            drifted: number;
+        };
+        Endpoint: {
+            /** Format: int64 */
+            id: number;
+            address: string;
+            /** @description 0 表示沿用入站端口 */
+            port: number;
+            remark: string;
+            isDisabled: boolean;
+            isMissing: boolean;
+        };
+        Inbound: {
+            /** Format: int64 */
+            id: number;
+            /** Format: int64 */
+            serverId: number;
+            remoteRef: string;
+            protocol: string;
+            port: number;
+            listen: string;
+            tag: string;
+            remark: string;
+            isEnabled: boolean;
+            network: string;
+            security: string;
+            /** @enum {string} */
+            coreType: "xray";
+            /** @description 面板配置副本（settings、streamSettings、sniffing），敏感字段已删除 */
+            config: {
+                [key: string]: unknown;
+            };
+            clientCount: number;
+            /** Format: date-time */
+            driftDetectedAt?: string | null;
+            isMissing: boolean;
+            endpoints: components["schemas"]["Endpoint"][];
+            /** Format: date-time */
+            createdAt: string;
+        };
+        InboundEnvelope: components["schemas"]["Envelope"] & {
+            data?: components["schemas"]["Inbound"];
+        };
+        /** @enum {string} */
+        InboundTemplate: "vless-reality" | "vmess-ws" | "shadowsocks-2022";
+        /** @description template 与 config 二选一；template 时按其参数生成配置与密钥，config 为高级 JSON（settings、streamSettings、sniffing） */
+        InboundCreateInput: {
+            remark: string;
+            port: number;
+            listen?: string;
+            /** @default true */
+            enabled: boolean;
+            template?: components["schemas"]["InboundTemplate"];
+            /** @description vless-reality 需 target（如 www.cloudflare.com:443）与 serverNames；vmess-ws 需 path；shadowsocks-2022 可选 method */
+            templateParams?: {
+                [key: string]: unknown;
+            };
+            /** @description 高级 JSON 模式必填 */
+            protocol?: string;
+            /** @description 高级 JSON 模式必填 */
+            config?: {
+                [key: string]: unknown;
+            };
+        };
+        InboundUpdateInput: {
+            remark: string;
+            port: number;
+            listen?: string;
+            /** @description 省略则不改配置；提供时整体替换（敏感字段与 clients 由服务端补回） */
+            config?: {
+                [key: string]: unknown;
+            };
+        };
+        EndpointInput: {
+            inboundIds: number[];
+            addresses: string[];
+            /** @description 0 表示沿用入站端口 */
+            port?: number;
+            remark?: string;
+        };
+        Node: {
+            /** Format: int64 */
+            id: number;
+            /** Format: int64 */
+            inboundId: number;
+            /** Format: int64 */
+            endpointId?: number | null;
+            /** Format: int64 */
+            serverId: number;
+            serverName: string;
+            protocol: string;
+            /** @description 直连节点为面板主机名，Host 节点为对外地址 */
+            address: string;
+            port: number;
+            displayName: string;
+            region: string;
+            tags: string[];
+            sortOrder: number;
+            isEnabled: boolean;
+            /** @description 来源入站或地址在面板上已不存在 */
+            isMissing: boolean;
+            groupIds: number[];
+        };
+        NodeInput: {
+            displayName: string;
+            region: string;
+            tags: string[];
+            sortOrder: number;
+            isEnabled: boolean;
+        };
+        NodeGroup: {
+            /** Format: int64 */
+            id: number;
+            name: string;
+            remark: string;
+            nodeIds: number[];
+        };
+        NodeGroupInput: {
+            name: string;
+            remark?: string;
+            nodeIds: number[];
         };
     };
     responses: {
@@ -446,6 +917,15 @@ export interface components {
         };
         /** @description conflict */
         Conflict: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Envelope"];
+            };
+        };
+        /** @description upstream_unavailable（面板不可达、拒绝 token 或返回异常） */
+        UpstreamUnavailable: {
             headers: {
                 [name: string]: unknown;
             };
@@ -972,6 +1452,631 @@ export interface operations {
             400: components["responses"]["InvalidArgument"];
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["PermissionDenied"];
+        };
+    };
+    listServers: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 服务器列表 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["Server"][];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+        };
+    };
+    createServer: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ServerInput"];
+            };
+        };
+        responses: {
+            /** @description 新接入的服务器（已完成一次同步） */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ServerEnvelope"];
+                };
+            };
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            409: components["responses"]["Conflict"];
+            502: components["responses"]["UpstreamUnavailable"];
+        };
+    };
+    testServer: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ServerConnInput"];
+            };
+        };
+        responses: {
+            /** @description 探测成功 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["PanelInfo"];
+                    };
+                };
+            };
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            502: components["responses"]["UpstreamUnavailable"];
+        };
+    };
+    serverCertFingerprint: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    baseUrl: components["schemas"]["PanelBaseUrl"];
+                };
+            };
+        };
+        responses: {
+            /** @description 证书指纹 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: {
+                            sha256: string;
+                        };
+                    };
+                };
+            };
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            502: components["responses"]["UpstreamUnavailable"];
+        };
+    };
+    getServer: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 服务器 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ServerEnvelope"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    updateServer: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ServerInput"];
+            };
+        };
+        responses: {
+            /** @description 修改后的服务器 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ServerEnvelope"];
+                };
+            };
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            502: components["responses"]["UpstreamUnavailable"];
+        };
+    };
+    deleteServer: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["Ok"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    syncServer: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 同步结果 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["SyncResult"];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+            502: components["responses"]["UpstreamUnavailable"];
+        };
+    };
+    listServerInbounds: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 入站列表 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["Inbound"][];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    createInbound: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InboundCreateInput"];
+            };
+        };
+        responses: {
+            /** @description 新建的入站 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InboundEnvelope"];
+                };
+            };
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+            502: components["responses"]["UpstreamUnavailable"];
+        };
+    };
+    createEndpoint: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EndpointInput"];
+            };
+        };
+        responses: {
+            200: components["responses"]["Ok"];
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+            502: components["responses"]["UpstreamUnavailable"];
+        };
+    };
+    getInbound: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 入站 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InboundEnvelope"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    updateInbound: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InboundUpdateInput"];
+            };
+        };
+        responses: {
+            /** @description 修改后的入站 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InboundEnvelope"];
+                };
+            };
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+            502: components["responses"]["UpstreamUnavailable"];
+        };
+    };
+    deleteInbound: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["Ok"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+            502: components["responses"]["UpstreamUnavailable"];
+        };
+    };
+    setInboundEnabled: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    enabled: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description 修改后的入站 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InboundEnvelope"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+            502: components["responses"]["UpstreamUnavailable"];
+        };
+    };
+    ackInboundDrift: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["Ok"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    deleteEndpoint: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["Ok"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+            502: components["responses"]["UpstreamUnavailable"];
+        };
+    };
+    listNodes: {
+        parameters: {
+            query?: {
+                page?: components["parameters"]["Page"];
+                pageSize?: components["parameters"]["PageSize"];
+                serverId?: number;
+                groupId?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 节点分页 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: {
+                            items: components["schemas"]["Node"][];
+                            /** Format: int64 */
+                            total: number;
+                        };
+                    };
+                };
+            };
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+        };
+    };
+    updateNode: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NodeInput"];
+            };
+        };
+        responses: {
+            200: components["responses"]["Ok"];
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    listNodeGroups: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 节点组列表 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["NodeGroup"][];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+        };
+    };
+    createNodeGroup: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NodeGroupInput"];
+            };
+        };
+        responses: {
+            /** @description 新建的节点组 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["NodeGroup"];
+                    };
+                };
+            };
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    updateNodeGroup: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NodeGroupInput"];
+            };
+        };
+        responses: {
+            200: components["responses"]["Ok"];
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    deleteNodeGroup: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["Ok"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
         };
     };
 }
