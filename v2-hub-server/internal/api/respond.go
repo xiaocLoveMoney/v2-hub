@@ -42,6 +42,7 @@ var statusByCode = map[service.Code]int{
 	service.CodeConflict:         http.StatusConflict,
 	service.CodeRateLimited:      http.StatusTooManyRequests,
 	service.CodeTOTPRequired:     http.StatusUnauthorized,
+	service.CodeUpstream:         http.StatusBadGateway,
 }
 
 func writeOK(w http.ResponseWriter, data any) {

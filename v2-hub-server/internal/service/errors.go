@@ -15,6 +15,7 @@ const (
 	CodeConflict         Code = "conflict"
 	CodeRateLimited      Code = "rate_limited"
 	CodeTOTPRequired     Code = "totp_required"
+	CodeUpstream         Code = "upstream_unavailable"
 	CodeInternal         Code = "internal"
 )
 
@@ -43,6 +44,7 @@ var (
 	ErrConflict         = &Error{Code: CodeConflict}
 	ErrRateLimited      = &Error{Code: CodeRateLimited}
 	ErrTOTPRequired     = &Error{Code: CodeTOTPRequired}
+	ErrUpstream         = &Error{Code: CodeUpstream}
 )
 
 func newError(code Code, message string) *Error {

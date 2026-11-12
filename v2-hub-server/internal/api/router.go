@@ -39,6 +39,8 @@ type Deps struct {
 	Auth AdminAuthenticator
 	// RBAC 提供管理员、角色、权限码与审计日志管理。
 	RBAC AdminManager
+	// Panels 提供服务器、入站、节点管理（docs/03 §5.1）。
+	Panels PanelManager
 	// Cookie 是会话 Cookie 属性。
 	Cookie CookieConfig
 	// TrustedProxies 是可采信 X-Forwarded-For 的直连网段（如 Caddy 所在 docker 网络）。
@@ -48,13 +50,14 @@ type Deps struct {
 type handlers struct {
 	auth           AdminAuthenticator
 	rbac           AdminManager
+	panels         PanelManager
 	cookie         CookieConfig
 	trustedProxies []netip.Prefix
 }
 
 // NewRouter 返回注册好全部路由的 http.Handler。路由与 hub-api.yaml 的 paths 逐条对应。
 func NewRouter(deps Deps) http.Handler {
-	h := &handlers{auth: deps.Auth, rbac: deps.RBAC, cookie: deps.Cookie, trustedProxies: deps.TrustedProxies}
+	h := &handlers{auth: deps.Auth, rbac: deps.RBAC, panels: deps.Panels, cookie: deps.Cookie, trustedProxies: deps.TrustedProxies}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", handleHealthz)
 	mux.HandleFunc("GET /readyz", newReadyzHandler(deps.Database, deps.PingTimeout))
@@ -77,6 +80,30 @@ func NewRouter(deps Deps) http.Handler {
 	mux.HandleFunc("PUT /api/admin/admins/{id}/password", h.requireAdmin(service.PermAdminWrite, h.resetAdminCredential))
 	mux.HandleFunc("DELETE /api/admin/admins/{id}/totp", h.requireAdmin(service.PermAdminWrite, h.resetAdminTOTP))
 	mux.HandleFunc("GET /api/admin/audit-logs", h.requireAdmin(service.PermAuditRead, h.listAuditLogs))
+
+	mux.HandleFunc("GET /api/admin/servers", h.requireAdmin(service.PermServerRead, h.listServers))
+	mux.HandleFunc("POST /api/admin/servers", h.requireAdmin(service.PermServerWrite, h.createServer))
+	mux.HandleFunc("POST /api/admin/servers/test", h.requireAdmin(service.PermServerWrite, h.testServer))
+	mux.HandleFunc("POST /api/admin/servers/cert-fingerprint", h.requireAdmin(service.PermServerWrite, h.certFingerprint))
+	mux.HandleFunc("GET /api/admin/servers/{id}", h.requireAdmin(service.PermServerRead, h.getServer))
+	mux.HandleFunc("PUT /api/admin/servers/{id}", h.requireAdmin(service.PermServerWrite, h.updateServer))
+	mux.HandleFunc("DELETE /api/admin/servers/{id}", h.requireAdmin(service.PermServerWrite, h.deleteServer))
+	mux.HandleFunc("POST /api/admin/servers/{id}/sync", h.requireAdmin(service.PermServerWrite, h.syncServer))
+	mux.HandleFunc("GET /api/admin/servers/{id}/inbounds", h.requireAdmin(service.PermNodeRead, h.listServerInbounds))
+	mux.HandleFunc("POST /api/admin/servers/{id}/inbounds", h.requireAdmin(service.PermNodeWrite, h.createInbound))
+	mux.HandleFunc("POST /api/admin/servers/{id}/endpoints", h.requireAdmin(service.PermNodeWrite, h.createEndpoints))
+	mux.HandleFunc("GET /api/admin/inbounds/{id}", h.requireAdmin(service.PermNodeRead, h.getInbound))
+	mux.HandleFunc("PUT /api/admin/inbounds/{id}", h.requireAdmin(service.PermNodeWrite, h.updateInbound))
+	mux.HandleFunc("DELETE /api/admin/inbounds/{id}", h.requireAdmin(service.PermNodeWrite, h.deleteInbound))
+	mux.HandleFunc("PUT /api/admin/inbounds/{id}/enabled", h.requireAdmin(service.PermNodeWrite, h.setInboundEnabled))
+	mux.HandleFunc("POST /api/admin/inbounds/{id}/drift/ack", h.requireAdmin(service.PermNodeWrite, h.ackInboundDrift))
+	mux.HandleFunc("DELETE /api/admin/endpoints/{id}", h.requireAdmin(service.PermNodeWrite, h.deleteEndpoint))
+	mux.HandleFunc("GET /api/admin/nodes", h.requireAdmin(service.PermNodeRead, h.listNodes))
+	mux.HandleFunc("PUT /api/admin/nodes/{id}", h.requireAdmin(service.PermNodeWrite, h.updateNode))
+	mux.HandleFunc("GET /api/admin/node-groups", h.requireAdmin(service.PermNodeRead, h.listNodeGroups))
+	mux.HandleFunc("POST /api/admin/node-groups", h.requireAdmin(service.PermNodeWrite, h.createNodeGroup))
+	mux.HandleFunc("PUT /api/admin/node-groups/{id}", h.requireAdmin(service.PermNodeWrite, h.updateNodeGroup))
+	mux.HandleFunc("DELETE /api/admin/node-groups/{id}", h.requireAdmin(service.PermNodeWrite, h.deleteNodeGroup))
 	return withSecurityHeaders(mux)
 }
 

@@ -26,7 +26,7 @@ v2-hub-server/
 
 目前已有：`cmd/hub`（服务 + `admin-create` 子命令）、`internal/api`（探活、管理员认证与 RBAC 接口、会话 / CSRF / 权限中间件）、
 `internal/service`（AuthService、RBACService）、`internal/manager/{crypto,ratelimit}`、`internal/dao`（连接池、sqlc 生成物、daotest）、
-`internal/job`（过期会话清理）、`internal/config`。其余目录在对应任务里创建，不预建空目录。
+`internal/job`（过期会话清理、面板探测与同步）、`internal/manager/{panel,panel/xui,panel/paneltest,inboundtpl}`、`internal/config`。其余目录在对应任务里创建，不预建空目录。
 
 ## 2. 模块划分与依赖方向
 

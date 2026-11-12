@@ -23,6 +23,7 @@ run_case() {  # run_case <编号> <脚本>
 
 run_case IT-1 it1_smoke.sh
 run_case IT-2 it2_admin_login.sh
+run_case IT-3 it3_panel.sh
 # 新用例登记在这里，并在 docs/08-联调与测试方案.md 用例库加一行
 
 echo

@@ -30,6 +30,12 @@ const (
 	defaultLoginWindow          = 15 * time.Minute
 	defaultLoginLockout         = 15 * time.Minute
 	defaultLoginMaxTrackedKeys  = 10000
+
+	// 面板探测与同步默认值，语义见 docs/03 §5.1
+	defaultPanelProbeInterval  = 30 * time.Second
+	defaultPanelSyncInterval   = 5 * time.Minute
+	defaultPanelRequestTimeout = 15 * time.Second
+	defaultPanelConcurrency    = 8
 )
 
 // ErrInvalidConfig 表示配置内容不合法。
@@ -40,6 +46,16 @@ type Config struct {
 	Server   ServerConfig   `yaml:"server"`
 	Database DatabaseConfig `yaml:"database"`
 	Auth     AuthConfig     `yaml:"auth"`
+	Panel    PanelConfig    `yaml:"panel"`
+}
+
+// PanelConfig 是面板探测、同步与请求参数（docs/03 §5.1）。
+type PanelConfig struct {
+	ProbeInterval  time.Duration `yaml:"probeInterval"`
+	SyncInterval   time.Duration `yaml:"syncInterval"`
+	RequestTimeout time.Duration `yaml:"requestTimeout"`
+	// Concurrency 是同时探测 / 同步的服务器数上限。
+	Concurrency int `yaml:"concurrency"`
 }
 
 // AuthConfig 是管理员会话与登录频控参数（docs/03 §4.2）。
@@ -114,6 +130,11 @@ func defaults() Config {
 		LoginWindow:            defaultLoginWindow,
 		LoginLockout:           defaultLoginLockout,
 		LoginMaxTrackedKeys:    defaultLoginMaxTrackedKeys,
+	}, Panel: PanelConfig{
+		ProbeInterval:  defaultPanelProbeInterval,
+		SyncInterval:   defaultPanelSyncInterval,
+		RequestTimeout: defaultPanelRequestTimeout,
+		Concurrency:    defaultPanelConcurrency,
 	}}
 }
 
@@ -134,6 +155,10 @@ func (c Config) validate() error {
 	}
 	if a.LoginMaxFailures <= 0 || a.LoginWindow <= 0 || a.LoginLockout <= 0 || a.LoginMaxTrackedKeys <= 0 {
 		return fmt.Errorf("%w: auth login rate limit must be positive", ErrInvalidConfig)
+	}
+	pc := c.Panel
+	if pc.ProbeInterval <= 0 || pc.SyncInterval <= 0 || pc.RequestTimeout <= 0 || pc.Concurrency <= 0 {
+		return fmt.Errorf("%w: panel intervals, timeout and concurrency must be positive", ErrInvalidConfig)
 	}
 	return nil
 }
