@@ -1,0 +1,268 @@
+package xui
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"strconv"
+
+	"v2-hub-server/internal/manager/panel"
+)
+
+// 3x-ui 入站 JSON 的键名。
+const (
+	keySettings       = "settings"
+	keyStreamSettings = "streamSettings"
+	keySniffing       = "sniffing"
+	keyClients        = "clients"
+	keyPeers          = "peers"
+	keyEnable         = "enable"
+	keyRemark         = "remark"
+	keyPort           = "port"
+	keyListen         = "listen"
+	keyProtocol       = "protocol"
+	keyExpiryTime     = "expiryTime"
+	keyTotal          = "total"
+)
+
+// inboundWire 是 3x-ui 返回的入站中平台用到的字段；其余字段在 raw 中原样保留。
+type inboundWire struct {
+	ID       int64  `json:"id"`
+	Protocol string `json:"protocol"`
+	Port     int    `json:"port"`
+	Listen   string `json:"listen"`
+	Tag      string `json:"tag"`
+	Remark   string `json:"remark"`
+	Enable   bool   `json:"enable"`
+}
+
+// configWire 是入站的内核配置三段（Xray 形状）。
+type configWire struct {
+	Settings       map[string]any `json:"settings"`
+	StreamSettings map[string]any `json:"streamSettings"`
+	Sniffing       map[string]any `json:"sniffing"`
+}
+
+// sensitivePaths 是缓存副本里要删除、编辑时要从面板补回的字段（Ruling-14）。
+// 每项是从 configWire 根开始的路径；"*" 表示数组的每个元素。
+var sensitivePaths = [][]string{
+	{keyStreamSettings, "realitySettings", "privateKey"},
+	{keyStreamSettings, "tlsSettings", "certificates", "*", "key"},
+	{keySettings, "password"},
+	{keySettings, "secretKey"},
+}
+
+// toNeutral 把一条 3x-ui 入站 JSON 转成中立模型：计算摘要、删除敏感字段与 clients。
+func toNeutral(raw json.RawMessage) (panel.Inbound, error) {
+	var w inboundWire
+	if err := json.Unmarshal(raw, &w); err != nil {
+		return panel.Inbound{}, fmt.Errorf("decode inbound: %w", err)
+	}
+	var cfg configWire
+	if err := json.Unmarshal(raw, &cfg); err != nil {
+		return panel.Inbound{}, fmt.Errorf("decode inbound config: %w", err)
+	}
+	clientCount := countClients(cfg.Settings)
+
+	// 摘要覆盖完整配置（含敏感字段，私钥被换也算面板侧改动），但不含 clients 与流量计数
+	hashSettings := withoutKeys(cfg.Settings, keyClients, keyPeers)
+	hash, err := panel.CanonicalHash(map[string]any{
+		keyProtocol: w.Protocol, keyPort: w.Port, keyListen: w.Listen, keyRemark: w.Remark, keyEnable: w.Enable,
+		keySettings: hashSettings, keyStreamSettings: cfg.StreamSettings, keySniffing: cfg.Sniffing,
+	})
+	if err != nil {
+		return panel.Inbound{}, err
+	}
+
+	redacted := configWire{
+		Settings:       deepCopy(hashSettings),
+		StreamSettings: deepCopy(cfg.StreamSettings),
+		Sniffing:       deepCopy(cfg.Sniffing),
+	}
+	root := map[string]any{keySettings: redacted.Settings, keyStreamSettings: redacted.StreamSettings}
+	for _, path := range sensitivePaths {
+		deletePath(root, path)
+	}
+	configJSON, err := json.Marshal(redacted)
+	if err != nil {
+		return panel.Inbound{}, fmt.Errorf("encode redacted config: %w", err)
+	}
+
+	return panel.Inbound{
+		Ref:         strconv.FormatInt(w.ID, 10),
+		Protocol:    w.Protocol,
+		Port:        w.Port,
+		Listen:      w.Listen,
+		Tag:         w.Tag,
+		Remark:      w.Remark,
+		Enabled:     w.Enable,
+		Network:     stringAt(cfg.StreamSettings, "network"),
+		Security:    stringAt(cfg.StreamSettings, "security"),
+		CoreType:    panel.CoreXray,
+		Config:      configJSON,
+		ConfigHash:  hash,
+		ClientCount: clientCount,
+	}, nil
+}
+
+func countClients(settings map[string]any) int {
+	for _, k := range []string{keyClients, keyPeers} {
+		if list, ok := settings[k].([]any); ok {
+			return len(list)
+		}
+	}
+	return 0
+}
+
+// ListInbounds 实现 panel.Provider。
+func (c *Client) ListInbounds(ctx context.Context) ([]panel.Inbound, error) {
+	var raws []json.RawMessage
+	if err := c.call(ctx, http.MethodGet, "/inbounds/list", nil, &raws); err != nil {
+		return nil, err
+	}
+	out := make([]panel.Inbound, 0, len(raws))
+	for _, r := range raws {
+		in, err := toNeutral(r)
+		if err != nil {
+			return nil, &panel.Error{Kind: panel.KindUnreachable, Message: "面板返回的入站格式与预期不符", Err: err}
+		}
+		out = append(out, in)
+	}
+	return out, nil
+}
+
+func (c *Client) getRaw(ctx context.Context, ref string) (map[string]any, error) {
+	if _, err := strconv.ParseInt(ref, 10, 64); err != nil {
+		return nil, &panel.Error{Kind: panel.KindNotFound, Message: "入站标识不合法"}
+	}
+	var raw map[string]any
+	if err := c.call(ctx, http.MethodGet, "/inbounds/get/"+ref, nil, &raw); err != nil {
+		return nil, err
+	}
+	if raw == nil {
+		return nil, &panel.Error{Kind: panel.KindNotFound, Message: "入站不存在"}
+	}
+	return raw, nil
+}
+
+// GetInbound 实现 panel.Provider。
+func (c *Client) GetInbound(ctx context.Context, ref string) (panel.Inbound, error) {
+	raw, err := c.getRaw(ctx, ref)
+	if err != nil {
+		return panel.Inbound{}, err
+	}
+	return neutralFromMap(raw)
+}
+
+func neutralFromMap(raw map[string]any) (panel.Inbound, error) {
+	encoded, err := json.Marshal(raw)
+	if err != nil {
+		return panel.Inbound{}, fmt.Errorf("encode inbound: %w", err)
+	}
+	in, err := toNeutral(encoded)
+	if err != nil {
+		return panel.Inbound{}, &panel.Error{Kind: panel.KindUnreachable, Message: "面板返回的入站格式与预期不符", Err: err}
+	}
+	return in, nil
+}
+
+// decodeSpecConfig 解出 spec.Config 中的三段配置；缺省段落给空对象。
+func decodeSpecConfig(spec panel.InboundSpec) (configWire, error) {
+	var cfg configWire
+	if len(spec.Config) > 0 {
+		if err := json.Unmarshal(spec.Config, &cfg); err != nil {
+			return configWire{}, &panel.Error{Kind: panel.KindRejected, Message: "入站配置不是合法的 JSON 对象", Err: err}
+		}
+	}
+	if cfg.Settings == nil {
+		cfg.Settings = map[string]any{}
+	}
+	if cfg.StreamSettings == nil {
+		cfg.StreamSettings = map[string]any{}
+	}
+	if cfg.Sniffing == nil {
+		cfg.Sniffing = map[string]any{}
+	}
+	return cfg, nil
+}
+
+// CreateInbound 实现 panel.Provider。新建入站不带 clients（M2 由下发对账挂载）。
+func (c *Client) CreateInbound(ctx context.Context, spec panel.InboundSpec) (panel.Inbound, error) {
+	cfg, err := decodeSpecConfig(spec)
+	if err != nil {
+		return panel.Inbound{}, err
+	}
+	if _, ok := cfg.Settings[keyClients]; !ok {
+		cfg.Settings[keyClients] = []any{}
+	}
+	body := map[string]any{
+		keyEnable: spec.Enabled, keyRemark: spec.Remark, keyListen: spec.Listen, keyPort: spec.Port,
+		keyProtocol: spec.Protocol, keyExpiryTime: 0, keyTotal: 0,
+		keySettings: cfg.Settings, keyStreamSettings: cfg.StreamSettings, keySniffing: cfg.Sniffing,
+	}
+	var created map[string]any
+	if err := c.call(ctx, http.MethodPost, "/inbounds/add", body, &created); err != nil {
+		return panel.Inbound{}, err
+	}
+	return neutralFromMap(created)
+}
+
+// UpdateInbound 实现 panel.Provider：以面板现有入站为底，覆盖平台管理的字段；
+// spec.Config 为空表示只改基本字段；省略的敏感字段与现有 clients 一律从面板原值补回（Ruling-14）。
+func (c *Client) UpdateInbound(ctx context.Context, ref string, spec panel.InboundSpec) (panel.Inbound, error) {
+	current, err := c.getRaw(ctx, ref)
+	if err != nil {
+		return panel.Inbound{}, err
+	}
+	merged := deepCopy(current)
+	merged[keyRemark] = spec.Remark
+	merged[keyPort] = spec.Port
+	merged[keyListen] = spec.Listen
+	merged[keyEnable] = spec.Enabled
+	if len(spec.Config) > 0 {
+		cfg, err := decodeSpecConfig(spec)
+		if err != nil {
+			return panel.Inbound{}, err
+		}
+		curSettings, _ := current[keySettings].(map[string]any)
+		for _, k := range []string{keyClients, keyPeers} {
+			if v, ok := curSettings[k]; ok {
+				cfg.Settings[k] = v
+			} else {
+				delete(cfg.Settings, k)
+			}
+		}
+		next := map[string]any{keySettings: cfg.Settings, keyStreamSettings: cfg.StreamSettings}
+		for _, path := range sensitivePaths {
+			restorePath(next, current, path)
+		}
+		merged[keySettings] = cfg.Settings
+		merged[keyStreamSettings] = cfg.StreamSettings
+		merged[keySniffing] = cfg.Sniffing
+	}
+	var updated map[string]any
+	if err := c.call(ctx, http.MethodPost, "/inbounds/update/"+ref, merged, &updated); err != nil {
+		return panel.Inbound{}, err
+	}
+	if updated == nil {
+		return c.GetInbound(ctx, ref)
+	}
+	return neutralFromMap(updated)
+}
+
+// SetInboundEnabled 实现 panel.Provider。
+func (c *Client) SetInboundEnabled(ctx context.Context, ref string, enabled bool) error {
+	if _, err := strconv.ParseInt(ref, 10, 64); err != nil {
+		return &panel.Error{Kind: panel.KindNotFound, Message: "入站标识不合法"}
+	}
+	return c.call(ctx, http.MethodPost, "/inbounds/setEnable/"+ref, map[string]bool{keyEnable: enabled}, nil)
+}
+
+// DeleteInbound 实现 panel.Provider。3x-ui 对不存在的入站也返回成功。
+func (c *Client) DeleteInbound(ctx context.Context, ref string) error {
+	if _, err := strconv.ParseInt(ref, 10, 64); err != nil {
+		return &panel.Error{Kind: panel.KindNotFound, Message: "入站标识不合法"}
+	}
+	return c.call(ctx, http.MethodPost, "/inbounds/del/"+ref, nil, nil)
+}
