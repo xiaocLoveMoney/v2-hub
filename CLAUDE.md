@@ -34,7 +34,7 @@ cd v2-hub-contract/deploy/it && bash run_all.sh
 - 前端静态文件放 MinIO，Caddy 同域反代 `/api`、`/sub`（Ruling-5、Ruling-6）。
 
 契约（全部在 v2-hub-contract/）：`hub-api.yaml`（server → 前端）、`deploy/init.sql`（server 的表结构）、
-`upstream/3x-ui/openapi-v3.11.0.json`（3x-ui → server 的上游基准）。契约版本用 git tag `vX.Y`，当前未打 tag。
+`upstream/3x-ui/openapi-v3.11.0.json`（3x-ui → server 的上游基准）。契约版本用 git tag `vX.Y`，当前 `v0.1`。
 
 ## 跨目录纪律
 
@@ -52,5 +52,6 @@ GitHub 仓库设置见 `docs/github-仓库设置清单.md`。
 
 ## 当前完成度
 
-- 脚手架初始化（2026-11-11）：三个模块 `make test` 全绿，hub-server `/healthz` 可跑，前端首页可探活后端；
-  `init.sql` 含 M0 管理员与 RBAC 表；`hub-api.yaml` 只有 `/healthz`。里程碑 M0 其余任务未开始。
+- M0 完成（2026-11-12，tag `v0.1`）：管理员登录 / 会话 / CSRF / 登录频控、RBAC（R1–R7）与管理员 / 角色 / 审计日志接口和页面、
+  TOTP 两步验证（AES-256-GCM 加密，主密钥 `HUB_ENCRYPTION_KEY`）、`make admin-create`；IT-1、IT-2 通过。
+- 用户端（v2-hub-user-web）仍是脚手架首页；下一步是 M1（面板 Provider 抽象与 3x-ui 实现、服务器接入、入站增删改查）。
