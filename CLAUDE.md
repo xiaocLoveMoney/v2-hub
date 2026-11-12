@@ -34,7 +34,7 @@ cd v2-hub-contract/deploy/it && bash run_all.sh
 - 前端静态文件放 MinIO，Caddy 同域反代 `/api`、`/sub`（Ruling-5、Ruling-6）。
 
 契约（全部在 v2-hub-contract/）：`hub-api.yaml`（server → 前端）、`deploy/init.sql`（server 的表结构）、
-`upstream/3x-ui/openapi-v3.11.0.json`（3x-ui → server 的上游基准）。契约版本用 git tag `vX.Y`，当前 `v0.1`。
+`upstream/3x-ui/openapi-v3.11.0.json`（3x-ui → server 的上游基准）。契约版本用 git tag `vX.Y`，当前 `v0.2`。
 
 ## 跨目录纪律
 
@@ -54,4 +54,6 @@ GitHub 仓库设置见 `docs/github-仓库设置清单.md`。
 
 - M0 完成（2026-11-12，tag `v0.1`）：管理员登录 / 会话 / CSRF / 登录频控、RBAC（R1–R7）与管理员 / 角色 / 审计日志接口和页面、
   TOTP 两步验证（AES-256-GCM 加密，主密钥 `HUB_ENCRYPTION_KEY`）、`make admin-create`；IT-1、IT-2 通过。
-- 用户端（v2-hub-user-web）仍是脚手架首页；下一步是 M1（面板 Provider 抽象与 3x-ui 实现、服务器接入、入站增删改查）。
+- M1 完成（2026-11-12，tag `v0.2`）：面板 Provider 抽象与 3x-ui 实现、服务器接入 / 探测 / 同步、入站增删改查
+  （表单与 3x-ui 同构，Ruling-16）、Host 对外地址、节点目录与节点组、漂移与面板标识复用处理；IT-3 通过。
+- 用户端（v2-hub-user-web）仍是脚手架首页；下一步是 M2（用户、套餐、授权、对账器、流量与到期）。
