@@ -1,6 +1,7 @@
 import { Alert, App, Button, Form, Input, Modal, Radio, Select, Space, Switch, Typography } from 'antd'
 import { useState } from 'react'
 import { api, csrfHeader, toApiError, type ApiError, type ProviderType, type Server, type TlsMode } from '../../api/client'
+import { useOpenGeneration } from '../../hooks/use-open-generation'
 import { mutate } from '../../hooks/use-remote'
 
 const PROVIDER_OPTIONS: { value: ProviderType; label: string }[] = [{ value: 'xui', label: '3x-ui（v3.x）' }]
@@ -28,8 +29,27 @@ interface ServerFormModalProps {
   onSaved: () => void
 }
 
-/** 接入 / 编辑服务器。API token 只写不读：编辑时留空表示沿用原值（docs/03 §5.1）。 */
+/**
+ * 接入 / 编辑服务器的弹窗。表单实例与错误状态放在 ServerFormBody 里，每次打开都重建，
+ * 上一次填的值（含 token）不会带到下一次打开。
+ */
 export function ServerFormModal({ server, isOpen, onClose, onSaved }: ServerFormModalProps) {
+  const generation = useOpenGeneration(isOpen)
+  return (
+    <Modal title={server === null ? '接入服务器' : `编辑服务器：${server.name}`} open={isOpen} onCancel={onClose} footer={null} destroyOnHidden width={560}>
+      <ServerFormBody key={generation} server={server} onSaved={onSaved} />
+    </Modal>
+  )
+}
+
+interface ServerFormBodyProps {
+  /** null 表示新建 */
+  server: Server | null
+  onSaved: () => void
+}
+
+/** 服务器表单本体。API token 只写不读：编辑时留空表示沿用原值（docs/03 §5.1）。 */
+function ServerFormBody({ server, onSaved }: ServerFormBodyProps) {
   const [form] = Form.useForm<ServerForm>()
   const { message } = App.useApp()
   const [error, setError] = useState<ApiError | null>(null)
@@ -110,7 +130,7 @@ export function ServerFormModal({ server, isOpen, onClose, onSaved }: ServerForm
   }
 
   return (
-    <Modal title={isEdit ? `编辑服务器：${server.name}` : '接入服务器'} open={isOpen} onCancel={onClose} footer={null} destroyOnHidden width={560}>
+    <>
       {error !== null && <Alert type="error" title={error.message} showIcon className="page-alert" />}
       <Form<ServerForm>
         form={form}
@@ -194,6 +214,6 @@ export function ServerFormModal({ server, isOpen, onClose, onSaved }: ServerForm
           平台只做控制面，代理流量不经过本服务器。
         </Typography.Paragraph>
       </Form>
-    </Modal>
+    </>
   )
 }

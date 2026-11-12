@@ -91,6 +91,37 @@ describe('ServersPage', () => {
     expect(post?.csrf).toBe(CSRF)
     expect(post?.body).toMatchObject({ name: 'jp-1', providerType: 'xui', baseUrl: 'https://jp.example.com:2053/x', tlsMode: 'verify', certPinSha256: '' })
   })
+
+  it('连续打开表单时不带出上一次的值：编辑 A → 编辑 B → 接入', async () => {
+    const other = { ...server, id: 2, name: 'jp-1', baseUrl: 'https://jp.example.com:2053/b' }
+    mockServer({ 'GET /api/admin/servers': () => ok([server, other]) })
+    renderWith(<ServersPage />)
+    await screen.findByText('hk-1')
+    const openDialog = async (trigger: HTMLElement) => {
+      fireEvent.click(trigger)
+      const dialogs = await screen.findAllByRole('dialog')
+      return dialogs[dialogs.length - 1]
+    }
+    const valueOf = (dialog: HTMLElement, label: string) => (within(dialog).getByLabelText(label) as HTMLInputElement).value
+    const closeDialog = (dialog: HTMLElement) => fireEvent.click(within(dialog).getByRole('button', { name: /close/i }))
+    const editButtons = () => screen.getAllByRole('button', { name: /编\s*辑/ })
+
+    let dialog = await openDialog(editButtons()[0])
+    expect(valueOf(dialog, '名称')).toBe('hk-1')
+    fireEvent.change(within(dialog).getByLabelText('API token'), { target: { value: 'typed-for-hk' } })
+    closeDialog(dialog)
+
+    dialog = await openDialog(editButtons()[1])
+    expect(valueOf(dialog, '名称')).toBe('jp-1')
+    expect(valueOf(dialog, '面板地址')).toBe('https://jp.example.com:2053/b')
+    expect(valueOf(dialog, 'API token')).toBe('')
+    closeDialog(dialog)
+
+    dialog = await openDialog(screen.getByRole('button', { name: /接入服务器/ }))
+    expect(valueOf(dialog, '名称')).toBe('')
+    expect(valueOf(dialog, '面板地址')).toBe('')
+    expect(valueOf(dialog, 'API token')).toBe('')
+  })
 })
 
 describe('ServerDetailPage', () => {
@@ -120,6 +151,26 @@ describe('ServerDetailPage', () => {
     const post = calls.find((c) => c.method === 'POST')
     expect(post?.body).toMatchObject({ remark: 'new-reality', port: 8443, template: 'vless-reality', templateParams: { target: 'www.cloudflare.com:443' } })
     expect(JSON.stringify(post?.body)).not.toContain('privateKey')
+  })
+
+  it('新建入站弹窗关闭后立刻再打开，不带出上一次填的值', async () => {
+    mockServer({
+      'GET /api/admin/servers/1': () => ok({ ...server, status: 'online', lastError: '' }),
+      'GET /api/admin/servers/1/inbounds': () => ok([]),
+    })
+    renderWith(<ServerDetailPage />, '/servers/1', '/servers/:id')
+    const openButton = await screen.findByRole('button', { name: /新建入站/ })
+    await waitFor(() => expect((openButton as HTMLButtonElement).disabled).toBe(false))
+
+    fireEvent.click(openButton)
+    let dialog = await screen.findByRole('dialog')
+    fireEvent.change(within(dialog).getByLabelText('备注'), { target: { value: 'draft-remark' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: /close/i }))
+
+    fireEvent.click(openButton)
+    const dialogs = await screen.findAllByRole('dialog')
+    dialog = dialogs[dialogs.length - 1]
+    expect((within(dialog).getByLabelText('备注') as HTMLInputElement).value).toBe('')
   })
 })
 

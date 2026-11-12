@@ -1,6 +1,7 @@
 import { Alert, App, Button, Form, Input, InputNumber, Modal, Select } from 'antd'
 import { useState } from 'react'
 import { api, csrfHeader, type ApiError, type Inbound, type InboundTemplate } from '../../api/client'
+import { useOpenGeneration } from '../../hooks/use-open-generation'
 import { mutate } from '../../hooks/use-remote'
 
 const MODE_ADVANCED = 'advanced'
@@ -64,8 +65,26 @@ interface CreateInboundModalProps {
   onSaved: () => void
 }
 
-/** 在服务器上新建入站：模板或高级 JSON。 */
+/**
+ * 在服务器上新建入站的弹窗。表单实例与错误状态放在 CreateInboundForm 里，每次打开都重建，
+ * 上一次填的值不会带到下一次打开。
+ */
 export function CreateInboundModal({ serverId, isOpen, onClose, onSaved }: CreateInboundModalProps) {
+  const generation = useOpenGeneration(isOpen)
+  return (
+    <Modal title="新建入站" open={isOpen} onCancel={onClose} footer={null} destroyOnHidden width={600}>
+      <CreateInboundForm key={generation} serverId={serverId} onSaved={onSaved} />
+    </Modal>
+  )
+}
+
+interface CreateInboundFormProps {
+  serverId: number
+  onSaved: () => void
+}
+
+/** 新建入站表单本体：模板或高级 JSON。 */
+function CreateInboundForm({ serverId, onSaved }: CreateInboundFormProps) {
   const [form] = Form.useForm<CreateForm>()
   const { message } = App.useApp()
   const [error, setError] = useState<ApiError | null>(null)
@@ -95,7 +114,7 @@ export function CreateInboundModal({ serverId, isOpen, onClose, onSaved }: Creat
   }
 
   return (
-    <Modal title="新建入站" open={isOpen} onCancel={onClose} footer={null} destroyOnHidden width={600}>
+    <>
       {error !== null && <Alert type="error" title={error.message} showIcon className="page-alert" />}
       <Form<CreateForm> form={form} layout="vertical" onFinish={handleFinish} initialValues={{ mode: 'vless-reality', method: SS2022_METHODS[0].value }}>
         <Form.Item name="mode" label="类型">
@@ -141,7 +160,7 @@ export function CreateInboundModal({ serverId, isOpen, onClose, onSaved }: Creat
           创建
         </Button>
       </Form>
-    </Modal>
+    </>
   )
 }
 
