@@ -76,6 +76,12 @@ body {
   font-family: ui-monospace, 'SFMono-Regular', Menlo, monospace;
 }
 
+.modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 16px;
+}
+
 .config-preview {
   max-height: 240px;
   overflow: auto;
