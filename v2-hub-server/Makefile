@@ -1,7 +1,8 @@
-.PHONY: run test build lint sqlc admin-create
+.PHONY: run test build lint vuln sqlc admin-create
 
 REPO_ROOT := $(abspath ..)
 SQLC_IMAGE := sqlc/sqlc:1.31.1
+GOVULNCHECK_VERSION := v1.9.0
 CONFIG := etc/hub-server.yaml
 
 # 开发库连接串：未显式设置 HUB_DATABASE_URL 时，从契约目录的 deploy/.env（init_env.sh 生成）拼出。
@@ -32,6 +33,10 @@ build:
 # 挂载仓库根，让 contract 符号链接在容器内也能解析。
 sqlc:
 	docker run --rm -v $(REPO_ROOT):/src -w /src/v2-hub-server $(SQLC_IMAGE) generate
+
+# 扫描代码实际调用到的已知漏洞（标准库与依赖）；有可达漏洞时退出码非 0，CI 据此失败。
+vuln:
+	go run golang.org/x/vuln/cmd/govulncheck@$(GOVULNCHECK_VERSION) ./...
 
 lint:
 	go vet ./...
