@@ -1,12 +1,14 @@
 import { Card, Empty, PageHeader } from '../components/ui'
+import { useI18n } from '../i18n/i18n-context'
 
 /** 404 页。 */
 export function NotFoundPage() {
+  const { t } = useI18n()
   return (
     <>
-      <PageHeader title="页面不存在" />
+      <PageHeader title={t('shell.notFoundTitle')} />
       <Card>
-        <Empty>你访问的页面不存在或已被移除。</Empty>
+        <Empty>{t('shell.notFoundBody')}</Empty>
       </Card>
     </>
   )

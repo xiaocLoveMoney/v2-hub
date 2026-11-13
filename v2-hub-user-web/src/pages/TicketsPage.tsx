@@ -6,12 +6,14 @@ import { formatTime } from '../format'
 import { useRemote } from '../hooks/use-remote'
 import { ROUTES } from '../menu'
 import { MAX_TICKET_CONTENT_LEN, MAX_TICKET_SUBJECT_LEN, TicketStatusBadge } from './tickets'
+import { useI18n } from '../i18n/i18n-context'
 
 const PAGE_SIZE = 20
 const CONTENT_ROWS = 6
 
 /** 工单支持（docs/03 §5.10）：本人的工单列表与新建；工单关闭时菜单不出现，接口也会拒绝。 */
 export function TicketsPage() {
+  const { t, tag } = useI18n()
   const [page, setPage] = useState(1)
   const [isCreating, setIsCreating] = useState(false)
   const load = useCallback((signal: AbortSignal) => api.GET('/api/user/tickets', { params: { query: { page, pageSize: PAGE_SIZE } }, signal }), [page])
@@ -21,10 +23,10 @@ export function TicketsPage() {
   return (
     <>
       <PageHeader
-        title="工单支持"
+        title={t('menu.tickets')}
         extra={
           <Button variant="primary" onClick={() => setIsCreating(true)}>
-            新建工单
+            {t('tickets.new')}
           </Button>
         }
       />
@@ -34,29 +36,29 @@ export function TicketsPage() {
           <table className="hub-table">
             <thead>
               <tr>
-                <th>主题</th>
-                <th>状态</th>
-                <th>最近回复</th>
-                <th>创建时间</th>
+                <th>{t('tickets.colSubject')}</th>
+                <th>{t('tickets.colStatus')}</th>
+                <th>{t('tickets.colLastReply')}</th>
+                <th>{t('tickets.colCreated')}</th>
               </tr>
             </thead>
             <tbody>
-              {items.map((t) => (
-                <tr key={t.id}>
+              {items.map((ticket) => (
+                <tr key={ticket.id}>
                   <td>
-                    <Link to={generatePath(ROUTES.TICKET_DETAIL, { id: String(t.id) })}>{t.subject}</Link>
+                    <Link to={generatePath(ROUTES.TICKET_DETAIL, { id: String(ticket.id) })}>{ticket.subject}</Link>
                   </td>
                   <td>
-                    <TicketStatusBadge status={t.status} />
+                    <TicketStatusBadge status={ticket.status} />
                   </td>
-                  <td>{formatTime(t.lastReplyAt)}</td>
-                  <td>{formatTime(t.createdAt)}</td>
+                  <td>{formatTime(ticket.lastReplyAt, tag)}</td>
+                  <td>{formatTime(ticket.createdAt, tag)}</td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
-        {tickets.data !== null && items.length === 0 && <Empty>还没有工单，遇到问题可以点右上角新建</Empty>}
+        {tickets.data !== null && items.length === 0 && <Empty>{t('tickets.empty')}</Empty>}
         <Pager page={page} pageSize={PAGE_SIZE} total={tickets.data?.total ?? 0} onChange={setPage} />
       </Card>
       <CreateTicketModal isOpen={isCreating} onClose={() => setIsCreating(false)} />
@@ -73,6 +75,7 @@ function CreateTicketModal({ isOpen, onClose }: { isOpen: boolean; onClose: () =
 }
 
 function CreateTicketForm({ onClose }: { onClose: () => void }) {
+  const { t } = useI18n()
   const navigate = useNavigate()
   const [subject, setSubject] = useState('')
   const [content, setContent] = useState('')
@@ -99,27 +102,27 @@ function CreateTicketForm({ onClose }: { onClose: () => void }) {
 
   return (
     <Modal
-      title="新建工单"
+      title={t('tickets.new')}
       isOpen
       onClose={onClose}
       footer={
         <>
           <Button variant="outline" onClick={onClose}>
-            取消
+            {t('common.cancel')}
           </Button>
           <Button variant="primary" isBusy={isBusy} disabled={subject.trim() === '' || content.trim() === ''} onClick={() => void handleCreate()}>
-            提交
+            {t('tickets.submit')}
           </Button>
         </>
       }
     >
       {error !== null && <Alert tone="plain">{error}</Alert>}
-      <Field label="主题" maxLength={MAX_TICKET_SUBJECT_LEN} value={subject} onChange={(e) => setSubject(e.target.value)} />
+      <Field label={t('tickets.subject')} maxLength={MAX_TICKET_SUBJECT_LEN} value={subject} onChange={(e) => setSubject(e.target.value)} />
       <TextAreaField
-        label="问题描述"
+        label={t('tickets.content')}
         rows={CONTENT_ROWS}
         maxLength={MAX_TICKET_CONTENT_LEN}
-        hint="纯文本；请不要把订阅地址、口令等凭据写进来"
+        hint={t('tickets.contentHint')}
         value={content}
         onChange={(e) => setContent(e.target.value)}
       />

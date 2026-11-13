@@ -1,4 +1,5 @@
 import { useEffect, useId, type ButtonHTMLAttributes, type CSSProperties, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes } from 'react'
+import { useI18n } from '../i18n/i18n-context'
 
 /** 设计系统的基础组件（docs/06 §4）。只负责外观与无障碍语义，不含业务逻辑。 */
 
@@ -157,6 +158,7 @@ interface PagerProps {
 
 /** 上一页 / 下一页；只有一页时不渲染。 */
 export function Pager({ page, pageSize, total, onChange }: PagerProps) {
+  const { t } = useI18n()
   if (total <= pageSize) {
     return null
   }
@@ -164,13 +166,13 @@ export function Pager({ page, pageSize, total, onChange }: PagerProps) {
   return (
     <div className="hub-pagination">
       <Button variant="outline" disabled={page <= 1} onClick={() => onChange(page - 1)}>
-        上一页
+        {t('common.prevPage')}
       </Button>
       <span>
         {page} / {pageCount}
       </span>
       <Button variant="outline" disabled={page >= pageCount} onClick={() => onChange(page + 1)}>
-        下一页
+        {t('common.nextPage')}
       </Button>
     </div>
   )
@@ -235,6 +237,7 @@ interface ConfirmProps {
 
 /** 危险操作的二次确认（docs/06 §3 不变式 5）。 */
 export function Confirm({ title, isOpen, isBusy = false, confirmText, onConfirm, onClose, children }: ConfirmProps) {
+  const { t } = useI18n()
   return (
     <Modal
       title={title}
@@ -243,7 +246,7 @@ export function Confirm({ title, isOpen, isBusy = false, confirmText, onConfirm,
       footer={
         <>
           <Button variant="outline" onClick={onClose}>
-            取消
+            {t('common.cancel')}
           </Button>
           <Button variant="danger" isBusy={isBusy} onClick={onConfirm}>
             {confirmText}

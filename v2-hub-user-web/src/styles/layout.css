@@ -130,6 +130,12 @@
 .hub-footer {
   position: absolute;
   inset: auto 0 0;
+  display: flex;
+  flex-wrap: wrap;
+  /* 靠左排：右下角留给客服按钮 */
+  justify-content: flex-start;
+  align-items: center;
+  gap: 8px 16px;
   padding: 18px var(--hub-gap);
   font-size: 12px;
   color: var(--hub-muted);
@@ -209,6 +215,130 @@
   color: var(--hub-on-color);
 }
 
+/* 语言切换（docs/06 §5 M8 的做法）：页脚里的两个文字按钮，当前语言用主色 */
+.hub-locale-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--hub-muted);
+}
+
+.hub-locale-switch button {
+  padding: 2px 4px;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.hub-locale-switch button.is-active {
+  color: var(--hub-primary);
+  font-weight: 700;
+}
+
+.hub-login-footer {
+  margin-top: 28px;
+}
+
+/* 客服入口：右下角固定的药丸按钮（Ruling-44） */
+.hub-support {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  z-index: 30;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 18px;
+  border-radius: var(--hub-radius-pill);
+  background: var(--hub-primary);
+  box-shadow: var(--hub-float-shadow);
+  color: var(--hub-on-color);
+  font-size: 13px;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.hub-support:hover {
+  background: var(--hub-primary-hover);
+  color: var(--hub-on-color);
+}
+
+/* 落地页（docs/03 §5.20）：顶栏 + 主色 Hero + 在售套餐 + 页脚 */
+.hub-landing {
+  min-height: 100vh;
+  background: var(--hub-page-bg);
+}
+
+.hub-landing-nav {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  padding: 0 var(--hub-gap);
+  background: var(--hub-surface);
+  box-shadow: var(--hub-card-shadow);
+}
+
+.hub-landing-hero {
+  padding: 72px var(--hub-gap) 80px;
+  background: linear-gradient(135deg, var(--hub-primary-hover), var(--hub-primary) 60%, var(--hub-primary-glow));
+  color: var(--hub-on-color);
+  text-align: center;
+}
+
+.hub-landing-hero h1 {
+  margin-bottom: 16px;
+  font-size: 40px;
+  font-weight: 800;
+  color: var(--hub-on-color);
+}
+
+.hub-landing-hero .hub-markdown {
+  max-width: 720px;
+  margin: 0 auto 28px;
+  color: var(--hub-on-color);
+  opacity: 0.92;
+}
+
+.hub-landing-hero .hub-markdown :is(h1, h2, h3, h4, a) {
+  color: var(--hub-on-color);
+}
+
+.hub-landing-hero .hub-actions {
+  justify-content: center;
+}
+
+.hub-btn-light {
+  background: var(--hub-surface);
+  color: var(--hub-primary);
+}
+
+.hub-btn-light:hover {
+  background: var(--hub-primary-faint);
+}
+
+.hub-landing-plans {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 48px var(--hub-gap) 24px;
+}
+
+.hub-landing-footer {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px 16px;
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 24px var(--hub-gap) 88px;
+  font-size: 12px;
+  color: var(--hub-muted);
+}
+
 @media (width <= 1024px) {
   .hub-sider {
     transform: translateX(-100%);
@@ -270,5 +400,20 @@
   .hub-topbar,
   .hub-content {
     padding-inline: 16px;
+  }
+}
+
+@media (width <= 640px) {
+  .hub-landing-hero {
+    padding: 48px 16px 56px;
+  }
+
+  .hub-landing-hero h1 {
+    font-size: 28px;
+  }
+
+  .hub-support {
+    right: 16px;
+    bottom: 16px;
   }
 }

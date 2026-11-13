@@ -7,6 +7,7 @@ import { Alert, Badge, Button, Card, Empty, Field, Modal, PageHeader } from '../
 import { formatTime } from '../format'
 import { mutate, useRemote } from '../hooks/use-remote'
 import { DeleteAccountCard, EmailCard } from './AccountEmailCards'
+import { useI18n } from '../i18n/i18n-context'
 
 const MIN_CREDENTIAL_LEN = 8
 const MAX_CREDENTIAL_LEN = 128
@@ -21,6 +22,7 @@ function digitsOnly(v: string): string {
 
 /** 改口令：须提交旧口令，成功后其它设备上的登录会失效（docs/03 §5.3）。 */
 function CredentialCard() {
+  const { t } = useI18n()
   const toast = useToast()
   const [oldValue, setOldValue] = useState('')
   const [newValue, setNewValue] = useState('')
@@ -44,35 +46,35 @@ function CredentialCard() {
     setOldValue('')
     setNewValue('')
     setRepeat('')
-    toast.show('口令已修改，其它设备需要重新登录', 'success')
+    toast.show(t('account.credentialChanged'), 'success')
   }
 
   return (
-    <Card title="修改登录口令">
+    <Card title={t('account.credentialTitle')}>
       {error !== null && <Alert tone="plain">{error}</Alert>}
       <form onSubmit={(e) => void handleSubmit(e)} noValidate>
-        <Field label="当前口令" type="password" autoComplete="current-password" maxLength={MAX_CREDENTIAL_LEN} value={oldValue} onChange={(e) => setOldValue(e.target.value)} />
+        <Field label={t('account.currentCredential')} type="password" autoComplete="current-password" maxLength={MAX_CREDENTIAL_LEN} value={oldValue} onChange={(e) => setOldValue(e.target.value)} />
         <Field
-          label="新口令"
+          label={t('account.newCredential')}
           type="password"
           autoComplete="new-password"
           maxLength={MAX_CREDENTIAL_LEN}
-          hint={`${MIN_CREDENTIAL_LEN}–${MAX_CREDENTIAL_LEN} 个字符`}
-          error={tooShort ? `至少 ${MIN_CREDENTIAL_LEN} 个字符` : null}
+          hint={t('auth.passwordHint', { min: MIN_CREDENTIAL_LEN, max: MAX_CREDENTIAL_LEN })}
+          error={tooShort ? t('auth.passwordTooShort', { min: MIN_CREDENTIAL_LEN }) : null}
           value={newValue}
           onChange={(e) => setNewValue(e.target.value)}
         />
         <Field
-          label="再输一次新口令"
+          label={t('account.newCredentialRepeat')}
           type="password"
           autoComplete="new-password"
           maxLength={MAX_CREDENTIAL_LEN}
-          error={mismatch ? '两次输入不一致' : null}
+          error={mismatch ? t('auth.passwordMismatch') : null}
           value={repeat}
           onChange={(e) => setRepeat(e.target.value)}
         />
         <Button type="submit" variant="primary" isBusy={isBusy} disabled={oldValue === '' || newValue.length < MIN_CREDENTIAL_LEN || repeat !== newValue}>
-          保存
+          {t('common.save')}
         </Button>
       </form>
     </Card>
@@ -81,6 +83,7 @@ function CredentialCard() {
 
 /** 两步验证：开启分两步（生成密钥 → 输入验证码确认），关闭须提交当前验证码（docs/03 §5.3）。 */
 function TotpCard() {
+  const { t } = useI18n()
   const toast = useToast()
   const { session, refresh } = useSession()
   const isEnabled = session?.totpEnabled === true
@@ -107,7 +110,7 @@ function TotpCard() {
     })
     setIsBusy(false)
     if (err !== null || next === null) {
-      toast.show(err?.message ?? '生成密钥失败', 'error')
+      toast.show(err?.message ?? t('account.totpSetupFailed'), 'error')
       return
     }
     setSetup(next)
@@ -123,34 +126,34 @@ function TotpCard() {
       setError(err.message)
       return
     }
-    toast.show(isDisabling ? '已关闭两步验证' : '已开启两步验证', 'success')
+    toast.show(t(isDisabling ? 'account.totpOff' : 'account.totpOn'), 'success')
     close()
     await refresh()
   }
 
   return (
-    <Card title="两步验证" extra={<Badge tone={isEnabled ? 'success' : undefined}>{isEnabled ? '已开启' : '未开启'}</Badge>}>
-      <p style={{ marginBottom: 16 }}>开启后，登录时除了口令还要输入验证器 App（如 Google Authenticator、1Password）里的 6 位数字。</p>
+    <Card title={t('account.totpTitle')} extra={<Badge tone={isEnabled ? 'success' : undefined}>{t(isEnabled ? 'wallet.on' : 'wallet.off')}</Badge>}>
+      <p style={{ marginBottom: 16 }}>{t('account.totpIntro')}</p>
       {isEnabled ? (
         <Button variant="outline" onClick={() => setIsDisabling(true)}>
-          关闭两步验证
+          {t('account.totpDisable')}
         </Button>
       ) : (
         <Button variant="primary" isBusy={isBusy} onClick={() => void startSetup()}>
-          开启两步验证
+          {t('account.totpEnable')}
         </Button>
       )}
       <Modal
-        title={isDisabling ? '关闭两步验证' : '开启两步验证'}
+        title={t(isDisabling ? 'account.totpDisable' : 'account.totpEnable')}
         isOpen={setup !== null || isDisabling}
         onClose={close}
         footer={
           <>
             <Button variant="outline" onClick={close}>
-              取消
+              {t('common.cancel')}
             </Button>
             <Button variant={isDisabling ? 'danger' : 'primary'} isBusy={isBusy} disabled={code.length !== TOTP_LENGTH} onClick={() => void submitCode()}>
-              {isDisabling ? '关闭' : '确认开启'}
+              {t(isDisabling ? 'account.totpDisableShort' : 'account.totpEnableConfirm')}
             </Button>
           </>
         }
@@ -158,7 +161,7 @@ function TotpCard() {
         {error !== null && <Alert tone="plain">{error}</Alert>}
         {setup !== null && (
           <>
-            <p style={{ marginBottom: 12 }}>用验证器 App 扫描二维码，或手动输入密钥：</p>
+            <p style={{ marginBottom: 12 }}>{t('account.totpScan')}</p>
             <div style={{ display: 'grid', placeItems: 'center', marginBottom: 12 }}>
               <QRCodeSVG value={setup.otpauthUri} size={QR_SIZE} />
             </div>
@@ -168,11 +171,11 @@ function TotpCard() {
           </>
         )}
         <Field
-          label="验证码"
+          label={t('account.totpCode')}
           inputMode="numeric"
           autoComplete="one-time-code"
           maxLength={TOTP_LENGTH}
-          hint="输入验证器 App 当前显示的 6 位数字"
+          hint={t('account.totpCodeHint')}
           value={code}
           onChange={(e) => setCode(digitsOnly(e.target.value))}
         />
@@ -182,42 +185,44 @@ function TotpCard() {
 }
 
 function LoginLogsCard() {
+  const { t, tag } = useI18n()
   const logs = useRemote<LoginLog[]>(loadLoginLogs)
   return (
-    <Card title="最近登录">
+    <Card title={t('account.loginLogs')}>
       {logs.error !== null && <Alert tone="plain">{logs.error.message}</Alert>}
       <div className="hub-table-wrap">
         <table className="hub-table">
           <thead>
             <tr>
-              <th>时间</th>
+              <th>{t('account.colTime')}</th>
               <th>IP</th>
-              <th>结果</th>
+              <th>{t('account.colResult')}</th>
             </tr>
           </thead>
           <tbody>
             {(logs.data ?? []).map((l) => (
               <tr key={`${l.createdAt}-${l.clientIp}-${String(l.isSuccess)}`}>
-                <td>{formatTime(l.createdAt)}</td>
-                <td>{l.clientIp || '—'}</td>
+                <td>{formatTime(l.createdAt, tag)}</td>
+                <td>{l.clientIp || t('common.dash')}</td>
                 <td>
-                  <Badge tone={l.isSuccess ? 'success' : 'danger'}>{l.isSuccess ? '成功' : '失败'}</Badge>
+                  <Badge tone={l.isSuccess ? 'success' : 'danger'}>{t(l.isSuccess ? 'account.success' : 'account.failure')}</Badge>
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
-      {logs.data !== null && logs.data.length === 0 && <Empty>暂无记录</Empty>}
+      {logs.data !== null && logs.data.length === 0 && <Empty>{t('account.noLogs')}</Empty>}
     </Card>
   )
 }
 
 /** 我的账号（docs/06 §5）：改口令、邮箱、注销账号、两步验证、最近登录。 */
 export function AccountPage() {
+  const { t } = useI18n()
   return (
     <>
-      <PageHeader title="我的账号" />
+      <PageHeader title={t('menu.account')} />
       <div className="hub-grid-2">
         <div>
           <CredentialCard />

@@ -1,17 +1,20 @@
 import { LogOut, Menu as MenuIcon } from 'lucide-react'
 import { Fragment, useState } from 'react'
 import { NavLink, Navigate, Outlet, useLocation, useNavigate } from 'react-router'
-import { APP_TITLE } from '../app-config'
 import { useSession } from '../auth/session-context'
+import { LocaleSwitch } from '../components/LocaleSwitch'
+import { SupportButton } from '../components/SupportButton'
 import { Alert, Button } from '../components/ui'
+import { useI18n, type MessageKey } from '../i18n/i18n-context'
+import { LandingPage } from '../pages/LandingPage'
 import { ROUTES, visibleMenu, type MenuEntry } from '../menu'
 import { useSite } from '../site/site-context'
 
 const STATUS_DISABLED = 'disabled'
 
 /** 把菜单表按分组切开，保持表内顺序。 */
-function groupMenu(entries: readonly MenuEntry[]): { title: string | undefined; items: MenuEntry[] }[] {
-  const groups: { title: string | undefined; items: MenuEntry[] }[] = []
+function groupMenu(entries: readonly MenuEntry[]): { title: MessageKey | undefined; items: MenuEntry[] }[] {
+  const groups: { title: MessageKey | undefined; items: MenuEntry[] }[] = []
   for (const entry of entries) {
     const last = groups[groups.length - 1]
     if (last !== undefined && last.title === entry.group) {
@@ -24,22 +27,27 @@ function groupMenu(entries: readonly MenuEntry[]): { title: string | undefined; 
 }
 
 /**
- * 已登录后的整体布局：侧栏 + 主色色带 + 顶栏 + 内容区（docs/06 §4 外壳）。未登录跳到登录页；
- * 停用的账号只显示停用提示（docs/03 §5.3）。
+ * 已登录后的整体布局：侧栏 + 主色色带 + 顶栏 + 内容区（docs/06 §4 外壳）。未登录跳到登录页，
+ * 但站点开了落地页时根地址改为显示落地页（docs/03 §5.20）；停用的账号只显示停用提示（docs/03 §5.3）。
  */
 export function UserLayout() {
   const { status, session, logout } = useSession()
   const site = useSite()
   const location = useLocation()
   const navigate = useNavigate()
+  const { t, rich } = useI18n()
   // 小屏：侧栏默认收起、点按钮滑出；大屏：默认展开、点按钮收起。两种状态分开记
   const [isOpenOnSmall, setIsOpenOnSmall] = useState(false)
   const [isCollapsedOnLarge, setIsCollapsedOnLarge] = useState(false)
 
   if (status === 'loading') {
-    return <div className="hub-empty">加载中…</div>
+    return <div className="hub-empty">{t('common.loading')}</div>
   }
-  if (status === 'anonymous' || session === null) {
+  const isAnonymous = status === 'anonymous' || session === null
+  if (isAnonymous && location.pathname === ROUTES.DASHBOARD && site.landing?.enabled === true) {
+    return <LandingPage />
+  }
+  if (isAnonymous) {
     return <Navigate to={ROUTES.LOGIN} replace state={{ from: location.pathname }} />
   }
 
@@ -58,16 +66,16 @@ export function UserLayout() {
     <div className={shellClass}>
       <aside className="hub-sider">
         <div className="hub-brand">{site.siteName}</div>
-        <nav aria-label="主菜单">
+        <nav aria-label={t('shell.mainMenu')}>
           <ul className="hub-menu">
             {groupMenu(visibleMenu(site, session.features)).map((g) => (
               <Fragment key={g.title ?? 'top'}>
-                {g.title !== undefined && <li className="hub-menu-header">{g.title}</li>}
+                {g.title !== undefined && <li className="hub-menu-header">{t(g.title)}</li>}
                 {g.items.map((entry) => (
                   <li key={entry.path}>
                     <NavLink to={entry.path} end={entry.path === ROUTES.DASHBOARD} className="hub-menu-link" onClick={() => setIsOpenOnSmall(false)}>
                       {entry.icon}
-                      <span>{entry.label}</span>
+                      <span>{t(entry.labelKey)}</span>
                     </NavLink>
                   </li>
                 ))}
@@ -76,36 +84,38 @@ export function UserLayout() {
           </ul>
         </nav>
       </aside>
-      <button type="button" className="hub-sider-mask" aria-label="收起菜单" onClick={() => setIsOpenOnSmall(false)} />
+      <button type="button" className="hub-sider-mask" aria-label={t('shell.closeMenu')} onClick={() => setIsOpenOnSmall(false)} />
       <div className="hub-main">
         <div className="hub-band" aria-hidden="true" />
         <header className="hub-topbar">
-          <button type="button" className="hub-topbar-toggle" aria-label="展开或收起菜单" onClick={toggleSider}>
+          <button type="button" className="hub-topbar-toggle" aria-label={t('shell.toggleMenu')} onClick={toggleSider}>
             <MenuIcon size={20} />
           </button>
           <div className="hub-topbar-user">
-            <span>Hi, {session.user.username}</span>
+            <span>{t('shell.greeting', { name: session.user.username })}</span>
             <Button variant="ghost" onClick={() => void handleLogout()}>
               <LogOut size={14} />
-              退出
+              {t('shell.logout')}
             </Button>
           </div>
         </header>
         {session.impersonated === true && (
           <div className="hub-impersonate-bar" role="status">
-            <span>
-              正在以 <strong>{session.user.username}</strong> 的身份查看（只读，30 分钟后失效）
-            </span>
+            <span>{rich('shell.impersonating', { name: <strong>{session.user.username}</strong> })}</span>
             <Button variant="ghost" onClick={() => void handleLogout()}>
-              退出
+              {t('shell.logout')}
             </Button>
           </div>
         )}
         <main className="hub-content">
-          {isDisabled ? <Alert tone="danger">账号已停用，请联系管理员。</Alert> : <Outlet />}
+          {isDisabled ? <Alert tone="danger">{t('shell.accountDisabled')}</Alert> : <Outlet />}
         </main>
-        <footer className="hub-footer">{APP_TITLE}</footer>
+        <footer className="hub-footer">
+          <span>{t('shell.appTitle')}</span>
+          <LocaleSwitch />
+        </footer>
       </div>
+      <SupportButton />
     </div>
   )
 }

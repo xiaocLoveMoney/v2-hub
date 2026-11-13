@@ -4,6 +4,7 @@ import type { Announcement } from '../api/client'
 import { Markdown } from '../components/Markdown'
 import { Button, Card, Modal } from '../components/ui'
 import { formatTime } from '../format'
+import { useI18n } from '../i18n/i18n-context'
 import { ROUTES } from '../menu'
 
 /** 记住“已关掉的弹窗公告 id”的 localStorage 键；只存公告 id，不属凭据（docs/06 §5 M4 的做法）。 */
@@ -29,16 +30,18 @@ function writeDismissedId(id: number) {
 
 /** 仪表盘上的最新公告卡。 */
 export function LatestAnnouncementCard({ announcement }: { announcement: Announcement }) {
+  const { t, tag } = useI18n()
   return (
-    <Card title={`📢 ${announcement.title}`} extra={<Link to={ROUTES.ANNOUNCEMENTS}>全部公告 →</Link>}>
+    <Card title={`📢 ${announcement.title}`} extra={<Link to={ROUTES.ANNOUNCEMENTS}>{t('ann.all')}</Link>}>
       <Markdown source={announcement.content} />
-      <p className="hub-field-hint">{formatTime(announcement.publishedAt)}</p>
+      <p className="hub-field-hint">{formatTime(announcement.publishedAt, tag)}</p>
     </Card>
   )
 }
 
 /** 弹窗公告：同一条关掉后不再弹（docs/03 §5.9）。 */
 export function PopupAnnouncement({ announcement }: { announcement: Announcement }) {
+  const { t } = useI18n()
   const [isOpen, setIsOpen] = useState(() => readDismissedId() !== String(announcement.id))
   const close = () => {
     writeDismissedId(announcement.id)
@@ -51,7 +54,7 @@ export function PopupAnnouncement({ announcement }: { announcement: Announcement
       onClose={close}
       footer={
         <Button variant="primary" onClick={close}>
-          知道了
+          {t('ann.gotIt')}
         </Button>
       }
     >

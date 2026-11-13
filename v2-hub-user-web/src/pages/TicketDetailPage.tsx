@@ -8,6 +8,7 @@ import { mutate, useRemote } from '../hooks/use-remote'
 import { ROUTES } from '../menu'
 import { NotFoundPage } from './NotFoundPage'
 import { MAX_TICKET_CONTENT_LEN, TicketStatusBadge } from './tickets'
+import { useI18n } from '../i18n/i18n-context'
 
 const REPLY_ROWS = 4
 const TICKET_ID_PATTERN = /^[1-9]\d{0,17}$/
@@ -15,12 +16,13 @@ const STATUS_CLOSED = 'closed'
 
 /** 一条消息：内容是纯文本，交给 React 转义后按原样（保留换行）显示（Ruling-25）。客服一律显示“客服”，不显示管理员用户名。 */
 function MessageItem({ message }: { message: TicketMessage }) {
+  const { t, tag } = useI18n()
   const isStaff = message.authorKind === 'admin'
   return (
     <div className={`hub-chat-item${isStaff ? ' is-staff' : ''}`}>
       <div className="hub-chat-meta">
-        <strong>{isStaff ? '客服' : '我'}</strong>
-        <span>{formatTime(message.createdAt)}</span>
+        <strong>{t(isStaff ? 'tickets.staff' : 'tickets.me')}</strong>
+        <span>{formatTime(message.createdAt, tag)}</span>
       </div>
       <div className="hub-chat-content">{message.content}</div>
     </div>
@@ -37,6 +39,7 @@ export function TicketDetailPage() {
 }
 
 function TicketConversation({ ticketId }: { ticketId: number }) {
+  const { t, tag } = useI18n()
   const toast = useToast()
   const load = useCallback((signal: AbortSignal) => api.GET('/api/user/tickets/{id}', { params: { path: { id: ticketId } }, signal }), [ticketId])
   const ticket = useRemote<TicketDetail>(load)
@@ -68,30 +71,30 @@ function TicketConversation({ ticketId }: { ticketId: number }) {
       toast.show(err.message, 'error')
       return
     }
-    toast.show('工单已关闭', 'success')
+    toast.show(t('tickets.closed'), 'success')
     ticket.reload()
   }
 
   if (detail === null) {
     return (
       <>
-        <PageHeader title="工单" extra={<Link to={ROUTES.TICKETS}>← 返回列表</Link>} />
-        {ticket.error === null ? <div className="hub-empty">加载中…</div> : <Alert tone="plain">{ticket.error.message}</Alert>}
+        <PageHeader title={t('tickets.title')} extra={<Link to={ROUTES.TICKETS}>{t('tickets.backToList')}</Link>} />
+        {ticket.error === null ? <div className="hub-empty">{t('common.loading')}</div> : <Alert tone="plain">{ticket.error.message}</Alert>}
       </>
     )
   }
   const isClosed = detail.status === STATUS_CLOSED
   return (
     <>
-      <PageHeader title={detail.subject} extra={<Link to={ROUTES.TICKETS}>← 返回列表</Link>} />
+      <PageHeader title={detail.subject} extra={<Link to={ROUTES.TICKETS}>{t('tickets.backToList')}</Link>} />
       <Card
-        title={`创建于 ${formatTime(detail.createdAt)}`}
+        title={t('tickets.createdAt', { time: formatTime(detail.createdAt, tag) })}
         extra={
           <span className="hub-actions">
             <TicketStatusBadge status={detail.status} />
             {!isClosed && (
               <Button variant="outline" onClick={() => setIsConfirming(true)}>
-                关闭工单
+                {t('tickets.close')}
               </Button>
             )}
           </span>
@@ -102,18 +105,18 @@ function TicketConversation({ ticketId }: { ticketId: number }) {
           <MessageItem key={m.id} message={m} />
         ))}
         <TextAreaField
-          label={isClosed ? '继续回复（会重新打开这张工单）' : '回复'}
+          label={t(isClosed ? 'tickets.replyReopen' : 'tickets.reply')}
           rows={REPLY_ROWS}
           maxLength={MAX_TICKET_CONTENT_LEN}
           value={content}
           onChange={(e) => setContent(e.target.value)}
         />
         <Button variant="primary" isBusy={isReplying} disabled={content.trim() === ''} onClick={() => void handleReply()}>
-          发送
+          {t('tickets.send')}
         </Button>
       </Card>
-      <Confirm title="关闭工单" isOpen={isConfirming} isBusy={isClosing} confirmText="关闭" onConfirm={() => void handleClose()} onClose={() => setIsConfirming(false)}>
-        问题解决了就可以关闭。之后再回复，这张工单会重新打开。
+      <Confirm title={t('tickets.close')} isOpen={isConfirming} isBusy={isClosing} confirmText={t('tickets.closeConfirm')} onConfirm={() => void handleClose()} onClose={() => setIsConfirming(false)}>
+        {t('tickets.closeConfirmBody')}
       </Confirm>
     </>
   )

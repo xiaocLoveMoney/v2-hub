@@ -4,6 +4,7 @@ import { api, toApiError, type ApiError, type RegisterInput } from '../../api/cl
 import { useSession } from '../../auth/session-context'
 import { Alert, Button, Field } from '../../components/ui'
 import { mutate } from '../../hooks/use-remote'
+import { useI18n } from '../../i18n/i18n-context'
 import { ROUTES } from '../../menu'
 import { useSite } from '../../site/site-context'
 import { AuthShell } from './AuthShell'
@@ -24,6 +25,7 @@ const sendRegisterCode = (email: string): Promise<ApiError | null> =>
  */
 export function RegisterPage() {
   const site = useSite()
+  const { t } = useI18n()
   const { status, adopt } = useSession()
   const navigate = useNavigate()
   const [query] = useSearchParams()
@@ -41,10 +43,10 @@ export function RegisterPage() {
   }
   if (site.registerMode === MODE_CLOSED) {
     return (
-      <AuthShell lead="注册" subtitle="创建账号后即可查看订阅与节点">
-        <Alert tone="info">当前不开放注册，请联系管理员开通账号。</Alert>
+      <AuthShell lead={t('auth.registerLead')} subtitle={t('auth.registerSubtitle')}>
+        <Alert tone="info">{t('auth.registerClosed')}</Alert>
         <p className="hub-login-links">
-          <Link to={ROUTES.LOGIN}>返回登录</Link>
+          <Link to={ROUTES.LOGIN}>{t('common.backToLogin')}</Link>
         </p>
       </AuthShell>
     )
@@ -91,66 +93,66 @@ export function RegisterPage() {
   }
 
   return (
-    <AuthShell lead="注册" subtitle="创建账号后即可查看订阅与节点">
+    <AuthShell lead={t('auth.registerLead')} subtitle={t('auth.registerSubtitle')}>
       {error !== null && <Alert tone="plain">{error}</Alert>}
       <form onSubmit={(e) => void handleSubmit(e)} noValidate>
         <Field
-          label="用户名"
+          label={t('auth.username')}
           name="username"
           autoComplete="username"
           maxLength={MAX_USERNAME_LEN}
-          hint="3–64 位字母、数字或 _ . -"
-          error={isUsernameBad ? '只能用 3–64 位字母、数字或 _ . -' : null}
+          hint={t('auth.usernameHint')}
+          error={isUsernameBad ? t('auth.usernameInvalid') : null}
           value={username}
           onChange={(e) => setUsername(e.target.value.trim())}
         />
         <Field
-          label="邮箱"
+          label={t('auth.email')}
           name="email"
           type="email"
           autoComplete="email"
           maxLength={MAX_EMAIL_LEN}
-          hint="用来登录与找回口令"
+          hint={t('auth.emailRegisterHint')}
           value={email}
           onChange={(e) => setEmail(e.target.value)}
         />
         {site.emailVerifyRequired && <EmailCodeField email={email} value={emailCode} onChange={setEmailCode} send={sendRegisterCode} />}
         <Field
-          label="密码"
+          label={t('auth.password')}
           name="password"
           type="password"
           autoComplete="new-password"
           maxLength={MAX_CREDENTIAL_LEN}
-          hint={`${MIN_CREDENTIAL_LEN}–${MAX_CREDENTIAL_LEN} 个字符`}
-          error={isTooShort ? `至少 ${MIN_CREDENTIAL_LEN} 个字符` : null}
+          hint={t('auth.passwordHint', { min: MIN_CREDENTIAL_LEN, max: MAX_CREDENTIAL_LEN })}
+          error={isTooShort ? t('auth.passwordTooShort', { min: MIN_CREDENTIAL_LEN }) : null}
           value={credential}
           onChange={(e) => setCredential(e.target.value)}
         />
         <Field
-          label="再输一次密码"
+          label={t('auth.passwordRepeat')}
           name="repeat"
           type="password"
           autoComplete="new-password"
           maxLength={MAX_CREDENTIAL_LEN}
-          error={isMismatch ? '两次输入不一致' : null}
+          error={isMismatch ? t('auth.passwordMismatch') : null}
           value={repeat}
           onChange={(e) => setRepeat(e.target.value)}
         />
         <Field
-          label={isInviteRequired ? '邀请码' : '邀请码（可选）'}
+          label={t(isInviteRequired ? 'auth.inviteCode' : 'auth.inviteCodeOptional')}
           name="inviteCode"
           autoComplete="off"
           maxLength={MAX_INVITE_CODE_LEN}
-          hint={isInviteRequired ? '当前只能凭邀请码注册' : undefined}
+          hint={isInviteRequired ? t('auth.inviteRequiredHint') : undefined}
           value={inviteCode}
           onChange={(e) => setInviteCode(e.target.value)}
         />
         <Button type="submit" variant="primary" isLarge isBlock isBusy={isBusy} disabled={!canSubmit}>
-          注册
+          {t('auth.register')}
         </Button>
       </form>
       <p className="hub-login-links">
-        <Link to={ROUTES.LOGIN}>已有账号，去登录</Link>
+        <Link to={ROUTES.LOGIN}>{t('auth.haveAccount')}</Link>
       </p>
     </AuthShell>
   )

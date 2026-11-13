@@ -5,8 +5,8 @@ import { Alert, Badge, Button, Card, Confirm, Empty, Field, Modal, TextAreaField
 import { useCopy } from '../../hooks/use-copy'
 import { mutate } from '../../hooks/use-remote'
 import { MAX_CHAIN_NAME_LEN, MAX_CUSTOM_LINK_LEN, isValidChainName } from './labels'
+import { useI18n } from '../../i18n/i18n-context'
 
-const LINK_HINT = '粘贴 vless:// vmess:// trojan:// ss:// 分享链接，或 socks5://[用户名:口令@]地址:端口'
 const LINK_ROWS = 4
 const NEW_NODE_KEY = 'new'
 
@@ -20,6 +20,7 @@ interface NodeFormModalProps {
 
 /** 添加或编辑自有落地节点：添加时链接必填；编辑时链接留空表示不换。 */
 function NodeFormModal({ node, isOpen, onClose, onSaved }: NodeFormModalProps) {
+  const { t } = useI18n()
   const [name, setName] = useState(node?.name ?? '')
   const [link, setLink] = useState('')
   const [error, setError] = useState<string | null>(null)
@@ -52,34 +53,34 @@ function NodeFormModal({ node, isOpen, onClose, onSaved }: NodeFormModalProps) {
   }
 
   return (
-    <Modal title={isEditing ? '编辑自有节点' : '添加自有节点'} isOpen={isOpen} onClose={onClose}>
+    <Modal title={t(isEditing ? 'chain.editNode' : 'chain.addNode')} isOpen={isOpen} onClose={onClose}>
       {error !== null && <Alert tone="plain">{error}</Alert>}
       <form onSubmit={(e) => void handleSubmit(e)} noValidate>
         <TextAreaField
-          label={isEditing ? '新链接（留空不换）' : '节点链接'}
+          label={t(isEditing ? 'chain.newLink' : 'chain.nodeLink')}
           autoComplete="off"
           spellCheck={false}
           rows={LINK_ROWS}
           maxLength={MAX_CUSTOM_LINK_LEN}
           value={link}
           onChange={(e) => setLink(e.target.value)}
-          hint={LINK_HINT}
+          hint={t('chain.linkHint')}
         />
         <Field
-          label={isEditing ? '名称' : '名称（可选）'}
+          label={t(isEditing ? 'chain.name' : 'chain.nameOptional')}
           autoComplete="off"
           maxLength={MAX_CHAIN_NAME_LEN}
           value={name}
           onChange={(e) => setName(e.target.value)}
-          error={isValidChainName(name) ? null : `名称不能超过 ${MAX_CHAIN_NAME_LEN} 个字符，且不能含换行`}
-          hint={isEditing ? undefined : '留空则取链接里的名称'}
+          error={isValidChainName(name) ? null : t('chain.badName', { max: MAX_CHAIN_NAME_LEN })}
+          hint={isEditing ? undefined : t('chain.nodeNameHint')}
         />
         <div className="hub-actions">
           <Button type="submit" variant="primary" isBusy={isBusy} disabled={!canSubmit}>
-            保存
+            {t('common.save')}
           </Button>
           <Button variant="outline" onClick={onClose}>
-            取消
+            {t('common.cancel')}
           </Button>
         </div>
       </form>
@@ -96,6 +97,7 @@ interface NodeItemProps {
 
 /** 一个自有节点：原链接属于凭据，默认不取，点“查看链接”才单独请求，只留在本组件内存里。 */
 function NodeItem({ node, isWritable, onEdit, onDelete }: NodeItemProps) {
+  const { t } = useI18n()
   const toast = useToast()
   const copy = useCopy()
   const [link, setLink] = useState<string | null>(null)
@@ -128,31 +130,31 @@ function NodeItem({ node, isWritable, onEdit, onDelete }: NodeItemProps) {
         <span className="hub-mono">
           {node.address}:{node.port}
         </span>
-        {` · 被 ${node.ruleCount} 条规则引用`}
+        {t('chain.refCount', { n: node.ruleCount })}
       </p>
       {link !== null && <div className="hub-chain-link hub-mono">{link}</div>}
       <div className="hub-actions">
         {link === null ? (
           <Button variant="outline" isBusy={isBusy} onClick={() => void reveal()}>
-            查看链接
+            {t('chain.viewLink')}
           </Button>
         ) : (
           <>
-            <Button variant="outline" onClick={() => void copy(link, '链接已复制')}>
-              复制
+            <Button variant="outline" onClick={() => void copy(link, t('chain.linkCopied'))}>
+              {t('common.copy')}
             </Button>
             <Button variant="outline" onClick={() => setLink(null)}>
-              隐藏
+              {t('chain.hide')}
             </Button>
           </>
         )}
         {isWritable && (
           <Button variant="outline" onClick={onEdit}>
-            编辑
+            {t('chain.edit')}
           </Button>
         )}
         <Button variant="danger" onClick={onDelete}>
-          删除
+          {t('common.delete')}
         </Button>
       </div>
     </div>
@@ -161,6 +163,7 @@ function NodeItem({ node, isWritable, onEdit, onDelete }: NodeItemProps) {
 
 /** 自有落地节点卡（docs/03 §5.18）：只能作落地；套餐不允许时只读，但仍可删除。 */
 export function CustomNodesCard({ overview, onChanged }: { overview: ChainOverview; onChanged: () => void }) {
+  const { t } = useI18n()
   const toast = useToast()
   const [editing, setEditing] = useState<CustomNode | null>(null)
   const [isAdding, setIsAdding] = useState(false)
@@ -175,7 +178,7 @@ export function CustomNodesCard({ overview, onChanged }: { overview: ChainOvervi
   }
   const handleSaved = () => {
     closeForm()
-    toast.show('已保存', 'success')
+    toast.show(t('chain.saved'), 'success')
     onChanged()
   }
 
@@ -191,29 +194,29 @@ export function CustomNodesCard({ overview, onChanged }: { overview: ChainOvervi
       return
     }
     setDeleting(null)
-    toast.show('已删除', 'success')
+    toast.show(t('chain.deleted'), 'success')
     onChanged()
   }
 
   const addButton = (
     <Button variant="primary" disabled={!overview.customNodeAllowed || isFull} onClick={() => setIsAdding(true)}>
-      添加
+      {t('chain.add')}
     </Button>
   )
 
   return (
-    <Card title={`自有落地节点（${nodes.length} / ${overview.maxCustomNodes}）`} extra={addButton}>
-      {!overview.customNodeAllowed && <Alert tone="info">当前套餐不支持自有落地节点，已有的只能查看与删除，引用它们的规则处于阻断状态。</Alert>}
-      {overview.customNodeAllowed && isFull && <Alert tone="info">已达 {overview.maxCustomNodes} 个上限，删除不用的再添加。</Alert>}
-      {nodes.length === 0 && <Empty>还没有自有节点。自己的服务器可以添加进来，作为链路的落地出口。</Empty>}
+    <Card title={t('chain.customTitle', { count: nodes.length, max: overview.maxCustomNodes })} extra={addButton}>
+      {!overview.customNodeAllowed && <Alert tone="info">{t('chain.customNotAllowed')}</Alert>}
+      {overview.customNodeAllowed && isFull && <Alert tone="info">{t('chain.customFull', { max: overview.maxCustomNodes })}</Alert>}
+      {nodes.length === 0 && <Empty>{t('chain.customEmpty')}</Empty>}
       {nodes.map((n) => (
         <NodeItem key={n.id} node={n} isWritable={overview.customNodeAllowed} onEdit={() => setEditing(n)} onDelete={() => setDeleting(n)} />
       ))}
       {/* 每次打开都重新挂载，表单状态不残留上一次的输入 */}
       {(isAdding || editing !== null) && <NodeFormModal key={editing?.id ?? NEW_NODE_KEY} node={editing} isOpen onClose={closeForm} onSaved={handleSaved} />}
-      <Confirm title="删除自有节点" isOpen={deleting !== null} isBusy={isDeleting} confirmText="删除" onConfirm={() => void handleDelete()} onClose={() => setDeleting(null)}>
-        <p>确定删除“{deleting?.name}”？</p>
-        {deleting !== null && deleting.ruleCount > 0 && <Alert tone="warning">有 {deleting.ruleCount} 条规则以它为落地，会一并删除。</Alert>}
+      <Confirm title={t('chain.deleteNode')} isOpen={deleting !== null} isBusy={isDeleting} confirmText={t('common.delete')} onConfirm={() => void handleDelete()} onClose={() => setDeleting(null)}>
+        <p>{t('chain.deleteNodeConfirm', { name: deleting?.name ?? '' })}</p>
+        {deleting !== null && deleting.ruleCount > 0 && <Alert tone="warning">{t('chain.deleteNodeCascade', { n: deleting.ruleCount })}</Alert>}
       </Confirm>
     </Card>
   )

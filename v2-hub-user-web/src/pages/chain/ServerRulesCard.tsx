@@ -4,6 +4,7 @@ import { useToast } from '../../components/toast-context'
 import { Alert, Badge, Button, Card, Confirm, Empty, Modal, SelectField } from '../../components/ui'
 import { mutate } from '../../hooks/use-remote'
 import { serverRuleState } from './labels'
+import { useI18n } from '../../i18n/i18n-context'
 
 /** 有规则在下发中时自动刷新的间隔（docs/06 §5 M7）。 */
 const PENDING_REFRESH_MS = 15_000
@@ -17,6 +18,7 @@ interface CreateModalProps {
 
 /** 新建服务端规则：入口只列面板支持改内核配置、且还没有服务端规则的节点；落地列能作落地且不同于入口的节点。 */
 function CreateServerRuleModal({ overview, onClose, onCreated }: CreateModalProps) {
+  const { t } = useI18n()
   const [entryId, setEntryId] = useState('')
   const [exitId, setExitId] = useState('')
   const [error, setError] = useState<string | null>(null)
@@ -44,11 +46,11 @@ function CreateServerRuleModal({ overview, onClose, onCreated }: CreateModalProp
   }
 
   return (
-    <Modal title="新建服务端规则" isOpen onClose={onClose}>
+    <Modal title={t('chain.serverCreateTitle')} isOpen onClose={onClose}>
       {error !== null && <Alert tone="plain">{error}</Alert>}
       <form onSubmit={(e) => void handleSubmit(e)} noValidate>
         <SelectField
-          label="入口节点"
+          label={t('chain.entryNode')}
           value={entryId}
           onChange={(e) => {
             setEntryId(e.target.value)
@@ -56,30 +58,30 @@ function CreateServerRuleModal({ overview, onClose, onCreated }: CreateModalProp
               setExitId('')
             }
           }}
-          hint="你连这个节点的全部流量都会改从落地出网；每个入口只能有一条"
+          hint={t('chain.serverEntryHint')}
         >
-          <option value="">请选择</option>
+          <option value="">{t('chain.pick')}</option>
           {entries.map((n) => (
             <option key={n.id} value={n.id}>
               {n.name}
             </option>
           ))}
         </SelectField>
-        <SelectField label="落地节点" value={exitId} onChange={(e) => setExitId(e.target.value)} hint="由入口服务器转发到这里出网；hysteria 类节点不能作落地">
-          <option value="">请选择</option>
+        <SelectField label={t('chain.exitNode')} value={exitId} onChange={(e) => setExitId(e.target.value)} hint={t('chain.serverExitHint')}>
+          <option value="">{t('chain.pick')}</option>
           {exits.map((n) => (
             <option key={n.id} value={n.id}>
               {n.name}
             </option>
           ))}
         </SelectField>
-        {entries.length === 0 && <Alert tone="info">没有可作入口的节点：入口所在面板须支持服务端链式，且每个入口只能有一条规则。</Alert>}
+        {entries.length === 0 && <Alert tone="info">{t('chain.serverNoEntries')}</Alert>}
         <div className="hub-actions">
           <Button type="submit" variant="primary" isBusy={isBusy} disabled={entryId === '' || exitId === ''}>
-            创建
+            {t('chain.create')}
           </Button>
           <Button variant="outline" onClick={onClose}>
-            取消
+            {t('common.cancel')}
           </Button>
         </div>
       </form>
@@ -89,6 +91,7 @@ function CreateServerRuleModal({ overview, onClose, onCreated }: CreateModalProp
 
 /** 服务端规则表（docs/03 §5.19）：入口、落地、状态（阻断 / 已停用 / 生效 / 下发中 / 下发失败）、启停、删除。 */
 export function ServerRulesCard({ overview, onChanged }: { overview: ChainOverview; onChanged: () => void }) {
+  const { t } = useI18n()
   const toast = useToast()
   const [isCreating, setIsCreating] = useState(false)
   const [deleting, setDeleting] = useState<ServerChainRule | null>(null)
@@ -131,37 +134,37 @@ export function ServerRulesCard({ overview, onChanged }: { overview: ChainOvervi
       return
     }
     setDeleting(null)
-    toast.show('已删除', 'success')
+    toast.show(t('chain.deleted'), 'success')
     onChanged()
   }
 
   const createButton = (
     <Button variant="primary" disabled={!overview.serverAllowed || isFull} onClick={() => setIsCreating(true)}>
-      新建服务端规则
+      {t('chain.serverNew')}
     </Button>
   )
 
   return (
-    <Card title={`服务端链式（${rules.length} / ${overview.maxServerRules}）`} extra={createButton}>
-      {!overview.serverAllowed && overview.allowed && <Alert tone="info">当前套餐不支持服务端链式；已有的规则处于阻断状态、不会生效，仍可删除。</Alert>}
-      {hasPending && <Alert tone="info">下发中：同一台服务器两次下发至少间隔 60 秒，通常一两分钟内生效，本页会自动刷新。</Alert>}
+    <Card title={t('chain.serverTitle', { count: rules.length, max: overview.maxServerRules })} extra={createButton}>
+      {!overview.serverAllowed && overview.allowed && <Alert tone="info">{t('chain.serverNotAllowed')}</Alert>}
+      {hasPending && <Alert tone="info">{t('chain.serverPending')}</Alert>}
       {rules.length === 0 ? (
-        <Empty>服务端链式不改订阅：给某个入口节点配上落地后，你连这个入口的流量就由服务器转发到落地出网。</Empty>
+        <Empty>{t('chain.serverEmpty')}</Empty>
       ) : (
         <div className="hub-table-wrap">
           <table className="hub-table">
             <thead>
               <tr>
-                <th>入口</th>
-                <th>落地</th>
-                <th>状态</th>
-                <th>启用</th>
-                <th>操作</th>
+                <th>{t('chain.colEntry')}</th>
+                <th>{t('chain.colExit')}</th>
+                <th>{t('chain.colStatus')}</th>
+                <th>{t('chain.colEnabled')}</th>
+                <th>{t('chain.colActions')}</th>
               </tr>
             </thead>
             <tbody>
               {rules.map((r) => {
-                const state = serverRuleState(r)
+                const state = serverRuleState(t, r)
                 return (
                   <tr key={r.id}>
                     <td>{r.entry.name}</td>
@@ -174,12 +177,12 @@ export function ServerRulesCard({ overview, onChanged }: { overview: ChainOvervi
                     </td>
                     <td>
                       <Button variant={r.isEnabled ? 'outline' : 'primary'} isBusy={busyId === r.id} disabled={!overview.serverAllowed} aria-pressed={r.isEnabled} onClick={() => void toggle(r)}>
-                        {r.isEnabled ? '停用' : '启用'}
+                        {t(r.isEnabled ? 'chain.disable' : 'chain.enable')}
                       </Button>
                     </td>
                     <td>
                       <Button variant="danger" onClick={() => setDeleting(r)}>
-                        删除
+                        {t('common.delete')}
                       </Button>
                     </td>
                   </tr>
@@ -195,13 +198,13 @@ export function ServerRulesCard({ overview, onChanged }: { overview: ChainOvervi
           onClose={() => setIsCreating(false)}
           onCreated={() => {
             setIsCreating(false)
-            toast.show('已创建，正在下发', 'success')
+            toast.show(t('chain.serverCreated'), 'success')
             onChanged()
           }}
         />
       )}
-      <Confirm title="删除服务端规则" isOpen={deleting !== null} isBusy={busyId !== null} confirmText="删除" onConfirm={() => void handleDelete()} onClose={() => setDeleting(null)}>
-        <p>确定删除“{deleting?.entry.name} → {deleting?.exit.name}”？删除后连这个入口会恢复直接出网（下一次下发后生效）。</p>
+      <Confirm title={t('chain.serverDelete')} isOpen={deleting !== null} isBusy={busyId !== null} confirmText={t('common.delete')} onConfirm={() => void handleDelete()} onClose={() => setDeleting(null)}>
+        <p>{t('chain.serverDeleteConfirm', { entry: deleting?.entry.name ?? '', exit: deleting?.exit.name ?? '' })}</p>
       </Confirm>
     </Card>
   )

@@ -5,6 +5,7 @@ import { useToast } from '../../components/toast-context'
 import { Alert, Button, Field, Modal } from '../../components/ui'
 import { formatBytes, formatTime } from '../../format'
 import { useRemote } from '../../hooks/use-remote'
+import { useI18n, type MessageKey } from '../../i18n/i18n-context'
 import { ROUTES } from '../../menu'
 import { formatMoney } from '../../money'
 import { useCurrency } from '../../site/site-context'
@@ -39,20 +40,21 @@ export function CheckoutModal({ item, onClose, onPaid }: CheckoutModalProps) {
 }
 
 /** 这次购买的后果说明：续费、换购、首次购买、流量包各不相同（docs/03 §5.13）。 */
-function consequence(item: CheckoutItem, quote: Quote): string {
+function consequence(item: CheckoutItem, quote: Quote): MessageKey {
   if (item.input.kind === 'traffic_pack') {
-    return '流量包只增加流量额度，到期时间不变；之后续费或换购套餐时，这部分额度不保留。'
+    return 'checkout.packEffect'
   }
   if (quote.isRenewal) {
-    return '续费：从当前到期日顺延，已用流量清零，流量额度恢复为套餐的值（签到与流量包加的额度不保留）。'
+    return 'checkout.renewEffect'
   }
   if (item.hasOtherPlan) {
-    return '换购：新套餐立即生效，当前套餐剩余的时长作废、不折算。'
+    return 'checkout.switchEffect'
   }
-  return '购买后立即生效。'
+  return 'checkout.newEffect'
 }
 
 function CheckoutBody({ item, onClose, onPaid }: { item: CheckoutItem; onClose: () => void; onPaid: () => void }) {
+  const { t, tag } = useI18n()
   const toast = useToast()
   const currency = useCurrency()
   const [couponInput, setCouponInput] = useState('')
@@ -77,11 +79,11 @@ function CheckoutBody({ item, onClose, onPaid }: { item: CheckoutItem; onClose: 
       const res = await api.POST('/api/user/orders', { params: csrfHeader(), body: { ...input, couponCode: coupon === '' ? undefined : coupon } })
       if (res.error !== undefined || res.data?.data === undefined) {
         const err = toApiError(res.error)
-        setPayError(err.code === CODE_INSUFFICIENT_BALANCE ? '余额不足，请先充值' : err.message)
+        setPayError(err.code === CODE_INSUFFICIENT_BALANCE ? t('checkout.insufficient') : err.message)
         quoteState.reload()
         return
       }
-      toast.show(`购买成功：${res.data.data.itemName}`, 'success')
+      toast.show(t('checkout.paid', { name: res.data.data.itemName }), 'success')
       onPaid()
       onClose()
     } catch (err) {
@@ -95,21 +97,21 @@ function CheckoutBody({ item, onClose, onPaid }: { item: CheckoutItem; onClose: 
   const isShort = quote !== null && quote.shortfall > 0
   return (
     <Modal
-      title={`购买：${item.title}`}
+      title={t('checkout.title', { name: item.title })}
       isOpen
       onClose={onClose}
       footer={
         <>
           <Button variant="outline" onClick={onClose}>
-            取消
+            {t('common.cancel')}
           </Button>
           {isShort ? (
             <Link className="hub-btn hub-btn-primary" to={ROUTES.WALLET}>
-              去充值
+              {t('checkout.goTopup')}
             </Link>
           ) : (
             <Button variant="primary" isBusy={isPaying} disabled={quote === null || quoteState.isLoading} onClick={() => void handlePay()}>
-              确认支付
+              {t('checkout.pay')}
             </Button>
           )}
         </>
@@ -119,40 +121,40 @@ function CheckoutBody({ item, onClose, onPaid }: { item: CheckoutItem; onClose: 
       {quoteState.error !== null && <Alert tone="plain">{quoteState.error.message}</Alert>}
       {item.canUseCoupon && (
         <div className="hub-code-row">
-          <Field label="优惠码" autoComplete="off" maxLength={MAX_COUPON_LEN} value={couponInput} onChange={(e) => setCouponInput(e.target.value)} />
+          <Field label={t('checkout.coupon')} autoComplete="off" maxLength={MAX_COUPON_LEN} value={couponInput} onChange={(e) => setCouponInput(e.target.value)} />
           <Button variant="outline" disabled={couponInput.trim() === coupon} onClick={() => setCoupon(couponInput.trim())}>
-            {couponInput.trim() === '' && coupon !== '' ? '取消优惠码' : '使用'}
+            {t(couponInput.trim() === '' && coupon !== '' ? 'checkout.removeCoupon' : 'checkout.applyCoupon')}
           </Button>
         </div>
       )}
-      {quote === null && quoteState.error === null && <div className="hub-empty">正在计算价格…</div>}
+      {quote === null && quoteState.error === null && <div className="hub-empty">{t('checkout.quoting')}</div>}
       {quote !== null && (
         <>
           <dl className="hub-bill">
-            <dt>原价</dt>
-            <dd>{formatMoney(quote.amountOriginal, currency)}</dd>
+            <dt>{t('checkout.original')}</dt>
+            <dd>{formatMoney(quote.amountOriginal, currency, tag)}</dd>
             {quote.amountDiscount > 0 && (
               <>
-                <dt>优惠（{quote.couponCode}）</dt>
-                <dd>−{formatMoney(quote.amountDiscount, currency)}</dd>
+                <dt>{t('checkout.discount', { code: quote.couponCode })}</dt>
+                <dd>−{formatMoney(quote.amountDiscount, currency, tag)}</dd>
               </>
             )}
-            <dt className="hub-bill-total">应付</dt>
-            <dd className="hub-bill-total">{formatMoney(quote.amountPayable, currency)}</dd>
-            <dt>当前余额</dt>
-            <dd>{formatMoney(quote.balance, currency)}</dd>
+            <dt className="hub-bill-total">{t('checkout.due')}</dt>
+            <dd className="hub-bill-total">{formatMoney(quote.amountPayable, currency, tag)}</dd>
+            <dt>{t('checkout.balance')}</dt>
+            <dd>{formatMoney(quote.balance, currency, tag)}</dd>
             {isShort && (
               <>
-                <dt>还需充值</dt>
-                <dd className="hub-bill-short">{formatMoney(quote.shortfall, currency)}</dd>
+                <dt>{t('checkout.shortfall')}</dt>
+                <dd className="hub-bill-short">{formatMoney(quote.shortfall, currency, tag)}</dd>
               </>
             )}
-            <dt>购买后的到期时间</dt>
-            <dd>{quote.expiresAt === null ? '不过期，或首次使用后开始计时' : formatTime(quote.expiresAt)}</dd>
-            <dt>购买后的流量额度</dt>
-            <dd>{quote.trafficLimit === UNLIMITED ? '不限' : formatBytes(quote.trafficLimit)}</dd>
+            <dt>{t('checkout.expiresAfter')}</dt>
+            <dd>{quote.expiresAt === null ? t('checkout.noExpiry') : formatTime(quote.expiresAt, tag)}</dd>
+            <dt>{t('checkout.trafficAfter')}</dt>
+            <dd>{quote.trafficLimit === UNLIMITED ? t('common.unlimited') : formatBytes(quote.trafficLimit)}</dd>
           </dl>
-          <p className="hub-field-hint">{consequence(item, quote)}</p>
+          <p className="hub-field-hint">{t(consequence(item, quote))}</p>
         </>
       )}
     </Modal>

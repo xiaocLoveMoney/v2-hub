@@ -7,6 +7,7 @@ const REGION_CODE = /^[A-Za-z]{2}$/
 /** 区域指示符 A 的码点与字母 A 的差值，用来把两位地区码拼成国旗 emoji。 */
 const REGIONAL_INDICATOR_OFFSET = 0x1f1e6 - 'A'.charCodeAt(0)
 const PERCENT_FULL = 100
+const DEFAULT_TAG = 'zh-CN'
 
 /** 把字节数格式化为带单位的字符串（1024 进制，保留两位小数）。 */
 export function formatBytes(bytes: number): string {
@@ -19,17 +20,17 @@ export function formatBytes(bytes: number): string {
   return `${unit === 0 ? value : value.toFixed(2)} ${BYTE_UNITS[unit]}`
 }
 
-/** 本地时间的 yyyy/M/d HH:mm:ss；空值显示破折号。 */
-export function formatTime(iso: string | null | undefined): string {
+/** 本地时间（24 小时制，按界面语言标签排版）；空值显示破折号。 */
+export function formatTime(iso: string | null | undefined, tag: string = DEFAULT_TAG): string {
   if (iso === null || iso === undefined || iso === '') {
     return '—'
   }
-  return new Date(iso).toLocaleString('zh-CN', { hour12: false })
+  return new Date(iso).toLocaleString(tag, { hour12: false })
 }
 
-/** 只要日期部分。 */
-export function formatDate(iso: string): string {
-  return new Date(iso).toLocaleDateString('zh-CN')
+/** 只要日期部分（按界面语言标签排版）。 */
+export function formatDate(iso: string, tag: string = DEFAULT_TAG): string {
+  return new Date(iso).toLocaleDateString(tag)
 }
 
 /** 距到期还有几天（向上取整，已过期为 0）；now 由调用方传入便于测试。 */

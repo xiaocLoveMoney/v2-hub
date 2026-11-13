@@ -1,5 +1,6 @@
 import type { TrafficPoint } from '../api/client'
 import { formatBytes } from '../format'
+import { useI18n } from '../i18n/i18n-context'
 
 /** 轻量图表：环形图与按小时柱状图，直接画 SVG，不引入图表库。 */
 
@@ -85,6 +86,7 @@ interface HourBarsProps {
 
 /** 最近 hours 小时的用量柱状图；没有用量的小时留空。 */
 export function HourBars({ points, hours, now }: HourBarsProps) {
+  const { t } = useI18n()
   const currentHour = Math.floor(now / MS_PER_HOUR)
   const byHour = new Map(points.map((p) => [Math.floor(new Date(p.hour).getTime() / MS_PER_HOUR), p.up + p.down]))
   const values = Array.from({ length: hours }, (_, i) => byHour.get(currentHour - (hours - 1 - i)) ?? 0)
@@ -94,7 +96,7 @@ export function HourBars({ points, hours, now }: HourBarsProps) {
   const usable = BARS_HEIGHT - BARS_PADDING_BOTTOM
   const total = values.reduce((sum, v) => sum + v, 0)
   return (
-    <svg className="hub-bars" viewBox={`0 0 ${BARS_WIDTH} ${BARS_HEIGHT}`} preserveAspectRatio="none" role="img" aria-label={`最近 ${hours} 小时用量 ${formatBytes(total)}`}>
+    <svg className="hub-bars" viewBox={`0 0 ${BARS_WIDTH} ${BARS_HEIGHT}`} preserveAspectRatio="none" role="img" aria-label={t('chart.hoursUsage', { hours, amount: formatBytes(total) })}>
       <line x1="0" y1={usable} x2={BARS_WIDTH} y2={usable} stroke="var(--hub-border)" strokeWidth="1" />
       {values.map((v, i) => {
         if (v === 0 || peak === 0) {
