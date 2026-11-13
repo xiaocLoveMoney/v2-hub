@@ -19,6 +19,22 @@ const MAX_BASE_URL_LEN = 255
 const MAX_SUB_TITLE_LEN = 64
 const MAX_UPDATE_INTERVAL_HOURS = 168
 const MAX_LOG_RETENTION_DAYS = 365
+const MAX_REBATE_PERCENT = 100
+const MAX_NOTIFY_EXPIRE_DAYS = 30
+const MAX_NOTIFY_TRAFFIC_PERCENT = 50
+
+/** 可选的显示币种；取值见 hub-api.yaml 的 Currency。只影响金额的显示符号，不做换算（Ruling-29）。 */
+const CURRENCY_OPTIONS = [
+  { value: 'CNY', label: 'CNY 人民币' },
+  { value: 'USD', label: 'USD 美元' },
+  { value: 'EUR', label: 'EUR 欧元' },
+  { value: 'HKD', label: 'HKD 港元' },
+  { value: 'JPY', label: 'JPY 日元' },
+]
+const REBATE_MODE_OPTIONS = [
+  { value: 'first', label: '只返被邀请人的首笔消费' },
+  { value: 'always', label: '每笔消费都返' },
+]
 const NO_PLAN_ID = 0
 
 const REGISTER_MODE_OPTIONS: { value: RegisterMode; label: string }[] = [
@@ -91,6 +107,38 @@ function SettingsFormBody({ settings, canWrite, canReadPlans, onSaved }: Setting
             rules={[{ required: true, max: MAX_TIMEZONE_LEN, message: `1–${MAX_TIMEZONE_LEN} 个字符` }]}
           >
             <Input autoComplete="off" />
+          </Form.Item>
+          <Form.Item
+            name={['site', 'portalUrl']}
+            label="客户门户地址"
+            extra="如 https://user.example.com；“切换为用户身份”与支付回调用它。留空 = 与管理端同源"
+            rules={[{ max: MAX_BASE_URL_LEN }]}
+          >
+            <Input autoComplete="off" />
+          </Form.Item>
+        </Card>
+
+        <Card title="商店与返利" className="settings-card">
+          <Form.Item name={['shop', 'enabled']} label="开启商店与钱包" extra="关闭后用户不能下单、兑换充值码，已有余额与订单仍可查看；自动续费暂停" valuePropName="checked">
+            <Switch />
+          </Form.Item>
+          <Form.Item name={['shop', 'currency']} label="显示币种" extra="只影响金额的显示符号，不做换算" rules={required}>
+            <Select options={CURRENCY_OPTIONS} />
+          </Form.Item>
+          <Form.Item name={['rebate', 'percent']} label="邀请返利比例（%）" extra="0 = 关闭；按被邀请人订单的实付金额计算，只进邀请人余额" rules={required}>
+            <InputNumber min={0} max={MAX_REBATE_PERCENT} precision={0} className="full-width" />
+          </Form.Item>
+          <Form.Item name={['rebate', 'mode']} label="返利方式" rules={required}>
+            <Select options={REBATE_MODE_OPTIONS} />
+          </Form.Item>
+        </Card>
+
+        <Card title="提醒邮件" className="settings-card">
+          <Form.Item name={['notify', 'expireDays']} label="到期前几天提醒" extra="0 = 不提醒；每个到期时间只发一封" rules={required}>
+            <InputNumber min={0} max={MAX_NOTIFY_EXPIRE_DAYS} precision={0} className="full-width" />
+          </Form.Item>
+          <Form.Item name={['notify', 'trafficPercent']} label="剩余流量低于百分之几时提醒" extra="0 = 不提醒" rules={required}>
+            <InputNumber min={0} max={MAX_NOTIFY_TRAFFIC_PERCENT} precision={0} className="full-width" />
           </Form.Item>
         </Card>
 

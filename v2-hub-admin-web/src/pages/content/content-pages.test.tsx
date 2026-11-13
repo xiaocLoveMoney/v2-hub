@@ -194,7 +194,10 @@ describe('InviteCodesPage', () => {
 describe('SettingsPage', () => {
   const settings = {
     mailEnabled: false,
-    site: { name: 'v2-hub', timezone: 'Asia/Shanghai' },
+    site: { name: 'v2-hub', timezone: 'Asia/Shanghai', portalUrl: '' },
+    shop: { enabled: false, currency: 'CNY' },
+    rebate: { percent: 0, mode: 'first' },
+    notify: { expireDays: 3, trafficPercent: 10 },
     register: { mode: 'invite', emailVerify: true, emailAllow: [], emailBlock: [], planId: 0 },
     invite: { userEnabled: true, userMaxUses: 5 },
     checkin: { enabled: false, minMb: 50, maxMb: 200 },

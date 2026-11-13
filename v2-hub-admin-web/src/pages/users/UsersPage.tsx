@@ -1,11 +1,14 @@
 import { PlusOutlined } from '@ant-design/icons'
 import { Alert, App, Button, Input, Popconfirm, Progress, Select, Space, Table, Tag, Tooltip, Typography, type TableProps } from 'antd'
 import { useCallback, useState } from 'react'
-import { api, csrfHeader, type EndUser, type PageData, type Plan, type UserStatus } from '../../api/client'
+import { api, csrfHeader, toApiError, type EndUser, type PageData, type Plan, type UserStatus } from '../../api/client'
 import { useSession } from '../../auth/session-context'
+import { useCurrency } from '../../hooks/use-currency'
 import { mutate, useRemote } from '../../hooks/use-remote'
 import { PERMISSIONS } from '../../menu'
+import { formatMoney } from '../../money'
 import { TABLE_SCROLL, formatTime } from '../system/format'
+import { BalanceModal } from './BalanceModal'
 import { UserStatusTag } from './quota-fields'
 import { USER_STATUS, formatBytes } from './quota'
 import { AssignPlanModal, CreateUserModal, EditUserModal, ProvisionDrawer, QuotaModal, ResetUserCredentialModal } from './UserModals'
@@ -14,7 +17,10 @@ const DEFAULT_PAGE_SIZE = 20
 const PERCENT_FULL = 100
 const loadPlans = (signal: AbortSignal) => api.GET('/api/admin/plans', { signal })
 
-type Dialog = 'create' | 'edit' | 'plan' | 'quota' | 'credential' | 'provisions' | null
+type Dialog = 'create' | 'edit' | 'plan' | 'quota' | 'credential' | 'provisions' | 'balance' | null
+
+/** 客户门户里兑换代入票据的页面；票据放在地址的 # 片段里，不会随请求发到服务器（docs/03 §5.17）。 */
+const IMPERSONATE_PATH = '/impersonate#ticket='
 
 function UsageCell({ u }: { u: EndUser }) {
   if (u.trafficLimit === 0) {
@@ -55,6 +61,9 @@ export function UsersPage() {
   const { message, modal } = App.useApp()
   const canWrite = can(PERMISSIONS.USER_WRITE)
   const canReadPlans = can(PERMISSIONS.PLAN_READ)
+  const canAdjustBalance = can(PERMISSIONS.FINANCE_WRITE)
+  const canImpersonate = can(PERMISSIONS.IMPERSONATE_WRITE)
+  const currency = useCurrency()
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE)
   const [keyword, setKeyword] = useState('')
@@ -90,6 +99,25 @@ export function UsersPage() {
     }
     void message.success('已删除；面板不可达时会在恢复后删掉 client')
     users.reload()
+  }
+
+  /** 切换为用户身份：向后端要一次性票据，在新窗口打开客户门户兑换成只读会话；票据不在管理端保存。 */
+  const impersonate = async (u: EndUser) => {
+    try {
+      const res = await api.POST('/api/admin/users/{id}/impersonate', { params: { ...csrfHeader(), path: { id: u.id } } })
+      if (res.error !== undefined || res.data?.data === undefined) {
+        void message.error(toApiError(res.error).message)
+        return
+      }
+      const { ticket, portalUrl } = res.data.data
+      const base = portalUrl === '' ? window.location.origin : portalUrl
+      // noopener：新窗口拿不到管理端页面的引用
+      window.open(`${base}${IMPERSONATE_PATH}${encodeURIComponent(ticket)}`, '_blank', 'noopener,noreferrer')
+      void message.success(`已打开客户门户，以 ${u.username} 的身份只读查看（30 分钟内有效）`)
+    } catch (err) {
+      reportError(err)
+      void message.error(toApiError(err).message)
+    }
   }
 
   /** 重置订阅：换订阅地址并轮换连接凭据（docs/03 §5.4 重置）。 */
@@ -157,6 +185,7 @@ export function UsersPage() {
     { title: '套餐', dataIndex: 'planName', render: (v: string) => v || '—' },
     { title: '邀请人', dataIndex: 'invitedByUsername', render: (v: string | undefined) => v || '—' },
     { title: '状态', dataIndex: 'status', render: (s: UserStatus) => <UserStatusTag status={s} /> },
+    { title: '余额', dataIndex: 'balance', render: (v: number | undefined) => formatMoney(v ?? 0, currency) },
     { title: '已用 / 额度', key: 'usage', render: (_: unknown, u: EndUser) => <UsageCell u={u} /> },
     { title: '到期', key: 'expiry', render: (_: unknown, u: EndUser) => <ExpiryCell u={u} /> },
     { title: '下发', key: 'provisions', render: (_: unknown, u: EndUser) => <ProvisionCell u={u} /> },
@@ -168,6 +197,18 @@ export function UsersPage() {
           <Button size="small" onClick={() => open('provisions', u)}>
             下发详情
           </Button>
+          {canAdjustBalance && (
+            <Button size="small" onClick={() => open('balance', u)}>
+              调整余额
+            </Button>
+          )}
+          {canImpersonate && (
+            <Popconfirm title={`以 ${u.username} 的身份查看？`} description="在新窗口打开客户门户，只读，30 分钟后失效；会记入审计" onConfirm={() => impersonate(u)}>
+              <Button size="small" disabled={u.isDisabled}>
+                切换身份
+              </Button>
+            </Popconfirm>
+          )}
           {canWrite && (
             <>
               <Button size="small" type="primary" disabled={u.isDisabled} onClick={() => open('plan', u)}>
@@ -269,6 +310,7 @@ export function UsersPage() {
       <AssignPlanModal user={dialog === 'plan' ? current : null} plans={plans.data ?? []} onClose={close} onSaved={saved} />
       <QuotaModal user={dialog === 'quota' ? current : null} onClose={close} onSaved={saved} />
       <ResetUserCredentialModal user={dialog === 'credential' ? current : null} onClose={close} onSaved={saved} />
+      <BalanceModal user={dialog === 'balance' ? current : null} currency={currency} onClose={close} onSaved={saved} />
       <ProvisionDrawer user={dialog === 'provisions' ? current : null} canWrite={canWrite} onClose={close} onChanged={() => users.reload()} />
     </>
   )

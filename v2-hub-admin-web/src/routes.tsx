@@ -8,6 +8,11 @@ import { AnnouncementsPage } from './pages/content/AnnouncementsPage'
 import { SharedAccountsPage } from './pages/content/SharedAccountsPage'
 import { TicketsPage } from './pages/content/TicketsPage'
 import { TutorialsPage } from './pages/content/TutorialsPage'
+import { CouponsPage } from './pages/shop/CouponsPage'
+import { FinanceStatsPage } from './pages/shop/FinanceStatsPage'
+import { LedgerPage, OrdersPage, PaymentsPage, RebatesPage } from './pages/shop/RecordPages'
+import { TopupCodesPage } from './pages/shop/TopupCodesPage'
+import { TrafficPacksPage } from './pages/shop/TrafficPacksPage'
 import { AdminsPage } from './pages/system/AdminsPage'
 import { AuditLogsPage } from './pages/system/AuditLogsPage'
 import { MailOutboxPage } from './pages/system/MailOutboxPage'
@@ -34,6 +39,14 @@ const PAGE_BY_PATH: Record<string, ReactNode> = {
   [ROUTES.PLANS]: <PlansPage />,
   [ROUTES.INVITE_CODES]: <InviteCodesPage />,
   [ROUTES.SUBSCRIBE_LOGS]: <SubscribeLogsPage />,
+  [ROUTES.TRAFFIC_PACKS]: <TrafficPacksPage />,
+  [ROUTES.COUPONS]: <CouponsPage />,
+  [ROUTES.TOPUP_CODES]: <TopupCodesPage />,
+  [ROUTES.ORDERS]: <OrdersPage />,
+  [ROUTES.WALLET_LEDGER]: <LedgerPage />,
+  [ROUTES.PAYMENTS]: <PaymentsPage />,
+  [ROUTES.REBATES]: <RebatesPage />,
+  [ROUTES.FINANCE_STATS]: <FinanceStatsPage />,
   [ROUTES.ADMINS]: <AdminsPage />,
   [ROUTES.ROLES]: <RolesPage />,
   [ROUTES.AUDIT_LOGS]: <AuditLogsPage />,
