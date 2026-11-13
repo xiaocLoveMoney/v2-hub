@@ -3,11 +3,11 @@ import { api, csrfHeader, type ChainOverview, type ChainRule } from '../../api/c
 import { Alert, Button, Field, Modal, SelectField } from '../../components/ui'
 import { mutate } from '../../hooks/use-remote'
 import { MAX_CHAIN_NAME_LEN, isValidChainName } from './labels'
+import { useI18n } from '../../i18n/i18n-context'
 
 const EXIT_NODE_PREFIX = 'node:'
 const EXIT_CUSTOM_PREFIX = 'custom:'
 const ARROW = ' → '
-const BAD_NAME_MESSAGE = `名称不能超过 ${MAX_CHAIN_NAME_LEN} 个字符，且不能含换行`
 
 interface ExitChoice {
   exitNodeId?: number
@@ -42,6 +42,7 @@ interface CreateRuleModalProps {
  * 名称可空，空时订阅里用“入口 → 落地”（docs/03 §5.18）。
  */
 export function CreateRuleModal({ overview, isOpen, onClose, onCreated }: CreateRuleModalProps) {
+  const { t } = useI18n()
   const [entryId, setEntryId] = useState('')
   const [exitValue, setExitValue] = useState('')
   const [name, setName] = useState('')
@@ -52,7 +53,7 @@ export function CreateRuleModal({ overview, isOpen, onClose, onCreated }: Create
   const exit = parseExit(exitValue, overview)
   const exitNodes = overview.nodes.filter((n) => n.canBeExit && String(n.id) !== entryId)
   const customNodes = overview.customNodeAllowed ? overview.customNodes : []
-  const defaultName = entry !== undefined && exit !== null ? `${entry.name}${ARROW}${exit.name}` : '入口 → 落地'
+  const defaultName = entry !== undefined && exit !== null ? `${entry.name}${ARROW}${exit.name}` : t('chain.defaultName')
   const isNameValid = isValidChainName(name)
 
   const reset = () => {
@@ -89,11 +90,11 @@ export function CreateRuleModal({ overview, isOpen, onClose, onCreated }: Create
   }
 
   return (
-    <Modal title="新建链式规则" isOpen={isOpen} onClose={handleClose}>
+    <Modal title={t('chain.createTitle')} isOpen={isOpen} onClose={handleClose}>
       {error !== null && <Alert tone="plain">{error}</Alert>}
       <form onSubmit={(e) => void handleSubmit(e)} noValidate>
         <SelectField
-          label="入口节点"
+          label={t('chain.entryNode')}
           value={entryId}
           onChange={(e) => {
             setEntryId(e.target.value)
@@ -102,18 +103,18 @@ export function CreateRuleModal({ overview, isOpen, onClose, onCreated }: Create
               setExitValue('')
             }
           }}
-          hint="客户端先连到这里"
+          hint={t('chain.entryHint')}
         >
-          <option value="">请选择</option>
+          <option value="">{t('chain.pick')}</option>
           {overview.nodes.map((n) => (
             <option key={n.id} value={n.id}>
               {n.name}
             </option>
           ))}
         </SelectField>
-        <SelectField label="落地节点" value={exitValue} onChange={(e) => setExitValue(e.target.value)} hint="再经入口连到这里出网；hysteria 类节点不能作落地">
-          <option value="">请选择</option>
-          <optgroup label="平台节点">
+        <SelectField label={t('chain.exitNode')} value={exitValue} onChange={(e) => setExitValue(e.target.value)} hint={t('chain.exitHint')}>
+          <option value="">{t('chain.pick')}</option>
+          <optgroup label={t('chain.platformNodes')}>
             {exitNodes.map((n) => (
               <option key={n.id} value={`${EXIT_NODE_PREFIX}${n.id}`}>
                 {n.name}
@@ -121,7 +122,7 @@ export function CreateRuleModal({ overview, isOpen, onClose, onCreated }: Create
             ))}
           </optgroup>
           {customNodes.length > 0 && (
-            <optgroup label="自有节点">
+            <optgroup label={t('chain.customNodes')}>
               {customNodes.map((n) => (
                 <option key={n.id} value={`${EXIT_CUSTOM_PREFIX}${n.id}`}>
                   {n.name}
@@ -131,21 +132,21 @@ export function CreateRuleModal({ overview, isOpen, onClose, onCreated }: Create
           )}
         </SelectField>
         <Field
-          label="名称（可选）"
+          label={t('chain.nameOptional')}
           autoComplete="off"
           placeholder={defaultName}
           maxLength={MAX_CHAIN_NAME_LEN}
           value={name}
           onChange={(e) => setName(e.target.value)}
-          error={isNameValid ? null : BAD_NAME_MESSAGE}
-          hint="订阅里显示的节点名，留空就用“入口 → 落地”"
+          error={isNameValid ? null : t('chain.badName', { max: MAX_CHAIN_NAME_LEN })}
+          hint={t('chain.nameHint')}
         />
         <div className="hub-actions">
           <Button type="submit" variant="primary" isBusy={isBusy} disabled={entry === undefined || exit === null || !isNameValid}>
-            创建
+            {t('chain.create')}
           </Button>
           <Button variant="outline" onClick={handleClose}>
-            取消
+            {t('common.cancel')}
           </Button>
         </div>
       </form>
@@ -161,6 +162,7 @@ interface RenameRuleModalProps {
 
 /** 改规则名称；清空即恢复默认名“入口 → 落地”。rule 为 null 时不显示。 */
 export function RenameRuleModal({ rule, onClose, onSaved }: RenameRuleModalProps) {
+  const { t } = useI18n()
   const [name, setName] = useState(rule?.name ?? '')
   const [error, setError] = useState<string | null>(null)
   const [isBusy, setIsBusy] = useState(false)
@@ -185,25 +187,25 @@ export function RenameRuleModal({ rule, onClose, onSaved }: RenameRuleModalProps
   }
 
   return (
-    <Modal title="修改名称" isOpen={rule !== null} onClose={onClose}>
+    <Modal title={t('chain.renameTitle')} isOpen={rule !== null} onClose={onClose}>
       {error !== null && <Alert tone="plain">{error}</Alert>}
       <form onSubmit={(e) => void handleSubmit(e)} noValidate>
         <Field
-          label="名称"
+          label={t('chain.name')}
           autoComplete="off"
           placeholder={rule === null ? '' : `${rule.entry.name}${ARROW}${rule.exit.name}`}
           maxLength={MAX_CHAIN_NAME_LEN}
           value={name}
           onChange={(e) => setName(e.target.value)}
-          error={isNameValid ? null : BAD_NAME_MESSAGE}
-          hint="留空恢复为“入口 → 落地”"
+          error={isNameValid ? null : t('chain.badName', { max: MAX_CHAIN_NAME_LEN })}
+          hint={t('chain.renameHint')}
         />
         <div className="hub-actions">
           <Button type="submit" variant="primary" isBusy={isBusy} disabled={!isNameValid}>
-            保存
+            {t('common.save')}
           </Button>
           <Button variant="outline" onClick={onClose}>
-            取消
+            {t('common.cancel')}
           </Button>
         </div>
       </form>

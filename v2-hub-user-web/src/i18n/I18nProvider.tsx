@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { setErrorTranslator } from '../api/client'
 import { describeError } from './errors'
-import { I18nContext, makeI18n } from './i18n-context'
+import { I18nContext, makeI18n, translate } from './i18n-context'
 import { LOCALE_TAG, initialLocale, saveLocale, type Locale } from './locale'
 
 interface I18nProviderProps {
@@ -24,6 +24,7 @@ export function I18nProvider({ initial, children }: I18nProviderProps) {
 
   useEffect(() => {
     document.documentElement.lang = LOCALE_TAG[locale]
+    document.title = translate(locale, 'shell.appTitle')
     setErrorTranslator((err) => describeError(locale, err))
   }, [locale])
 

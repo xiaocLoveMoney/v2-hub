@@ -4,6 +4,7 @@ import { useToast } from '../components/toast-context'
 import { Alert, Button, Card, Empty, PageHeader } from '../components/ui'
 import { useCopy } from '../hooks/use-copy'
 import { useRemote } from '../hooks/use-remote'
+import { useI18n } from '../i18n/i18n-context'
 
 const loadAccounts = (signal: AbortSignal) => api.GET('/api/user/shared-accounts', { signal })
 
@@ -23,6 +24,7 @@ function groupByCategory(accounts: SharedAccount[]): { category: string; items: 
 
 /** 一条共享账号：口令属于凭据，默认不取，点“显示”才单独请求一次（后端记审计），只留在本组件内存里。 */
 function AccountRow({ account }: { account: SharedAccount }) {
+  const { t } = useI18n()
   const toast = useToast()
   const copy = useCopy()
   const [credential, setCredential] = useState<string | null>(null)
@@ -49,27 +51,27 @@ function AccountRow({ account }: { account: SharedAccount }) {
     <div className="hub-shared-item">
       <div className="hub-shared-name">{account.name}</div>
       <dl className="hub-shared-fields">
-        <dt>账号</dt>
+        <dt>{t('shared.account')}</dt>
         <dd>
           <span className="hub-mono">{account.account}</span>
-          <Button variant="outline" onClick={() => void copy(account.account, '账号已复制')}>
-            复制
+          <Button variant="outline" onClick={() => void copy(account.account, t('shared.accountCopied'))}>
+            {t('common.copy')}
           </Button>
         </dd>
-        <dt>口令</dt>
+        <dt>{t('shared.credential')}</dt>
         <dd>
           {credential === null ? (
             <Button variant="outline" isBusy={isBusy} onClick={() => void reveal()}>
-              显示
+              {t('shared.show')}
             </Button>
           ) : (
             <>
               <span className="hub-mono">{credential}</span>
-              <Button variant="outline" onClick={() => void copy(credential, '口令已复制')}>
-                复制
+              <Button variant="outline" onClick={() => void copy(credential, t('shared.credentialCopied'))}>
+                {t('common.copy')}
               </Button>
               <Button variant="outline" onClick={() => setCredential(null)}>
-                隐藏
+                {t('shared.hide')}
               </Button>
             </>
           )}
@@ -82,16 +84,17 @@ function AccountRow({ account }: { account: SharedAccount }) {
 
 /** 共享账号（docs/03 §5.9）：按分类分卡；只有状态正常且套餐符合的用户能看到条目。 */
 export function SharedAccountsPage() {
+  const { t } = useI18n()
   const accounts = useRemote<SharedAccount[]>(loadAccounts)
   const groups = groupByCategory(accounts.data ?? [])
 
   return (
     <>
-      <PageHeader title="共享账号" />
+      <PageHeader title={t('menu.sharedAccounts')} />
       {accounts.error !== null && <Alert tone="plain">{accounts.error.message}</Alert>}
       {accounts.data !== null && groups.length === 0 && (
         <Card>
-          <Empty>当前套餐没有可用的共享账号</Empty>
+          <Empty>{t('shared.empty')}</Empty>
         </Card>
       )}
       <div className="hub-grid-2">

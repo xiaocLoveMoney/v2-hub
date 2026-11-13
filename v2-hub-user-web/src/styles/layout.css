@@ -132,7 +132,8 @@
   inset: auto 0 0;
   display: flex;
   flex-wrap: wrap;
-  justify-content: space-between;
+  /* 靠左排：右下角留给客服按钮 */
+  justify-content: flex-start;
   align-items: center;
   gap: 8px 16px;
   padding: 18px var(--hub-gap);

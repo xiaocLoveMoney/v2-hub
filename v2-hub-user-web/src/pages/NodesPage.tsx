@@ -7,6 +7,7 @@ import { Alert, Badge, Button, Card, Empty, Modal, PageHeader } from '../compone
 import { regionFlag } from '../format'
 import { useCopy } from '../hooks/use-copy'
 import { useRemote } from '../hooks/use-remote'
+import { useI18n } from '../i18n/i18n-context'
 
 const QR_SIZE = 200
 const STATUS_ACTIVE = 'active'
@@ -20,26 +21,27 @@ interface LinkState {
 }
 
 function NodeCard({ node, canOpen, onOpen }: { node: UserNode; canOpen: boolean; onOpen: (n: UserNode) => void }) {
+  const { t } = useI18n()
   const flag = regionFlag(node.region)
   return (
     <Card>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
         <div style={{ minWidth: 0 }}>
           <div style={{ fontWeight: 700, color: 'var(--hub-heading)', fontSize: 15 }}>
-            <span className={`hub-dot${node.isServerOnline ? ' hub-dot-on' : ''}`} title={node.isServerOnline ? '在线' : '离线'} />
+            <span className={`hub-dot${node.isServerOnline ? ' hub-dot-on' : ''}`} title={t(node.isServerOnline ? 'nodes.online' : 'nodes.offline')} />
             {flag === '' ? <Globe size={14} style={{ marginRight: 6, verticalAlign: -2 }} /> : <span style={{ marginRight: 6 }}>{flag}</span>}
             {node.name}
           </div>
           <div className="hub-actions" style={{ marginTop: 10 }}>
             <Badge tone="light">{node.protocol}</Badge>
             {node.region !== '' && <Badge>{node.region}</Badge>}
-            <span className="hub-muted">在线 {node.onlineClients}</span>
-            <span className="hub-muted">负载 {node.serverLoad === null || node.serverLoad === undefined ? '—' : `${node.serverLoad.toFixed(0)}%`}</span>
+            <span className="hub-muted">{t('nodes.onlineClients', { n: node.onlineClients })}</span>
+            <span className="hub-muted">{t('nodes.load', { value: node.serverLoad === null || node.serverLoad === undefined ? t('common.dash') : `${node.serverLoad.toFixed(0)}%` })}</span>
           </div>
         </div>
         {canOpen && (
           <Button variant="outline" onClick={() => onOpen(node)}>
-            查看
+            {t('nodes.view')}
           </Button>
         )}
       </div>
@@ -49,6 +51,7 @@ function NodeCard({ node, canOpen, onOpen }: { node: UserNode; canOpen: boolean;
 
 /** 节点列表（docs/06 §5）：按节点组分段；点"查看"取该节点的分享链接与二维码（凭据，按需加载）。 */
 export function NodesPage() {
+  const { t } = useI18n()
   const { session } = useSession()
   const copy = useCopy()
   const groups = useRemote<UserNodeGroup[]>(loadNodes)
@@ -73,11 +76,11 @@ export function NodesPage() {
 
   return (
     <>
-      <PageHeader title="节点列表" />
+      <PageHeader title={t('menu.nodes')} />
       {groups.error !== null && <Alert tone="plain">{groups.error.message}</Alert>}
       {groups.data !== null && groups.data.length === 0 && (
         <Card>
-          <Empty>当前套餐没有可用节点</Empty>
+          <Empty>{t('nodes.empty')}</Empty>
         </Card>
       )}
       {(groups.data ?? []).map((g) => (
@@ -92,20 +95,20 @@ export function NodesPage() {
       ))}
       <Modal title={detail?.node.name ?? ''} isOpen={detail !== null} onClose={() => setDetail(null)}>
         {detail?.error !== null && detail?.error !== undefined && <Alert tone="plain">{detail.error}</Alert>}
-        {detail !== null && detail.link === null && detail.error === null && <div className="hub-empty">加载中…</div>}
+        {detail !== null && detail.link === null && detail.error === null && <div className="hub-empty">{t('common.loading')}</div>}
         {detail !== null && detail.link !== null && (
           <>
             <div style={{ display: 'grid', placeItems: 'center', marginBottom: 16 }}>
               <QRCodeSVG value={detail.link} size={QR_SIZE} />
             </div>
             <div className="hub-copy-row">
-              <input className="hub-input hub-mono" readOnly aria-label="节点链接" value={detail.link} />
-              <Button variant="primary" onClick={() => void copy(detail.link ?? '', '已复制节点链接')}>
+              <input className="hub-input hub-mono" readOnly aria-label={t('nodes.link')} value={detail.link} />
+              <Button variant="primary" onClick={() => void copy(detail.link ?? '', t('nodes.linkCopied'))}>
                 <Copy size={14} />
-                复制
+                {t('common.copy')}
               </Button>
             </div>
-            <p className="hub-field-hint">节点链接含连接凭据，请勿分享给他人。</p>
+            <p className="hub-field-hint">{t('nodes.linkHint')}</p>
           </>
         )}
       </Modal>

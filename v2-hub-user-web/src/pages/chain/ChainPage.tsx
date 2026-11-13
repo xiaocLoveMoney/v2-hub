@@ -7,6 +7,7 @@ import { CustomNodesCard } from './CustomNodesCard'
 import { chainStatusLabel, isChainOk } from './labels'
 import { CreateRuleModal, RenameRuleModal } from './RuleModals'
 import { ServerRulesCard } from './ServerRulesCard'
+import { useI18n, type MessageKey } from '../../i18n/i18n-context'
 
 const EXIT_KIND_CUSTOM: ChainRule['exit']['kind'] = 'custom'
 
@@ -19,6 +20,7 @@ interface RulesCardProps {
 
 /** 规则表：名称、入口、落地、状态、启用开关（即时保存）、改名、删除（docs/03 §5.18）。 */
 function RulesCard({ overview, onChanged }: RulesCardProps) {
+  const { t } = useI18n()
   const toast = useToast()
   const [isCreating, setIsCreating] = useState(false)
   const [renaming, setRenaming] = useState<ChainRule | null>(null)
@@ -53,7 +55,7 @@ function RulesCard({ overview, onChanged }: RulesCardProps) {
       return
     }
     setDeleting(null)
-    toast.show('已删除', 'success')
+    toast.show(t('chain.deleted'), 'success')
     onChanged()
   }
 
@@ -66,28 +68,28 @@ function RulesCard({ overview, onChanged }: RulesCardProps) {
 
   const createButton = (
     <Button variant="primary" disabled={!overview.allowed || isFull || !hasNodes} onClick={() => setIsCreating(true)}>
-      新建规则
+      {t('chain.newRule')}
     </Button>
   )
 
   return (
-    <Card title={`客户端链式（${rules.length} / ${overview.maxRules}）`} extra={createButton}>
-      {!overview.allowed && overview.serverAllowed && <Alert tone="info">当前套餐不支持客户端链式；已有的规则处于阻断状态、不会出现在订阅里，仍可删除。</Alert>}
-      {overview.allowed && isFull && <Alert tone="info">已达 {overview.maxRules} 条上限，删除不用的再新建。</Alert>}
-      {overview.allowed && !hasNodes && <Alert tone="info">当前没有可用的节点，暂时无法新建规则。</Alert>}
+    <Card title={t('chain.clientTitle', { count: rules.length, max: overview.maxRules })} extra={createButton}>
+      {!overview.allowed && overview.serverAllowed && <Alert tone="info">{t('chain.clientNotAllowed')}</Alert>}
+      {overview.allowed && isFull && <Alert tone="info">{t('chain.full', { max: overview.maxRules })}</Alert>}
+      {overview.allowed && !hasNodes && <Alert tone="info">{t('chain.noNodes')}</Alert>}
       {rules.length === 0 ? (
-        <Empty>还没有规则。新建一条，订阅里就会多出一个“入口 → 落地”节点。</Empty>
+        <Empty>{t('chain.emptyRules')}</Empty>
       ) : (
         <div className="hub-table-wrap">
           <table className="hub-table">
             <thead>
               <tr>
-                <th>名称</th>
-                <th>入口</th>
-                <th>落地</th>
-                <th>状态</th>
-                <th>启用</th>
-                <th>操作</th>
+                <th>{t('chain.colName')}</th>
+                <th>{t('chain.colEntry')}</th>
+                <th>{t('chain.colExit')}</th>
+                <th>{t('chain.colStatus')}</th>
+                <th>{t('chain.colEnabled')}</th>
+                <th>{t('chain.colActions')}</th>
               </tr>
             </thead>
             <tbody>
@@ -100,14 +102,14 @@ function RulesCard({ overview, onChanged }: RulesCardProps) {
                     {r.exit.kind === EXIT_KIND_CUSTOM && (
                       <>
                         {' '}
-                        <Badge tone="info">自有</Badge>
+                        <Badge tone="info">{t('chain.custom')}</Badge>
                       </>
                     )}
                     {r.exit.protocol !== '' && <span className="hub-field-hint"> · {r.exit.protocol}</span>}
                   </td>
                   <td>
                     {/* 停用的规则不进订阅，通畅与否不再有意义，只显示已停用 */}
-                    {r.isEnabled ? <Badge tone={isChainOk(r) ? 'success' : 'danger'}>{chainStatusLabel(r)}</Badge> : <Badge tone="light">已停用</Badge>}
+                    {r.isEnabled ? <Badge tone={isChainOk(r) ? 'success' : 'danger'}>{chainStatusLabel(t, r)}</Badge> : <Badge tone="light">{t('chain.disabled')}</Badge>}
                   </td>
                   <td>
                     <Button
@@ -117,16 +119,16 @@ function RulesCard({ overview, onChanged }: RulesCardProps) {
                       aria-pressed={r.isEnabled}
                       onClick={() => void toggle(r)}
                     >
-                      {r.isEnabled ? '停用' : '启用'}
+                      {t(r.isEnabled ? 'chain.disable' : 'chain.enable')}
                     </Button>
                   </td>
                   <td>
                     <div className="hub-actions">
                       <Button variant="outline" disabled={!overview.allowed} onClick={() => setRenaming(r)}>
-                        改名
+                        {t('chain.rename')}
                       </Button>
                       <Button variant="danger" onClick={() => setDeleting(r)}>
-                        删除
+                        {t('common.delete')}
                       </Button>
                     </div>
                   </td>
@@ -136,26 +138,27 @@ function RulesCard({ overview, onChanged }: RulesCardProps) {
           </table>
         </div>
       )}
-      {isCreating && <CreateRuleModal overview={overview} isOpen onClose={() => setIsCreating(false)} onCreated={() => handleSaved('已创建')} />}
-      {renaming !== null && <RenameRuleModal key={renaming.id} rule={renaming} onClose={() => setRenaming(null)} onSaved={() => handleSaved('已保存')} />}
-      <Confirm title="删除规则" isOpen={deleting !== null} isBusy={busyId !== null} confirmText="删除" onConfirm={() => void handleDelete()} onClose={() => setDeleting(null)}>
-        <p>确定删除“{deleting?.displayName}”？订阅里的这个节点会在客户端下次更新时消失。</p>
+      {isCreating && <CreateRuleModal overview={overview} isOpen onClose={() => setIsCreating(false)} onCreated={() => handleSaved(t('chain.created'))} />}
+      {renaming !== null && <RenameRuleModal key={renaming.id} rule={renaming} onClose={() => setRenaming(null)} onSaved={() => handleSaved(t('chain.saved'))} />}
+      <Confirm title={t('chain.deleteRule')} isOpen={deleting !== null} isBusy={busyId !== null} confirmText={t('common.delete')} onConfirm={() => void handleDelete()} onClose={() => setDeleting(null)}>
+        <p>{t('chain.deleteRuleConfirm', { name: deleting?.displayName ?? '' })}</p>
       </Confirm>
     </Card>
   )
 }
 
+/** 说明卡的条目，按显示顺序。 */
+const NOTE_KEYS: readonly MessageKey[] = ['chain.note1', 'chain.note2', 'chain.note3', 'chain.note4', 'chain.note5', 'chain.note6']
+
 /** 说明卡：哪些订阅格式带链路、流量怎么计、平台不探测连通性（Ruling-36 – Ruling-38）。 */
 function NotesCard() {
+  const { t } = useI18n()
   return (
-    <Card title="说明">
+    <Card title={t('chain.notesTitle')}>
       <ul className="hub-notes">
-        <li>客户端先连入口节点，再经入口连到落地节点出网；配置全部写在订阅里，平台不转发流量。</li>
-        <li>Mihomo、sing-box、Xray JSON 订阅会带上链路，Base64 订阅不带；链路只出现在手动选择组，不参与自动测速。</li>
-        <li>状态“通畅”表示配置与授权成立，平台不探测连通性，也不连接你填写的地址；能否连通以客户端实测为准。</li>
-        <li>阻断的规则会保留但不进订阅，原因消除后（如续上支持的套餐、节点恢复）自动恢复通畅。</li>
-        <li>落地是平台节点时，同一份流量在入口与落地各计一次；落地是自有节点时只计入口。</li>
-        <li>服务端链式不改订阅：入口服务器把你的流量转发到落地出网，入口与落地两边都计流量；每次生效会让入口服务器的 Xray 重启一次。</li>
+        {NOTE_KEYS.map((key) => (
+          <li key={key}>{t(key)}</li>
+        ))}
       </ul>
     </Card>
   )
@@ -163,15 +166,16 @@ function NotesCard() {
 
 /** 链式代理（docs/03 §5.18、§5.19，docs/06 §5 M6 / M7）：一个接口取全，任何写操作成功后整体重取。 */
 export function ChainPage() {
+  const { t } = useI18n()
   const chain = useRemote<ChainOverview>(loadChain)
   const overview = chain.data
 
   return (
     <>
-      <PageHeader title="链式代理" />
+      <PageHeader title={t('menu.chain')} />
       {chain.error !== null && <Alert tone="plain">{chain.error.message}</Alert>}
       {overview !== null && !overview.allowed && !overview.serverAllowed && (
-        <Alert tone="warning">当前套餐不支持链式代理：已有的规则处于阻断状态、不会生效，仍可查看与删除。</Alert>
+        <Alert tone="warning">{t('chain.planNotAllowed')}</Alert>
       )}
       {overview !== null && (
         <>

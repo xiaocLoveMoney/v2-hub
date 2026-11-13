@@ -46,9 +46,9 @@ afterEach(() => {
 
 describe('链式代理文案与菜单', () => {
   it('状态带阻断原因；名称拒绝超长与换行；菜单随套餐开关显隐', () => {
-    expect(chainStatusLabel(okRule as never)).toBe('通畅')
-    expect(chainStatusLabel(blockedRule as never)).toBe('阻断 · 落地不可用')
-    expect(chainStatusLabel({ ...blockedRule, blockedReason: 'plan' } as never)).toBe('阻断 · 套餐不支持')
+    expect(chainStatusLabel(zhT, okRule as never)).toBe('通畅')
+    expect(chainStatusLabel(zhT, blockedRule as never)).toBe('阻断 · 落地不可用')
+    expect(chainStatusLabel(zhT, { ...blockedRule, blockedReason: 'plan' } as never)).toBe('阻断 · 套餐不支持')
     expect(isValidChainName('入口 → 落地')).toBe(true)
     expect(isValidChainName('一'.repeat(64))).toBe(true)
     expect(isValidChainName('一'.repeat(65))).toBe(false)
@@ -154,11 +154,11 @@ describe('服务端链式（docs/03 §5.19）', () => {
   const serverSession = { ...session, features: { clientChain: false, customNode: false, serverChain: true } }
 
   it('状态文案：阻断优先，其次已停用，最后是下发情况', () => {
-    expect(serverRuleState(serverRule as never).label).toBe('生效')
-    expect(serverRuleState({ ...serverRule, applyStatus: 'pending' } as never).label).toBe('下发中')
-    expect(serverRuleState({ ...serverRule, applyStatus: 'failed' } as never).label).toBe('下发失败')
-    expect(serverRuleState({ ...serverRule, isEnabled: false, applyStatus: '' } as never).label).toBe('已停用')
-    expect(serverRuleState({ ...serverRule, status: 'blocked', blockedReason: 'exit', applyStatus: '' } as never).label).toBe('阻断 · 落地不可用')
+    expect(serverRuleState(zhT, serverRule as never).label).toBe('生效')
+    expect(serverRuleState(zhT, { ...serverRule, applyStatus: 'pending' } as never).label).toBe('下发中')
+    expect(serverRuleState(zhT, { ...serverRule, applyStatus: 'failed' } as never).label).toBe('下发失败')
+    expect(serverRuleState(zhT, { ...serverRule, isEnabled: false, applyStatus: '' } as never).label).toBe('已停用')
+    expect(serverRuleState(zhT, { ...serverRule, status: 'blocked', blockedReason: 'exit', applyStatus: '' } as never).label).toBe('阻断 · 落地不可用')
   })
 
   it('只开服务端链式：菜单可见、客户端区给说明；新建时入口排除已有规则的节点，提交后整体重取', async () => {

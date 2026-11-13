@@ -7,6 +7,7 @@ import { useToast } from '../components/toast-context'
 import { Alert, Button, Card, Confirm, Modal } from '../components/ui'
 import { useCopy } from '../hooks/use-copy'
 import { mutate, useRemote } from '../hooks/use-remote'
+import { useI18n } from '../i18n/i18n-context'
 import { IMPORT_TARGETS, maskSecretUrl, urlOfFormat, type ImportTarget } from './subscription'
 
 const QR_SIZE = 220
@@ -16,6 +17,7 @@ const loadSubscription = (signal: AbortSignal) => api.GET('/api/user/subscriptio
 
 /** 快速导入卡：各客户端一键导入、复制订阅地址、二维码、重置订阅（docs/03 §5.4）。 */
 export function SubscriptionCard() {
+  const { t } = useI18n()
   const toast = useToast()
   const copy = useCopy()
   const sub = useRemote<SubscriptionInfo>(loadSubscription)
@@ -30,12 +32,12 @@ export function SubscriptionCard() {
     (target: ImportTarget, current: SubscriptionInfo) => {
       const url = urlOfFormat(current, target.format)
       if (target.buildUrl === null) {
-        void copy(url, `已复制 ${target.label} 订阅地址`)
+        void copy(url, t('sub.copiedFormat', { client: target.label }))
         return
       }
       window.location.assign(target.buildUrl(url, BRAND))
     },
-    [copy],
+    [copy, t],
   )
 
   const handleReset = async () => {
@@ -49,71 +51,71 @@ export function SubscriptionCard() {
     setIsResetting(false)
     setIsConfirming(false)
     if (err !== null || next === null) {
-      toast.show(err?.message ?? '重置失败', 'error')
+      toast.show(err?.message ?? t('sub.resetFailed'), 'error')
       return
     }
     setOverride(next)
     setIsRevealed(false)
-    toast.show('已重置，请在客户端重新导入订阅', 'success')
+    toast.show(t('sub.resetDone'), 'success')
   }
 
   if (sub.error !== null && info === null) {
     return (
-      <Card title="快速导入">
+      <Card title={t('sub.title')}>
         <Alert tone="plain">{sub.error.message}</Alert>
       </Card>
     )
   }
   if (info === null) {
     return (
-      <Card title="快速导入">
-        <div className="hub-empty">加载中…</div>
+      <Card title={t('sub.title')}>
+        <div className="hub-empty">{t('common.loading')}</div>
       </Card>
     )
   }
 
   return (
     <Card
-      title="快速导入"
+      title={t('sub.title')}
       extra={
         <Button variant="outline" onClick={() => setIsConfirming(true)}>
           <RefreshCw size={ICON_SIZE} />
-          重置订阅
+          {t('sub.reset')}
         </Button>
       }
     >
       <div className="hub-actions" style={{ marginBottom: 20 }}>
-        {IMPORT_TARGETS.map((t) => (
+        {IMPORT_TARGETS.map((target) => (
           <Button
-            key={t.key}
+            key={target.key}
             className="hub-btn-brand hub-btn-round"
-            style={{ '--brand-from': t.gradient[0], '--brand-to': t.gradient[1] } as CSSProperties}
-            onClick={() => handleImport(t, info)}
+            style={{ '--brand-from': target.gradient[0], '--brand-to': target.gradient[1] } as CSSProperties}
+            onClick={() => handleImport(target, info)}
           >
-            {t.buildUrl === null ? `复制 ${t.label}` : `导入 ${t.label}`}
+            {t(target.buildUrl === null ? 'sub.copyFor' : 'sub.importTo', { client: target.label })}
           </Button>
         ))}
       </div>
-      <div className="hub-field-label">订阅地址（请勿泄露）</div>
+      <div className="hub-field-label">{t('sub.urlLabel')}</div>
       <div className="hub-copy-row">
-        <input className="hub-input hub-mono" readOnly aria-label="订阅地址" value={isRevealed ? info.url : maskSecretUrl(info.url)} />
-        <Button variant="outline" aria-label={isRevealed ? '隐藏订阅地址' : '显示订阅地址'} onClick={() => setIsRevealed((v) => !v)}>
+        <input className="hub-input hub-mono" readOnly aria-label={t('sub.url')} value={isRevealed ? info.url : maskSecretUrl(info.url)} />
+        <Button variant="outline" aria-label={t(isRevealed ? 'sub.hideUrl' : 'sub.showUrl')} onClick={() => setIsRevealed((v) => !v)}>
           {isRevealed ? <EyeOff size={ICON_SIZE} /> : <Eye size={ICON_SIZE} />}
         </Button>
-        <Button variant="outline" aria-label="复制订阅地址" onClick={() => void copy(info.url, '已复制订阅地址')}>
+        <Button variant="outline" aria-label={t('sub.copyUrl')} onClick={() => void copy(info.url, t('sub.urlCopied'))}>
           <Copy size={ICON_SIZE} />
         </Button>
-        <Button variant="outline" aria-label="显示订阅二维码" onClick={() => setQrTarget(IMPORT_TARGETS[0] ?? null)}>
+        <Button variant="outline" aria-label={t('sub.showQr')} onClick={() => setQrTarget(IMPORT_TARGETS[0] ?? null)}>
           <QrCode size={ICON_SIZE} />
         </Button>
       </div>
-      <p className="hub-field-hint">客户端每 {info.updateIntervalHours} 小时自动更新一次；地址泄露后请立即重置。</p>
+      <p className="hub-field-hint">{t('sub.updateHint', { hours: info.updateIntervalHours })}</p>
 
-      <Modal title="订阅二维码" isOpen={qrTarget !== null} onClose={() => setQrTarget(null)}>
+      <Modal title={t('sub.qrTitle')} isOpen={qrTarget !== null} onClose={() => setQrTarget(null)}>
         <div className="hub-actions" style={{ marginBottom: 16 }}>
-          {IMPORT_TARGETS.map((t) => (
-            <Button key={t.key} variant={qrTarget?.key === t.key ? 'primary' : 'outline'} onClick={() => setQrTarget(t)}>
-              {t.label}
+          {IMPORT_TARGETS.map((target) => (
+            <Button key={target.key} variant={qrTarget?.key === target.key ? 'primary' : 'outline'} onClick={() => setQrTarget(target)}>
+              {target.label}
             </Button>
           ))}
         </div>
@@ -123,8 +125,8 @@ export function SubscriptionCard() {
           </div>
         )}
       </Modal>
-      <Confirm title="重置订阅？" isOpen={isConfirming} isBusy={isResetting} confirmText="重置" onConfirm={() => void handleReset()} onClose={() => setIsConfirming(false)}>
-        旧订阅地址与旧连接凭据会立即失效，所有设备都需要重新导入订阅。
+      <Confirm title={t('sub.resetConfirmTitle')} isOpen={isConfirming} isBusy={isResetting} confirmText={t('sub.resetConfirm')} onConfirm={() => void handleReset()} onClose={() => setIsConfirming(false)}>
+        {t('sub.resetConfirmBody')}
       </Confirm>
     </Card>
   )
