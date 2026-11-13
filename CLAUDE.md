@@ -34,7 +34,7 @@ cd v2-hub-contract/deploy/it && bash run_all.sh
 - 前端静态文件放 MinIO，Caddy 同域反代 `/api`、`/sub`（Ruling-5、Ruling-6）。
 
 契约（全部在 v2-hub-contract/）：`hub-api.yaml`（server → 前端）、`deploy/init.sql`（server 的表结构）、
-`upstream/3x-ui/openapi-v3.11.0.json`（3x-ui → server 的上游基准）。契约版本用 git tag `vX.Y`，当前 `v0.3`。
+`upstream/3x-ui/openapi-v3.11.0.json`（3x-ui → server 的上游基准）。契约版本用 git tag `vX.Y`，当前 `v0.4`。
 
 ## 跨目录纪律
 
@@ -58,6 +58,9 @@ GitHub 仓库设置见 `docs/github-仓库设置清单.md`。
   （表单与 3x-ui 同构，Ruling-16）、Host 对外地址、节点目录与节点组、漂移与面板标识复用处理；IT-3 通过。
 - M2 完成（2026-11-13，tag `v0.3`）：套餐与用户（额度模型照 3x-ui：到期、首次使用起算、周期流量重置）、
   对账器（每用户在每台面板一个 client，失败重试）、流量汇总、超额 / 到期自动禁用、管理员直接改用量；IT-4 通过。
-- 用户端（v2-hub-user-web）仍是脚手架首页；下一步是 M3（订阅与用户端基础）。
+- M3 完成（2026-11-13，tag `v0.4`）：终端用户登录 / 会话 / 两步验证、订阅（`/sub/{token}`，Base64 / Mihomo / sing-box /
+  Xray JSON，节点参数取自面板分享链接）、重置订阅即轮换连接凭据、客户后台（仪表盘、节点、账号、订阅记录，自写设计系统）、
+  管理端换肤；IT-5 通过。真实客户端导入连通未自动化，待人工验证。
+- 下一步是 M4（自助运营：注册与邀请、邮件、公告、工单、签到）。
 - 路线（2026-11-13，Ruling-17 – Ruling-22）：参考 SSPanel-Uim Malio 的功能与界面，自行实现；里程碑为
   M3 订阅与用户端基础 → M4 自助运营 → M5 商店与钱包 → M6 / M7 两种链式 → M8 运营，见 docs/07。
