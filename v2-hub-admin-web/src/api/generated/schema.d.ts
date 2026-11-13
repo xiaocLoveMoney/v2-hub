@@ -783,6 +783,342 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/admin/users/{id}/subscription/reset": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 重置该用户的订阅地址并轮换连接凭据（user:write）；旧地址与旧凭据立即失效并触发对账 */
+        post: operations["resetUserSubscription"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/users/{id}/totp": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** 清除该用户的两步验证（遗失设备时用；user:write），其全部会话失效 */
+        delete: operations["clearUserTotp"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/subscribe-logs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 订阅拉取记录分页（user:read），按时间倒序 */
+        get: operations["listSubscribeLogs"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/user/auth/login": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 终端用户登录，成功后 Set-Cookie hub_user_session
+         * @description 失败一律 401“用户名或密码错误”；触发频控返回 429（docs/03 §5.3）。本接口不需要 CSRF 头。停用的账号可以登录。
+         */
+        post: operations["userLogin"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/user/auth/logout": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 登出并删除当前会话 */
+        post: operations["userLogout"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/user/auth/me": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 当前用户、状态与 CSRF token（停用的账号也可访问） */
+        get: operations["userMe"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/user/auth/password": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** 本人改口令（须提交旧口令）；成功后其余会话全部失效 */
+        put: operations["userChangePassword"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/user/auth/totp/setup": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 生成待确认的 TOTP 密钥（只返回这一次） */
+        post: operations["userTotpSetup"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/user/auth/totp/enable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 提交验证码确认并开启两步验证 */
+        post: operations["userTotpEnable"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/user/auth/totp/disable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 提交当前验证码关闭两步验证 */
+        post: operations["userTotpDisable"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/user/dashboard": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 仪表盘：套餐、额度与用量、到期、在线设备、最近使用（docs/03 §5.5） */
+        get: operations["getUserDashboard"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/user/traffic": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 最近若干小时按小时的用量，时间升序；没有用量的小时不返回 */
+        get: operations["listUserTraffic"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/user/nodes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 本人被授权且启用的节点，按节点组分段；状态取平台缓存 */
+        get: operations["listUserNodes"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/user/nodes/{id}/link": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        /** 该节点的分享链接（凭据）；节点不在本人授权范围内返回 404，账号非 active 返回 409 */
+        get: operations["getUserNodeLink"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/user/subscription": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 本人的订阅地址（凭据，前端默认打码）与各格式地址；尚无 token 时生成 */
+        get: operations["getUserSubscription"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/user/subscription/reset": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 重置订阅地址并轮换连接凭据；旧地址与旧凭据立即失效，客户端需重新导入 */
+        post: operations["resetOwnSubscription"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/user/login-logs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 本人最近 10 次登录记录 */
+        get: operations["listUserLoginLogs"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/user/subscribe-logs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 本人的订阅拉取记录分页，按时间倒序 */
+        get: operations["listOwnSubscribeLogs"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/sub/{token}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 按格式渲染该用户的全部可用节点（docs/03 §5.4）
+         * @description 不走响应信封。响应头带 Subscription-Userinfo、Profile-Update-Interval、Profile-Title、Content-Disposition。
+         *     用户非 active 时仍返回 200，内容只有一条说明状态的信息节点。
+         */
+        get: operations["getSubscription"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -1183,12 +1519,19 @@ export interface components {
                 pending: number;
                 failed: number;
             };
+            /** @description 是否已开启两步验证（0.2.6） */
+            totpEnabled?: boolean;
+            /**
+             * Format: date-time
+             * @description 最近一次产生流量的时间（0.2.6）
+             */
+            lastUsedAt?: string | null;
             /** Format: date-time */
             createdAt: string;
         };
         UserCreateInput: {
             username: string;
-            password: components["schemas"]["Password"];
+            password: components["schemas"]["UserPassword"];
             remark?: string;
             /**
              * Format: int64
@@ -1213,6 +1556,117 @@ export interface components {
             syncedAt: string | null;
             /** Format: date-time */
             updatedAt: string;
+        };
+        UserPassword: string;
+        UserPasswordChangeInput: {
+            oldPassword: string;
+            newPassword: components["schemas"]["UserPassword"];
+        };
+        UserSession: {
+            user: {
+                /** Format: int64 */
+                id: number;
+                username: string;
+                status: components["schemas"]["UserStatus"];
+            };
+            totpEnabled: boolean;
+            csrfToken: string;
+        };
+        UserSessionEnvelope: components["schemas"]["Envelope"] & {
+            data?: components["schemas"]["UserSession"];
+        };
+        UserDashboard: {
+            status: components["schemas"]["UserStatus"];
+            /** @description 没有套餐时为空串 */
+            planName: string;
+            /**
+             * Format: int64
+             * @description 字节，0 不限
+             */
+            trafficLimit: number;
+            /** Format: int64 */
+            trafficUsed: number;
+            /**
+             * Format: int64
+             * @description 今日（平台时区）已用字节
+             */
+            trafficToday: number;
+            /** Format: date-time */
+            expiresAt: string | null;
+            /** @description 大于 0 表示首次使用后才开始计时的天数 */
+            pendingDays: number;
+            /** @description 同时在线 IP 数，0 不限 */
+            limitIp: number;
+            /** @description 各面板在线 client 数之和；面板都不提供时为 null */
+            onlineDevices: number | null;
+            /** Format: date-time */
+            lastUsedAt: string | null;
+            /** @description 当前可用节点数 */
+            nodeCount: number;
+        };
+        TrafficPoint: {
+            /** Format: date-time */
+            hour: string;
+            /** Format: int64 */
+            up: number;
+            /** Format: int64 */
+            down: number;
+        };
+        UserNode: {
+            /** Format: int64 */
+            id: number;
+            name: string;
+            region: string;
+            protocol: string;
+            isServerOnline: boolean;
+            /** @description 所在服务器的 CPU 占用百分比，未知为 null */
+            serverLoad: number | null;
+            /** @description 所在服务器的在线 client 数 */
+            onlineClients: number;
+        };
+        UserNodeGroup: {
+            /** Format: int64 */
+            id: number;
+            name: string;
+            nodes: components["schemas"]["UserNode"][];
+        };
+        NodeLink: {
+            /** @description 分享链接，属于凭据 */
+            link: string;
+        };
+        /** @enum {string} */
+        SubscriptionFormat: "base64" | "mihomo" | "singbox" | "xray";
+        SubscriptionInfo: {
+            /** @description 不带 format 参数的订阅地址，属于凭据 */
+            url: string;
+            formats: {
+                format: components["schemas"]["SubscriptionFormat"];
+                url: string;
+            }[];
+            updateIntervalHours: number;
+        };
+        LoginLog: {
+            clientIp: string;
+            isSuccess: boolean;
+            /** Format: date-time */
+            createdAt: string;
+        };
+        SubscribeLog: {
+            /** Format: int64 */
+            id: number;
+            /** Format: int64 */
+            userId: number;
+            username: string;
+            format: components["schemas"]["SubscriptionFormat"];
+            clientIp: string;
+            userAgent: string;
+            /** Format: date-time */
+            createdAt: string;
+        };
+        SubscribeLogPage: {
+            items: components["schemas"]["SubscribeLog"][];
+            /** Format: int64 */
+            total: number;
         };
     };
     responses: {
@@ -1254,6 +1708,15 @@ export interface components {
         };
         /** @description not_found */
         NotFound: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Envelope"];
+            };
+        };
+        /** @description account_disabled（账号已停用，只能查看本人信息与退出）或 permission_denied（CSRF 校验失败） */
+        AccountDisabled: {
             headers: {
                 [name: string]: unknown;
             };
@@ -2845,7 +3308,7 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    password: components["schemas"]["Password"];
+                    password: components["schemas"]["UserPassword"];
                 };
             };
         };
@@ -2901,6 +3364,503 @@ export interface operations {
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["PermissionDenied"];
             404: components["responses"]["NotFound"];
+        };
+    };
+    resetUserSubscription: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["Ok"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    clearUserTotp: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["Ok"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    listSubscribeLogs: {
+        parameters: {
+            query?: {
+                page?: components["parameters"]["Page"];
+                pageSize?: components["parameters"]["PageSize"];
+                userId?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 订阅记录分页 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["SubscribeLogPage"];
+                    };
+                };
+            };
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+        };
+    };
+    userLogin: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LoginRequest"];
+            };
+        };
+        responses: {
+            /** @description 登录成功 */
+            200: {
+                headers: {
+                    "Set-Cookie"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserSessionEnvelope"];
+                };
+            };
+            400: components["responses"]["InvalidArgument"];
+            /** @description unauthenticated（用户名或口令错误）或 totp_required（需再提交验证码） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"];
+                };
+            };
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    userLogout: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["Ok"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+        };
+    };
+    userMe: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 当前会话 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserSessionEnvelope"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+        };
+    };
+    userChangePassword: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UserPasswordChangeInput"];
+            };
+        };
+        responses: {
+            200: components["responses"]["Ok"];
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["AccountDisabled"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    userTotpSetup: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 待确认的密钥 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["TotpSetup"];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["AccountDisabled"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    userTotpEnable: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TotpCodeInput"];
+            };
+        };
+        responses: {
+            200: components["responses"]["Ok"];
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["AccountDisabled"];
+            409: components["responses"]["Conflict"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    userTotpDisable: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TotpCodeInput"];
+            };
+        };
+        responses: {
+            200: components["responses"]["Ok"];
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["AccountDisabled"];
+            409: components["responses"]["Conflict"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    getUserDashboard: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 仪表盘 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["UserDashboard"];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["AccountDisabled"];
+        };
+    };
+    listUserTraffic: {
+        parameters: {
+            query?: {
+                hours?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 按小时用量 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["TrafficPoint"][];
+                    };
+                };
+            };
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["AccountDisabled"];
+        };
+    };
+    listUserNodes: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 节点分段 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["UserNodeGroup"][];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["AccountDisabled"];
+        };
+    };
+    getUserNodeLink: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 分享链接 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["NodeLink"];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["AccountDisabled"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    getUserSubscription: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 订阅地址 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["SubscriptionInfo"];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["AccountDisabled"];
+        };
+    };
+    resetOwnSubscription: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 新的订阅地址 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["SubscriptionInfo"];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["AccountDisabled"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    listUserLoginLogs: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 登录记录 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["LoginLog"][];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["AccountDisabled"];
+        };
+    };
+    listOwnSubscribeLogs: {
+        parameters: {
+            query?: {
+                page?: components["parameters"]["Page"];
+                pageSize?: components["parameters"]["PageSize"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 订阅记录分页 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["SubscribeLogPage"];
+                    };
+                };
+            };
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["AccountDisabled"];
+        };
+    };
+    getSubscription: {
+        parameters: {
+            query?: {
+                /** @description 未指定时按 User-Agent 判断 */
+                format?: components["schemas"]["SubscriptionFormat"];
+            };
+            header?: never;
+            path: {
+                token: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 订阅内容 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/plain": string;
+                    "application/yaml": string;
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description format 取值不认识 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/plain": string;
+                };
+            };
+            /** @description token 不存在 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/plain": string;
+                };
+            };
+            /** @description 触发频控 */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/plain": string;
+                };
+            };
         };
     };
 }

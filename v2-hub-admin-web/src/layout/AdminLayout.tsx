@@ -7,6 +7,9 @@ import { ROUTES, visibleMenu, type MenuEntry } from '../menu'
 
 type MenuItem = Required<MenuProps>['items'][number]
 
+/** 侧栏宽度（docs/06 §4 外壳）。 */
+const SIDER_WIDTH = 250
+
 /** 把菜单表转成 antd Menu 的 items：有 group 的归到同名分组下，保持表内顺序。 */
 function toMenuItems(entries: MenuEntry[]): MenuItem[] {
   const items: MenuItem[] = []
@@ -49,7 +52,7 @@ export function AdminLayout() {
 
   return (
     <Layout className="admin-layout">
-      <Layout.Sider breakpoint="lg" collapsedWidth={0} theme="light" width={220}>
+      <Layout.Sider breakpoint="lg" collapsedWidth={0} theme="light" width={SIDER_WIDTH} className="admin-sider">
         <div className="admin-brand">v2-hub</div>
         <Menu
           mode="inline"
@@ -58,11 +61,12 @@ export function AdminLayout() {
           onClick={({ key }) => void navigate(key)}
         />
       </Layout.Sider>
-      <Layout>
+      <Layout className="admin-main">
+        <div className="admin-band" aria-hidden="true" />
         <Layout.Header className="admin-header">
           <Space>
-            <Typography.Text>{session?.admin.username}</Typography.Text>
-            <Button icon={<LogoutOutlined />} onClick={() => void handleLogout()}>
+            <Typography.Text className="admin-header-user">{session?.admin.username}</Typography.Text>
+            <Button ghost icon={<LogoutOutlined />} onClick={() => void handleLogout()}>
               退出
             </Button>
           </Space>

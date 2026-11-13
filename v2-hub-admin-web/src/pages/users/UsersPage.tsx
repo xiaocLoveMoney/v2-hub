@@ -52,7 +52,7 @@ function ProvisionCell({ u }: { u: EndUser }) {
 /** 用户管理（user:read 查看，user:write 增改、续费、改用量、停用、删除；docs/03 §5.2）。 */
 export function UsersPage() {
   const { can } = useSession()
-  const { message } = App.useApp()
+  const { message, modal } = App.useApp()
   const canWrite = can(PERMISSIONS.USER_WRITE)
   const canReadPlans = can(PERMISSIONS.PLAN_READ)
   const [page, setPage] = useState(1)
@@ -90,6 +90,44 @@ export function UsersPage() {
     }
     void message.success('已删除；面板不可达时会在恢复后删掉 client')
     users.reload()
+  }
+
+  /** 重置订阅：换订阅地址并轮换连接凭据（docs/03 §5.4 重置）。 */
+  const resetSubscription = (u: EndUser) => {
+    modal.confirm({
+      title: `重置 ${u.username} 的订阅？`,
+      content: '旧订阅地址与旧连接凭据立即失效，用户需要重新导入订阅',
+      okText: '重置',
+      okButtonProps: { danger: true },
+      onOk: async () => {
+        const err = await mutate(() => api.POST('/api/admin/users/{id}/subscription/reset', { params: { ...csrfHeader(), path: { id: u.id } } }))
+        if (err !== null) {
+          void message.error(err.message)
+          return
+        }
+        void message.success('已重置，正在同步到各面板')
+        users.reload()
+      },
+    })
+  }
+
+  /** 清除两步验证：用户遗失设备时用，其全部会话失效（docs/03 §5.3）。 */
+  const clearTotp = (u: EndUser) => {
+    modal.confirm({
+      title: `清除 ${u.username} 的两步验证？`,
+      content: '该用户的全部登录会话会失效，之后登录不再需要验证码',
+      okText: '清除',
+      okButtonProps: { danger: true },
+      onOk: async () => {
+        const err = await mutate(() => api.DELETE('/api/admin/users/{id}/totp', { params: { ...csrfHeader(), path: { id: u.id } } }))
+        if (err !== null) {
+          void message.error(err.message)
+          return
+        }
+        void message.success('已清除两步验证')
+        users.reload()
+      },
+    })
   }
 
   const columns: TableProps<EndUser>['columns'] = [
@@ -130,6 +168,14 @@ export function UsersPage() {
               <Button size="small" onClick={() => open('credential', u)}>
                 重置口令
               </Button>
+              <Button size="small" onClick={() => resetSubscription(u)}>
+                重置订阅
+              </Button>
+              {u.totpEnabled === true && (
+                <Button size="small" onClick={() => clearTotp(u)}>
+                  清除两步验证
+                </Button>
+              )}
               <Popconfirm title={`删除用户 ${u.username}？`} description="会先删除各面板上的 client，不可恢复" onConfirm={() => remove(u)}>
                 <Button size="small" danger>
                   删除

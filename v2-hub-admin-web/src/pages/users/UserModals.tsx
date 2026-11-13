@@ -8,7 +8,8 @@ import { TABLE_SCROLL, formatTime } from '../system/format'
 import { RenewResetFields, type RenewResetForm } from './quota-fields'
 import { bytesToGb, describeRenew, describeReset, formatBytes, gbToBytes, renewFieldsOf, renewModeOf, renewValueOf } from './quota'
 
-const MIN_CREDENTIAL_LEN = 12
+// 终端用户口令 8–128 位（docs/03 §5.3；管理员口令是 12 位起）
+const MIN_CREDENTIAL_LEN = 8
 const MAX_CREDENTIAL_LEN = 128
 const MAX_REMARK_LEN = 255
 const MAX_LIMIT_IP = 1000

@@ -207,10 +207,10 @@ function PlanFormBody({ plan, groups, onSaved }: { plan: Plan | null; groups: No
           <InputNumber min={0} max={MAX_LIMIT_IP} className="full-width" />
         </Form.Item>
         <RenewResetFields />
-        <Form.Item name="allowClientChain" label="允许客户端链式代理（M4 起生效）" valuePropName="checked">
+        <Form.Item name="allowClientChain" label="允许客户端链式代理（M6 起生效）" valuePropName="checked">
           <Switch />
         </Form.Item>
-        <Form.Item name="allowCustomNode" label="允许导入自有落地节点（M4 起生效）" valuePropName="checked">
+        <Form.Item name="allowCustomNode" label="允许导入自有落地节点（M6 起生效）" valuePropName="checked">
           <Switch />
         </Form.Item>
         <Form.Item name="remark" label="备注">

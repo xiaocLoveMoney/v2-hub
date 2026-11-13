@@ -156,4 +156,25 @@ describe('UsersPage', () => {
     await waitFor(() => expect(calls.some((c) => c.path === '/api/admin/users/9/plan')).toBe(true))
     expect(calls.find((c) => c.path === '/api/admin/users/9/plan')?.body).toEqual({ planId: 3 })
   })
+
+  it('重置订阅与清除两步验证都要二次确认后才提交', async () => {
+    const calls = mockServer({
+      'GET /api/admin/users': () => ok({ items: [{ ...user, status: 'active', totpEnabled: true }], total: 1 }),
+      'GET /api/admin/plans': () => ok([plan]),
+      'POST /api/admin/users/9/subscription/reset': () => ok(null),
+      'DELETE /api/admin/users/9/totp': () => ok(null),
+    })
+    renderWith(<UsersPage />)
+    await screen.findByText('alice@example.com')
+
+    fireEvent.click(screen.getByRole('button', { name: /重置订阅/ }))
+    expect(calls.some((c) => c.method === 'POST')).toBe(false)
+    fireEvent.click(await screen.findByRole('button', { name: /^重\s*置$/ }))
+    await waitFor(() => expect(calls.some((c) => c.path === '/api/admin/users/9/subscription/reset')).toBe(true))
+    expect(calls.find((c) => c.path === '/api/admin/users/9/subscription/reset')?.csrf).toBe(CSRF)
+
+    fireEvent.click(screen.getByRole('button', { name: /清除两步验证/ }))
+    fireEvent.click(await screen.findByRole('button', { name: /^清\s*除$/ }))
+    await waitFor(() => expect(calls.some((c) => c.method === 'DELETE' && c.path === '/api/admin/users/9/totp')).toBe(true))
+  })
 })

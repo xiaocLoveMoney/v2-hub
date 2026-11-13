@@ -88,3 +88,4 @@ export function toApiError(error: unknown): ApiError {
   }
   return { code: 'network', message: FALLBACK_MESSAGE }
 }
+export type SubscribeLog = components['schemas']['SubscribeLog']

@@ -12,6 +12,7 @@ import { NodesPage } from './pages/panel/NodesPage'
 import { ServerDetailPage } from './pages/panel/ServerDetailPage'
 import { ServersPage } from './pages/panel/ServersPage'
 import { PlansPage } from './pages/users/PlansPage'
+import { SubscribeLogsPage } from './pages/users/SubscribeLogsPage'
 import { UsersPage } from './pages/users/UsersPage'
 
 /** 已实现的页面；菜单表里其余路径显示交付里程碑占位。 */
@@ -20,6 +21,7 @@ const PAGE_BY_PATH: Record<string, ReactNode> = {
   [ROUTES.NODES]: <NodesPage />,
   [ROUTES.USERS]: <UsersPage />,
   [ROUTES.PLANS]: <PlansPage />,
+  [ROUTES.SUBSCRIBE_LOGS]: <SubscribeLogsPage />,
   [ROUTES.ADMINS]: <AdminsPage />,
   [ROUTES.ROLES]: <RolesPage />,
   [ROUTES.AUDIT_LOGS]: <AuditLogsPage />,

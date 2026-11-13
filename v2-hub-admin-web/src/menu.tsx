@@ -3,6 +3,7 @@ import {
   ClusterOutlined,
   DashboardOutlined,
   DeploymentUnitOutlined,
+  HistoryOutlined,
   LockOutlined,
   ProfileOutlined,
   SafetyOutlined,
@@ -20,6 +21,7 @@ export const ROUTES = {
   NODES: '/nodes',
   USERS: '/users',
   PLANS: '/plans',
+  SUBSCRIBE_LOGS: '/subscribe-logs',
   ADMINS: '/system/admins',
   ROLES: '/system/roles',
   AUDIT_LOGS: '/system/audit-logs',
@@ -51,21 +53,24 @@ export interface MenuEntry {
   group?: string
 }
 
+// 分组照 docs/05：我的 / 节点 / 用户 / 系统，交易分组随 M5 加入
+const GROUP_MINE = '我的'
+const GROUP_NODES = '节点'
 const GROUP_USERS = '用户'
 const GROUP_SYSTEM = '系统'
-const GROUP_ACCOUNT = '账号'
 
 /** 左侧菜单表：增减菜单只改这张表，菜单显示与路由守卫都以它为准。 */
 export const MENU: readonly MenuEntry[] = [
-  { path: ROUTES.DASHBOARD, label: '总览', icon: <DashboardOutlined /> },
-  { path: ROUTES.SERVERS, label: '服务器', icon: <ClusterOutlined />, permission: PERMISSIONS.SERVER_READ },
-  { path: ROUTES.NODES, label: '节点', icon: <DeploymentUnitOutlined />, permission: PERMISSIONS.NODE_READ },
+  { path: ROUTES.DASHBOARD, label: '总览', icon: <DashboardOutlined />, group: GROUP_MINE },
+  { path: ROUTES.SERVERS, label: '服务器', icon: <ClusterOutlined />, permission: PERMISSIONS.SERVER_READ, group: GROUP_NODES },
+  { path: ROUTES.NODES, label: '节点', icon: <DeploymentUnitOutlined />, permission: PERMISSIONS.NODE_READ, group: GROUP_NODES },
   { path: ROUTES.USERS, label: '用户', icon: <UserOutlined />, permission: PERMISSIONS.USER_READ, group: GROUP_USERS },
   { path: ROUTES.PLANS, label: '套餐', icon: <ProfileOutlined />, permission: PERMISSIONS.PLAN_READ, group: GROUP_USERS },
+  { path: ROUTES.SUBSCRIBE_LOGS, label: '订阅记录', icon: <HistoryOutlined />, permission: PERMISSIONS.USER_READ, group: GROUP_USERS },
   { path: ROUTES.ADMINS, label: '管理员', icon: <TeamOutlined />, permission: PERMISSIONS.ADMIN_READ, group: GROUP_SYSTEM },
   { path: ROUTES.ROLES, label: '角色与权限', icon: <SafetyOutlined />, permission: PERMISSIONS.ADMIN_READ, group: GROUP_SYSTEM },
   { path: ROUTES.AUDIT_LOGS, label: '审计日志', icon: <AuditOutlined />, permission: PERMISSIONS.AUDIT_READ, group: GROUP_SYSTEM },
-  { path: ROUTES.SECURITY, label: '账号安全', icon: <LockOutlined />, group: GROUP_ACCOUNT },
+  { path: ROUTES.SECURITY, label: '账号安全', icon: <LockOutlined />, group: GROUP_SYSTEM },
 ]
 
 /** 按权限过滤菜单表，返回新数组。 */
