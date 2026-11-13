@@ -65,9 +65,10 @@ afterEach(() => {
 })
 
 const plan = {
-  id: 3, name: 'basic', trafficLimit: 100 * BYTES_PER_GB, durationDays: 30, startOnFirstUse: false, limitIp: 2, renewEveryDays: 0,
-  renewMonthDay: 1, renewWeekday: 0, renewMax: 0, trafficReset: 'never', trafficResetDay: 1, allowClientChain: false, allowCustomNode: false,
+  id: 3, name: 'basic', trafficLimit: 100 * BYTES_PER_GB, durationDays: 30, startOnFirstUse: false, limitIp: 2,
+  trafficReset: 'monthly', trafficResetDay: 1, allowClientChain: false, allowCustomNode: false,
   remark: '', nodeGroupIds: [7], userCount: 1, createdAt: '2026-11-12T00:00:00Z',
+  isOnSale: true, isTrial: false, sortOrder: 0, description: '', prices: [{ id: 11, durationDays: 30, price: 990 }],
 }
 
 const user = {
@@ -86,7 +87,7 @@ describe('quota helpers', () => {
 })
 
 describe('PlansPage', () => {
-  it('列表显示额度与续期；新建套餐按 GB 换算成字节并带上节点组', async () => {
+  it('列表显示额度、售价与上架状态；新建套餐按 GB 换算成字节、价格按元换算成分，且不再带免费续期字段', async () => {
     const calls = mockServer({
       'GET /api/admin/plans': () => ok([plan]),
       'GET /api/admin/node-groups': () => ok([{ id: 7, name: 'hk', remark: '', nodeIds: [] }]),
@@ -94,18 +95,26 @@ describe('PlansPage', () => {
     })
     renderWith(<PlansPage />)
     expect(await screen.findByText('100.00 GB')).toBeDefined()
-    expect(screen.getByText('每月 1 号')).toBeDefined()
+    expect(screen.getByText(/30 天 ¥9\.90/)).toBeDefined()
+    expect(screen.getByText('上架')).toBeDefined()
     expect(await screen.findByText('hk')).toBeDefined()
 
     fireEvent.click(screen.getByRole('button', { name: /新建套餐/ }))
     const dialog = await screen.findByRole('dialog')
     fireEvent.change(within(dialog).getByLabelText('名称'), { target: { value: 'pro' } })
     fireEvent.change(within(dialog).getByLabelText('流量额度（GB）'), { target: { value: '50' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: /添加时长选项/ }))
+    fireEvent.change(await within(dialog).findByLabelText('天数'), { target: { value: '90' } })
+    fireEvent.change(within(dialog).getByLabelText('价格'), { target: { value: '19.9' } })
     fireEvent.click(within(dialog).getByRole('button', { name: /创\s*建/ }))
     await waitFor(() => expect(calls.some((c) => c.method === 'POST')).toBe(true))
     const post = calls.find((c) => c.method === 'POST')
     expect(post?.csrf).toBe(CSRF)
-    expect(post?.body).toMatchObject({ name: 'pro', trafficLimit: 50 * BYTES_PER_GB, durationDays: 30, renewEveryDays: 0, renewMonthDay: 0, renewWeekday: 0, trafficReset: 'never' })
+    expect(post?.body).toMatchObject({
+      name: 'pro', trafficLimit: 50 * BYTES_PER_GB, durationDays: 30, trafficReset: 'never', isOnSale: false, isTrial: false,
+      prices: [{ durationDays: 90, price: 1990 }],
+    })
+    expect(post?.body).not.toHaveProperty('renewEveryDays')
   })
 })
 
