@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: v2-hub API
-  version: 0.2.6
+  version: 0.2.7
   description: |
     v2-hub 对外接口契约（hub-server 提供，v2-hub-admin-web / v2-hub-user-web 消费）。
     - 管理端接口前缀 /api/admin，客户端接口前缀 /api/user，订阅端点前缀 /sub。
@@ -16,6 +16,7 @@ info:
     0.2.5：M2 套餐与用户（docs/03 §5.2）——套餐增删改查、用户增删改查、分配 / 续费套餐、直接改用量与额度、重置口令、下发状态与手动对账。
     0.2.6：M3 客户后台与订阅（docs/03 §5.3–§5.5）——终端用户登录 / 两步验证 / 改口令、仪表盘、用量、节点、订阅地址与重置、
       登录记录、订阅记录、订阅端点 /sub/{token}；管理端新增重置用户订阅、清除用户两步验证、订阅记录；新增错误码 account_disabled。
+    0.2.7：管理员建用户、重置用户口令的口令长度放宽为 8–128（docs/03 §5.3，原误用管理员的 12 位下限）；xray 格式的订阅说明改为每节点一份完整配置。
 servers:
   - url: http://127.0.0.1:8080
     description: 本地开发
@@ -1253,7 +1254,7 @@ paths:
         required: true
         content:
           application/json:
-            schema: { type: object, required: [password], properties: { password: { $ref: "#/components/schemas/Password" } } }
+            schema: { type: object, required: [password], properties: { password: { $ref: "#/components/schemas/UserPassword" } } }
       responses:
         "200": { $ref: "#/components/responses/Ok" }
         "400": { $ref: "#/components/responses/InvalidArgument" }
@@ -2226,7 +2227,7 @@ components:
       required: [username, password]
       properties:
         username: { type: string, minLength: 3, maxLength: 64, pattern: "^[A-Za-z0-9_.@-]+$" }
-        password: { $ref: "#/components/schemas/Password" }
+        password: { $ref: "#/components/schemas/UserPassword" }
         remark: { type: string, maxLength: 255 }
         planId: { type: integer, format: int64, minimum: 1, description: 省略则不分配套餐（无可用节点） }
     UserUpdateInput:
