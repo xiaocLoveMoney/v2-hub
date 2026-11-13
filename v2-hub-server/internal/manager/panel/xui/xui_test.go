@@ -346,6 +346,13 @@ func TestEndpoints(t *testing.T) {
 	if len(fp.hosts) != 0 {
 		t.Fatalf("group with its last pair removed should be deleted: %v", fp.hosts)
 	}
+	// 平台侧不填备注时用第一个地址（3x-ui 拒绝空备注）
+	if err := c.CreateEndpoints(ctx, panel.EndpointSpec{InboundRefs: []string{"1"}, Addresses: []string{"relay.example.com"}}); err != nil {
+		t.Fatalf("CreateEndpoints without remark: %v", err)
+	}
+	if len(fp.hosts) != 1 || fp.hosts[0]["remark"] != "relay.example.com" {
+		t.Fatalf("empty remark should default to the first address, hosts = %v", fp.hosts)
+	}
 	if _, err := c.RemoveEndpoint(ctx, panel.EndpointKey{GroupRef: "g1", InboundRef: "1", Address: "cdn.example.com"}); !errors.Is(err, panel.ErrNotFound) {
 		t.Fatalf("remove twice err = %v", err)
 	}
