@@ -76,6 +76,11 @@ type Chain struct {
 // chainNameSep 连接入口名与落地名，作为没有起名的链路的默认名称。
 const chainNameSep = " → "
 
+// ChainDefaultName 返回没有起名的链路的默认名称：“入口名 → 落地名”。
+func ChainDefaultName(entry, exit string) string {
+	return entry + chainNameSep + exit
+}
+
 // namer 给出不重复的名称：重名的追加序号（完整配置要求名称唯一）。
 type namer map[string]int
 
@@ -147,7 +152,7 @@ func selectNodes(nodes []ProxyNode, chains []Chain, keep func(ProxyNode) bool) s
 		}
 		name := strings.TrimSpace(c.Name)
 		if name == "" {
-			name = entryName + chainNameSep + displayName(c.Exit)
+			name = ChainDefaultName(entryName, displayName(c.Exit))
 		}
 		sel.chains = append(sel.chains, resolvedChain{name: names.unique(name), entryName: entryName, entry: nodes[c.Entry], exit: c.Exit})
 	}

@@ -182,6 +182,7 @@ func runServer(args []string) error {
 			Shop:           shop,
 			Finance:        shop,
 			Pay:            payments,
+			Chain:          service.NewChainService(pool, sealer),
 			Cookie:         api.CookieConfig{Secure: secureCookie},
 			TrustedProxies: trusted,
 		}),

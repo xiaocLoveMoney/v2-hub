@@ -45,6 +45,8 @@ type userSessionVO struct {
 	TOTPEnabled bool        `json:"totpEnabled"`
 	// 0.4.0 起：真 = 管理员代入的只读会话（docs/03 §5.17）
 	Impersonated bool `json:"impersonated"`
+	// 0.4.1 起：当前套餐开了哪些功能（docs/03 §5.18），由 handlers.sessionVO 填
+	Features userFeaturesVO `json:"features"`
 }
 
 func toUserSessionVO(p *service.UserPrincipal) userSessionVO {
@@ -134,7 +136,7 @@ func (h *handlers) userLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.SetCookie(w, h.userSessionCookie(res.Token, res.ExpiresAt))
-	writeOK(w, toUserSessionVO(res.Principal))
+	writeOK(w, h.sessionVO(r, res.Principal))
 }
 
 func (h *handlers) userLogout(w http.ResponseWriter, r *http.Request, p *service.UserPrincipal) {
@@ -148,8 +150,8 @@ func (h *handlers) userLogout(w http.ResponseWriter, r *http.Request, p *service
 	writeOK(w, nil)
 }
 
-func (h *handlers) userMe(w http.ResponseWriter, _ *http.Request, p *service.UserPrincipal) {
-	writeOK(w, toUserSessionVO(p))
+func (h *handlers) userMe(w http.ResponseWriter, r *http.Request, p *service.UserPrincipal) {
+	writeOK(w, h.sessionVO(r, p))
 }
 
 // secretChangeRequest 对应 hub-api.yaml UserPasswordChangeInput。
@@ -275,5 +277,5 @@ func (h *handlers) redeemImpersonateTicket(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	http.SetCookie(w, h.userSessionCookie(res.Token, res.ExpiresAt))
-	writeOK(w, toUserSessionVO(res.Principal))
+	writeOK(w, h.sessionVO(r, res.Principal))
 }

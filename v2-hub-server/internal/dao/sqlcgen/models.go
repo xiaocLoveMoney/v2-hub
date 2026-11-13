@@ -65,6 +65,19 @@ type AuditLog struct {
 	CreatedAt  pgtype.Timestamptz
 }
 
+type ChainRule struct {
+	ID           int64
+	UserID       int64
+	Kind         string
+	Name         string
+	EntryNodeID  int64
+	ExitNodeID   pgtype.Int8
+	ExitCustomID pgtype.Int8
+	IsEnabled    bool
+	CreatedAt    pgtype.Timestamptz
+	UpdatedAt    pgtype.Timestamptz
+}
+
 type CheckinLog struct {
 	ID          int64
 	UserID      int64
@@ -103,6 +116,18 @@ type CouponUsage struct {
 	UserID    pgtype.Int8
 	OrderID   int64
 	CreatedAt pgtype.Timestamptz
+}
+
+type CustomNode struct {
+	ID        int64
+	UserID    int64
+	Name      string
+	Protocol  string
+	Address   string
+	Port      int32
+	LinkEnc   []byte
+	CreatedAt pgtype.Timestamptz
+	UpdatedAt pgtype.Timestamptz
 }
 
 type EmailCode struct {

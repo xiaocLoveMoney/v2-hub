@@ -34,8 +34,10 @@ type Querier interface {
 	CountAdminsByRole(ctx context.Context, roleID int64) (int64, error)
 	CountAnnouncements(ctx context.Context) (int64, error)
 	CountAuditLogs(ctx context.Context) (int64, error)
+	CountChainRules(ctx context.Context, userID int64) (int64, error)
 	CountCouponUsesByUser(ctx context.Context, arg CountCouponUsesByUserParams) (int64, error)
 	CountCoupons(ctx context.Context) (int64, error)
+	CountCustomNodes(ctx context.Context, userID int64) (int64, error)
 	CountEmailCodesByEmailSince(ctx context.Context, arg CountEmailCodesByEmailSinceParams) (int64, error)
 	CountEmailCodesByIPSince(ctx context.Context, arg CountEmailCodesByIPSinceParams) (int64, error)
 	// 用于 R5：除 excluded_admin_id 外，仍持有该角色且启用的管理员数。
@@ -90,6 +92,10 @@ type Querier interface {
 	DeleteAdminSessionByTokenHash(ctx context.Context, tokenHash []byte) error
 	DeleteAdminSessionsByAdmin(ctx context.Context, adminID int64) error
 	DeleteAnnouncement(ctx context.Context, id int64) (int64, error)
+	DeleteChainRule(ctx context.Context, arg DeleteChainRuleParams) (int64, error)
+	DeleteChainRulesByUser(ctx context.Context, userID int64) error
+	DeleteCustomNode(ctx context.Context, arg DeleteCustomNodeParams) (int64, error)
+	DeleteCustomNodesByUser(ctx context.Context, userID int64) error
 	DeleteEndpoint(ctx context.Context, id int64) error
 	DeleteExpiredAdminSessions(ctx context.Context, expiresAt pgtype.Timestamptz) (int64, error)
 	DeleteExpiredUserSessions(ctx context.Context, expiresAt pgtype.Timestamptz) (int64, error)
@@ -140,6 +146,7 @@ type Querier interface {
 	GetAnnouncementForUpdate(ctx context.Context, id int64) (GetAnnouncementForUpdateRow, error)
 	// 下单时锁住优惠码行，次数判断与占用在同一事务内完成（并发下单不超发）
 	GetCouponByCodeForUpdate(ctx context.Context, code string) (GetCouponByCodeForUpdateRow, error)
+	GetCustomNodeLink(ctx context.Context, arg GetCustomNodeLinkParams) ([]byte, error)
 	GetEndUserEmail(ctx context.Context, id int64) (pgtype.Text, error)
 	// 客户后台：终端用户会话、两步验证、登录记录（docs/03 §5.3）。
 	// 待删除的用户不可登录；停用的用户可以登录（docs/03 §5.3）。
@@ -175,6 +182,9 @@ type Querier interface {
 	GetTrafficPack(ctx context.Context, id int64) (GetTrafficPackRow, error)
 	// 订阅与客户后台数据（docs/03 §5.4、§5.5）。
 	GetUserBySubTokenHash(ctx context.Context, subTokenHash []byte) (GetUserBySubTokenHashRow, error)
+	// 客户端链式：链式规则与自有落地节点（docs/03 §5.18）------------------------------------
+	// 当前套餐的两个开关；没有套餐时都为假
+	GetUserChainFlags(ctx context.Context, id int64) (GetUserChainFlagsRow, error)
 	// 判断能否签到要用的字段；状态由调用方按当前时间现算，不取库里可能滞后的 status 列
 	GetUserCheckinState(ctx context.Context, id int64) (GetUserCheckinStateRow, error)
 	GetUserDashboard(ctx context.Context, arg GetUserDashboardParams) (GetUserDashboardRow, error)
@@ -200,11 +210,14 @@ type Querier interface {
 	HasTrialOrder(ctx context.Context, userID pgtype.Int8) (bool, error)
 	InsertAdminRoles(ctx context.Context, arg InsertAdminRolesParams) error
 	InsertAuditLog(ctx context.Context, arg InsertAuditLogParams) error
+	InsertChainRule(ctx context.Context, arg InsertChainRuleParams) (int64, error)
 	// ---- 签到 ----
 	// 唯一约束 (user_id, checkin_date) 保证每人每天一次（Ruling-26）；并发提交只有一条插入成功
 	InsertCheckin(ctx context.Context, arg InsertCheckinParams) (int64, error)
 	InsertCouponPlans(ctx context.Context, arg InsertCouponPlansParams) error
 	InsertCouponUsage(ctx context.Context, arg InsertCouponUsageParams) error
+	// 链接密文的关联数据含 id，所以先插入空值，拿到 id 后由 SetCustomNodeLink 回填
+	InsertCustomNode(ctx context.Context, arg InsertCustomNodeParams) (int64, error)
 	InsertEmailCode(ctx context.Context, arg InsertEmailCodeParams) error
 	InsertImpersonateTicket(ctx context.Context, arg InsertImpersonateTicketParams) error
 	InsertLedger(ctx context.Context, arg InsertLedgerParams) (int64, error)
@@ -232,8 +245,14 @@ type Querier interface {
 	// 自动续费、提醒与返利（docs/03 §5.16）------------------------------------------------
 	// 到期且开了扣余额续费的用户；一轮最多处理一批，剩下的下一轮再来
 	ListAutoRenewDueIDs(ctx context.Context, arg ListAutoRenewDueIDsParams) ([]int64, error)
+	// 某用户的客户端链式规则，带入口与落地的显示信息；rule_id 非空时只取这一条（归属仍按 user_id 约束，R8）
+	ListChainRules(ctx context.Context, arg ListChainRulesParams) ([]ListChainRulesRow, error)
 	ListCheckins(ctx context.Context, arg ListCheckinsParams) ([]ListCheckinsRow, error)
 	ListCoupons(ctx context.Context, arg ListCouponsParams) ([]ListCouponsRow, error)
+	// 渲染订阅用：该用户全部自有落地节点的名称与链接密文
+	ListCustomNodeLinks(ctx context.Context, userID int64) ([]ListCustomNodeLinksRow, error)
+	// 某用户的自有落地节点及各自被多少条规则引用；node_id 非空时只取这一个
+	ListCustomNodes(ctx context.Context, arg ListCustomNodesParams) ([]ListCustomNodesRow, error)
 	// 期望状态：每个（用户, 服务器）上应挂的入站。来源 = 套餐节点组里启用的节点，入站未缺失、服务器未停用（docs/03 §5.2 授权）
 	ListDesiredClients(ctx context.Context, serverID int64) ([]ListDesiredClientsRow, error)
 	ListEnabledServerIDs(ctx context.Context) ([]int64, error)
@@ -330,6 +349,7 @@ type Querier interface {
 	PurgeDeletedUsers(ctx context.Context) (int64, error)
 	PurgeEmailCodes(ctx context.Context, createdAt pgtype.Timestamptz) (int64, error)
 	PurgeMailOutbox(ctx context.Context, createdAt pgtype.Timestamptz) (int64, error)
+	RenameCustomNode(ctx context.Context, arg RenameCustomNodeParams) (int64, error)
 	// 删除对外地址拆分了面板上的组：被挪到新组的地址改写组标识，保留原记录与节点（docs/03 §5.1）
 	RepointEndpoint(ctx context.Context, arg RepointEndpointParams) error
 	// 剩余流量回到阈值以上（清零、续费、加了流量包）的用户，下次再低于阈值时可以再提醒一次
@@ -342,6 +362,7 @@ type Querier interface {
 	RotateUserSubscription(ctx context.Context, arg RotateUserSubscriptionParams) (int64, error)
 	SaveUserQuota(ctx context.Context, arg SaveUserQuotaParams) error
 	SetAdminTOTPPending(ctx context.Context, arg SetAdminTOTPPendingParams) error
+	SetCustomNodeLink(ctx context.Context, arg SetCustomNodeLinkParams) error
 	SetExpireNotified(ctx context.Context, arg SetExpireNotifiedParams) error
 	SetInboundEnabledLocal(ctx context.Context, arg SetInboundEnabledLocalParams) error
 	SetInviteCodeDisabled(ctx context.Context, arg SetInviteCodeDisabledParams) error
@@ -381,6 +402,7 @@ type Querier interface {
 	UpdateAdminLastLogin(ctx context.Context, id int64) error
 	UpdateAdminPasswordHash(ctx context.Context, arg UpdateAdminPasswordHashParams) (int64, error)
 	UpdateAnnouncement(ctx context.Context, arg UpdateAnnouncementParams) error
+	UpdateChainRule(ctx context.Context, arg UpdateChainRuleParams) (int64, error)
 	UpdateCoupon(ctx context.Context, arg UpdateCouponParams) (int64, error)
 	// 同步时以面板为准刷新缓存；drift_detected_at 由调用方按漂移规则给出（保留已有标记）。缺失是终态，不刷新
 	UpdateInboundFromSync(ctx context.Context, arg UpdateInboundFromSyncParams) error
