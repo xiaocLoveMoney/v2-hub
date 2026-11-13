@@ -18,6 +18,7 @@ type Querier interface {
 	AdvanceUserTOTPStep(ctx context.Context, arg AdvanceUserTOTPStepParams) (int64, error)
 	// 校验失败计一次；达到上限即作废
 	BumpEmailCodeAttempts(ctx context.Context, arg BumpEmailCodeAttemptsParams) error
+	BumpInviteCodeUse(ctx context.Context, id int64) error
 	// 领取到期的待发邮件并顺延下次尝试时间（租约），发送在事务外进行；并发的任务实例不会领到同一封
 	ClaimDueMail(ctx context.Context, arg ClaimDueMailParams) ([]ClaimDueMailRow, error)
 	ClearAdminTOTP(ctx context.Context, id int64) (int64, error)
@@ -33,6 +34,7 @@ type Querier interface {
 	// 用于 R5：除 excluded_admin_id 外，仍持有该角色且启用的管理员数。
 	CountEnabledAdminsWithRoleExcluding(ctx context.Context, arg CountEnabledAdminsWithRoleExcludingParams) (int64, error)
 	CountGroupMembershipsByInbound(ctx context.Context, inboundID int64) (int64, error)
+	CountInviteCodes(ctx context.Context, kind string) (int64, error)
 	CountMailOutbox(ctx context.Context, status string) (int64, error)
 	CountNodeGroupsByIDs(ctx context.Context, ids []int64) (int64, error)
 	CountNodes(ctx context.Context, arg CountNodesParams) (int64, error)
@@ -41,6 +43,7 @@ type Querier interface {
 	CountSubscribeLogs(ctx context.Context, userID pgtype.Int8) (int64, error)
 	CountUsers(ctx context.Context, arg CountUsersParams) (int64, error)
 	CreateAdmin(ctx context.Context, arg CreateAdminParams) (CreateAdminRow, error)
+	CreateAdminInviteCode(ctx context.Context, arg CreateAdminInviteCodeParams) (int64, error)
 	CreateAdminSession(ctx context.Context, arg CreateAdminSessionParams) error
 	CreateNodeGroup(ctx context.Context, arg CreateNodeGroupParams) (int64, error)
 	CreatePlan(ctx context.Context, arg CreatePlanParams) (int64, error)
@@ -57,6 +60,7 @@ type Querier interface {
 	DeleteExpiredAdminSessions(ctx context.Context, expiresAt pgtype.Timestamptz) (int64, error)
 	DeleteExpiredUserSessions(ctx context.Context, expiresAt pgtype.Timestamptz) (int64, error)
 	DeleteInbound(ctx context.Context, id int64) error
+	DeleteInviteCode(ctx context.Context, id int64) error
 	DeleteNodeGroup(ctx context.Context, id int64) (int64, error)
 	DeleteOldSubscribeLogs(ctx context.Context, createdAt pgtype.Timestamptz) (int64, error)
 	DeleteOldUserLoginLogs(ctx context.Context, createdAt pgtype.Timestamptz) (int64, error)
@@ -75,6 +79,8 @@ type Querier interface {
 	// 节点与节点组（docs/03 §5.1）-----------------------------------------------
 	// 同一来源（入站 × 对外地址）只生成一个节点；已存在时保留管理员改过的展示属性
 	EnsureNode(ctx context.Context, arg EnsureNodeParams) error
+	// 首次查看时生成个人码；已有（或随机码撞了别人的）时什么都不做，由调用方重读
+	EnsureUserInviteCode(ctx context.Context, arg EnsureUserInviteCodeParams) error
 	// 邮箱是否已被占用：等于某个用户的邮箱，或等于某个（存量、含 @ 的）用户名（docs/03 §5.8 冲突）
 	ExistsEndUserIdentity(ctx context.Context, email string) (bool, error)
 	ExistsPlan(ctx context.Context, id int64) (bool, error)
@@ -85,13 +91,20 @@ type Querier interface {
 	GetAdminSessionByTokenHash(ctx context.Context, tokenHash []byte) (GetAdminSessionByTokenHashRow, error)
 	// 两步验证（docs/03 §4.3）---------------------------------------------------
 	GetAdminTOTP(ctx context.Context, id int64) (GetAdminTOTPRow, error)
+	GetEndUserEmail(ctx context.Context, id int64) (pgtype.Text, error)
 	// 客户后台：终端用户会话、两步验证、登录记录（docs/03 §5.3）。
 	// 待删除的用户不可登录；停用的用户可以登录（docs/03 §5.3）。
 	GetEndUserForLogin(ctx context.Context, username string) (GetEndUserForLoginRow, error)
+	// 按邮箱登录（docs/03 §5.3 登录）：调用方先按用户名找，找不到且输入含 @ 时才走这里；列与 GetEndUserForLogin 一致
+	GetEndUserForLoginByEmail(ctx context.Context, email string) (GetEndUserForLoginByEmailRow, error)
 	GetEndUserIDByEmail(ctx context.Context, email string) (int64, error)
 	GetEndUserLoginSecretHash(ctx context.Context, id int64) (string, error)
 	GetEndpoint(ctx context.Context, id int64) (GetEndpointRow, error)
 	GetInbound(ctx context.Context, id int64) (GetInboundRow, error)
+	// 注册、邀请码与账号自助（docs/03 §5.8）。
+	// 注册时锁住邀请码行，计数与上限的判断在同一事务内完成（并发注册不超发）
+	GetInviteCodeForUpdate(ctx context.Context, code string) (GetInviteCodeForUpdateRow, error)
+	GetInviteCodeOwner(ctx context.Context, id int64) (pgtype.Int8, error)
 	GetPlan(ctx context.Context, id int64) (GetPlanRow, error)
 	GetRoleByCode(ctx context.Context, code string) (GetRoleByCodeRow, error)
 	GetRoleByID(ctx context.Context, id int64) (GetRoleByIDRow, error)
@@ -102,6 +115,7 @@ type Querier interface {
 	// 订阅与客户后台数据（docs/03 §5.4、§5.5）。
 	GetUserBySubTokenHash(ctx context.Context, subTokenHash []byte) (GetUserBySubTokenHashRow, error)
 	GetUserDashboard(ctx context.Context, arg GetUserDashboardParams) (GetUserDashboardRow, error)
+	GetUserInviteCode(ctx context.Context, ownerUserID pgtype.Int8) (GetUserInviteCodeRow, error)
 	// 读写配额前加行锁，避免流量任务与管理员操作互相覆盖
 	GetUserQuota(ctx context.Context, id int64) (GetUserQuotaRow, error)
 	GetUserSessionByTokenHash(ctx context.Context, tokenHash []byte) (GetUserSessionByTokenHashRow, error)
@@ -127,6 +141,8 @@ type Querier interface {
 	ListInboundsByIDs(ctx context.Context, ids []int64) ([]ListInboundsByIDsRow, error)
 	// 入站与对外地址缓存（docs/03 §5.1）------------------------------------------
 	ListInboundsByServer(ctx context.Context, serverID int64) ([]ListInboundsByServerRow, error)
+	ListInviteCodes(ctx context.Context, arg ListInviteCodesParams) ([]ListInviteCodesRow, error)
+	ListInvitees(ctx context.Context, arg ListInviteesParams) ([]ListInviteesRow, error)
 	ListMailOutbox(ctx context.Context, arg ListMailOutboxParams) ([]ListMailOutboxRow, error)
 	ListNodeGroups(ctx context.Context) ([]ListNodeGroupsRow, error)
 	ListNodes(ctx context.Context, arg ListNodesParams) ([]ListNodesRow, error)
@@ -168,6 +184,7 @@ type Querier interface {
 	MarkMailFailed(ctx context.Context, arg MarkMailFailedParams) error
 	// 发送成功后清空正文（docs/03 §5.7 发件箱）
 	MarkMailSent(ctx context.Context, id int64) error
+	// 待删除期间把用户名换成占位名并清空邮箱，原用户名与邮箱随即可被重新注册（docs/03 §5.8 注销账号）
 	MarkUserDeleted(ctx context.Context, id int64) (int64, error)
 	MarkUserProvisionsPending(ctx context.Context, userID int64) error
 	// 待删除且各面板 client 已删完的用户，删除记录（docs/03 §5.2 删除用户）
@@ -176,6 +193,8 @@ type Querier interface {
 	PurgeMailOutbox(ctx context.Context, createdAt pgtype.Timestamptz) (int64, error)
 	// 删除对外地址拆分了面板上的组：被挪到新组的地址改写组标识，保留原记录与节点（docs/03 §5.1）
 	RepointEndpoint(ctx context.Context, arg RepointEndpointParams) error
+	// 原地换码：旧码作废，已用次数不清零（防止靠重置绕过次数上限）
+	ResetUserInviteCode(ctx context.Context, arg ResetUserInviteCodeParams) (int64, error)
 	// 面板把该标识分给了新入站：仍挂着它的未缺失记录对应的旧入站已被删，标记缺失（docs/03 §5.1 面板标识复用）
 	RetireInboundByRef(ctx context.Context, arg RetireInboundByRefParams) ([]int64, error)
 	// 重置订阅：换 token 并轮换连接凭据（docs/03 §5.4 重置）
@@ -183,6 +202,7 @@ type Querier interface {
 	SaveUserQuota(ctx context.Context, arg SaveUserQuotaParams) error
 	SetAdminTOTPPending(ctx context.Context, arg SetAdminTOTPPendingParams) error
 	SetInboundEnabledLocal(ctx context.Context, arg SetInboundEnabledLocalParams) error
+	SetInviteCodeDisabled(ctx context.Context, arg SetInviteCodeDisabledParams) error
 	SetMailRetry(ctx context.Context, arg SetMailRetryParams) error
 	SetProvisionCounters(ctx context.Context, arg SetProvisionCountersParams) error
 	SetProvisionLinks(ctx context.Context, arg SetProvisionLinksParams) error
@@ -193,6 +213,7 @@ type Querier interface {
 	SetServerSynced(ctx context.Context, id int64) error
 	SetServerToken(ctx context.Context, arg SetServerTokenParams) error
 	SetUserCredential(ctx context.Context, arg SetUserCredentialParams) error
+	SetUserEmail(ctx context.Context, arg SetUserEmailParams) (int64, error)
 	SetUserPasswordHash(ctx context.Context, arg SetUserPasswordHashParams) (int64, error)
 	// 只在还没有 token 时写入，避免并发请求互相覆盖
 	SetUserSubToken(ctx context.Context, arg SetUserSubTokenParams) (int64, error)
@@ -203,6 +224,7 @@ type Querier interface {
 	TouchUserLastUsed(ctx context.Context, arg TouchUserLastUsedParams) error
 	TouchUserSession(ctx context.Context, arg TouchUserSessionParams) error
 	UpdateAdminDisabled(ctx context.Context, arg UpdateAdminDisabledParams) error
+	UpdateAdminInviteCode(ctx context.Context, arg UpdateAdminInviteCodeParams) error
 	UpdateAdminLastLogin(ctx context.Context, id int64) error
 	UpdateAdminPasswordHash(ctx context.Context, arg UpdateAdminPasswordHashParams) (int64, error)
 	// 同步时以面板为准刷新缓存；drift_detected_at 由调用方按漂移规则给出（保留已有标记）。缺失是终态，不刷新

@@ -44,14 +44,17 @@ SELECT u.id, u.username, u.remark, u.plan_id, COALESCE(p.name, '')::text AS plan
        u.expires_at, u.pending_days, u.limit_ip, u.renew_every_days, u.renew_month_day, u.renew_weekday, u.renew_max,
        u.renew_count, u.traffic_reset, u.traffic_reset_day, u.is_disabled, u.status, u.created_at,
        (u.totp_secret_enc IS NOT NULL)::boolean AS totp_enabled, u.last_used_at,
+       u.email, (u.email_verified_at IS NOT NULL)::boolean AS is_email_verified, u.invited_by,
+       COALESCE(iu.username, '')::text AS invited_by_username,
        (SELECT COUNT(*) FROM provision v WHERE v.user_id = u.id AND v.status = 'synced')::int AS synced_count,
        (SELECT COUNT(*) FROM provision v WHERE v.user_id = u.id AND v.status = 'pending')::int AS pending_count,
        (SELECT COUNT(*) FROM provision v WHERE v.user_id = u.id AND v.status = 'failed')::int AS failed_count
 FROM end_user u
 LEFT JOIN plan p ON p.id = u.plan_id
+LEFT JOIN end_user iu ON iu.id = u.invited_by AND iu.deleted_at IS NULL
 WHERE u.deleted_at IS NULL
   AND (sqlc.narg(user_id)::bigint IS NULL OR u.id = sqlc.narg(user_id))
-  AND (sqlc.narg(keyword)::text IS NULL OR u.username ILIKE '%' || sqlc.narg(keyword) || '%' OR u.remark ILIKE '%' || sqlc.narg(keyword) || '%') -- rule-ignore: 管理端按用户名 / 备注模糊搜索，只给管理员用且有分页上限；本项目是 PostgreSQL，mysql.md 不适用
+  AND (sqlc.narg(keyword)::text IS NULL OR u.username ILIKE '%' || sqlc.narg(keyword) || '%' OR u.remark ILIKE '%' || sqlc.narg(keyword) || '%' OR u.email ILIKE '%' || sqlc.narg(keyword) || '%') -- rule-ignore: 管理端按用户名 / 备注 / 邮箱模糊搜索，只给管理员用且有分页上限；本项目是 PostgreSQL，mysql.md 不适用
   AND (sqlc.narg(status)::text IS NULL OR u.status = sqlc.narg(status))
   AND (sqlc.narg(plan_id)::bigint IS NULL OR u.plan_id = sqlc.narg(plan_id))
 ORDER BY u.id DESC
@@ -60,7 +63,7 @@ LIMIT sqlc.arg(row_limit) OFFSET sqlc.arg(row_offset);
 -- name: CountUsers :one
 SELECT COUNT(*) FROM end_user u
 WHERE u.deleted_at IS NULL
-  AND (sqlc.narg(keyword)::text IS NULL OR u.username ILIKE '%' || sqlc.narg(keyword) || '%' OR u.remark ILIKE '%' || sqlc.narg(keyword) || '%') -- rule-ignore: 管理端按用户名 / 备注模糊搜索，只给管理员用且有分页上限；本项目是 PostgreSQL，mysql.md 不适用
+  AND (sqlc.narg(keyword)::text IS NULL OR u.username ILIKE '%' || sqlc.narg(keyword) || '%' OR u.remark ILIKE '%' || sqlc.narg(keyword) || '%' OR u.email ILIKE '%' || sqlc.narg(keyword) || '%') -- rule-ignore: 管理端按用户名 / 备注 / 邮箱模糊搜索，只给管理员用且有分页上限；本项目是 PostgreSQL，mysql.md 不适用
   AND (sqlc.narg(status)::text IS NULL OR u.status = sqlc.narg(status))
   AND (sqlc.narg(plan_id)::bigint IS NULL OR u.plan_id = sqlc.narg(plan_id));
 
@@ -72,8 +75,8 @@ FROM end_user WHERE id = $1 AND deleted_at IS NULL
 FOR UPDATE;
 
 -- name: CreateUser :one
-INSERT INTO end_user (username, password_hash, remark, email_code, client_cred_enc)
-VALUES ($1, $2, $3, $4, ''::bytea)
+INSERT INTO end_user (username, password_hash, remark, email_code, client_cred_enc, email, email_verified_at, invited_by, invite_code_id)
+VALUES ($1, $2, $3, $4, ''::bytea, sqlc.narg(email), sqlc.narg(email_verified_at), sqlc.narg(invited_by), sqlc.narg(invite_code_id))
 RETURNING id;
 
 -- name: SetUserCredential :exec
@@ -92,7 +95,14 @@ UPDATE end_user SET remark = $2, updated_at = now() WHERE id = $1 AND deleted_at
 UPDATE end_user SET password_hash = $2, updated_at = now() WHERE id = $1 AND deleted_at IS NULL;
 
 -- name: MarkUserDeleted :execrows
-UPDATE end_user SET deleted_at = now(), status = 'disabled', updated_at = now() WHERE id = $1 AND deleted_at IS NULL;
+-- 待删除期间把用户名换成占位名并清空邮箱，原用户名与邮箱随即可被重新注册（docs/03 §5.8 注销账号）
+UPDATE end_user
+SET deleted_at = now(), status = 'disabled', username = '~deleted-' || id, email = NULL, email_verified_at = NULL, updated_at = now()
+WHERE id = $1 AND deleted_at IS NULL;
+
+-- name: SetUserEmail :execrows
+UPDATE end_user SET email = sqlc.narg(email), email_verified_at = sqlc.narg(email_verified_at), updated_at = now()
+WHERE id = sqlc.arg(id) AND deleted_at IS NULL;
 
 -- name: PurgeDeletedUsers :execrows
 -- 待删除且各面板 client 已删完的用户，删除记录（docs/03 §5.2 删除用户）

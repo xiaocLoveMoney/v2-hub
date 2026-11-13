@@ -34,11 +34,16 @@ func rawJSON(t *testing.T, v any) json.RawMessage {
 
 func (f *settingsFixture) update(t *testing.T, patch map[string]any) (Settings, error) {
 	t.Helper()
+	return updateSettings(t, f.settings, f.actor, patch)
+}
+
+func updateSettings(t *testing.T, settings *SettingsService, actor *AdminPrincipal, patch map[string]any) (Settings, error) {
+	t.Helper()
 	raw := make(map[string]json.RawMessage, len(patch))
 	for k, v := range patch {
 		raw[k] = rawJSON(t, v)
 	}
-	return f.settings.Update(context.Background(), f.actor, raw, nil)
+	return settings.Update(context.Background(), actor, raw, nil)
 }
 
 func TestSettingsDefaultsComeFromCodeAndConfigFile(t *testing.T) {

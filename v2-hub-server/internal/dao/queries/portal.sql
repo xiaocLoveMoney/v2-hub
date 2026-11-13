@@ -2,9 +2,17 @@
 
 -- name: GetEndUserForLogin :one
 -- 待删除的用户不可登录；停用的用户可以登录（docs/03 §5.3）。
-SELECT id, username, password_hash, status, is_disabled, totp_secret_enc, totp_last_step
+SELECT id, username, password_hash, status, is_disabled, totp_secret_enc, totp_last_step, email,
+       (email_verified_at IS NOT NULL)::boolean AS is_email_verified
 FROM end_user
 WHERE username = $1 AND deleted_at IS NULL;
+
+-- name: GetEndUserForLoginByEmail :one
+-- 按邮箱登录（docs/03 §5.3 登录）：调用方先按用户名找，找不到且输入含 @ 时才走这里；列与 GetEndUserForLogin 一致
+SELECT id, username, password_hash, status, is_disabled, totp_secret_enc, totp_last_step, email,
+       (email_verified_at IS NOT NULL)::boolean AS is_email_verified
+FROM end_user
+WHERE email = sqlc.arg(email)::text AND deleted_at IS NULL;
 
 -- name: GetEndUserLoginSecretHash :one
 SELECT password_hash FROM end_user WHERE id = $1 AND deleted_at IS NULL;
@@ -17,7 +25,8 @@ RETURNING id;
 -- name: GetUserSessionByTokenHash :one
 SELECT s.id, s.user_id, s.csrf_token, s.expires_at, s.idle_until, u.username, u.status, u.is_disabled,
        (u.totp_secret_enc IS NOT NULL)::boolean AS totp_enabled,
-       (u.deleted_at IS NOT NULL)::boolean AS is_deleted
+       (u.deleted_at IS NOT NULL)::boolean AS is_deleted,
+       u.email, (u.email_verified_at IS NOT NULL)::boolean AS is_email_verified
 FROM user_session s
 JOIN end_user u ON u.id = s.user_id
 WHERE s.token_hash = $1;

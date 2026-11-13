@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/netip"
+	"time"
 
 	"v2-hub-server/internal/service"
 )
@@ -14,6 +15,17 @@ import (
 type AccountManager interface {
 	Site(ctx context.Context) (*service.SiteInfo, error)
 	SendEmailCode(ctx context.Context, email, purpose string, ip *netip.Addr) error
+	Register(ctx context.Context, in service.RegisterInput) (*service.PortalLoginResult, error)
+	ResetLoginSecret(ctx context.Context, email, code, newSecret string, ip *netip.Addr) error
+	SendBindEmailCode(ctx context.Context, p *service.UserPrincipal, email string, ip *netip.Addr) error
+	BindEmail(ctx context.Context, p *service.UserPrincipal, secret, email, code string, ip *netip.Addr) error
+	DeleteOwnAccount(ctx context.Context, p *service.UserPrincipal, secret, totpCode string, ip *netip.Addr) error
+	GetInvite(ctx context.Context, p *service.UserPrincipal) (*service.InviteInfo, error)
+	ResetInvite(ctx context.Context, p *service.UserPrincipal, ip *netip.Addr) (*service.InviteInfo, error)
+	ListInviteCodes(ctx context.Context, kind string, pq service.PageQuery) (*service.Page[service.InviteCode], error)
+	CreateInviteCode(ctx context.Context, actor *service.AdminPrincipal, in service.InviteCodeInput, ip *netip.Addr) (*service.InviteCode, error)
+	UpdateInviteCode(ctx context.Context, actor *service.AdminPrincipal, id int64, in service.InviteCodeInput, ip *netip.Addr) (*service.InviteCode, error)
+	DeleteInviteCode(ctx context.Context, actor *service.AdminPrincipal, id int64, ip *netip.Addr) error
 }
 
 // siteInfoVO 对应 hub-api.yaml SiteInfo。
@@ -55,4 +67,152 @@ func (h *handlers) sendEmailCode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeOK(w, nil)
+}
+
+// registerRequest 对应 hub-api.yaml RegisterInput。
+type registerRequest struct {
+	Username   string `json:"username"`
+	Email      string `json:"email"`
+	Credential string `json:"password"`
+	InviteCode string `json:"inviteCode"`
+	EmailCode  string `json:"emailCode"`
+}
+
+func (h *handlers) registerUser(w http.ResponseWriter, r *http.Request) {
+	var req registerRequest
+	if err := decodeJSON(w, r, &req); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	in := service.RegisterInput{
+		Username: req.Username, Email: req.Email, InviteCode: req.InviteCode, EmailCode: req.EmailCode,
+		ClientIP: clientIP(r, h.trustedProxies), UserAgent: r.Header.Get(headerUserAgent),
+	}
+	in.Password = req.Credential
+	res, err := h.account.Register(r.Context(), in)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	http.SetCookie(w, h.userSessionCookie(res.Token, res.ExpiresAt))
+	writeOK(w, toUserSessionVO(res.Principal))
+}
+
+// secretResetRequest 对应 hub-api.yaml PasswordResetInput。
+type secretResetRequest struct {
+	Email     string `json:"email"`
+	EmailCode string `json:"emailCode"`
+	New       string `json:"newPassword"`
+}
+
+func (h *handlers) resetOwnSecret(w http.ResponseWriter, r *http.Request) {
+	var req secretResetRequest
+	if err := decodeJSON(w, r, &req); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	if err := h.account.ResetLoginSecret(r.Context(), req.Email, req.EmailCode, req.New, clientIP(r, h.trustedProxies)); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeOK(w, nil)
+}
+
+type bindEmailCodeRequest struct {
+	Email string `json:"email"`
+}
+
+func (h *handlers) sendBindEmailCode(w http.ResponseWriter, r *http.Request, p *service.UserPrincipal) {
+	var req bindEmailCodeRequest
+	if err := decodeJSON(w, r, &req); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	if err := h.account.SendBindEmailCode(r.Context(), p, req.Email, clientIP(r, h.trustedProxies)); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeOK(w, nil)
+}
+
+// bindEmailRequest 对应 hub-api.yaml BindEmailInput。
+type bindEmailRequest struct {
+	Current   string `json:"currentPassword"`
+	Email     string `json:"email"`
+	EmailCode string `json:"emailCode"`
+}
+
+func (h *handlers) bindEmail(w http.ResponseWriter, r *http.Request, p *service.UserPrincipal) {
+	var req bindEmailRequest
+	if err := decodeJSON(w, r, &req); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	if err := h.account.BindEmail(r.Context(), p, req.Current, req.Email, req.EmailCode, clientIP(r, h.trustedProxies)); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeOK(w, toUserSessionVO(p))
+}
+
+// accountDeleteRequest 对应 hub-api.yaml AccountDeleteInput。
+type accountDeleteRequest struct {
+	Current  string `json:"currentPassword"`
+	TOTPCode string `json:"totpCode"`
+}
+
+func (h *handlers) deleteOwnAccount(w http.ResponseWriter, r *http.Request, p *service.UserPrincipal) {
+	var req accountDeleteRequest
+	if err := decodeJSON(w, r, &req); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	if err := h.account.DeleteOwnAccount(r.Context(), p, req.Current, req.TOTPCode, clientIP(r, h.trustedProxies)); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	expired := h.userSessionCookie("", time.Unix(0, 0))
+	expired.MaxAge = -1
+	http.SetCookie(w, expired)
+	writeOK(w, nil)
+}
+
+type inviteeVO struct {
+	Username  string    `json:"username"`
+	CreatedAt time.Time `json:"createdAt"`
+}
+
+// inviteInfoVO 对应 hub-api.yaml InviteInfo。
+type inviteInfoVO struct {
+	Enabled   bool        `json:"enabled"`
+	Code      string      `json:"code"`
+	MaxUses   int         `json:"maxUses"`
+	UsedCount int         `json:"usedCount"`
+	Invitees  []inviteeVO `json:"invitees"`
+}
+
+func toInviteInfoVO(info *service.InviteInfo) inviteInfoVO {
+	out := inviteInfoVO{Enabled: info.Enabled, Code: info.Code, MaxUses: info.MaxUses, UsedCount: info.UsedCount, Invitees: make([]inviteeVO, 0, len(info.Invitees))}
+	for _, it := range info.Invitees {
+		out.Invitees = append(out.Invitees, inviteeVO{Username: it.Username, CreatedAt: it.CreatedAt})
+	}
+	return out
+}
+
+func (h *handlers) getInvite(w http.ResponseWriter, r *http.Request, p *service.UserPrincipal) {
+	info, err := h.account.GetInvite(r.Context(), p)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeOK(w, toInviteInfoVO(info))
+}
+
+func (h *handlers) resetInviteCode(w http.ResponseWriter, r *http.Request, p *service.UserPrincipal) {
+	info, err := h.account.ResetInvite(r.Context(), p, clientIP(r, h.trustedProxies))
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeOK(w, toInviteInfoVO(info))
 }

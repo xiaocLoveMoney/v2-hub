@@ -32,6 +32,9 @@ type userBriefVO struct {
 	ID       int64  `json:"id"`
 	Username string `json:"username"`
 	Status   string `json:"status"`
+	// 0.3.0 起：未绑定邮箱为 null
+	Email           *string `json:"email"`
+	IsEmailVerified bool    `json:"isEmailVerified"`
 }
 
 type userSessionVO struct {
@@ -42,10 +45,18 @@ type userSessionVO struct {
 
 func toUserSessionVO(p *service.UserPrincipal) userSessionVO {
 	return userSessionVO{
-		User:        userBriefVO{ID: p.UserID, Username: p.Username, Status: p.Status},
+		User:        userBriefVO{ID: p.UserID, Username: p.Username, Status: p.Status, Email: optionalText(p.Email), IsEmailVerified: p.EmailVerified},
 		CSRFToken:   p.CSRFToken,
 		TOTPEnabled: p.TOTPEnabled,
 	}
+}
+
+// optionalText 把空串转成 nil（契约里“没有”用 null 表达）。
+func optionalText(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
 }
 
 // userHandler 是已登录终端用户接口的处理函数。

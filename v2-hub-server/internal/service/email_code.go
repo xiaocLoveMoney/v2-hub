@@ -62,15 +62,28 @@ type AccountService struct {
 	sealer   *crypto.Sealer
 	settings *SettingsService
 	mail     *MailService
+	users    *UserService
+	portal   *PortalAuthService
+	guards   accountGuards
 	now      func() time.Time
 }
 
+// AccountDeps 是账号自助服务依赖的其它服务，字段均不可为 nil。
+type AccountDeps struct {
+	Settings *SettingsService
+	Mail     *MailService
+	// Users 用来建用户、删用户与触发对账；Portal 用来建会话与确认口令 / 两步验证。
+	Users  *UserService
+	Portal *PortalAuthService
+}
+
 // NewAccountService 创建账号自助服务；now 为 nil 时用 time.Now。
-func NewAccountService(pool *pgxpool.Pool, sealer *crypto.Sealer, settings *SettingsService, mailSvc *MailService, now func() time.Time) *AccountService {
+func NewAccountService(pool *pgxpool.Pool, sealer *crypto.Sealer, deps AccountDeps, now func() time.Time) *AccountService {
 	if now == nil {
 		now = time.Now
 	}
-	return &AccountService{store: newStore(pool), sealer: sealer, settings: settings, mail: mailSvc, now: now}
+	return &AccountService{store: newStore(pool), sealer: sealer, settings: deps.Settings, mail: deps.Mail, users: deps.Users, portal: deps.Portal,
+		guards: newAccountGuards(now), now: now}
 }
 
 // SiteInfo 是客户门户未登录即可读的站点信息（docs/03 §5.6 公开子集）。

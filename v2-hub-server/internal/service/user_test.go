@@ -97,7 +97,7 @@ func TestUserProvisioningLifecycle(t *testing.T) {
 	fake := f.fleet.get(fakeBase)
 	plan := f.plan(t, "basic", PlanQuota{TrafficLimit: gib, DurationDays: 30, LimitIP: 2})
 
-	u := f.newUser(t, "alice@example.com", plan.ID)
+	u := f.newUser(t, "alice.example", plan.ID)
 	if u.Status != UserStatusActive || u.Quota.TrafficLimit != gib || u.Quota.ExpiresAt == nil || u.PlanName != "basic" {
 		t.Fatalf("user = %+v", u)
 	}

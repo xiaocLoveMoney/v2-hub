@@ -139,6 +139,11 @@ type userVO struct {
 	// 0.2.6 起
 	TOTPEnabled bool       `json:"totpEnabled"`
 	LastUsedAt  *time.Time `json:"lastUsedAt"`
+	// 0.3.0 起
+	Email             *string `json:"email"`
+	IsEmailVerified   bool    `json:"isEmailVerified"`
+	InvitedBy         *int64  `json:"invitedBy"`
+	InvitedByUsername string  `json:"invitedByUsername"`
 }
 
 func toUserVO(u service.User) userVO {
@@ -146,6 +151,7 @@ func toUserVO(u service.User) userVO {
 	return userVO{
 		ID: u.ID, Username: u.Username, Remark: u.Remark, PlanID: u.PlanID, PlanName: u.PlanName, Status: u.Status,
 		IsDisabled: q.Disabled, RenewCount: q.RenewCount, CreatedAt: u.CreatedAt, TOTPEnabled: u.TOTPEnabled, LastUsedAt: u.LastUsedAt,
+		Email: optionalText(u.Email), IsEmailVerified: u.EmailVerified, InvitedBy: u.InvitedBy, InvitedByUsername: u.InvitedByUsername,
 		Provisions: provisionCountsVO{Synced: u.Provisions.Synced, Pending: u.Provisions.Pending, Failed: u.Provisions.Failed},
 		quotaBody: quotaBody{
 			TrafficLimit: q.TrafficLimit, TrafficUsed: q.TrafficUsed, ExpiresAt: q.ExpiresAt, PendingDays: q.PendingDays, LimitIP: q.LimitIP,
@@ -248,6 +254,7 @@ type userCreateBody struct {
 	Credential string `json:"password"`
 	Remark     string `json:"remark"`
 	PlanID     int64  `json:"planId"`
+	Email      string `json:"email"`
 }
 
 func (h *handlers) createUser(w http.ResponseWriter, r *http.Request, p *service.AdminPrincipal) {
@@ -256,7 +263,7 @@ func (h *handlers) createUser(w http.ResponseWriter, r *http.Request, p *service
 		writeError(w, r, err)
 		return
 	}
-	in := service.UserCreateInput{Username: req.Username, Remark: req.Remark, PlanID: req.PlanID}
+	in := service.UserCreateInput{Username: req.Username, Remark: req.Remark, PlanID: req.PlanID, Email: req.Email}
 	pw := req.Credential
 	in.Password = pw
 	u, err := h.users.CreateUser(r.Context(), p, in, clientIP(r, h.trustedProxies))
@@ -285,6 +292,8 @@ func (h *handlers) getUser(w http.ResponseWriter, r *http.Request, _ *service.Ad
 type userUpdateBody struct {
 	Remark     string `json:"remark"`
 	IsDisabled bool   `json:"isDisabled"`
+	// Email 省略不改，空串清除（0.3.0）
+	Email *string `json:"email"`
 }
 
 func (h *handlers) updateUser(w http.ResponseWriter, r *http.Request, p *service.AdminPrincipal) {
@@ -298,7 +307,7 @@ func (h *handlers) updateUser(w http.ResponseWriter, r *http.Request, p *service
 		writeError(w, r, err)
 		return
 	}
-	u, err := h.users.UpdateUser(r.Context(), p, id, service.UserUpdateInput{Remark: req.Remark, IsDisabled: req.IsDisabled}, clientIP(r, h.trustedProxies))
+	u, err := h.users.UpdateUser(r.Context(), p, id, service.UserUpdateInput{Remark: req.Remark, IsDisabled: req.IsDisabled, Email: req.Email}, clientIP(r, h.trustedProxies))
 	if err != nil {
 		writeError(w, r, err)
 		return
