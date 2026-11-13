@@ -59,6 +59,8 @@ type Deps struct {
 	Tickets TicketManager
 	// Wallet 提供余额流水与充值码（docs/03 §5.14、§5.15）。
 	Wallet WalletManager
+	// Shop 提供流量包、优惠码、询价、下单、订单与钱包总览（docs/03 §5.12、§5.13、§5.16）。
+	Shop ShopManager
 	// Cookie 是会话 Cookie 属性。
 	Cookie CookieConfig
 	// TrustedProxies 是可采信 X-Forwarded-For 的直连网段（如 Caddy 所在 docker 网络）。
@@ -78,6 +80,7 @@ type handlers struct {
 	content        ContentManager
 	tickets        TicketManager
 	wallet         WalletManager
+	shop           ShopManager
 	cookie         CookieConfig
 	trustedProxies []netip.Prefix
 }
@@ -85,7 +88,7 @@ type handlers struct {
 // NewRouter 返回注册好全部路由的 http.Handler。路由与 hub-api.yaml 的 paths 逐条对应。
 func NewRouter(deps Deps) http.Handler {
 	h := &handlers{auth: deps.Auth, rbac: deps.RBAC, panels: deps.Panels, users: deps.Users, portalAuth: deps.PortalAuth, portal: deps.Portal,
-		settings: deps.Settings, mail: deps.Mail, account: deps.Account, content: deps.Content, tickets: deps.Tickets, wallet: deps.Wallet, cookie: deps.Cookie, trustedProxies: deps.TrustedProxies}
+		settings: deps.Settings, mail: deps.Mail, account: deps.Account, content: deps.Content, tickets: deps.Tickets, wallet: deps.Wallet, shop: deps.Shop, cookie: deps.Cookie, trustedProxies: deps.TrustedProxies}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", handleHealthz)
 	mux.HandleFunc("GET /readyz", newReadyzHandler(deps.Database, deps.PingTimeout))
@@ -145,6 +148,15 @@ func NewRouter(deps Deps) http.Handler {
 	mux.HandleFunc("DELETE /api/admin/users/{id}/totp", h.requireAdmin(service.PermUserWrite, h.clearUserTOTP))
 	mux.HandleFunc("POST /api/admin/users/{id}/balance", h.requireAdmin(service.PermFinanceWrite, h.adjustUserBalance))
 
+	mux.HandleFunc("GET /api/admin/traffic-packs", h.requireAdmin(service.PermShopRead, h.listTrafficPacks))
+	mux.HandleFunc("POST /api/admin/traffic-packs", h.requireAdmin(service.PermShopWrite, h.createTrafficPack))
+	mux.HandleFunc("PUT /api/admin/traffic-packs/{id}", h.requireAdmin(service.PermShopWrite, h.updateTrafficPack))
+	mux.HandleFunc("DELETE /api/admin/traffic-packs/{id}", h.requireAdmin(service.PermShopWrite, h.deleteTrafficPack))
+	mux.HandleFunc("GET /api/admin/coupons", h.requireAdmin(service.PermShopRead, h.listCoupons))
+	mux.HandleFunc("POST /api/admin/coupons", h.requireAdmin(service.PermShopWrite, h.createCoupon))
+	mux.HandleFunc("PUT /api/admin/coupons/{id}", h.requireAdmin(service.PermShopWrite, h.updateCoupon))
+	mux.HandleFunc("DELETE /api/admin/coupons/{id}", h.requireAdmin(service.PermShopWrite, h.deleteCoupon))
+	mux.HandleFunc("GET /api/admin/orders", h.requireAdmin(service.PermFinanceRead, h.listOrders))
 	mux.HandleFunc("GET /api/admin/wallet-ledger", h.requireAdmin(service.PermFinanceRead, h.listWalletLedger))
 	mux.HandleFunc("GET /api/admin/topup-codes", h.requireAdmin(service.PermFinanceRead, h.listTopupCodes))
 	mux.HandleFunc("POST /api/admin/topup-codes", h.requireAdmin(service.PermFinanceWrite, h.createTopupCodes))
@@ -225,6 +237,12 @@ func NewRouter(deps Deps) http.Handler {
 	mux.HandleFunc("POST /api/user/tickets/{id}/close", h.requireUser(false, h.closeOwnTicket))
 	mux.HandleFunc("GET /api/user/checkin", h.requireUser(false, h.getCheckin))
 	mux.HandleFunc("POST /api/user/checkin", h.requireUser(false, h.checkin))
+	mux.HandleFunc("GET /api/user/shop", h.requireUser(false, h.getShop))
+	mux.HandleFunc("POST /api/user/shop/quote", h.requireUser(false, h.quoteOrder))
+	mux.HandleFunc("GET /api/user/orders", h.requireUser(false, h.listOwnOrders))
+	mux.HandleFunc("POST /api/user/orders", h.requireUser(false, h.createOrder))
+	mux.HandleFunc("GET /api/user/wallet", h.requireUser(false, h.getWallet))
+	mux.HandleFunc("PUT /api/user/wallet/auto-renew", h.requireUser(false, h.setAutoRenew))
 	mux.HandleFunc("GET /api/user/wallet/ledger", h.requireUser(false, h.listOwnLedger))
 	mux.HandleFunc("POST /api/user/wallet/redeem", h.requireUser(false, h.redeemTopupCode))
 

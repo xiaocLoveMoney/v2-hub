@@ -16,21 +16,26 @@ type Querier interface {
 	AdvanceAdminTOTPStep(ctx context.Context, arg AdvanceAdminTOTPStepParams) (int64, error)
 	// 原子地推进已用步长；返回 0 行表示该步长已被用过（并发重放）
 	AdvanceUserTOTPStep(ctx context.Context, arg AdvanceUserTOTPStepParams) (int64, error)
+	BumpCouponUse(ctx context.Context, id int64) error
 	// 校验失败计一次；达到上限即作废
 	BumpEmailCodeAttempts(ctx context.Context, arg BumpEmailCodeAttemptsParams) error
 	BumpInviteCodeUse(ctx context.Context, id int64) error
 	// 领取到期的待发邮件并顺延下次尝试时间（租约），发送在事务外进行；并发的任务实例不会领到同一封
 	ClaimDueMail(ctx context.Context, arg ClaimDueMailParams) ([]ClaimDueMailRow, error)
 	ClearAdminTOTP(ctx context.Context, id int64) (int64, error)
+	ClearCouponPlans(ctx context.Context, couponID int64) error
 	ClearNodeGroupItems(ctx context.Context, nodeGroupID int64) error
 	ClearPlanNodeGroups(ctx context.Context, planID int64) error
 	ClearSharedAccountPlans(ctx context.Context, sharedAccountID int64) error
 	ClearUserTOTP(ctx context.Context, id int64) (int64, error)
+	ClearUserTrafficNotified(ctx context.Context, id int64) error
 	ConsumeEmailCode(ctx context.Context, arg ConsumeEmailCodeParams) (int64, error)
 	CountAdmins(ctx context.Context) (int64, error)
 	CountAdminsByRole(ctx context.Context, roleID int64) (int64, error)
 	CountAnnouncements(ctx context.Context) (int64, error)
 	CountAuditLogs(ctx context.Context) (int64, error)
+	CountCouponUsesByUser(ctx context.Context, arg CountCouponUsesByUserParams) (int64, error)
+	CountCoupons(ctx context.Context) (int64, error)
 	CountEmailCodesByEmailSince(ctx context.Context, arg CountEmailCodesByEmailSinceParams) (int64, error)
 	CountEmailCodesByIPSince(ctx context.Context, arg CountEmailCodesByIPSinceParams) (int64, error)
 	// 用于 R5：除 excluded_admin_id 外，仍持有该角色且启用的管理员数。
@@ -43,6 +48,7 @@ type Querier interface {
 	CountNodes(ctx context.Context, arg CountNodesParams) (int64, error)
 	CountNodesByIDs(ctx context.Context, ids []int64) (int64, error)
 	CountOpenTicketsByUser(ctx context.Context, userID int64) (int64, error)
+	CountOrders(ctx context.Context, arg CountOrdersParams) (int64, error)
 	CountPermissionsByCodes(ctx context.Context, codes []string) (int64, error)
 	CountPlansByIDs(ctx context.Context, ids []int64) (int64, error)
 	CountPublishedAnnouncements(ctx context.Context) (int64, error)
@@ -52,10 +58,13 @@ type Querier interface {
 	CountTopupCodes(ctx context.Context, arg CountTopupCodesParams) (int64, error)
 	CountUserTicketMessagesSince(ctx context.Context, arg CountUserTicketMessagesSinceParams) (int64, error)
 	CountUsers(ctx context.Context, arg CountUsersParams) (int64, error)
+	CouponCoversPlan(ctx context.Context, arg CouponCoversPlanParams) (bool, error)
+	CouponExists(ctx context.Context, id int64) (bool, error)
 	CreateAdmin(ctx context.Context, arg CreateAdminParams) (CreateAdminRow, error)
 	CreateAdminInviteCode(ctx context.Context, arg CreateAdminInviteCodeParams) (int64, error)
 	CreateAdminSession(ctx context.Context, arg CreateAdminSessionParams) error
 	CreateAnnouncement(ctx context.Context, arg CreateAnnouncementParams) (int64, error)
+	CreateCoupon(ctx context.Context, arg CreateCouponParams) (int64, error)
 	CreateNodeGroup(ctx context.Context, arg CreateNodeGroupParams) (int64, error)
 	CreatePlan(ctx context.Context, arg CreatePlanParams) (int64, error)
 	CreateRole(ctx context.Context, arg CreateRoleParams) (int64, error)
@@ -64,6 +73,7 @@ type Querier interface {
 	CreateSharedAccount(ctx context.Context, arg CreateSharedAccountParams) (int64, error)
 	// ---- 工单 ----
 	CreateTicket(ctx context.Context, arg CreateTicketParams) (int64, error)
+	CreateTrafficPack(ctx context.Context, arg CreateTrafficPackParams) (int64, error)
 	CreateTutorial(ctx context.Context, arg CreateTutorialParams) (int64, error)
 	CreateUser(ctx context.Context, arg CreateUserParams) (int64, error)
 	CreateUserSession(ctx context.Context, arg CreateUserSessionParams) (int64, error)
@@ -89,9 +99,12 @@ type Querier interface {
 	DeleteServer(ctx context.Context, id int64) (int64, error)
 	DeleteSharedAccount(ctx context.Context, id int64) (int64, error)
 	DeleteTopupCode(ctx context.Context, id int64) error
+	DeleteTrafficPack(ctx context.Context, id int64) (int64, error)
 	DeleteTutorial(ctx context.Context, id int64) (int64, error)
 	// 删除用户时当场删掉未关闭的工单（docs/03 §5.2 删除用户）；已关闭的随用户记录级联删除
 	DeleteUnclosedTicketsByUser(ctx context.Context, userID int64) error
+	// 已被使用过的不可删除，只能停用（docs/03 §5.15）
+	DeleteUnusedCoupon(ctx context.Context, id int64) (int64, error)
 	DeleteUserSessionByID(ctx context.Context, id int64) error
 	DeleteUserSessionsByUser(ctx context.Context, userID int64) error
 	// 待定密钥已由调用方校验并重新加密为正式密钥后传入
@@ -115,6 +128,8 @@ type Querier interface {
 	// 两步验证（docs/03 §4.3）---------------------------------------------------
 	GetAdminTOTP(ctx context.Context, id int64) (GetAdminTOTPRow, error)
 	GetAnnouncementForUpdate(ctx context.Context, id int64) (GetAnnouncementForUpdateRow, error)
+	// 下单时锁住优惠码行，次数判断与占用在同一事务内完成（并发下单不超发）
+	GetCouponByCodeForUpdate(ctx context.Context, code string) (GetCouponByCodeForUpdateRow, error)
 	GetEndUserEmail(ctx context.Context, id int64) (pgtype.Text, error)
 	// 客户后台：终端用户会话、两步验证、登录记录（docs/03 §5.3）。
 	// 待删除的用户不可登录；停用的用户可以登录（docs/03 §5.3）。
@@ -130,6 +145,8 @@ type Querier interface {
 	GetInviteCodeForUpdate(ctx context.Context, code string) (GetInviteCodeForUpdateRow, error)
 	GetInviteCodeOwner(ctx context.Context, id int64) (pgtype.Int8, error)
 	GetPlan(ctx context.Context, id int64) (GetPlanRow, error)
+	// 一个时长选项连同它的套餐；是否上架由调用方判断（自动续费也用这条）
+	GetPlanPriceForSale(ctx context.Context, id int64) (GetPlanPriceForSaleRow, error)
 	GetRoleByCode(ctx context.Context, code string) (GetRoleByCodeRow, error)
 	GetRoleByID(ctx context.Context, id int64) (GetRoleByIDRow, error)
 	GetServer(ctx context.Context, id int64) (GetServerRow, error)
@@ -141,6 +158,7 @@ type Querier interface {
 	// 兑换时按 HMAC 查找并锁行，一码只能用一次（Ruling-31）
 	GetTopupCodeByHashForUpdate(ctx context.Context, codeHash []byte) (GetTopupCodeByHashForUpdateRow, error)
 	GetTopupCodeForUpdate(ctx context.Context, id int64) (GetTopupCodeForUpdateRow, error)
+	GetTrafficPack(ctx context.Context, id int64) (GetTrafficPackRow, error)
 	// 订阅与客户后台数据（docs/03 §5.4、§5.5）。
 	GetUserBySubTokenHash(ctx context.Context, subTokenHash []byte) (GetUserBySubTokenHashRow, error)
 	// 判断能否签到要用的字段；状态由调用方按当前时间现算，不取库里可能滞后的 status 列
@@ -153,20 +171,26 @@ type Querier interface {
 	// 读写配额前加行锁，避免流量任务与管理员操作互相覆盖
 	GetUserQuota(ctx context.Context, id int64) (GetUserQuotaRow, error)
 	GetUserSessionByTokenHash(ctx context.Context, tokenHash []byte) (GetUserSessionByTokenHashRow, error)
+	// 用户与购买有关的状态；不加锁，只用于展示
+	GetUserShopState(ctx context.Context, id int64) (GetUserShopStateRow, error)
 	GetUserSubToken(ctx context.Context, id int64) ([]byte, error)
 	GetUserTOTP(ctx context.Context, id int64) (GetUserTOTPRow, error)
 	// 与 ListVisibleSharedAccounts 同样的可见性条件，防止凭 id 读到不可见的条目
 	GetVisibleSharedAccountCredential(ctx context.Context, arg GetVisibleSharedAccountCredentialParams) ([]byte, error)
+	HasTrialOrder(ctx context.Context, userID pgtype.Int8) (bool, error)
 	InsertAdminRoles(ctx context.Context, arg InsertAdminRolesParams) error
 	InsertAuditLog(ctx context.Context, arg InsertAuditLogParams) error
 	// ---- 签到 ----
 	// 唯一约束 (user_id, checkin_date) 保证每人每天一次（Ruling-26）；并发提交只有一条插入成功
 	InsertCheckin(ctx context.Context, arg InsertCheckinParams) (int64, error)
+	InsertCouponPlans(ctx context.Context, arg InsertCouponPlansParams) error
+	InsertCouponUsage(ctx context.Context, arg InsertCouponUsageParams) error
 	InsertEmailCode(ctx context.Context, arg InsertEmailCodeParams) error
 	InsertLedger(ctx context.Context, arg InsertLedgerParams) (int64, error)
 	// 时间由服务时钟给出（不用库的 now()），与领取时的比较基准一致
 	InsertMailOutbox(ctx context.Context, arg InsertMailOutboxParams) (int64, error)
 	InsertNodeGroupItems(ctx context.Context, arg InsertNodeGroupItemsParams) error
+	InsertOrder(ctx context.Context, arg InsertOrderParams) (int64, error)
 	InsertPlanNodeGroups(ctx context.Context, arg InsertPlanNodeGroupsParams) error
 	InsertRolePermissions(ctx context.Context, arg InsertRolePermissionsParams) error
 	InsertSharedAccountPlans(ctx context.Context, arg InsertSharedAccountPlansParams) error
@@ -182,6 +206,7 @@ type Querier interface {
 	ListAnnouncements(ctx context.Context, arg ListAnnouncementsParams) ([]ListAnnouncementsRow, error)
 	ListAuditLogs(ctx context.Context, arg ListAuditLogsParams) ([]AuditLog, error)
 	ListCheckins(ctx context.Context, arg ListCheckinsParams) ([]ListCheckinsRow, error)
+	ListCoupons(ctx context.Context, arg ListCouponsParams) ([]ListCouponsRow, error)
 	// 期望状态：每个（用户, 服务器）上应挂的入站。来源 = 套餐节点组里启用的节点，入站未缺失、服务器未停用（docs/03 §5.2 授权）
 	ListDesiredClients(ctx context.Context, serverID int64) ([]ListDesiredClientsRow, error)
 	ListEnabledServerIDs(ctx context.Context) ([]int64, error)
@@ -197,10 +222,12 @@ type Querier interface {
 	ListMailableUserEmails(ctx context.Context) ([]string, error)
 	ListNodeGroups(ctx context.Context) ([]ListNodeGroupsRow, error)
 	ListNodes(ctx context.Context, arg ListNodesParams) ([]ListNodesRow, error)
+	ListOrders(ctx context.Context, arg ListOrdersParams) ([]ListOrdersRow, error)
 	ListPermissionCodesForAdmin(ctx context.Context, adminID int64) ([]string, error)
 	ListPermissions(ctx context.Context) ([]ListPermissionsRow, error)
 	// 全部套餐的时长选项（docs/03 §5.12），按套餐、天数升序；套餐数量有限，一次取完在内存里归组
 	ListPlanPrices(ctx context.Context) ([]ListPlanPricesRow, error)
+	ListPlanPricesOnSale(ctx context.Context) ([]ListPlanPricesOnSaleRow, error)
 	// 套餐、用户、下发与用量（docs/03 §5.2）-------------------------------------------
 	ListPlans(ctx context.Context) ([]ListPlansRow, error)
 	// 用户端：只有已发布的，置顶在前、新的在前；only_popup 为真时只取标了弹窗的
@@ -220,11 +247,15 @@ type Querier interface {
 	// ---- 共享账号 ----
 	// 管理端：全部条目与各自限定的套餐，不含口令
 	ListSharedAccounts(ctx context.Context, id int64) ([]ListSharedAccountsRow, error)
+	// 商店里的套餐：已上架且至少有一个时长选项；node_count 是该套餐当前可输出的节点数（条件同 ListUserSubNodes）
+	ListShopPlans(ctx context.Context) ([]ListShopPlansRow, error)
 	ListSubscribeLogs(ctx context.Context, arg ListSubscribeLogsParams) ([]ListSubscribeLogsRow, error)
 	ListTicketMessages(ctx context.Context, ticketID int64) ([]ListTicketMessagesRow, error)
 	ListTickets(ctx context.Context, arg ListTicketsParams) ([]ListTicketsRow, error)
 	// 状态由 used_at / is_disabled / expires_at 推出：unused / used / disabled / expired；now 由服务端时钟传入
 	ListTopupCodes(ctx context.Context, arg ListTopupCodesParams) ([]ListTopupCodesRow, error)
+	// 商店：流量包、优惠码、下单与订单（docs/03 §5.12、§5.13、§5.15）-----------------------------
+	ListTrafficPacks(ctx context.Context, onlyOnSale bool) ([]ListTrafficPacksRow, error)
 	// ---- 教程 ----
 	// only_published 为真时只取已发布的（用户端）
 	ListTutorials(ctx context.Context, arg ListTutorialsParams) ([]ListTutorialsRow, error)
@@ -288,13 +319,17 @@ type Querier interface {
 	// touch_reply 为真时把最近回复时间推到 now（有新消息）；关闭时记关闭时间，重新打开时清掉
 	SetTicketStatus(ctx context.Context, arg SetTicketStatusParams) error
 	SetTopupCodeDisabled(ctx context.Context, arg SetTopupCodeDisabledParams) error
+	SetUserAutoRenew(ctx context.Context, arg SetUserAutoRenewParams) error
 	SetUserBalance(ctx context.Context, arg SetUserBalanceParams) error
 	SetUserCredential(ctx context.Context, arg SetUserCredentialParams) error
 	SetUserEmail(ctx context.Context, arg SetUserEmailParams) (int64, error)
 	SetUserPasswordHash(ctx context.Context, arg SetUserPasswordHashParams) (int64, error)
+	// 记下最近一次购买的时长选项与自动续费开关；提醒去重标记随新一轮额度清掉
+	SetUserPurchase(ctx context.Context, arg SetUserPurchaseParams) error
 	// 只在还没有 token 时写入，避免并发请求互相覆盖
 	SetUserSubToken(ctx context.Context, arg SetUserSubTokenParams) (int64, error)
 	SetUserTOTPPending(ctx context.Context, arg SetUserTOTPPendingParams) error
+	SumRebateByInviter(ctx context.Context, inviterID pgtype.Int8) (int64, error)
 	// 同一邮箱同一用途只有最新一条有效
 	SupersedeEmailCodes(ctx context.Context, arg SupersedeEmailCodesParams) error
 	TouchAdminSession(ctx context.Context, arg TouchAdminSessionParams) error
@@ -305,6 +340,7 @@ type Querier interface {
 	UpdateAdminLastLogin(ctx context.Context, id int64) error
 	UpdateAdminPasswordHash(ctx context.Context, arg UpdateAdminPasswordHashParams) (int64, error)
 	UpdateAnnouncement(ctx context.Context, arg UpdateAnnouncementParams) error
+	UpdateCoupon(ctx context.Context, arg UpdateCouponParams) (int64, error)
 	// 同步时以面板为准刷新缓存；drift_detected_at 由调用方按漂移规则给出（保留已有标记）。缺失是终态，不刷新
 	UpdateInboundFromSync(ctx context.Context, arg UpdateInboundFromSyncParams) error
 	UpdateNode(ctx context.Context, arg UpdateNodeParams) (int64, error)
@@ -313,6 +349,7 @@ type Querier interface {
 	UpdateRoleName(ctx context.Context, arg UpdateRoleNameParams) error
 	UpdateServer(ctx context.Context, arg UpdateServerParams) (int64, error)
 	UpdateSharedAccount(ctx context.Context, arg UpdateSharedAccountParams) (int64, error)
+	UpdateTrafficPack(ctx context.Context, arg UpdateTrafficPackParams) (int64, error)
 	UpdateTutorial(ctx context.Context, arg UpdateTutorialParams) (int64, error)
 	UpdateUserRemark(ctx context.Context, arg UpdateUserRemarkParams) (int64, error)
 	UpsertEndpoint(ctx context.Context, arg UpsertEndpointParams) (int64, error)
