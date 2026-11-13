@@ -34,7 +34,7 @@ cd v2-hub-contract/deploy/it && bash run_all.sh
 - 前端静态文件放 MinIO，Caddy 同域反代 `/api`、`/sub`（Ruling-5、Ruling-6）。
 
 契约（全部在 v2-hub-contract/）：`hub-api.yaml`（server → 前端）、`deploy/init.sql`（server 的表结构）、
-`upstream/3x-ui/openapi-v3.11.0.json`（3x-ui → server 的上游基准）。契约版本用 git tag `vX.Y`，当前 `v0.4`。
+`upstream/3x-ui/openapi-v3.11.0.json`（3x-ui → server 的上游基准）。契约版本用 git tag `vX.Y`，当前 `v0.5`。
 
 ## 跨目录纪律
 
@@ -61,6 +61,9 @@ GitHub 仓库设置见 `docs/github-仓库设置清单.md`。
 - M3 完成（2026-11-13，tag `v0.4`）：终端用户登录 / 会话 / 两步验证、订阅（`/sub/{token}`，Base64 / Mihomo / sing-box /
   Xray JSON，节点参数取自面板分享链接）、重置订阅即轮换连接凭据、客户后台（仪表盘、节点、账号、订阅记录，自写设计系统）、
   管理端换肤；IT-5 通过。真实客户端导入连通未自动化，待人工验证。
-- 下一步是 M4（自助运营：注册与邀请、邮件、公告、工单、签到）。
+- M4 完成（2026-11-13，tag `v0.5`）：系统设置表、邮件发件箱与邮箱验证码（SMTP 只走 `HUB_SMTP_*` 环境变量）、自助注册（开放 / 仅邀请 / 关闭）
+  与邀请码、邮箱登录、找回口令、换绑邮箱、注销账号、公告（Markdown、弹窗、群发）、教程、共享账号、工单、签到；两端页面齐备；IT-6 通过。
+  真实 SMTP 投递与管理端 M4 页面的浏览器实测未自动化，待人工验证。
+- 下一步是 M5（商店与钱包：套餐定价、订单、余额流水、充值码、优惠码、扣余额续费、邀请返利）。
 - 路线（2026-11-13，Ruling-17 – Ruling-22）：参考 SSPanel-Uim Malio 的功能与界面，自行实现；里程碑为
   M3 订阅与用户端基础 → M4 自助运营 → M5 商店与钱包 → M6 / M7 两种链式 → M8 运营，见 docs/07。
