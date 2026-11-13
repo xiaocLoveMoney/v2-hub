@@ -16,6 +16,13 @@ export type SyncResult = components['schemas']['SyncResult']
 export type InboundTemplate = components['schemas']['InboundTemplate']
 export type TlsMode = components['schemas']['TlsMode']
 export type ProviderType = components['schemas']['ServerConnInput']['providerType']
+export type Plan = components['schemas']['Plan']
+export type PlanInput = components['schemas']['PlanInput']
+export type EndUser = components['schemas']['User']
+export type UserQuotaInput = components['schemas']['UserQuotaInput']
+export type UserStatus = components['schemas']['UserStatus']
+export type TrafficReset = components['schemas']['TrafficReset']
+export type Provision = components['schemas']['Provision']
 
 /** 分页结果（hub-api.yaml 各分页接口的 data 形状）。 */
 export interface PageData<T> {

@@ -4,8 +4,10 @@ import {
   DashboardOutlined,
   DeploymentUnitOutlined,
   LockOutlined,
+  ProfileOutlined,
   SafetyOutlined,
   TeamOutlined,
+  UserOutlined,
 } from '@ant-design/icons'
 import type { ReactNode } from 'react'
 
@@ -16,6 +18,8 @@ export const ROUTES = {
   SERVERS: '/servers',
   SERVER_DETAIL: '/servers/:id',
   NODES: '/nodes',
+  USERS: '/users',
+  PLANS: '/plans',
   ADMINS: '/system/admins',
   ROLES: '/system/roles',
   AUDIT_LOGS: '/system/audit-logs',
@@ -31,6 +35,10 @@ export const PERMISSIONS = {
   SERVER_WRITE: 'server:write',
   NODE_READ: 'node:read',
   NODE_WRITE: 'node:write',
+  USER_READ: 'user:read',
+  USER_WRITE: 'user:write',
+  PLAN_READ: 'plan:read',
+  PLAN_WRITE: 'plan:write',
 } as const
 
 /** 一个菜单项；permission 为空表示登录即可见。 */
@@ -43,6 +51,7 @@ export interface MenuEntry {
   group?: string
 }
 
+const GROUP_USERS = '用户'
 const GROUP_SYSTEM = '系统'
 const GROUP_ACCOUNT = '账号'
 
@@ -51,6 +60,8 @@ export const MENU: readonly MenuEntry[] = [
   { path: ROUTES.DASHBOARD, label: '总览', icon: <DashboardOutlined /> },
   { path: ROUTES.SERVERS, label: '服务器', icon: <ClusterOutlined />, permission: PERMISSIONS.SERVER_READ },
   { path: ROUTES.NODES, label: '节点', icon: <DeploymentUnitOutlined />, permission: PERMISSIONS.NODE_READ },
+  { path: ROUTES.USERS, label: '用户', icon: <UserOutlined />, permission: PERMISSIONS.USER_READ, group: GROUP_USERS },
+  { path: ROUTES.PLANS, label: '套餐', icon: <ProfileOutlined />, permission: PERMISSIONS.PLAN_READ, group: GROUP_USERS },
   { path: ROUTES.ADMINS, label: '管理员', icon: <TeamOutlined />, permission: PERMISSIONS.ADMIN_READ, group: GROUP_SYSTEM },
   { path: ROUTES.ROLES, label: '角色与权限', icon: <SafetyOutlined />, permission: PERMISSIONS.ADMIN_READ, group: GROUP_SYSTEM },
   { path: ROUTES.AUDIT_LOGS, label: '审计日志', icon: <AuditOutlined />, permission: PERMISSIONS.AUDIT_READ, group: GROUP_SYSTEM },
