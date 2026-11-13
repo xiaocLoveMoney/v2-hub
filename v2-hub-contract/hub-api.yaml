@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: v2-hub API
-  version: 0.2.5
+  version: 0.2.6
   description: |
     v2-hub 对外接口契约（hub-server 提供，v2-hub-admin-web / v2-hub-user-web 消费）。
     - 管理端接口前缀 /api/admin，客户端接口前缀 /api/user，订阅端点前缀 /sub。
@@ -14,6 +14,8 @@ info:
     0.2.3：删除对外地址只删所点的那一个；对“面板上已不存在”的入站做编辑 / 启停 / 确认漂移 / 添加对外地址返回 409（docs/03 §5.1）。
     0.2.4：入站表单与 3x-ui 同构（Ruling-16）——新增读取面板完整入站配置、代理面板生成密钥两个接口。
     0.2.5：M2 套餐与用户（docs/03 §5.2）——套餐增删改查、用户增删改查、分配 / 续费套餐、直接改用量与额度、重置口令、下发状态与手动对账。
+    0.2.6：M3 客户后台与订阅（docs/03 §5.3–§5.5）——终端用户登录 / 两步验证 / 改口令、仪表盘、用量、节点、订阅地址与重置、
+      登录记录、订阅记录、订阅端点 /sub/{token}；管理端新增重置用户订阅、清除用户两步验证、订阅记录；新增错误码 account_disabled。
 servers:
   - url: http://127.0.0.1:8080
     description: 本地开发
@@ -30,6 +32,12 @@ tags:
     description: 服务器（server:*）、入站与节点（node:*），docs/03 §5.1
   - name: admin-users
     description: 套餐（plan:*）与用户（user:*），docs/03 §5.2
+  - name: user-auth
+    description: 终端用户登录、登出、当前会话、口令与两步验证（docs/03 §5.3）
+  - name: user-portal
+    description: 客户后台数据：仪表盘、用量、节点、订阅地址、登录与订阅记录（docs/03 §5.4、§5.5）；身份只取自会话（R8）
+  - name: subscription
+    description: 订阅端点，供代理客户端直接拉取，凭 token 访问（docs/03 §5.4）
 security:
   - adminSession: []
 paths:
@@ -1287,6 +1295,395 @@ paths:
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "403": { $ref: "#/components/responses/PermissionDenied" }
         "404": { $ref: "#/components/responses/NotFound" }
+  /api/admin/users/{id}/subscription/reset:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    post:
+      tags: [admin-users]
+      operationId: resetUserSubscription
+      summary: 重置该用户的订阅地址并轮换连接凭据（user:write）；旧地址与旧凭据立即失效并触发对账
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      responses:
+        "200": { $ref: "#/components/responses/Ok" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/admin/users/{id}/totp:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    delete:
+      tags: [admin-users]
+      operationId: clearUserTotp
+      summary: 清除该用户的两步验证（遗失设备时用；user:write），其全部会话失效
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      responses:
+        "200": { $ref: "#/components/responses/Ok" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/admin/subscribe-logs:
+    get:
+      tags: [admin-users]
+      operationId: listSubscribeLogs
+      summary: 订阅拉取记录分页（user:read），按时间倒序
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+        - { name: userId, in: query, schema: { type: integer, format: int64, minimum: 1 } }
+      responses:
+        "200":
+          description: 订阅记录分页
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/SubscribeLogPage" }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+
+  /api/user/auth/login:
+    post:
+      tags: [user-auth]
+      operationId: userLogin
+      summary: 终端用户登录，成功后 Set-Cookie hub_user_session
+      description: 失败一律 401“用户名或密码错误”；触发频控返回 429（docs/03 §5.3）。本接口不需要 CSRF 头。停用的账号可以登录。
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/LoginRequest" }
+      responses:
+        "200":
+          description: 登录成功
+          headers:
+            Set-Cookie:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/UserSessionEnvelope" }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401":
+          description: unauthenticated（用户名或口令错误）或 totp_required（需再提交验证码）
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Envelope" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /api/user/auth/logout:
+    post:
+      tags: [user-auth]
+      operationId: userLogout
+      summary: 登出并删除当前会话
+      security: [{ userSession: [] }]
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      responses:
+        "200": { $ref: "#/components/responses/Ok" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+  /api/user/auth/me:
+    get:
+      tags: [user-auth]
+      operationId: userMe
+      summary: 当前用户、状态与 CSRF token（停用的账号也可访问）
+      security: [{ userSession: [] }]
+      responses:
+        "200":
+          description: 当前会话
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/UserSessionEnvelope" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+  /api/user/auth/password:
+    put:
+      tags: [user-auth]
+      operationId: userChangePassword
+      summary: 本人改口令（须提交旧口令）；成功后其余会话全部失效
+      security: [{ userSession: [] }]
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UserPasswordChangeInput" }
+      responses:
+        "200": { $ref: "#/components/responses/Ok" }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/AccountDisabled" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /api/user/auth/totp/setup:
+    post:
+      tags: [user-auth]
+      operationId: userTotpSetup
+      summary: 生成待确认的 TOTP 密钥（只返回这一次）
+      security: [{ userSession: [] }]
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      responses:
+        "200":
+          description: 待确认的密钥
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/TotpSetup" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/AccountDisabled" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /api/user/auth/totp/enable:
+    post:
+      tags: [user-auth]
+      operationId: userTotpEnable
+      summary: 提交验证码确认并开启两步验证
+      security: [{ userSession: [] }]
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TotpCodeInput" }
+      responses:
+        "200": { $ref: "#/components/responses/Ok" }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/AccountDisabled" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /api/user/auth/totp/disable:
+    post:
+      tags: [user-auth]
+      operationId: userTotpDisable
+      summary: 提交当前验证码关闭两步验证
+      security: [{ userSession: [] }]
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TotpCodeInput" }
+      responses:
+        "200": { $ref: "#/components/responses/Ok" }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/AccountDisabled" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+
+  /api/user/dashboard:
+    get:
+      tags: [user-portal]
+      operationId: getUserDashboard
+      summary: 仪表盘：套餐、额度与用量、到期、在线设备、最近使用（docs/03 §5.5）
+      security: [{ userSession: [] }]
+      responses:
+        "200":
+          description: 仪表盘
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/UserDashboard" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/AccountDisabled" }
+  /api/user/traffic:
+    get:
+      tags: [user-portal]
+      operationId: listUserTraffic
+      summary: 最近若干小时按小时的用量，时间升序；没有用量的小时不返回
+      security: [{ userSession: [] }]
+      parameters:
+        - { name: hours, in: query, schema: { type: integer, minimum: 1, maximum: 720, default: 72 } }
+      responses:
+        "200":
+          description: 按小时用量
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { type: array, items: { $ref: "#/components/schemas/TrafficPoint" } }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/AccountDisabled" }
+  /api/user/nodes:
+    get:
+      tags: [user-portal]
+      operationId: listUserNodes
+      summary: 本人被授权且启用的节点，按节点组分段；状态取平台缓存
+      security: [{ userSession: [] }]
+      responses:
+        "200":
+          description: 节点分段
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { type: array, items: { $ref: "#/components/schemas/UserNodeGroup" } }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/AccountDisabled" }
+  /api/user/nodes/{id}/link:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    get:
+      tags: [user-portal]
+      operationId: getUserNodeLink
+      summary: 该节点的分享链接（凭据）；节点不在本人授权范围内返回 404，账号非 active 返回 409
+      security: [{ userSession: [] }]
+      responses:
+        "200":
+          description: 分享链接
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/NodeLink" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/AccountDisabled" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /api/user/subscription:
+    get:
+      tags: [user-portal]
+      operationId: getUserSubscription
+      summary: 本人的订阅地址（凭据，前端默认打码）与各格式地址；尚无 token 时生成
+      security: [{ userSession: [] }]
+      responses:
+        "200":
+          description: 订阅地址
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/SubscriptionInfo" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/AccountDisabled" }
+  /api/user/subscription/reset:
+    post:
+      tags: [user-portal]
+      operationId: resetOwnSubscription
+      summary: 重置订阅地址并轮换连接凭据；旧地址与旧凭据立即失效，客户端需重新导入
+      security: [{ userSession: [] }]
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      responses:
+        "200":
+          description: 新的订阅地址
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/SubscriptionInfo" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/AccountDisabled" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /api/user/login-logs:
+    get:
+      tags: [user-portal]
+      operationId: listUserLoginLogs
+      summary: 本人最近 10 次登录记录
+      security: [{ userSession: [] }]
+      responses:
+        "200":
+          description: 登录记录
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { type: array, items: { $ref: "#/components/schemas/LoginLog" } }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/AccountDisabled" }
+  /api/user/subscribe-logs:
+    get:
+      tags: [user-portal]
+      operationId: listOwnSubscribeLogs
+      summary: 本人的订阅拉取记录分页，按时间倒序
+      security: [{ userSession: [] }]
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+      responses:
+        "200":
+          description: 订阅记录分页
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/SubscribeLogPage" }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/AccountDisabled" }
+
+  /sub/{token}:
+    get:
+      tags: [subscription]
+      operationId: getSubscription
+      summary: 按格式渲染该用户的全部可用节点（docs/03 §5.4）
+      description: |
+        不走响应信封。响应头带 Subscription-Userinfo、Profile-Update-Interval、Profile-Title、Content-Disposition。
+        用户非 active 时仍返回 200，内容只有一条说明状态的信息节点。
+      security: []
+      parameters:
+        - { name: token, in: path, required: true, schema: { type: string, pattern: "^[A-Za-z0-9_-]{22,64}$" } }
+        - name: format
+          in: query
+          description: 未指定时按 User-Agent 判断
+          schema: { $ref: "#/components/schemas/SubscriptionFormat" }
+      responses:
+        "200":
+          description: 订阅内容
+          content:
+            text/plain: { schema: { type: string } }
+            application/yaml: { schema: { type: string } }
+            application/json: { schema: { type: object, additionalProperties: true } }
+        "400":
+          description: format 取值不认识
+          content:
+            text/plain: { schema: { type: string } }
+        "404":
+          description: token 不存在
+          content:
+            text/plain: { schema: { type: string } }
+        "429":
+          description: 触发频控
+          content:
+            text/plain: { schema: { type: string } }
 
 components:
   securitySchemes:
@@ -1340,6 +1737,11 @@ components:
           schema: { $ref: "#/components/schemas/Envelope" }
     NotFound:
       description: not_found
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Envelope" }
+    AccountDisabled:
+      description: account_disabled（账号已停用，只能查看本人信息与退出）或 permission_denied（CSRF 校验失败）
       content:
         application/json:
           schema: { $ref: "#/components/schemas/Envelope" }
@@ -1816,6 +2218,8 @@ components:
                 synced: { type: integer }
                 pending: { type: integer }
                 failed: { type: integer }
+            totpEnabled: { type: boolean, description: 是否已开启两步验证（0.2.6） }
+            lastUsedAt: { type: [string, "null"], format: date-time, description: 最近一次产生流量的时间（0.2.6） }
             createdAt: { type: string, format: date-time }
     UserCreateInput:
       type: object
@@ -1843,3 +2247,118 @@ components:
         retryCount: { type: integer }
         syncedAt: { type: [string, "null"], format: date-time }
         updatedAt: { type: string, format: date-time }
+    UserPassword:
+      type: string
+      minLength: 8
+      maxLength: 128
+    UserPasswordChangeInput:
+      type: object
+      required: [oldPassword, newPassword]
+      properties:
+        oldPassword: { type: string, minLength: 1, maxLength: 128 }
+        newPassword: { $ref: "#/components/schemas/UserPassword" }
+    UserSession:
+      type: object
+      required: [user, csrfToken, totpEnabled]
+      properties:
+        user:
+          type: object
+          required: [id, username, status]
+          properties:
+            id: { type: integer, format: int64 }
+            username: { type: string }
+            status: { $ref: "#/components/schemas/UserStatus" }
+        totpEnabled: { type: boolean }
+        csrfToken: { type: string }
+    UserSessionEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/Envelope"
+        - type: object
+          properties:
+            data: { $ref: "#/components/schemas/UserSession" }
+    UserDashboard:
+      type: object
+      required: [status, planName, trafficLimit, trafficUsed, trafficToday, expiresAt, pendingDays, limitIp, onlineDevices, lastUsedAt, nodeCount]
+      properties:
+        status: { $ref: "#/components/schemas/UserStatus" }
+        planName: { type: string, description: 没有套餐时为空串 }
+        trafficLimit: { type: integer, format: int64, description: 字节，0 不限 }
+        trafficUsed: { type: integer, format: int64 }
+        trafficToday: { type: integer, format: int64, description: 今日（平台时区）已用字节 }
+        expiresAt: { type: [string, "null"], format: date-time }
+        pendingDays: { type: integer, description: 大于 0 表示首次使用后才开始计时的天数 }
+        limitIp: { type: integer, description: 同时在线 IP 数，0 不限 }
+        onlineDevices: { type: [integer, "null"], description: 各面板在线 client 数之和；面板都不提供时为 null }
+        lastUsedAt: { type: [string, "null"], format: date-time }
+        nodeCount: { type: integer, description: 当前可用节点数 }
+    TrafficPoint:
+      type: object
+      required: [hour, up, down]
+      properties:
+        hour: { type: string, format: date-time }
+        up: { type: integer, format: int64 }
+        down: { type: integer, format: int64 }
+    UserNode:
+      type: object
+      required: [id, name, region, protocol, isServerOnline, serverLoad, onlineClients]
+      properties:
+        id: { type: integer, format: int64 }
+        name: { type: string }
+        region: { type: string }
+        protocol: { type: string }
+        isServerOnline: { type: boolean }
+        serverLoad: { type: [number, "null"], description: 所在服务器的 CPU 占用百分比，未知为 null }
+        onlineClients: { type: integer, description: 所在服务器的在线 client 数 }
+    UserNodeGroup:
+      type: object
+      required: [id, name, nodes]
+      properties:
+        id: { type: integer, format: int64 }
+        name: { type: string }
+        nodes: { type: array, items: { $ref: "#/components/schemas/UserNode" } }
+    NodeLink:
+      type: object
+      required: [link]
+      properties:
+        link: { type: string, description: 分享链接，属于凭据 }
+    SubscriptionFormat:
+      type: string
+      enum: [base64, mihomo, singbox, xray]
+    SubscriptionInfo:
+      type: object
+      required: [url, formats, updateIntervalHours]
+      properties:
+        url: { type: string, description: 不带 format 参数的订阅地址，属于凭据 }
+        formats:
+          type: array
+          items:
+            type: object
+            required: [format, url]
+            properties:
+              format: { $ref: "#/components/schemas/SubscriptionFormat" }
+              url: { type: string }
+        updateIntervalHours: { type: integer }
+    LoginLog:
+      type: object
+      required: [clientIp, isSuccess, createdAt]
+      properties:
+        clientIp: { type: string }
+        isSuccess: { type: boolean }
+        createdAt: { type: string, format: date-time }
+    SubscribeLog:
+      type: object
+      required: [id, userId, username, format, clientIp, userAgent, createdAt]
+      properties:
+        id: { type: integer, format: int64 }
+        userId: { type: integer, format: int64 }
+        username: { type: string }
+        format: { $ref: "#/components/schemas/SubscriptionFormat" }
+        clientIp: { type: string }
+        userAgent: { type: string }
+        createdAt: { type: string, format: date-time }
+    SubscribeLogPage:
+      type: object
+      required: [items, total]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/SubscribeLog" } }
+        total: { type: integer, format: int64 }
