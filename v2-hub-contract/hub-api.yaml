@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: v2-hub API
-  version: 0.4.1
+  version: 0.4.2
   description: |
     v2-hub 对外接口契约（hub-server 提供，v2-hub-admin-web / v2-hub-user-web 消费）。
     - 管理端接口前缀 /api/admin，客户端接口前缀 /api/user，订阅端点前缀 /sub。
@@ -53,7 +53,7 @@ tags:
   - name: user-shop
     description: 商店、下单、钱包与充值（docs/03 §5.12–§5.16）；身份只取自会话（R8）
   - name: user-chain
-    description: 链式代理：链式规则与自有落地节点（docs/03 §5.18）；身份只取自会话（R8）
+    description: 链式代理：客户端链式规则、自有落地节点（docs/03 §5.18）与服务端链式规则（§5.19，0.4.2）；身份只取自会话（R8）
   - name: payment
     description: 支付网关回调（docs/03 §5.15）
   - name: subscription
@@ -606,6 +606,75 @@ paths:
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "403": { $ref: "#/components/responses/PermissionDenied" }
         "404": { $ref: "#/components/responses/NotFound" }
+  /api/admin/servers/{id}/chain-apply:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    get:
+      tags: [admin-panel]
+      operationId: getServerChainApply
+      summary: 该服务器作为入口的服务端链式下发状态（server:read；docs/03 §5.19，0.4.2）
+      responses:
+        "200":
+          description: 下发状态
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/ChainApply" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/admin/servers/{id}/chain-apply/retry:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    post:
+      tags: [admin-panel]
+      operationId: retryServerChainApply
+      summary: 清零失败次数并立即触发一次下发（server:write；docs/03 §3 C4，0.4.2）
+      description: 仍受同一服务器两次下发至少间隔 60 秒的约束，所以返回的状态可能还是 pending。写审计。
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      responses:
+        "200":
+          description: 触发后的下发状态
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/ChainApply" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/admin/server-chain-rules:
+    get:
+      tags: [admin-panel]
+      operationId: listServerChainRules
+      summary: 全站服务端链式规则分页，按 id 倒序（server:read；只读，Ruling-41；0.4.2）
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+        - { name: userId, in: query, schema: { type: integer, format: int64, minimum: 1 } }
+        - { name: serverId, in: query, description: 入口所在服务器, schema: { type: integer, format: int64, minimum: 1 } }
+      responses:
+        "200":
+          description: 规则分页
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/AdminServerChainRulePage" }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
   /api/admin/servers/{id}/sync:
     parameters:
       - $ref: "#/components/parameters/IdPath"
@@ -3651,6 +3720,85 @@ paths:
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "403": { $ref: "#/components/responses/UserForbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
+  /api/user/chain/server-rules:
+    post:
+      tags: [user-chain]
+      operationId: createServerChainRule
+      summary: 新建一条服务端链式规则（docs/03 §5.19，0.4.2）
+      description: |
+        入口与落地都必须是本人当前可用的平台节点，入口所在面板须支持改内核配置；落地不能是 hysteria2、不能与入口相同。
+        套餐没开服务端链式返回 403 feature_disabled；超过上限或节点不合要求返回 400；同一入口已有服务端规则返回 409。
+        规则保存后由后台下发到入口面板，状态见 applyStatus。
+      security: [{ userSession: [] }]
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ServerChainRuleInput" }
+      responses:
+        "200":
+          description: 新建的规则
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/ServerChainRule" }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/UserForbidden" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /api/user/chain/server-rules/{id}:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    put:
+      tags: [user-chain]
+      operationId: updateServerChainRule
+      summary: 启用或停用服务端规则；他人的返回 404（R8）（0.4.2）
+      description: 入口与落地不能改，要换线路请删除后新建。套餐没开服务端链式时返回 403 feature_disabled。
+      security: [{ userSession: [] }]
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ServerChainRuleUpdateInput" }
+      responses:
+        "200":
+          description: 改后的规则
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/ServerChainRule" }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/UserForbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      tags: [user-chain]
+      operationId: deleteServerChainRule
+      summary: 删除服务端规则；套餐没开时也允许；他人的返回 404（R8）（0.4.2）
+      security: [{ userSession: [] }]
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      responses:
+        "200":
+          description: 已删除
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Envelope" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/UserForbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
   /sub/{token}:
     get:
       tags: [subscription]
@@ -4187,6 +4335,7 @@ components:
         trafficResetDay: { type: integer, minimum: 1, maximum: 31, default: 1 }
         allowClientChain: { type: boolean, default: false }
         allowCustomNode: { type: boolean, default: false }
+        allowServerChain: { type: boolean, default: false, description: 服务端链式（0.4.2，Ruling-41） }
         remark: { type: string, maxLength: 255 }
         nodeGroupIds:
           type: array
@@ -4319,10 +4468,11 @@ components:
         features:
           type: object
           description: 当前套餐开了哪些功能，决定菜单显隐；后端仍做最终校验（0.4.1）
-          required: [clientChain, customNode]
+          required: [clientChain, customNode, serverChain]
           properties:
             clientChain: { type: boolean, description: 可以使用客户端链式 }
             customNode: { type: boolean, description: 可以添加自有落地节点 }
+            serverChain: { type: boolean, description: 可以使用服务端链式（0.4.2） }
     UserSessionEnvelope:
       allOf:
         - $ref: "#/components/schemas/Envelope"
@@ -5205,13 +5355,14 @@ components:
     ChainNodeOption:
       type: object
       description: 新建规则时可选的平台节点（本人当前可用）
-      required: [id, name, region, protocol, canBeExit]
+      required: [id, name, region, protocol, canBeExit, canBeServerEntry]
       properties:
         id: { type: integer, format: int64 }
         name: { type: string }
         region: { type: string }
         protocol: { type: string }
         canBeExit: { type: boolean, description: 能否作落地；hysteria2 不能 }
+        canBeServerEntry: { type: boolean, description: 能否作服务端链式的入口：所在面板支持改内核配置（0.4.2） }
     ChainRule:
       type: object
       required: [id, name, displayName, entry, exit, isEnabled, status, blockedReason, createdAt]
@@ -5279,12 +5430,109 @@ components:
         link: { type: string, minLength: 1, maxLength: 2048, description: 省略 = 不改链接 }
     ChainOverview:
       type: object
-      required: [allowed, customNodeAllowed, maxRules, maxCustomNodes, rules, customNodes, nodes]
+      required: [allowed, customNodeAllowed, serverAllowed, maxRules, maxCustomNodes, maxServerRules, rules, customNodes, serverRules, nodes]
       properties:
         allowed: { type: boolean, description: 套餐是否允许客户端链式 }
         customNodeAllowed: { type: boolean, description: 套餐是否允许自有落地节点 }
+        serverAllowed: { type: boolean, description: 套餐是否允许服务端链式（0.4.2） }
         maxRules: { type: integer }
         maxCustomNodes: { type: integer }
+        maxServerRules: { type: integer, description: 0.4.2 }
         rules: { type: array, items: { $ref: "#/components/schemas/ChainRule" } }
         customNodes: { type: array, items: { $ref: "#/components/schemas/CustomNode" } }
+        serverRules: { type: array, items: { $ref: "#/components/schemas/ServerChainRule" }, description: 0.4.2 }
         nodes: { type: array, items: { $ref: "#/components/schemas/ChainNodeOption" } }
+    ServerChainApplyState:
+      type: string
+      enum: ["", applied, pending, failed]
+      description: 服务端规则的下发情况（docs/03 §5.19）；applied = 已在入口面板生效，pending = 下发中，failed = 入口服务器最近一次下发被回滚；规则阻断或停用时为空串
+    ServerChainRule:
+      type: object
+      required: [id, entry, exit, isEnabled, status, blockedReason, applyStatus, createdAt]
+      properties:
+        id: { type: integer, format: int64 }
+        entry:
+          type: object
+          required: [nodeId, name]
+          properties:
+            nodeId: { type: integer, format: int64 }
+            name: { type: string }
+        exit:
+          type: object
+          required: [nodeId, name, protocol]
+          properties:
+            nodeId: { type: integer, format: int64 }
+            name: { type: string }
+            protocol: { type: string }
+        isEnabled: { type: boolean }
+        status: { $ref: "#/components/schemas/ChainStatus" }
+        blockedReason: { $ref: "#/components/schemas/ChainBlockedReason" }
+        applyStatus: { $ref: "#/components/schemas/ServerChainApplyState" }
+        createdAt: { type: string, format: date-time }
+    ServerChainRuleInput:
+      type: object
+      required: [entryNodeId, exitNodeId]
+      properties:
+        entryNodeId: { type: integer, format: int64, minimum: 1 }
+        exitNodeId: { type: integer, format: int64, minimum: 1 }
+        isEnabled: { type: boolean, default: true }
+    ServerChainRuleUpdateInput:
+      type: object
+      required: [isEnabled]
+      properties:
+        isEnabled: { type: boolean }
+    ChainApplyStatus:
+      type: string
+      enum: [none, pending, applied, failed]
+      description: 入口服务器的下发状态（docs/03 §3 C1–C5）；none = 从未有过服务端规则
+    ChainApply:
+      type: object
+      required: [serverId, isSupported, status, ruleCount, appliedRuleCount, failCount, isRetryStopped, lastError, lastAttemptAt, nextAttemptAt, appliedAt]
+      properties:
+        serverId: { type: integer, format: int64 }
+        isSupported: { type: boolean, description: 面板是否支持改内核配置；不支持时不会有服务端规则以它为入口 }
+        status: { $ref: "#/components/schemas/ChainApplyStatus" }
+        ruleCount: { type: integer, description: 期望生效的规则数（不阻断、启用且落地凭据已就绪） }
+        appliedRuleCount: { type: integer, description: 当前面板上生效的规则数 }
+        failCount: { type: integer, description: 同一期望的连续失败次数 }
+        isRetryStopped: { type: boolean, description: 失败次数已达上限，停止自动重试，等期望变化或手动重试 }
+        lastError: { type: string, description: 脱敏后的最近错误，没有为空串 }
+        lastAttemptAt: { type: [string, "null"], format: date-time }
+        nextAttemptAt: { type: [string, "null"], format: date-time, description: 失败退避到这个时刻 }
+        appliedAt: { type: [string, "null"], format: date-time }
+    AdminServerChainRule:
+      type: object
+      required: [id, user, entry, exit, isEnabled, status, blockedReason, applyStatus, createdAt]
+      properties:
+        id: { type: integer, format: int64 }
+        user:
+          type: object
+          required: [id, username]
+          properties:
+            id: { type: integer, format: int64 }
+            username: { type: string }
+        entry:
+          type: object
+          required: [nodeId, name, serverId, serverName]
+          properties:
+            nodeId: { type: integer, format: int64 }
+            name: { type: string }
+            serverId: { type: integer, format: int64 }
+            serverName: { type: string }
+        exit:
+          type: object
+          required: [nodeId, name]
+          properties:
+            nodeId: { type: integer, format: int64 }
+            name: { type: string }
+        isEnabled: { type: boolean }
+        status: { $ref: "#/components/schemas/ChainStatus" }
+        blockedReason: { $ref: "#/components/schemas/ChainBlockedReason" }
+        applyStatus: { $ref: "#/components/schemas/ServerChainApplyState" }
+        createdAt: { type: string, format: date-time }
+    AdminServerChainRulePage:
+      type: object
+      required: [items, total]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/AdminServerChainRule" } }
+        total: { type: integer, format: int64 }
