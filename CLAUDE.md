@@ -34,7 +34,7 @@ cd v2-hub-contract/deploy/it && bash run_all.sh
 - 前端静态文件放 MinIO，Caddy 同域反代 `/api`、`/sub`（Ruling-5、Ruling-6）。
 
 契约（全部在 v2-hub-contract/）：`hub-api.yaml`（server → 前端）、`deploy/init.sql`（server 的表结构）、
-`upstream/3x-ui/openapi-v3.11.0.json`（3x-ui → server 的上游基准）。契约版本用 git tag `vX.Y`，当前 `v0.6`。
+`upstream/3x-ui/openapi-v3.11.0.json`（3x-ui → server 的上游基准）。契约版本用 git tag `vX.Y`，当前 `v0.7`。
 
 ## 跨目录纪律
 
@@ -68,6 +68,9 @@ GitHub 仓库设置见 `docs/github-仓库设置清单.md`。
   余额流水、充值码、管理员调整余额、到期扣余额自动续费与提醒邮件、邀请返利、支付网关接口（幂等入账，不带具体网关）、收支统计、
   切换为用户身份（一次性票据换只读会话）；两端页面齐备；IT-7 通过。
   真实支付网关、真实 SMTP 投递与管理端 M4 / M5 页面的浏览器实测未自动化，待人工验证。
-- 下一步是 M6（客户端链式），之后 M7（服务端链式）、M8（运营）。
+- M6 完成（2026-11-13，tag `v0.7`）：客户端链式（Ruling-36 – Ruling-38）：链式规则（入口 → 落地，通畅 / 阻断按套餐与节点可用性计算）、
+  自有落地节点（分享链接或 SOCKS5，加密存储，只能作落地）；Mihomo / sing-box / Xray JSON 订阅带两跳链路，Base64 不带；用户端链式代理页；IT-8 通过。
+  真实流量经落地出网（出口 IP）未自动化，待人工验证。
+- 下一步是 M7（服务端链式），之后 M8（运营）。
 - 路线（2026-11-13，Ruling-17 – Ruling-22）：参考 SSPanel-Uim Malio 的功能与界面，自行实现；里程碑为
   M3 订阅与用户端基础 → M4 自助运营 → M5 商店与钱包 → M6 / M7 两种链式 → M8 运营，见 docs/07。
