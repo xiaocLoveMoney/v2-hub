@@ -11,6 +11,25 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const countAdminServerChainRules = `-- name: CountAdminServerChainRules :one
+SELECT COUNT(*) FROM chain_rule r JOIN node n ON n.id = r.entry_node_id JOIN inbound i ON i.id = n.inbound_id
+WHERE r.kind = 'server'
+  AND ($1::bigint IS NULL OR r.user_id = $1)
+  AND ($2::bigint IS NULL OR i.server_id = $2)
+`
+
+type CountAdminServerChainRulesParams struct {
+	UserID   pgtype.Int8
+	ServerID pgtype.Int8
+}
+
+func (q *Queries) CountAdminServerChainRules(ctx context.Context, arg CountAdminServerChainRulesParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countAdminServerChainRules, arg.UserID, arg.ServerID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countChainRules = `-- name: CountChainRules :one
 SELECT COUNT(*) FROM chain_rule WHERE user_id = $1 AND kind = 'client'
 `
@@ -28,6 +47,17 @@ SELECT COUNT(*) FROM custom_node WHERE user_id = $1
 
 func (q *Queries) CountCustomNodes(ctx context.Context, userID int64) (int64, error) {
 	row := q.db.QueryRow(ctx, countCustomNodes, userID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const countServerChainRules = `-- name: CountServerChainRules :one
+SELECT COUNT(*) FROM chain_rule WHERE user_id = $1 AND kind = 'server'
+`
+
+func (q *Queries) CountServerChainRules(ctx context.Context, userID int64) (int64, error) {
+	row := q.db.QueryRow(ctx, countServerChainRules, userID)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -85,6 +115,47 @@ func (q *Queries) DeleteCustomNodesByUser(ctx context.Context, userID int64) err
 	return err
 }
 
+const deleteServerChainRule = `-- name: DeleteServerChainRule :execrows
+DELETE FROM chain_rule WHERE id = $1 AND user_id = $2 AND kind = 'server'
+`
+
+type DeleteServerChainRuleParams struct {
+	ID     int64
+	UserID int64
+}
+
+func (q *Queries) DeleteServerChainRule(ctx context.Context, arg DeleteServerChainRuleParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteServerChainRule, arg.ID, arg.UserID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const getChainApply = `-- name: GetChainApply :one
+SELECT server_id, status, desired_hash, applied_rule_ids, fail_count, last_error, last_attempt_at, next_attempt_at, applied_at, backup_enc, updated_at
+FROM chain_apply WHERE server_id = $1
+`
+
+func (q *Queries) GetChainApply(ctx context.Context, serverID int64) (ChainApply, error) {
+	row := q.db.QueryRow(ctx, getChainApply, serverID)
+	var i ChainApply
+	err := row.Scan(
+		&i.ServerID,
+		&i.Status,
+		&i.DesiredHash,
+		&i.AppliedRuleIds,
+		&i.FailCount,
+		&i.LastError,
+		&i.LastAttemptAt,
+		&i.NextAttemptAt,
+		&i.AppliedAt,
+		&i.BackupEnc,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getCustomNodeLink = `-- name: GetCustomNodeLink :one
 SELECT link_enc FROM custom_node WHERE id = $1 AND user_id = $2
 `
@@ -101,10 +172,27 @@ func (q *Queries) GetCustomNodeLink(ctx context.Context, arg GetCustomNodeLinkPa
 	return link_enc, err
 }
 
+const getProvisionEmail = `-- name: GetProvisionEmail :one
+SELECT email FROM provision WHERE user_id = $1 AND server_id = $2
+`
+
+type GetProvisionEmailParams struct {
+	UserID   int64
+	ServerID int64
+}
+
+func (q *Queries) GetProvisionEmail(ctx context.Context, arg GetProvisionEmailParams) (string, error) {
+	row := q.db.QueryRow(ctx, getProvisionEmail, arg.UserID, arg.ServerID)
+	var email string
+	err := row.Scan(&email)
+	return email, err
+}
+
 const getUserChainFlags = `-- name: GetUserChainFlags :one
 
 SELECT coalesce(p.allow_client_chain, FALSE)::boolean AS allow_client_chain,
-       coalesce(p.allow_custom_node, FALSE)::boolean AS allow_custom_node
+       coalesce(p.allow_custom_node, FALSE)::boolean AS allow_custom_node,
+       coalesce(p.allow_server_chain, FALSE)::boolean AS allow_server_chain
 FROM end_user u LEFT JOIN plan p ON p.id = u.plan_id
 WHERE u.id = $1 AND u.deleted_at IS NULL
 `
@@ -112,14 +200,15 @@ WHERE u.id = $1 AND u.deleted_at IS NULL
 type GetUserChainFlagsRow struct {
 	AllowClientChain bool
 	AllowCustomNode  bool
+	AllowServerChain bool
 }
 
 // 客户端链式：链式规则与自有落地节点（docs/03 §5.18）------------------------------------
-// 当前套餐的两个开关；没有套餐时都为假
+// 当前套餐的链式开关；没有套餐时都为假
 func (q *Queries) GetUserChainFlags(ctx context.Context, id int64) (GetUserChainFlagsRow, error) {
 	row := q.db.QueryRow(ctx, getUserChainFlags, id)
 	var i GetUserChainFlagsRow
-	err := row.Scan(&i.AllowClientChain, &i.AllowCustomNode)
+	err := row.Scan(&i.AllowClientChain, &i.AllowCustomNode, &i.AllowServerChain)
 	return i, err
 }
 
@@ -178,6 +267,167 @@ func (q *Queries) InsertCustomNode(ctx context.Context, arg InsertCustomNodePara
 	var id int64
 	err := row.Scan(&id)
 	return id, err
+}
+
+const insertServerChainRule = `-- name: InsertServerChainRule :one
+INSERT INTO chain_rule (user_id, kind, entry_node_id, exit_node_id, is_enabled)
+VALUES ($1, 'server', $2, $3, $4)
+RETURNING id
+`
+
+type InsertServerChainRuleParams struct {
+	UserID      int64
+	EntryNodeID int64
+	ExitNodeID  pgtype.Int8
+	IsEnabled   bool
+}
+
+func (q *Queries) InsertServerChainRule(ctx context.Context, arg InsertServerChainRuleParams) (int64, error) {
+	row := q.db.QueryRow(ctx, insertServerChainRule,
+		arg.UserID,
+		arg.EntryNodeID,
+		arg.ExitNodeID,
+		arg.IsEnabled,
+	)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}
+
+const listAdminServerChainRules = `-- name: ListAdminServerChainRules :many
+SELECT r.id, r.user_id, u.username, r.is_enabled, r.created_at,
+       r.entry_node_id, en.display_name AS entry_name, ei.server_id AS entry_server_id, s.name AS entry_server_name,
+       r.exit_node_id::bigint AS exit_node_id, xn.display_name AS exit_name
+FROM chain_rule r
+JOIN end_user u ON u.id = r.user_id
+JOIN node en ON en.id = r.entry_node_id
+JOIN inbound ei ON ei.id = en.inbound_id
+JOIN server s ON s.id = ei.server_id
+JOIN node xn ON xn.id = r.exit_node_id
+WHERE r.kind = 'server'
+  AND ($1::bigint IS NULL OR r.user_id = $1)
+  AND ($2::bigint IS NULL OR ei.server_id = $2)
+ORDER BY r.id DESC
+LIMIT $4 OFFSET $3
+`
+
+type ListAdminServerChainRulesParams struct {
+	UserID    pgtype.Int8
+	ServerID  pgtype.Int8
+	RowOffset int32
+	RowLimit  int32
+}
+
+type ListAdminServerChainRulesRow struct {
+	ID              int64
+	UserID          int64
+	Username        string
+	IsEnabled       bool
+	CreatedAt       pgtype.Timestamptz
+	EntryNodeID     int64
+	EntryName       string
+	EntryServerID   int64
+	EntryServerName string
+	ExitNodeID      int64
+	ExitName        string
+}
+
+// 全站服务端规则（管理端只读，Ruling-41），按 id 倒序分页
+func (q *Queries) ListAdminServerChainRules(ctx context.Context, arg ListAdminServerChainRulesParams) ([]ListAdminServerChainRulesRow, error) {
+	rows, err := q.db.Query(ctx, listAdminServerChainRules,
+		arg.UserID,
+		arg.ServerID,
+		arg.RowOffset,
+		arg.RowLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListAdminServerChainRulesRow{}
+	for rows.Next() {
+		var i ListAdminServerChainRulesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.UserID,
+			&i.Username,
+			&i.IsEnabled,
+			&i.CreatedAt,
+			&i.EntryNodeID,
+			&i.EntryName,
+			&i.EntryServerID,
+			&i.EntryServerName,
+			&i.ExitNodeID,
+			&i.ExitName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listChainApplies = `-- name: ListChainApplies :many
+SELECT server_id, status, applied_rule_ids FROM chain_apply WHERE server_id = ANY($1::bigint[])
+`
+
+type ListChainAppliesRow struct {
+	ServerID       int64
+	Status         string
+	AppliedRuleIds []int64
+}
+
+func (q *Queries) ListChainApplies(ctx context.Context, serverIds []int64) ([]ListChainAppliesRow, error) {
+	rows, err := q.db.Query(ctx, listChainApplies, serverIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListChainAppliesRow{}
+	for rows.Next() {
+		var i ListChainAppliesRow
+		if err := rows.Scan(&i.ServerID, &i.Status, &i.AppliedRuleIds); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listChainApplyServerIDs = `-- name: ListChainApplyServerIDs :many
+SELECT s.id FROM server s
+WHERE NOT s.is_disabled
+  AND (EXISTS (SELECT 1 FROM chain_rule r JOIN node n ON n.id = r.entry_node_id JOIN inbound i ON i.id = n.inbound_id
+               WHERE r.kind = 'server' AND i.server_id = s.id)
+       OR EXISTS (SELECT 1 FROM chain_apply a WHERE a.server_id = s.id AND cardinality(a.applied_rule_ids) > 0))
+ORDER BY s.id
+`
+
+// 需要检查下发的服务器：启用中，且有以它为入口的服务端规则，或面板上还留着平台条目
+func (q *Queries) ListChainApplyServerIDs(ctx context.Context) ([]int64, error) {
+	rows, err := q.db.Query(ctx, listChainApplyServerIDs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []int64{}
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listChainRules = `-- name: ListChainRules :many
@@ -334,6 +584,147 @@ func (q *Queries) ListCustomNodes(ctx context.Context, arg ListCustomNodesParams
 	return items, nil
 }
 
+const listServerChainRules = `-- name: ListServerChainRules :many
+
+SELECT r.id, r.is_enabled, r.created_at,
+       r.entry_node_id, en.display_name AS entry_name, ei.server_id AS entry_server_id,
+       r.exit_node_id::bigint AS exit_node_id, xn.display_name AS exit_name, xi.protocol AS exit_protocol
+FROM chain_rule r
+JOIN node en ON en.id = r.entry_node_id
+JOIN inbound ei ON ei.id = en.inbound_id
+JOIN node xn ON xn.id = r.exit_node_id
+JOIN inbound xi ON xi.id = xn.inbound_id
+WHERE r.user_id = $1 AND r.kind = 'server'
+  AND ($2::bigint IS NULL OR r.id = $2)
+ORDER BY r.id
+`
+
+type ListServerChainRulesParams struct {
+	UserID int64
+	RuleID pgtype.Int8
+}
+
+type ListServerChainRulesRow struct {
+	ID            int64
+	IsEnabled     bool
+	CreatedAt     pgtype.Timestamptz
+	EntryNodeID   int64
+	EntryName     string
+	EntryServerID int64
+	ExitNodeID    int64
+	ExitName      string
+	ExitProtocol  string
+}
+
+// 服务端链式：规则与下发记录（docs/03 §5.19）------------------------------------------------
+// 某用户的服务端规则；rule_id 非空时只取这一条（归属按 user_id 约束，R8）
+func (q *Queries) ListServerChainRules(ctx context.Context, arg ListServerChainRulesParams) ([]ListServerChainRulesRow, error) {
+	rows, err := q.db.Query(ctx, listServerChainRules, arg.UserID, arg.RuleID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListServerChainRulesRow{}
+	for rows.Next() {
+		var i ListServerChainRulesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.IsEnabled,
+			&i.CreatedAt,
+			&i.EntryNodeID,
+			&i.EntryName,
+			&i.EntryServerID,
+			&i.ExitNodeID,
+			&i.ExitName,
+			&i.ExitProtocol,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listServerChainRulesOnServer = `-- name: ListServerChainRulesOnServer :many
+SELECT r.id, r.user_id, r.is_enabled, r.entry_node_id, r.exit_node_id::bigint AS exit_node_id, i.tag AS inbound_tag
+FROM chain_rule r
+JOIN node n ON n.id = r.entry_node_id
+JOIN inbound i ON i.id = n.inbound_id
+JOIN end_user u ON u.id = r.user_id AND u.deleted_at IS NULL
+WHERE r.kind = 'server' AND i.server_id = $1
+ORDER BY r.id
+`
+
+type ListServerChainRulesOnServerRow struct {
+	ID          int64
+	UserID      int64
+	IsEnabled   bool
+	EntryNodeID int64
+	ExitNodeID  int64
+	InboundTag  string
+}
+
+// 以某台服务器为入口的全部服务端规则，带入口入站的 tag
+func (q *Queries) ListServerChainRulesOnServer(ctx context.Context, serverID int64) ([]ListServerChainRulesOnServerRow, error) {
+	rows, err := q.db.Query(ctx, listServerChainRulesOnServer, serverID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListServerChainRulesOnServerRow{}
+	for rows.Next() {
+		var i ListServerChainRulesOnServerRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.UserID,
+			&i.IsEnabled,
+			&i.EntryNodeID,
+			&i.ExitNodeID,
+			&i.InboundTag,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listServerProviderTypes = `-- name: ListServerProviderTypes :many
+SELECT id, provider_type FROM server ORDER BY id
+`
+
+type ListServerProviderTypesRow struct {
+	ID           int64
+	ProviderType string
+}
+
+// 各服务器的面板类型，用来判断入口能否改内核配置
+func (q *Queries) ListServerProviderTypes(ctx context.Context) ([]ListServerProviderTypesRow, error) {
+	rows, err := q.db.Query(ctx, listServerProviderTypes)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListServerProviderTypesRow{}
+	for rows.Next() {
+		var i ListServerProviderTypesRow
+		if err := rows.Scan(&i.ID, &i.ProviderType); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const renameCustomNode = `-- name: RenameCustomNode :execrows
 UPDATE custom_node SET name = $1, updated_at = now()
 WHERE id = $2 AND user_id = $3
@@ -347,6 +738,19 @@ type RenameCustomNodeParams struct {
 
 func (q *Queries) RenameCustomNode(ctx context.Context, arg RenameCustomNodeParams) (int64, error) {
 	result, err := q.db.Exec(ctx, renameCustomNode, arg.Name, arg.ID, arg.UserID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const resetChainApplyFailures = `-- name: ResetChainApplyFailures :execrows
+UPDATE chain_apply SET fail_count = 0, next_attempt_at = NULL, updated_at = now() WHERE server_id = $1
+`
+
+// 管理员重试（docs/03 §3 C4）：清零失败次数与退避
+func (q *Queries) ResetChainApplyFailures(ctx context.Context, serverID int64) (int64, error) {
+	result, err := q.db.Exec(ctx, resetChainApplyFailures, serverID)
 	if err != nil {
 		return 0, err
 	}
@@ -379,6 +783,25 @@ func (q *Queries) SetCustomNodeLink(ctx context.Context, arg SetCustomNodeLinkPa
 	return err
 }
 
+const setServerChainRuleEnabled = `-- name: SetServerChainRuleEnabled :execrows
+UPDATE chain_rule SET is_enabled = $1, updated_at = now()
+WHERE id = $2 AND user_id = $3 AND kind = 'server'
+`
+
+type SetServerChainRuleEnabledParams struct {
+	IsEnabled bool
+	ID        int64
+	UserID    int64
+}
+
+func (q *Queries) SetServerChainRuleEnabled(ctx context.Context, arg SetServerChainRuleEnabledParams) (int64, error) {
+	result, err := q.db.Exec(ctx, setServerChainRuleEnabled, arg.IsEnabled, arg.ID, arg.UserID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const updateChainRule = `-- name: UpdateChainRule :execrows
 UPDATE chain_rule SET name = $1, is_enabled = $2, updated_at = now()
 WHERE id = $3 AND user_id = $4 AND kind = 'client'
@@ -402,4 +825,42 @@ func (q *Queries) UpdateChainRule(ctx context.Context, arg UpdateChainRuleParams
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const upsertChainApply = `-- name: UpsertChainApply :exec
+INSERT INTO chain_apply (server_id, status, desired_hash, applied_rule_ids, fail_count, last_error, last_attempt_at, next_attempt_at, applied_at, backup_enc, updated_at)
+VALUES ($1, $2, $3, $4, $5, $6,
+        $7, $8, $9, $10, now())
+ON CONFLICT (server_id) DO UPDATE SET status = EXCLUDED.status, desired_hash = EXCLUDED.desired_hash, applied_rule_ids = EXCLUDED.applied_rule_ids,
+    fail_count = EXCLUDED.fail_count, last_error = EXCLUDED.last_error, last_attempt_at = EXCLUDED.last_attempt_at,
+    next_attempt_at = EXCLUDED.next_attempt_at, applied_at = EXCLUDED.applied_at, backup_enc = EXCLUDED.backup_enc, updated_at = now()
+`
+
+type UpsertChainApplyParams struct {
+	ServerID       int64
+	Status         string
+	DesiredHash    string
+	AppliedRuleIds []int64
+	FailCount      int32
+	LastError      string
+	LastAttemptAt  pgtype.Timestamptz
+	NextAttemptAt  pgtype.Timestamptz
+	AppliedAt      pgtype.Timestamptz
+	BackupEnc      []byte
+}
+
+func (q *Queries) UpsertChainApply(ctx context.Context, arg UpsertChainApplyParams) error {
+	_, err := q.db.Exec(ctx, upsertChainApply,
+		arg.ServerID,
+		arg.Status,
+		arg.DesiredHash,
+		arg.AppliedRuleIds,
+		arg.FailCount,
+		arg.LastError,
+		arg.LastAttemptAt,
+		arg.NextAttemptAt,
+		arg.AppliedAt,
+		arg.BackupEnc,
+	)
+	return err
 }

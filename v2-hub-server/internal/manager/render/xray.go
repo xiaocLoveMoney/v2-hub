@@ -141,3 +141,12 @@ func Xray(nodes []ProxyNode, chains []Chain) ([]byte, error) {
 	}
 	return out, nil
 }
+
+// XrayOutbound 返回节点对应的一个 Xray 出站（服务端链式在入口面板上用它连落地，docs/03 §5.19）；
+// 节点的协议或传输 Xray 表达不了时第二个返回值为 false。
+func XrayOutbound(n ProxyNode, tag string) (map[string]any, bool) {
+	if !xraySupports(n) {
+		return nil, false
+	}
+	return xrayOutbound(n, tag), true
+}

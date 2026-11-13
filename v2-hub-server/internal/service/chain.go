@@ -69,19 +69,21 @@ const (
 	msgCustomNodeDuplicate  = "已有同名的自有落地节点"
 )
 
-// ChainFlags 是当前套餐的两个开关。
+// ChainFlags 是当前套餐的链式开关。
 type ChainFlags struct {
-	Chain      bool
-	CustomNode bool
+	Chain       bool
+	CustomNode  bool
+	ServerChain bool
 }
 
 // ChainNodeOption 是新建规则时可选的平台节点。
 type ChainNodeOption struct {
-	ID        int64
-	Name      string
-	Region    string
-	Protocol  string
-	CanBeExit bool
+	ID               int64
+	Name             string
+	Region           string
+	Protocol         string
+	CanBeExit        bool
+	CanBeServerEntry bool
 }
 
 // ChainRule 是一条链式规则。ExitID 是平台节点 id 或自有落地节点 id，取决于 ExitKind；Status 是计算值。
@@ -117,6 +119,7 @@ type ChainOverview struct {
 	Flags       ChainFlags
 	Rules       []ChainRule
 	CustomNodes []CustomNode
+	ServerRules []ServerChainRule
 	Nodes       []ChainNodeOption
 }
 
@@ -129,15 +132,17 @@ type ChainRuleInput struct {
 	Enabled          bool
 }
 
-// ChainService 负责链式规则与自有落地节点。
+// ChainService 负责链式规则（客户端与服务端）与自有落地节点。
 type ChainService struct {
 	store
-	sealer *crypto.Sealer
+	sealer  *crypto.Sealer
+	applier *ChainApplier
 }
 
-// NewChainService 创建链式服务；sealer 用于加密自有落地节点的链接。
-func NewChainService(pool *pgxpool.Pool, sealer *crypto.Sealer) *ChainService {
-	return &ChainService{store: newStore(pool), sealer: sealer}
+// NewChainService 创建链式服务；sealer 用于加密自有落地节点的链接；applier 负责把服务端规则下发到面板，
+// 为 nil 时任何节点都不能作服务端链式的入口。
+func NewChainService(pool *pgxpool.Pool, sealer *crypto.Sealer, applier *ChainApplier) *ChainService {
+	return &ChainService{store: newStore(pool), sealer: sealer, applier: applier}
 }
 
 func customNodeAAD(id int64) []byte {
@@ -157,7 +162,7 @@ func chainFlags(ctx context.Context, q *sqlcgen.Queries, userID int64) (ChainFla
 	if err != nil {
 		return ChainFlags{}, fmt.Errorf("get chain flags of user %d: %w", userID, err)
 	}
-	return ChainFlags{Chain: row.AllowClientChain, CustomNode: row.AllowCustomNode}, nil
+	return ChainFlags{Chain: row.AllowClientChain, CustomNode: row.AllowCustomNode, ServerChain: row.AllowServerChain}, nil
 }
 
 // availableNodes 返回用户当前可用的平台节点（与节点列表同一口径），按 id 索引。
@@ -288,11 +293,22 @@ func (s *ChainService) Overview(ctx context.Context, p *UserPrincipal) (*ChainOv
 	if err != nil {
 		return nil, err
 	}
+	serverRules, err := s.listServerRules(ctx, s.q, p.UserID, 0)
+	if err != nil {
+		return nil, err
+	}
+	coreServers, err := s.coreConfigServers(ctx, s.q)
+	if err != nil {
+		return nil, err
+	}
 	options := make([]ChainNodeOption, 0, len(rows))
 	for _, r := range rows {
-		options = append(options, ChainNodeOption{ID: r.ID, Name: r.DisplayName, Region: r.Region, Protocol: r.Protocol, CanBeExit: !isQUICProtocol(r.Protocol)})
+		options = append(options, ChainNodeOption{
+			ID: r.ID, Name: r.DisplayName, Region: r.Region, Protocol: r.Protocol,
+			CanBeExit: !isQUICProtocol(r.Protocol), CanBeServerEntry: coreServers[r.ServerID],
+		})
 	}
-	return &ChainOverview{Flags: flags, Rules: rules, CustomNodes: customNodes, Nodes: options}, nil
+	return &ChainOverview{Flags: flags, Rules: rules, CustomNodes: customNodes, ServerRules: serverRules, Nodes: options}, nil
 }
 
 // validChainName 校验名称：去首尾空白后不超过上限、不含控制字符（名称会原样写进客户端配置）。

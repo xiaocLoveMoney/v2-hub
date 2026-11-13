@@ -1,0 +1,123 @@
+package paneltest
+
+import (
+	"context"
+	"encoding/json"
+	"strings"
+
+	"v2-hub-server/internal/manager/panel"
+)
+
+// DefaultCoreTemplate 是假面板初始的内核配置模板（与 3x-ui 默认模板同构的精简版）。
+const DefaultCoreTemplate = `{"log":{"loglevel":"warning"},"inbounds":[{"tag":"api","port":62789,"protocol":"tunnel"}],` +
+	`"outbounds":[{"tag":"direct","protocol":"freedom"},{"tag":"blocked","protocol":"blackhole"}],` +
+	`"routing":{"domainStrategy":"AsIs","rules":[{"type":"field","inboundTag":["api"],"outboundTag":"api"},` +
+	`{"type":"field","ip":["geoip:private"],"outboundTag":"blocked"}]}}`
+
+const fakeTestURL = "https://example.test/generate_204"
+
+// fakeCore 是假面板的内核：模板、运行状态，以及让某些模板启动失败的开关。
+type fakeCore struct {
+	template json.RawMessage
+	extra    map[string]string
+	running  bool
+	// breakOn 非空时，模板里含这个片段就会让重启后的内核处于未运行状态（模拟配置有误）
+	breakOn  string
+	// rejectOn 非空时，含这个片段的模板在保存时就被拒绝（模拟 3x-ui 保存前的校验）
+	rejectOn string
+	restarts int
+}
+
+func newFakeCore() fakeCore {
+	return fakeCore{
+		template: json.RawMessage(DefaultCoreTemplate),
+		extra:    map[string]string{"outboundTestUrl": fakeTestURL},
+		running:  true,
+	}
+}
+
+// BreakCoreOn 让含 fragment 的模板在重启后启动失败；传空串恢复。
+func (f *Fake) BreakCoreOn(fragment string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.core.breakOn = fragment
+}
+
+// RejectTemplateOn 让含 fragment 的模板在保存时被拒绝、模板保持不变；传空串恢复。
+func (f *Fake) RejectTemplateOn(fragment string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.core.rejectOn = fragment
+}
+
+// CoreSnapshot 返回当前模板、附带设置里的出站测试地址、是否运行与重启次数。
+func (f *Fake) CoreSnapshot() (json.RawMessage, string, bool, int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append(json.RawMessage(nil), f.core.template...), f.core.extra["outboundTestUrl"], f.core.running, f.core.restarts
+}
+
+// PutCoreTemplate 直接在“面板侧”改模板（模拟有人在面板上手改）。
+func (f *Fake) PutCoreTemplate(tpl json.RawMessage) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.core.template = append(json.RawMessage(nil), tpl...)
+}
+
+// GetCoreTemplate 实现 panel.CoreConfigurator。
+func (f *Fake) GetCoreTemplate(context.Context) (panel.CoreTemplate, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.enter("GetCoreTemplate"); err != nil {
+		return panel.CoreTemplate{}, err
+	}
+	extra := make(map[string]string, len(f.core.extra))
+	for k, v := range f.core.extra {
+		extra[k] = v
+	}
+	return panel.CoreTemplate{Config: append(json.RawMessage(nil), f.core.template...), Extra: extra}, nil
+}
+
+// SetCoreTemplate 实现 panel.CoreConfigurator；附带设置缺了出站测试地址时与真面板一样重置为空。
+func (f *Fake) SetCoreTemplate(_ context.Context, tpl panel.CoreTemplate) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.enter("SetCoreTemplate"); err != nil {
+		return err
+	}
+	var probe map[string]json.RawMessage
+	if err := json.Unmarshal(tpl.Config, &probe); err != nil {
+		return &panel.Error{Kind: panel.KindRejected, Message: "模板不是 JSON 对象"}
+	}
+	if f.core.rejectOn != "" && strings.Contains(string(tpl.Config), f.core.rejectOn) {
+		return &panel.Error{Kind: panel.KindRejected, Message: "面板拒绝了请求：xray core rejects outbound"}
+	}
+	f.core.template = append(json.RawMessage(nil), tpl.Config...)
+	f.core.extra = map[string]string{"outboundTestUrl": tpl.Extra["outboundTestUrl"]}
+	return nil
+}
+
+// RestartCore 实现 panel.CoreConfigurator。
+func (f *Fake) RestartCore(context.Context) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.enter("RestartCore"); err != nil {
+		return err
+	}
+	f.core.restarts++
+	f.core.running = f.core.breakOn == "" || !strings.Contains(string(f.core.template), f.core.breakOn)
+	return nil
+}
+
+// CoreState 实现 panel.CoreConfigurator。
+func (f *Fake) CoreState(context.Context) (panel.CoreState, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.enter("CoreState"); err != nil {
+		return panel.CoreState{}, err
+	}
+	if f.core.running {
+		return panel.CoreState{Running: true, State: "running"}, nil
+	}
+	return panel.CoreState{State: "error", Message: "failed to start: fake config error"}, nil
+}

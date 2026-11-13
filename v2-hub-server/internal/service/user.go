@@ -124,6 +124,7 @@ type PlanInput struct {
 	PlanQuota        PlanQuota
 	AllowClientChain bool
 	AllowCustomNode  bool
+	AllowServerChain bool
 	Remark           string
 	NodeGroupIDs     []int64
 	// 售卖属性（docs/03 §5.12）
@@ -244,7 +245,7 @@ func planFromRow(r sqlcgen.ListPlansRow) Plan {
 	return Plan{
 		ID: r.ID,
 		PlanInput: PlanInput{
-			Name: r.Name, AllowClientChain: r.AllowClientChain, AllowCustomNode: r.AllowCustomNode, Remark: r.Remark,
+			Name: r.Name, AllowClientChain: r.AllowClientChain, AllowCustomNode: r.AllowCustomNode, AllowServerChain: r.AllowServerChain, Remark: r.Remark,
 			NodeGroupIDs: r.NodeGroupIds, OnSale: r.IsOnSale, Trial: r.IsTrial, SortOrder: int(r.SortOrder), Description: r.Description,
 			PlanQuota: PlanQuota{
 				TrafficLimit: r.TrafficLimit, DurationDays: int(r.DurationDays), StartOnFirstUse: r.StartOnFirstUse,
@@ -298,7 +299,7 @@ func planParams(in PlanInput) sqlcgen.CreatePlanParams {
 	return sqlcgen.CreatePlanParams{
 		Name: in.Name, TrafficLimit: p.TrafficLimit, DurationDays: int32(p.DurationDays), StartOnFirstUse: p.StartOnFirstUse,
 		LimitIp: int32(p.LimitIP), TrafficReset: p.TrafficReset, TrafficResetDay: int32(p.TrafficResetDay),
-		AllowClientChain: in.AllowClientChain, AllowCustomNode: in.AllowCustomNode, Remark: in.Remark,
+		AllowClientChain: in.AllowClientChain, AllowCustomNode: in.AllowCustomNode, AllowServerChain: in.AllowServerChain, Remark: in.Remark,
 		IsOnSale: in.OnSale, IsTrial: in.Trial, SortOrder: int32(in.SortOrder), Description: in.Description,
 	}
 }
@@ -371,7 +372,7 @@ func (s *UserService) UpdatePlan(ctx context.Context, actor *AdminPrincipal, id 
 		n, err := q.UpdatePlan(ctx, sqlcgen.UpdatePlanParams{
 			ID: id, Name: p.Name, TrafficLimit: p.TrafficLimit, DurationDays: p.DurationDays, StartOnFirstUse: p.StartOnFirstUse,
 			LimitIp: p.LimitIp, TrafficReset: p.TrafficReset, TrafficResetDay: p.TrafficResetDay,
-			AllowClientChain: p.AllowClientChain, AllowCustomNode: p.AllowCustomNode, Remark: p.Remark,
+			AllowClientChain: p.AllowClientChain, AllowCustomNode: p.AllowCustomNode, AllowServerChain: p.AllowServerChain, Remark: p.Remark,
 			IsOnSale: p.IsOnSale, IsTrial: p.IsTrial, SortOrder: p.SortOrder, Description: p.Description,
 		})
 		if err != nil {

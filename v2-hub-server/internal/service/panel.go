@@ -271,6 +271,11 @@ func serverFromRow(r sqlcgen.GetServerRow) Server {
 	return srv
 }
 
+// SupportsCoreConfig 报告某类面板能否改内核配置（服务端链式的入口，docs/03 §5.19）。
+func (s *PanelService) SupportsCoreConfig(providerType string) bool {
+	return s.registry.Capabilities(providerType).CoreConfig
+}
+
 func timePtr(t pgtype.Timestamptz) *time.Time {
 	if !t.Valid {
 		return nil

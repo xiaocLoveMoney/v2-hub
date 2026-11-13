@@ -65,6 +65,20 @@ type AuditLog struct {
 	CreatedAt  pgtype.Timestamptz
 }
 
+type ChainApply struct {
+	ServerID       int64
+	Status         string
+	DesiredHash    string
+	AppliedRuleIds []int64
+	FailCount      int32
+	LastError      string
+	LastAttemptAt  pgtype.Timestamptz
+	NextAttemptAt  pgtype.Timestamptz
+	AppliedAt      pgtype.Timestamptz
+	BackupEnc      []byte
+	UpdatedAt      pgtype.Timestamptz
+}
+
 type ChainRule struct {
 	ID           int64
 	UserID       int64
@@ -317,6 +331,7 @@ type Plan struct {
 	TrafficResetDay  int32
 	AllowClientChain bool
 	AllowCustomNode  bool
+	AllowServerChain bool
 	Remark           string
 	IsOnSale         bool
 	IsTrial          bool

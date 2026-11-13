@@ -32,7 +32,7 @@ type chainFixture struct {
 func newChainFixture(t *testing.T) *chainFixture {
 	t.Helper()
 	sf := newSubFixture(t)
-	return &chainFixture{subFixture: sf, chain: NewChainService(sf.pool, testSealer(t))}
+	return &chainFixture{subFixture: sf, chain: NewChainService(sf.pool, testSealer(t), nil)}
 }
 
 // setFlags 直接改用户当前套餐的两个开关。

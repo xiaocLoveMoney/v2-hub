@@ -50,6 +50,7 @@ type planBody struct {
 	TrafficResetDay  int     `json:"trafficResetDay"`
 	AllowClientChain bool    `json:"allowClientChain"`
 	AllowCustomNode  bool    `json:"allowCustomNode"`
+	AllowServerChain bool    `json:"allowServerChain"`
 	Remark           string  `json:"remark"`
 	NodeGroupIDs     []int64 `json:"nodeGroupIds"`
 	IsOnSale         bool    `json:"isOnSale"`
@@ -92,7 +93,8 @@ func (b planBody) input() service.PlanInput {
 		day = defaultDayOne
 	}
 	return service.PlanInput{
-		Name: b.Name, AllowClientChain: b.AllowClientChain, AllowCustomNode: b.AllowCustomNode, Remark: b.Remark, NodeGroupIDs: b.NodeGroupIDs,
+		Name: b.Name, AllowClientChain: b.AllowClientChain, AllowCustomNode: b.AllowCustomNode, AllowServerChain: b.AllowServerChain,
+		Remark: b.Remark, NodeGroupIDs: b.NodeGroupIDs,
 		OnSale: b.IsOnSale, Trial: b.IsTrial, SortOrder: b.SortOrder, Description: b.Description,
 		PlanQuota: service.PlanQuota{
 			TrafficLimit: b.TrafficLimit, DurationDays: b.DurationDays, StartOnFirstUse: b.StartOnFirstUse, LimitIP: b.LimitIP,
@@ -131,7 +133,7 @@ func toPlanVO(p service.Plan) planVO {
 		planBody: planBody{
 			Name: p.Name, TrafficLimit: q.TrafficLimit, DurationDays: q.DurationDays, StartOnFirstUse: q.StartOnFirstUse, LimitIP: q.LimitIP,
 			TrafficReset: q.TrafficReset, TrafficResetDay: q.TrafficResetDay, AllowClientChain: p.AllowClientChain,
-			AllowCustomNode: p.AllowCustomNode, Remark: p.Remark, NodeGroupIDs: groups,
+			AllowCustomNode: p.AllowCustomNode, AllowServerChain: p.AllowServerChain, Remark: p.Remark, NodeGroupIDs: groups,
 			IsOnSale: p.OnSale, IsTrial: p.Trial, SortOrder: p.SortOrder, Description: p.Description,
 		},
 	}

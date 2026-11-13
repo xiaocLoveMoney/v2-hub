@@ -67,6 +67,8 @@ type Deps struct {
 	Pay PayManager
 	// Chain 提供链式规则与自有落地节点（docs/03 §5.18）。
 	Chain ChainManager
+	// ChainApply 提供服务端链式的下发状态、重试与全站规则（docs/03 §5.19）。
+	ChainApply ChainApplyManager
 	// Cookie 是会话 Cookie 属性。
 	Cookie CookieConfig
 	// TrustedProxies 是可采信 X-Forwarded-For 的直连网段（如 Caddy 所在 docker 网络）。
@@ -90,6 +92,7 @@ type handlers struct {
 	finance        FinanceManager
 	pay            PayManager
 	chain          ChainManager
+	chainApply     ChainApplyManager
 	cookie         CookieConfig
 	trustedProxies []netip.Prefix
 }
@@ -97,7 +100,7 @@ type handlers struct {
 // NewRouter 返回注册好全部路由的 http.Handler。路由与 hub-api.yaml 的 paths 逐条对应。
 func NewRouter(deps Deps) http.Handler {
 	h := &handlers{auth: deps.Auth, rbac: deps.RBAC, panels: deps.Panels, users: deps.Users, portalAuth: deps.PortalAuth, portal: deps.Portal,
-		settings: deps.Settings, mail: deps.Mail, account: deps.Account, content: deps.Content, tickets: deps.Tickets, wallet: deps.Wallet, shop: deps.Shop, finance: deps.Finance, pay: deps.Pay, chain: deps.Chain, cookie: deps.Cookie, trustedProxies: deps.TrustedProxies}
+		settings: deps.Settings, mail: deps.Mail, account: deps.Account, content: deps.Content, tickets: deps.Tickets, wallet: deps.Wallet, shop: deps.Shop, finance: deps.Finance, pay: deps.Pay, chain: deps.Chain, chainApply: deps.ChainApply, cookie: deps.Cookie, trustedProxies: deps.TrustedProxies}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", handleHealthz)
 	mux.HandleFunc("GET /readyz", newReadyzHandler(deps.Database, deps.PingTimeout))
@@ -129,6 +132,9 @@ func NewRouter(deps Deps) http.Handler {
 	mux.HandleFunc("PUT /api/admin/servers/{id}", h.requireAdmin(service.PermServerWrite, h.updateServer))
 	mux.HandleFunc("DELETE /api/admin/servers/{id}", h.requireAdmin(service.PermServerWrite, h.deleteServer))
 	mux.HandleFunc("POST /api/admin/servers/{id}/sync", h.requireAdmin(service.PermServerWrite, h.syncServer))
+	mux.HandleFunc("GET /api/admin/servers/{id}/chain-apply", h.requireAdmin(service.PermServerRead, h.getServerChainApply))
+	mux.HandleFunc("POST /api/admin/servers/{id}/chain-apply/retry", h.requireAdmin(service.PermServerWrite, h.retryServerChainApply))
+	mux.HandleFunc("GET /api/admin/server-chain-rules", h.requireAdmin(service.PermServerRead, h.listServerChainRules))
 	mux.HandleFunc("GET /api/admin/servers/{id}/inbounds", h.requireAdmin(service.PermNodeRead, h.listServerInbounds))
 	mux.HandleFunc("POST /api/admin/servers/{id}/inbounds", h.requireAdmin(service.PermNodeWrite, h.createInbound))
 	mux.HandleFunc("POST /api/admin/servers/{id}/endpoints", h.requireAdmin(service.PermNodeWrite, h.createEndpoints))
@@ -266,6 +272,9 @@ func NewRouter(deps Deps) http.Handler {
 	mux.HandleFunc("PUT /api/user/chain/custom-nodes/{id}", h.requireUser(false, h.updateCustomNode))
 	mux.HandleFunc("DELETE /api/user/chain/custom-nodes/{id}", h.requireUser(false, h.deleteCustomNode))
 	mux.HandleFunc("GET /api/user/chain/custom-nodes/{id}/link", h.requireUser(false, h.getCustomNodeLink))
+	mux.HandleFunc("POST /api/user/chain/server-rules", h.requireUser(false, h.createServerChainRule))
+	mux.HandleFunc("PUT /api/user/chain/server-rules/{id}", h.requireUser(false, h.updateServerChainRule))
+	mux.HandleFunc("DELETE /api/user/chain/server-rules/{id}", h.requireUser(false, h.deleteServerChainRule))
 	// 支付网关回调：没有会话与 CSRF，真实性靠网关实现验签
 	mux.HandleFunc("POST /api/pay/notify/{gateway}", h.paymentNotify)
 	mux.HandleFunc("GET /api/user/wallet/ledger", h.requireUser(false, h.listOwnLedger))

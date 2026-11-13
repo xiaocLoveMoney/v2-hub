@@ -14,6 +14,7 @@ import (
 
 	"v2-hub-server/internal/dao/daotest"
 	"v2-hub-server/internal/manager/crypto"
+	"v2-hub-server/internal/manager/panel"
 	"v2-hub-server/internal/manager/pay"
 	"v2-hub-server/internal/manager/pay/paytest"
 	"v2-hub-server/internal/manager/totp"
@@ -65,12 +66,15 @@ func newAPIServer(t *testing.T) (*httptest.Server, *service.RBACService) {
 	users := service.NewUserService(pool, sealer, nil, service.UserConfig{Settings: settings}, nil)
 	account := service.NewAccountService(pool, sealer, service.AccountDeps{Settings: settings, Mail: mails, Users: users, Portal: portal}, nil)
 	shop := service.NewShopService(pool, settings, users, mails, nil)
+	// 空注册表：没有任何面板类型支持改内核配置，服务端链式的下发接口只读数据库
+	panels := service.NewPanelService(pool, sealer, panel.NewRegistry(map[string]panel.Factory{}), service.PanelConfig{RequestTimeout: time.Second}, nil)
+	applier := service.NewChainApplier(pool, sealer, users, panels, service.ChainApplyConfig{}, nil)
 	srv := httptest.NewServer(NewRouter(Deps{
 		Database: pool, PingTimeout: time.Second, Auth: auth, RBAC: rbac,
 		Settings: settings, Mail: mails, Account: account, Users: users, PortalAuth: portal, Portal: users,
 		Content: service.NewContentService(pool, sealer, settings, mails, nil), Tickets: service.NewTicketService(pool, settings, mails, nil),
 		Wallet: service.NewWalletService(pool, sealer, settings, nil), Shop: shop, Finance: shop, Pay: service.NewPayService(pool, settings, testGateways(t), nil),
-		Chain:  service.NewChainService(pool, sealer),
+		Chain:  service.NewChainService(pool, sealer, applier), ChainApply: applier,
 		Cookie: CookieConfig{Secure: false}, TrustedProxies: []netip.Prefix{},
 	}))
 	t.Cleanup(srv.Close)

@@ -30,6 +30,7 @@ type Querier interface {
 	ClearUserTOTP(ctx context.Context, id int64) (int64, error)
 	ClearUserTrafficNotified(ctx context.Context, id int64) error
 	ConsumeEmailCode(ctx context.Context, arg ConsumeEmailCodeParams) (int64, error)
+	CountAdminServerChainRules(ctx context.Context, arg CountAdminServerChainRulesParams) (int64, error)
 	CountAdmins(ctx context.Context) (int64, error)
 	CountAdminsByRole(ctx context.Context, roleID int64) (int64, error)
 	CountAnnouncements(ctx context.Context) (int64, error)
@@ -58,6 +59,7 @@ type Querier interface {
 	CountPlansByIDs(ctx context.Context, ids []int64) (int64, error)
 	CountPublishedAnnouncements(ctx context.Context) (int64, error)
 	CountRebates(ctx context.Context, inviterID int64) (int64, error)
+	CountServerChainRules(ctx context.Context, userID int64) (int64, error)
 	CountSubscribeLogs(ctx context.Context, userID pgtype.Int8) (int64, error)
 	CountTickets(ctx context.Context, arg CountTicketsParams) (int64, error)
 	CountTicketsCreatedSince(ctx context.Context, arg CountTicketsCreatedSinceParams) (int64, error)
@@ -111,6 +113,7 @@ type Querier interface {
 	DeleteRole(ctx context.Context, id int64) error
 	DeleteRolePermissions(ctx context.Context, roleID int64) error
 	DeleteServer(ctx context.Context, id int64) (int64, error)
+	DeleteServerChainRule(ctx context.Context, arg DeleteServerChainRuleParams) (int64, error)
 	DeleteSharedAccount(ctx context.Context, id int64) (int64, error)
 	DeleteStaleImpersonateTickets(ctx context.Context, expiresAt pgtype.Timestamptz) (int64, error)
 	DeleteTopupCode(ctx context.Context, id int64) error
@@ -144,6 +147,7 @@ type Querier interface {
 	// 两步验证（docs/03 §4.3）---------------------------------------------------
 	GetAdminTOTP(ctx context.Context, id int64) (GetAdminTOTPRow, error)
 	GetAnnouncementForUpdate(ctx context.Context, id int64) (GetAnnouncementForUpdateRow, error)
+	GetChainApply(ctx context.Context, serverID int64) (ChainApply, error)
 	// 下单时锁住优惠码行，次数判断与占用在同一事务内完成（并发下单不超发）
 	GetCouponByCodeForUpdate(ctx context.Context, code string) (GetCouponByCodeForUpdateRow, error)
 	GetCustomNodeLink(ctx context.Context, arg GetCustomNodeLinkParams) ([]byte, error)
@@ -168,6 +172,7 @@ type Querier interface {
 	GetPlan(ctx context.Context, id int64) (GetPlanRow, error)
 	// 一个时长选项连同它的套餐；是否上架由调用方判断（自动续费也用这条）
 	GetPlanPriceForSale(ctx context.Context, id int64) (GetPlanPriceForSaleRow, error)
+	GetProvisionEmail(ctx context.Context, arg GetProvisionEmailParams) (string, error)
 	GetRoleByCode(ctx context.Context, code string) (GetRoleByCodeRow, error)
 	GetRoleByID(ctx context.Context, id int64) (GetRoleByIDRow, error)
 	GetServer(ctx context.Context, id int64) (GetServerRow, error)
@@ -183,7 +188,7 @@ type Querier interface {
 	// 订阅与客户后台数据（docs/03 §5.4、§5.5）。
 	GetUserBySubTokenHash(ctx context.Context, subTokenHash []byte) (GetUserBySubTokenHashRow, error)
 	// 客户端链式：链式规则与自有落地节点（docs/03 §5.18）------------------------------------
-	// 当前套餐的两个开关；没有套餐时都为假
+	// 当前套餐的链式开关；没有套餐时都为假
 	GetUserChainFlags(ctx context.Context, id int64) (GetUserChainFlagsRow, error)
 	// 判断能否签到要用的字段；状态由调用方按当前时间现算，不取库里可能滞后的 status 列
 	GetUserCheckinState(ctx context.Context, id int64) (GetUserCheckinStateRow, error)
@@ -230,12 +235,15 @@ type Querier interface {
 	InsertPlanNodeGroups(ctx context.Context, arg InsertPlanNodeGroupsParams) error
 	InsertRebate(ctx context.Context, arg InsertRebateParams) (int64, error)
 	InsertRolePermissions(ctx context.Context, arg InsertRolePermissionsParams) error
+	InsertServerChainRule(ctx context.Context, arg InsertServerChainRuleParams) (int64, error)
 	InsertSharedAccountPlans(ctx context.Context, arg InsertSharedAccountPlansParams) error
 	InsertSubscribeLog(ctx context.Context, arg InsertSubscribeLogParams) error
 	InsertTicketMessage(ctx context.Context, arg InsertTicketMessageParams) error
 	InsertTopupCode(ctx context.Context, arg InsertTopupCodeParams) error
 	InsertUserLoginLog(ctx context.Context, arg InsertUserLoginLogParams) error
 	ListActiveUserIDs(ctx context.Context) ([]int64, error)
+	// 全站服务端规则（管理端只读，Ruling-41），按 id 倒序分页
+	ListAdminServerChainRules(ctx context.Context, arg ListAdminServerChainRulesParams) ([]ListAdminServerChainRulesRow, error)
 	ListAdmins(ctx context.Context, arg ListAdminsParams) ([]ListAdminsRow, error)
 	// 公告、教程、共享账号、工单与签到（docs/03 §5.9–§5.11）。
 	// ---- 公告 ----
@@ -245,6 +253,9 @@ type Querier interface {
 	// 自动续费、提醒与返利（docs/03 §5.16）------------------------------------------------
 	// 到期且开了扣余额续费的用户；一轮最多处理一批，剩下的下一轮再来
 	ListAutoRenewDueIDs(ctx context.Context, arg ListAutoRenewDueIDsParams) ([]int64, error)
+	ListChainApplies(ctx context.Context, serverIds []int64) ([]ListChainAppliesRow, error)
+	// 需要检查下发的服务器：启用中，且有以它为入口的服务端规则，或面板上还留着平台条目
+	ListChainApplyServerIDs(ctx context.Context) ([]int64, error)
 	// 某用户的客户端链式规则，带入口与落地的显示信息；rule_id 非空时只取这一条（归属仍按 user_id 约束，R8）
 	ListChainRules(ctx context.Context, arg ListChainRulesParams) ([]ListChainRulesRow, error)
 	ListCheckins(ctx context.Context, arg ListCheckinsParams) ([]ListCheckinsRow, error)
@@ -290,8 +301,15 @@ type Querier interface {
 	ListRolePermissionCodes(ctx context.Context) ([]ListRolePermissionCodesRow, error)
 	ListRoles(ctx context.Context) ([]ListRolesRow, error)
 	ListRolesByCodes(ctx context.Context, codes []string) ([]ListRolesByCodesRow, error)
+	// 服务端链式：规则与下发记录（docs/03 §5.19）------------------------------------------------
+	// 某用户的服务端规则；rule_id 非空时只取这一条（归属按 user_id 约束，R8）
+	ListServerChainRules(ctx context.Context, arg ListServerChainRulesParams) ([]ListServerChainRulesRow, error)
+	// 以某台服务器为入口的全部服务端规则，带入口入站的 tag
+	ListServerChainRulesOnServer(ctx context.Context, serverID int64) ([]ListServerChainRulesOnServerRow, error)
 	// 这些服务器上全部对外地址（含未授权的），用来判断一条链接是不是某个对外地址的
 	ListServerEndpointAddrs(ctx context.Context, serverIds []int64) ([]ListServerEndpointAddrsRow, error)
+	// 各服务器的面板类型，用来判断入口能否改内核配置
+	ListServerProviderTypes(ctx context.Context) ([]ListServerProviderTypesRow, error)
 	ListServerProvisions(ctx context.Context, serverID int64) ([]ListServerProvisionsRow, error)
 	// 服务器（docs/03 §2、§3 T1–T4、§5.1）---------------------------------------
 	ListServers(ctx context.Context) ([]ListServersRow, error)
@@ -352,6 +370,8 @@ type Querier interface {
 	RenameCustomNode(ctx context.Context, arg RenameCustomNodeParams) (int64, error)
 	// 删除对外地址拆分了面板上的组：被挪到新组的地址改写组标识，保留原记录与节点（docs/03 §5.1）
 	RepointEndpoint(ctx context.Context, arg RepointEndpointParams) error
+	// 管理员重试（docs/03 §3 C4）：清零失败次数与退避
+	ResetChainApplyFailures(ctx context.Context, serverID int64) (int64, error)
 	// 剩余流量回到阈值以上（清零、续费、加了流量包）的用户，下次再低于阈值时可以再提醒一次
 	ResetTrafficNotified(ctx context.Context, percent int64) error
 	// 原地换码：旧码作废，已用次数不清零（防止靠重置绕过次数上限）
@@ -369,6 +389,7 @@ type Querier interface {
 	SetMailRetry(ctx context.Context, arg SetMailRetryParams) error
 	SetProvisionCounters(ctx context.Context, arg SetProvisionCountersParams) error
 	SetProvisionLinks(ctx context.Context, arg SetProvisionLinksParams) error
+	SetServerChainRuleEnabled(ctx context.Context, arg SetServerChainRuleEnabledParams) (int64, error)
 	SetServerOnlineClients(ctx context.Context, arg SetServerOnlineClientsParams) error
 	// T1–T3 的落库：status、last_error 由调用方按转移表算好；is_online 时才刷新版本、GUID、快照与最近在线时间
 	SetServerProbeResult(ctx context.Context, arg SetServerProbeResultParams) error
@@ -415,6 +436,7 @@ type Querier interface {
 	UpdateTrafficPack(ctx context.Context, arg UpdateTrafficPackParams) (int64, error)
 	UpdateTutorial(ctx context.Context, arg UpdateTutorialParams) (int64, error)
 	UpdateUserRemark(ctx context.Context, arg UpdateUserRemarkParams) (int64, error)
+	UpsertChainApply(ctx context.Context, arg UpsertChainApplyParams) error
 	UpsertEndpoint(ctx context.Context, arg UpsertEndpointParams) (int64, error)
 	// 平台写入面板成功后的落库：摘要即“已确认”状态，清除漂移与缺失标记
 	UpsertInboundFromPlatform(ctx context.Context, arg UpsertInboundFromPlatformParams) (int64, error)

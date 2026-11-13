@@ -50,6 +50,8 @@ type Capabilities struct {
 	MultiInboundClients bool
 	// OnlineClients 表示能列出当前在线的 client（docs/03 §5.5）。
 	OnlineClients bool
+	// CoreConfig 表示实现了 CoreConfigurator，可读写内核配置模板（服务端链式，docs/03 §5.19）。
+	CoreConfig bool
 }
 
 // Inbound 是面板上的一个入站（中立模型）。Config 已删除敏感字段与 clients（Ruling-14）。
@@ -249,4 +251,28 @@ func AsError(err error) *Error {
 		return pe
 	}
 	return nil
+}
+
+// CoreTemplate 是面板保存的内核配置模板。Config 是完整 JSON（含面板自己的 api 入站、路由等），
+// Extra 是与模板一起保存的面板设置，读出后原样回写，避免被重置。模板可能含凭据，不得写日志。
+type CoreTemplate struct {
+	Config json.RawMessage
+	Extra  map[string]string
+}
+
+// CoreState 是内核进程的运行状态；Message 是面板给出的错误摘要（可能为空）。
+type CoreState struct {
+	Running bool
+	State   string
+	Message string
+}
+
+// CoreConfigurator 是可选能力（Capabilities.CoreConfig 为真时由 Provider 实现）：读写内核配置模板、重启内核、
+// 查内核运行状态。服务端链式据此在模板里增删平台条目并在失败时回滚（docs/03 §5.19，Ruling-40）。
+type CoreConfigurator interface {
+	GetCoreTemplate(ctx context.Context) (CoreTemplate, error)
+	// SetCoreTemplate 整份写回模板；写入不等于生效，需再 RestartCore。
+	SetCoreTemplate(ctx context.Context, tpl CoreTemplate) error
+	RestartCore(ctx context.Context) error
+	CoreState(ctx context.Context) (CoreState, error)
 }

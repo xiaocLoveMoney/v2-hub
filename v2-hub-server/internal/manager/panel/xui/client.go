@@ -24,6 +24,7 @@ const (
 	headerContent    = "Content-Type"
 	headerAccept     = "Accept"
 	contentTypeJSON  = "application/json"
+	contentTypeForm  = "application/x-www-form-urlencoded"
 	maxResponseBytes = 8 << 20 // 8 MiB，防止异常面板撑爆内存
 	maxPanelMsgLen   = 200
 )
@@ -60,20 +61,29 @@ func New(cfg panel.ConnConfig) (panel.Provider, error) {
 
 // Capabilities 实现 panel.Provider。
 func (c *Client) Capabilities() panel.Capabilities {
-	return panel.Capabilities{CoreType: panel.CoreXray, Endpoints: true, MultiInboundClients: true, OnlineClients: true}
+	return panel.Capabilities{CoreType: panel.CoreXray, Endpoints: true, MultiInboundClients: true, OnlineClients: true, CoreConfig: true}
 }
 
 // call 发起一次 API 调用，校验信封并把 obj 解到 out（out 为 nil 时忽略）。
 // 错误一律转成 *panel.Error，Message 不含 token 与完整地址。
-func (c *Client) call(ctx context.Context, method, path string, body, out any) (retErr error) {
-	var reader io.Reader
-	if body != nil {
-		raw, err := json.Marshal(body)
-		if err != nil {
-			return fmt.Errorf("xui: marshal request: %w", err)
-		}
-		reader = bytes.NewReader(raw)
+func (c *Client) call(ctx context.Context, method, path string, body, out any) error {
+	if body == nil {
+		return c.send(ctx, method, path, "", nil, out)
 	}
+	raw, err := json.Marshal(body)
+	if err != nil {
+		return fmt.Errorf("xui: marshal request: %w", err)
+	}
+	return c.send(ctx, method, path, contentTypeJSON, bytes.NewReader(raw), out)
+}
+
+// callForm 以表单提交（3x-ui 部分接口只收表单字段），其余同 call。
+func (c *Client) callForm(ctx context.Context, path string, form url.Values, out any) error {
+	return c.send(ctx, http.MethodPost, path, contentTypeForm, bytes.NewReader([]byte(form.Encode())), out)
+}
+
+// send 发请求并解信封；contentType 为空表示没有请求体。
+func (c *Client) send(ctx context.Context, method, path, contentType string, reader io.Reader, out any) (retErr error) {
 	target := c.base.JoinPath(apiPrefix, path)
 	req, err := http.NewRequestWithContext(ctx, method, target.String(), reader)
 	if err != nil {
@@ -81,8 +91,8 @@ func (c *Client) call(ctx context.Context, method, path string, body, out any) (
 	}
 	req.Header.Set(headerAuth, "Bearer "+c.token)
 	req.Header.Set(headerAccept, contentTypeJSON)
-	if body != nil {
-		req.Header.Set(headerContent, contentTypeJSON)
+	if contentType != "" {
+		req.Header.Set(headerContent, contentType)
 	}
 
 	resp, err := c.http.Do(req)
