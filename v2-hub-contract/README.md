@@ -6,7 +6,7 @@
 | 文件 | 方向 | 内容 |
 |---|---|---|
 | `hub-api.yaml` | hub-server → 两个前端 | OpenAPI 3.1：管理端 `/api/admin`、客户端 `/api/user`、订阅 `/sub` |
-| `deploy/init.sql` | hub-server dao 层 | PostgreSQL 17 建表（当前含 M0 管理员与 RBAC） |
+| `deploy/init.sql` | hub-server dao 层 | PostgreSQL 17 建表（与 `migrations/` 的最新一份保持一致） |
 | `deploy/migrations/` | hub-server | 增量 SQL，幂等，手工执行，同步回 init.sql |
 | `upstream/3x-ui/openapi-v3.11.0.json` | 3x-ui → hub-server | 上游面板 API 快照，Provider(xui) 契约测试基准（Ruling-7） |
 | `deploy/docker-compose.yml` | 开发 | PostgreSQL、MinIO；`--profile xui` 另起两台 3x-ui |
@@ -23,5 +23,5 @@ cd it && bash run_all.sh                           # 联调回归（会重置库
 ```
 
 - 变更纪律：提 PR；破坏性变更在 PR 描述列受影响目录并在同一 PR 改引用方（Ruling-3）。
-- 版本：git tag `vX.Y[.Z]`，当前 `v0.4`（M3：客户后台与订阅；hub-api 0.2.7）。
+- 版本：git tag `vX.Y[.Z]`，当前 `v0.5`（M4：自助运营；hub-api 0.3.0）；main 上已是 M5 的 hub-api 0.4.0 与 migrations 0009。
 - SQL 由使用者手工执行（`reset_db.sh` 重置、`migrations/` 增量），模块不自动建表。

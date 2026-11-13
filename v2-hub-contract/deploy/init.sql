@@ -182,15 +182,15 @@ CREATE TABLE plan (
     duration_days      INTEGER      NOT NULL DEFAULT 0,       -- 时长（天），0 不限
     start_on_first_use BOOLEAN      NOT NULL DEFAULT FALSE,   -- 首次使用后才开始计时（docs/03 U9）
     limit_ip           INTEGER      NOT NULL DEFAULT 0,       -- 同时在线 IP 数，0 不限
-    renew_every_days   INTEGER      NOT NULL DEFAULT 0,       -- 自动续期：每 N 天（与下两项三选一）
-    renew_month_day    INTEGER      NOT NULL DEFAULT 0,       -- 自动续期：每月几号
-    renew_weekday      INTEGER      NOT NULL DEFAULT 0,       -- 自动续期：每周几（1–7 = 周一至周日）
-    renew_max          INTEGER      NOT NULL DEFAULT 0,       -- 自动续期最多次数，0 不限
     traffic_reset      VARCHAR(8)   NOT NULL DEFAULT 'never', -- 周期流量重置：never / hourly / daily / weekly / monthly
     traffic_reset_day  INTEGER      NOT NULL DEFAULT 1,       -- 按月重置的日期（1–31）
     allow_client_chain BOOLEAN      NOT NULL DEFAULT FALSE,   -- 功能开关：客户端链式（M4）
     allow_custom_node  BOOLEAN      NOT NULL DEFAULT FALSE,   -- 功能开关：自有落地节点（M4）
     remark             VARCHAR(255) NOT NULL DEFAULT '',
+    is_on_sale         BOOLEAN      NOT NULL DEFAULT FALSE,   -- 是否在商店上架（docs/03 §5.12）
+    is_trial           BOOLEAN      NOT NULL DEFAULT FALSE,   -- 试用套餐：每个用户终身只能下单一次
+    sort_order         INTEGER      NOT NULL DEFAULT 0,
+    description        VARCHAR(500) NOT NULL DEFAULT '',      -- 卖点说明，纯文本，一行一条
     created_at         TIMESTAMPTZ  NOT NULL DEFAULT now(),
     updated_at         TIMESTAMPTZ  NOT NULL DEFAULT now(),
     CONSTRAINT uk_plan_name UNIQUE (name)
@@ -215,7 +215,7 @@ CREATE TABLE end_user (
     expires_at            TIMESTAMPTZ,                       -- NULL = 不过期（或等待首次使用）
     pending_days          INTEGER      NOT NULL DEFAULT 0,   -- >0：首次使用后从那一刻起算的天数（docs/03 U9）
     limit_ip              INTEGER      NOT NULL DEFAULT 0,
-    renew_every_days      INTEGER      NOT NULL DEFAULT 0,
+    renew_every_days      INTEGER      NOT NULL DEFAULT 0,   -- 免费续期（U4）：只由管理员在用户上设置（Ruling-20）
     renew_month_day       INTEGER      NOT NULL DEFAULT 0,
     renew_weekday         INTEGER      NOT NULL DEFAULT 0,
     renew_max             INTEGER      NOT NULL DEFAULT 0,
@@ -239,10 +239,16 @@ CREATE TABLE end_user (
     email_verified_at     TIMESTAMPTZ,
     invited_by            BIGINT       REFERENCES end_user (id) ON DELETE SET NULL,
     invite_code_id        BIGINT,                            -- 外键在 invite_code 建表后补（两表互相引用）
+    balance               BIGINT       NOT NULL DEFAULT 0,   -- 余额（分），docs/03 §5.14
+    auto_renew            BOOLEAN      NOT NULL DEFAULT FALSE, -- 扣余额自动续费（docs/03 §5.16）
+    plan_price_id         BIGINT,                            -- 上次购买的时长选项；外键在 plan_price 建表后补
+    expire_notified_for   TIMESTAMPTZ,                       -- 已发过到期提醒的那个到期时间
+    traffic_notified      BOOLEAN      NOT NULL DEFAULT FALSE, -- 本轮额度是否已发过流量提醒
     created_at            TIMESTAMPTZ  NOT NULL DEFAULT now(),
     updated_at            TIMESTAMPTZ  NOT NULL DEFAULT now(),
     CONSTRAINT uk_end_user_username UNIQUE (username),
-    CONSTRAINT ck_end_user_email_lower CHECK (email IS NULL OR email = lower(email))
+    CONSTRAINT ck_end_user_email_lower CHECK (email IS NULL OR email = lower(email)),
+    CONSTRAINT ck_end_user_balance CHECK (balance BETWEEN 0 AND 9999999999)
 );
 CREATE UNIQUE INDEX uk_end_user_email ON end_user (email) WHERE email IS NOT NULL;
 CREATE INDEX idx_end_user_invited_by ON end_user (invited_by) WHERE invited_by IS NOT NULL;
@@ -290,6 +296,7 @@ CREATE TABLE user_session (
     user_agent    VARCHAR(255),
     expires_at    TIMESTAMPTZ  NOT NULL,               -- 绝对过期
     idle_until    TIMESTAMPTZ  NOT NULL,               -- 空闲过期，请求时顺延
+    impersonator_admin_id BIGINT REFERENCES admin (id) ON DELETE CASCADE, -- 非空 = 管理员代入的只读会话（docs/03 §5.17）
     created_at    TIMESTAMPTZ  NOT NULL DEFAULT now(),
     CONSTRAINT uk_user_session_token_hash UNIQUE (token_hash)
 );
@@ -462,6 +469,192 @@ CREATE TABLE checkin_log (
 
 ALTER TABLE end_user ADD CONSTRAINT end_user_invite_code_id_fkey FOREIGN KEY (invite_code_id) REFERENCES invite_code (id) ON DELETE SET NULL;
 
+-- M5：商店与钱包（docs/03 §5.12–§5.17）---------------------------------------------------
+
+-- 时长选项（docs/03 §5.12，Ruling-29）：套餐的可售规格 = 天数 + 价格（整数分）；同一套餐天数不重复，最多 6 个由服务端校验。
+CREATE TABLE plan_price (
+    id            BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    plan_id       BIGINT      NOT NULL REFERENCES plan (id) ON DELETE CASCADE,
+    duration_days INTEGER     NOT NULL,
+    price         BIGINT      NOT NULL,                -- 分
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT uk_plan_price_plan_days UNIQUE (plan_id, duration_days),
+    CONSTRAINT ck_plan_price_days CHECK (duration_days BETWEEN 1 AND 3650),
+    CONSTRAINT ck_plan_price_price CHECK (price BETWEEN 0 AND 99999999)
+);
+
+-- 流量包（docs/03 §5.12）：只加额度不改到期。
+CREATE TABLE traffic_pack (
+    id            BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    name          VARCHAR(64) NOT NULL,
+    traffic_bytes BIGINT      NOT NULL,
+    price         BIGINT      NOT NULL,                -- 分
+    is_on_sale    BOOLEAN     NOT NULL DEFAULT FALSE,
+    sort_order    INTEGER     NOT NULL DEFAULT 0,
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT uk_traffic_pack_name UNIQUE (name),
+    CONSTRAINT ck_traffic_pack_bytes CHECK (traffic_bytes > 0),
+    CONSTRAINT ck_traffic_pack_price CHECK (price BETWEEN 0 AND 99999999)
+);
+
+-- 优惠码（docs/03 §5.15）：码存大写；次数判断与占用在下单事务内完成（行加锁）。
+CREATE TABLE coupon (
+    id                BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    code              VARCHAR(32)  NOT NULL,
+    kind              VARCHAR(8)   NOT NULL,           -- percent / fixed
+    value             BIGINT       NOT NULL,           -- percent：1–100；fixed：分
+    all_plans         BOOLEAN      NOT NULL DEFAULT TRUE,  -- 假 = 只适用于 coupon_plan 里的套餐
+    for_traffic_pack  BOOLEAN      NOT NULL DEFAULT FALSE, -- 是否适用于流量包
+    min_amount        BIGINT       NOT NULL DEFAULT 0,     -- 最低消费（分）
+    max_uses          INTEGER      NOT NULL DEFAULT 0,     -- 总次数上限，0 不限
+    max_uses_per_user INTEGER      NOT NULL DEFAULT 1,     -- 每人次数上限，0 不限
+    used_count        INTEGER      NOT NULL DEFAULT 0,
+    starts_at         TIMESTAMPTZ,                         -- NULL = 立即生效
+    ends_at           TIMESTAMPTZ,                         -- NULL = 不过期
+    is_disabled       BOOLEAN      NOT NULL DEFAULT FALSE,
+    remark            VARCHAR(255) NOT NULL DEFAULT '',
+    created_at        TIMESTAMPTZ  NOT NULL DEFAULT now(),
+    updated_at        TIMESTAMPTZ  NOT NULL DEFAULT now(),
+    CONSTRAINT uk_coupon_code UNIQUE (code),
+    CONSTRAINT ck_coupon_kind CHECK (kind IN ('percent', 'fixed')),
+    CONSTRAINT ck_coupon_value CHECK (value >= 1 AND (kind <> 'percent' OR value <= 100) AND value <= 99999999)
+);
+
+CREATE TABLE coupon_plan (
+    coupon_id BIGINT NOT NULL REFERENCES coupon (id) ON DELETE CASCADE,
+    plan_id   BIGINT NOT NULL REFERENCES plan (id) ON DELETE CASCADE,
+    PRIMARY KEY (coupon_id, plan_id)
+);
+
+-- 订单（docs/03 §5.13，Ruling-28）：只有“已支付”一种状态。用户删除后保留，user_id 置空、username 留快照（Ruling-32）。
+CREATE TABLE shop_order (
+    id              BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    order_no        VARCHAR(24)  NOT NULL,             -- O + yyyyMMddHHmmss + 6 位随机数字（docs/03 §6）
+    user_id         BIGINT       REFERENCES end_user (id) ON DELETE SET NULL,
+    username        VARCHAR(64)  NOT NULL,             -- 下单时的用户名
+    kind            VARCHAR(16)  NOT NULL,             -- plan / traffic_pack / renew
+    plan_id         BIGINT       REFERENCES plan (id) ON DELETE SET NULL,
+    traffic_pack_id BIGINT       REFERENCES traffic_pack (id) ON DELETE SET NULL,
+    item            JSONB        NOT NULL,             -- 商品快照：名称、天数、流量、单价
+    is_trial        BOOLEAN      NOT NULL DEFAULT FALSE,
+    amount_original BIGINT       NOT NULL,             -- 原价（分）
+    amount_discount BIGINT       NOT NULL DEFAULT 0,   -- 优惠（分）
+    amount_paid     BIGINT       NOT NULL,             -- 实付（分）= 原价 − 优惠
+    coupon_id       BIGINT       REFERENCES coupon (id) ON DELETE SET NULL,
+    coupon_code     VARCHAR(32)  NOT NULL DEFAULT '',
+    created_at      TIMESTAMPTZ  NOT NULL DEFAULT now(),
+    CONSTRAINT uk_shop_order_no UNIQUE (order_no),
+    CONSTRAINT ck_shop_order_kind CHECK (kind IN ('plan', 'traffic_pack', 'renew')),
+    CONSTRAINT ck_shop_order_amounts CHECK (amount_original >= 0 AND amount_discount >= 0 AND amount_paid = amount_original - amount_discount AND amount_paid >= 0)
+);
+CREATE INDEX idx_shop_order_user ON shop_order (user_id, id DESC);
+CREATE INDEX idx_shop_order_created_at ON shop_order (created_at);
+-- 试用套餐每个用户终身只能下单一次（docs/03 §5.12）
+CREATE UNIQUE INDEX uk_shop_order_trial ON shop_order (user_id) WHERE is_trial;
+
+-- 优惠码使用记录：每人次数上限按它统计。
+CREATE TABLE coupon_usage (
+    id         BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    coupon_id  BIGINT      NOT NULL REFERENCES coupon (id) ON DELETE CASCADE,
+    user_id    BIGINT      REFERENCES end_user (id) ON DELETE SET NULL,
+    order_id   BIGINT      NOT NULL REFERENCES shop_order (id) ON DELETE CASCADE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT uk_coupon_usage_order UNIQUE (order_id)
+);
+CREATE INDEX idx_coupon_usage_coupon_user ON coupon_usage (coupon_id, user_id);
+
+-- 充值码（docs/03 §5.15，Ruling-31）：只存 HMAC（查找）与 AES-GCM 密文（关联数据 topup_code:<aad_key>），不存明文。
+CREATE TABLE topup_code (
+    id               BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    code_hash        BYTEA        NOT NULL,
+    code_enc         BYTEA        NOT NULL,
+    aad_key          VARCHAR(32)  NOT NULL,            -- 随机值，只作加密关联数据
+    code_tail        VARCHAR(4)   NOT NULL,            -- 末 4 位，列表里显示
+    amount           BIGINT       NOT NULL,            -- 面值（分）
+    batch            VARCHAR(64)  NOT NULL DEFAULT '', -- 批次备注
+    expires_at       TIMESTAMPTZ,                      -- NULL = 不过期
+    is_disabled      BOOLEAN      NOT NULL DEFAULT FALSE,
+    used_by          BIGINT       REFERENCES end_user (id) ON DELETE SET NULL,
+    used_by_username VARCHAR(64)  NOT NULL DEFAULT '',
+    used_at          TIMESTAMPTZ,                      -- 非空 = 已使用
+    created_by       BIGINT       REFERENCES admin (id) ON DELETE SET NULL,
+    created_at       TIMESTAMPTZ  NOT NULL DEFAULT now(),
+    CONSTRAINT uk_topup_code_hash UNIQUE (code_hash),
+    CONSTRAINT ck_topup_code_amount CHECK (amount BETWEEN 1 AND 99999999)
+);
+CREATE INDEX idx_topup_code_created_at ON topup_code (created_at DESC);
+
+-- 充值单（docs/03 §5.15）：经支付网关给余额充值；(gateway, gateway_trade_no) 唯一，重复回调只入账一次。
+CREATE TABLE payment (
+    id               BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    trade_no         VARCHAR(24)  NOT NULL,            -- P + yyyyMMddHHmmss + 6 位随机数字
+    user_id          BIGINT       REFERENCES end_user (id) ON DELETE SET NULL,
+    username         VARCHAR(64)  NOT NULL,
+    gateway          VARCHAR(32)  NOT NULL,
+    amount           BIGINT       NOT NULL,            -- 分
+    status           VARCHAR(16)  NOT NULL DEFAULT 'pending', -- pending / paid / expired
+    gateway_trade_no VARCHAR(128),
+    expires_at       TIMESTAMPTZ  NOT NULL,            -- 未支付的过期时间
+    paid_at          TIMESTAMPTZ,
+    created_at       TIMESTAMPTZ  NOT NULL DEFAULT now(),
+    CONSTRAINT uk_payment_trade_no UNIQUE (trade_no),
+    CONSTRAINT ck_payment_status CHECK (status IN ('pending', 'paid', 'expired')),
+    CONSTRAINT ck_payment_amount CHECK (amount BETWEEN 1 AND 99999999)
+);
+CREATE UNIQUE INDEX uk_payment_gateway_trade ON payment (gateway, gateway_trade_no) WHERE gateway_trade_no IS NOT NULL;
+CREATE INDEX idx_payment_user ON payment (user_id, id DESC);
+
+-- 返利（docs/03 §5.16，Ruling-34）：一笔订单最多一条。
+CREATE TABLE rebate (
+    id               BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    inviter_id       BIGINT      REFERENCES end_user (id) ON DELETE SET NULL,
+    inviter_username VARCHAR(64) NOT NULL,
+    invitee_id       BIGINT      REFERENCES end_user (id) ON DELETE SET NULL,
+    invitee_username VARCHAR(64) NOT NULL,
+    order_id         BIGINT      NOT NULL REFERENCES shop_order (id) ON DELETE CASCADE,
+    order_amount     BIGINT      NOT NULL,             -- 订单实付（分）
+    percent          INTEGER     NOT NULL,             -- 当时的返利比例
+    amount           BIGINT      NOT NULL,             -- 返利（分）
+    created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT uk_rebate_order UNIQUE (order_id),
+    CONSTRAINT ck_rebate_amount CHECK (amount > 0)
+);
+CREATE INDEX idx_rebate_inviter ON rebate (inviter_id, id DESC);
+CREATE INDEX idx_rebate_invitee ON rebate (invitee_id);
+
+-- 余额流水（docs/03 §5.14）：每次余额变动一条，与改余额同一事务。用户删除后保留（Ruling-32）。
+CREATE TABLE wallet_ledger (
+    id            BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    user_id       BIGINT       REFERENCES end_user (id) ON DELETE SET NULL,
+    username      VARCHAR(64)  NOT NULL,
+    kind          VARCHAR(16)  NOT NULL,               -- topup_code / topup_online / purchase / renew / rebate / admin_adjust / forfeit
+    amount        BIGINT       NOT NULL,               -- 带符号（分）
+    balance_after BIGINT       NOT NULL,
+    ref_type      VARCHAR(16)  NOT NULL DEFAULT '',    -- order / topup_code / payment / rebate；没有关联对象为空串
+    ref_id        BIGINT,
+    remark        VARCHAR(255) NOT NULL DEFAULT '',
+    admin_id      BIGINT       REFERENCES admin (id) ON DELETE SET NULL, -- 管理员调整时的操作人
+    created_at    TIMESTAMPTZ  NOT NULL DEFAULT now(),
+    CONSTRAINT ck_wallet_ledger_kind CHECK (kind IN ('topup_code', 'topup_online', 'purchase', 'renew', 'rebate', 'admin_adjust', 'forfeit')),
+    CONSTRAINT ck_wallet_ledger_amount CHECK (amount <> 0 AND balance_after >= 0)
+);
+CREATE INDEX idx_wallet_ledger_user ON wallet_ledger (user_id, id DESC);
+CREATE INDEX idx_wallet_ledger_created_at ON wallet_ledger (created_at);
+
+-- 切换为用户身份的一次性票据（docs/03 §5.17）：管理端签发，客户门户兑换成代入会话；只存 SHA-256。
+CREATE TABLE impersonate_ticket (
+    id          BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    ticket_hash BYTEA       NOT NULL,
+    admin_id    BIGINT      NOT NULL REFERENCES admin (id) ON DELETE CASCADE,
+    user_id     BIGINT      NOT NULL REFERENCES end_user (id) ON DELETE CASCADE,
+    expires_at  TIMESTAMPTZ NOT NULL,
+    used_at     TIMESTAMPTZ,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT uk_impersonate_ticket_hash UNIQUE (ticket_hash)
+);
+ALTER TABLE end_user ADD CONSTRAINT end_user_plan_price_id_fkey FOREIGN KEY (plan_price_id) REFERENCES plan_price (id) ON DELETE SET NULL;
+
 -- 种子数据 ---------------------------------------------------------------------
 -- 内置角色 super_admin 隐式拥有全部权限码（docs/03 §4），不写 role_permission。
 INSERT INTO role (code, name, is_builtin) VALUES ('super_admin', '超级管理员', TRUE);
@@ -484,4 +677,9 @@ INSERT INTO permission (code, name) VALUES
     ('content:read',  '查看公告、教程与共享账号'),
     ('content:write', '管理公告、教程与共享账号'),
     ('ticket:read',   '查看工单'),
-    ('ticket:write',  '回复与关闭工单');
+    ('ticket:write',  '回复与关闭工单'),
+    ('shop:read',     '查看商品定价、流量包与优惠码'),
+    ('shop:write',    '管理商品定价、流量包与优惠码'),
+    ('finance:read',  '查看订单、流水、充值单、返利与收支统计'),
+    ('finance:write', '管理充值码、调整用户余额'),
+    ('impersonate:write', '切换为用户身份');
