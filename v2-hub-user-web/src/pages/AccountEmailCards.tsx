@@ -146,7 +146,7 @@ export function DeleteAccountCard() {
         }
       >
         {error !== null && <Alert tone="plain">{error}</Alert>}
-        <Alert tone="danger">此操作不可恢复。</Alert>
+        <Alert tone="danger">此操作不可恢复。账户里剩余的余额会一并作废，不能退回或转给别人。</Alert>
         <Field label="当前口令" type="password" autoComplete="current-password" maxLength={MAX_CREDENTIAL_LEN} value={current} onChange={(e) => setCurrent(e.target.value)} />
         {needsTotp && (
           <Field

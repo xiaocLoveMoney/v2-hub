@@ -6,6 +6,8 @@ import { formatTime } from '../format'
 import { useCopy } from '../hooks/use-copy'
 import { mutate, useRemote } from '../hooks/use-remote'
 import { ROUTES } from '../menu'
+import { formatMoney } from '../money'
+import { useCurrency } from '../site/site-context'
 import { INVITE_QUERY_KEY } from './auth/fields'
 
 const UNLIMITED_USES = 0
@@ -23,6 +25,7 @@ function inviteLink(code: string): string {
 export function InvitePage() {
   const toast = useToast()
   const copy = useCopy()
+  const currency = useCurrency()
   const invite = useRemote<InviteInfo>(loadInvite)
   const [isConfirming, setIsConfirming] = useState(false)
   const [isBusy, setIsBusy] = useState(false)
@@ -101,6 +104,35 @@ export function InvitePage() {
             {info.invitees.length === 0 && <Empty>还没有人用你的邀请码注册</Empty>}
           </Card>
         </div>
+      )}
+      {info !== null && (info.rebatePercent ?? 0) > 0 && (
+        <Card title="邀请返利">
+          <p className="hub-card-text">
+            你邀请的人每次消费，实付金额的 <strong>{info.rebatePercent}%</strong> 会记到你的余额里（以站点当前的返利规则为准）。返利只能在本站消费，不能提现。
+            累计已获得 <strong>{formatMoney(info.rebateTotal ?? 0, currency)}</strong>。
+          </p>
+          <div className="hub-table-wrap">
+            <table className="hub-table">
+              <thead>
+                <tr>
+                  <th>被邀请人</th>
+                  <th>返利</th>
+                  <th>时间</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(info.rebates ?? []).map((r) => (
+                  <tr key={`${r.username}-${r.createdAt}-${r.amount}`}>
+                    <td>{r.username}</td>
+                    <td>{formatMoney(r.amount, currency)}</td>
+                    <td>{formatTime(r.createdAt)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {(info.rebates ?? []).length === 0 && <Empty>还没有返利记录</Empty>}
+        </Card>
       )}
       <Confirm title="重置邀请码" isOpen={isConfirming} isBusy={isBusy} confirmText="重置" onConfirm={() => void handleReset()} onClose={() => setIsConfirming(false)}>
         重置后旧的邀请码与邀请链接立即作废，已使用的次数不会清零。确定要重置吗？

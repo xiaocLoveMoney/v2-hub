@@ -3,6 +3,7 @@ import { UserLayout } from './layout/UserLayout'
 import { ROUTES } from './menu'
 import { AccountPage } from './pages/AccountPage'
 import { AnnouncementsPage } from './pages/AnnouncementsPage'
+import { ImpersonatePage } from './pages/auth/ImpersonatePage'
 import { RegisterPage } from './pages/auth/RegisterPage'
 import { ResetPage } from './pages/auth/ResetPage'
 import { DashboardPage } from './pages/DashboardPage'
@@ -11,6 +12,8 @@ import { LoginPage } from './pages/LoginPage'
 import { NodesPage } from './pages/NodesPage'
 import { NotFoundPage } from './pages/NotFoundPage'
 import { SharedAccountsPage } from './pages/SharedAccountsPage'
+import { ShopPage } from './pages/shop/ShopPage'
+import { WalletPage } from './pages/shop/WalletPage'
 import { SubscribeLogsPage } from './pages/SubscribeLogsPage'
 import { TicketDetailPage } from './pages/TicketDetailPage'
 import { TicketsPage } from './pages/TicketsPage'
@@ -21,6 +24,7 @@ export const routes: RouteObject[] = [
   { path: ROUTES.LOGIN, element: <LoginPage /> },
   { path: ROUTES.REGISTER, element: <RegisterPage /> },
   { path: ROUTES.RESET, element: <ResetPage /> },
+  { path: ROUTES.IMPERSONATE, element: <ImpersonatePage /> },
   {
     path: ROUTES.DASHBOARD,
     element: <UserLayout />,
@@ -29,6 +33,8 @@ export const routes: RouteObject[] = [
       { path: ROUTES.NODES, element: <NodesPage /> },
       { path: ROUTES.ACCOUNT, element: <AccountPage /> },
       { path: ROUTES.SUBSCRIBE_LOGS, element: <SubscribeLogsPage /> },
+      { path: ROUTES.SHOP, element: <ShopPage /> },
+      { path: ROUTES.WALLET, element: <WalletPage /> },
       { path: ROUTES.ANNOUNCEMENTS, element: <AnnouncementsPage /> },
       { path: ROUTES.INVITE, element: <InvitePage /> },
       { path: ROUTES.TUTORIALS, element: <TutorialsPage /> },

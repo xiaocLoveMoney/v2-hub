@@ -91,6 +91,16 @@ export function UserLayout() {
             </Button>
           </div>
         </header>
+        {session.impersonated === true && (
+          <div className="hub-impersonate-bar" role="status">
+            <span>
+              正在以 <strong>{session.user.username}</strong> 的身份查看（只读，30 分钟后失效）
+            </span>
+            <Button variant="ghost" onClick={() => void handleLogout()}>
+              退出
+            </Button>
+          </div>
+        )}
         <main className="hub-content">
           {isDisabled ? <Alert tone="danger">账号已停用，请联系管理员。</Alert> : <Outlet />}
         </main>
