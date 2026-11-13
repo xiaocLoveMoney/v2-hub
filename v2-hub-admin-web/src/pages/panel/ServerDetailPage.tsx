@@ -7,6 +7,7 @@ import { useSession } from '../../auth/session-context'
 import { mutate, useRemote } from '../../hooks/use-remote'
 import { PERMISSIONS, ROUTES } from '../../menu'
 import { TABLE_SCROLL, formatTime } from '../system/format'
+import { ChainApplyCard } from './ChainApplyCard'
 import { EndpointModal } from './InboundModals'
 import { InboundFormModal } from './inbound-form/InboundFormModal'
 import { ServerStatusTag } from './status'
@@ -185,6 +186,7 @@ export function ServerDetailPage() {
           <Descriptions.Item label="备注">{srv.remark || '—'}</Descriptions.Item>
         </Descriptions>
       )}
+      {srv !== null && can(PERMISSIONS.SERVER_READ) && <ChainApplyCard serverId={serverId} />}
       <Space className="page-header">
         <Typography.Title level={4}>入站</Typography.Title>
         {canWrite && (

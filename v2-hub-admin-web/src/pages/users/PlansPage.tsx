@@ -38,6 +38,7 @@ interface PlanForm extends ResetForm {
   nodeGroupIds: number[]
   allowClientChain: boolean
   allowCustomNode: boolean
+  allowServerChain: boolean
   remark: string
   isOnSale: boolean
   isTrial: boolean
@@ -53,13 +54,13 @@ function formOf(p: Plan | null): PlanForm {
   if (p === null) {
     return {
       name: '', trafficGb: 0, durationDays: 30, startOnFirstUse: false, limitIp: 0, nodeGroupIds: [], allowClientChain: false,
-      allowCustomNode: false, remark: '', trafficReset: 'never', trafficResetDay: 1, isOnSale: false, isTrial: false, sortOrder: 0,
+      allowCustomNode: false, allowServerChain: false, remark: '', trafficReset: 'never', trafficResetDay: 1, isOnSale: false, isTrial: false, sortOrder: 0,
       description: '', prices: [],
     }
   }
   return {
     name: p.name, trafficGb: bytesToGb(p.trafficLimit), durationDays: p.durationDays, startOnFirstUse: p.startOnFirstUse ?? false,
-    limitIp: p.limitIp ?? 0, nodeGroupIds: p.nodeGroupIds, allowClientChain: p.allowClientChain ?? false, allowCustomNode: p.allowCustomNode ?? false,
+    limitIp: p.limitIp ?? 0, nodeGroupIds: p.nodeGroupIds, allowClientChain: p.allowClientChain ?? false, allowCustomNode: p.allowCustomNode ?? false, allowServerChain: p.allowServerChain ?? false,
     remark: p.remark ?? '', trafficReset: p.trafficReset ?? 'never', trafficResetDay: p.trafficResetDay ?? 1,
     isOnSale: p.isOnSale ?? false, isTrial: p.isTrial ?? false, sortOrder: p.sortOrder ?? 0, description: p.description ?? '',
     prices: p.prices.map((price) => ({ durationDays: price.durationDays, amount: centsToAmount(price.price) })),
@@ -69,7 +70,7 @@ function formOf(p: Plan | null): PlanForm {
 function inputOf(v: PlanForm): PlanInput {
   return {
     name: v.name, trafficLimit: gbToBytes(v.trafficGb), durationDays: v.durationDays ?? 0, startOnFirstUse: v.startOnFirstUse, limitIp: v.limitIp ?? 0,
-    trafficReset: v.trafficReset, trafficResetDay: v.trafficResetDay ?? 1, allowClientChain: v.allowClientChain, allowCustomNode: v.allowCustomNode,
+    trafficReset: v.trafficReset, trafficResetDay: v.trafficResetDay ?? 1, allowClientChain: v.allowClientChain, allowCustomNode: v.allowCustomNode, allowServerChain: v.allowServerChain,
     remark: v.remark ?? '', nodeGroupIds: v.nodeGroupIds ?? [],
     isOnSale: v.isOnSale, isTrial: v.isTrial, sortOrder: v.sortOrder ?? 0, description: v.description ?? '',
     // 时长选项整体替换；金额在这里从元换成整数分
@@ -251,6 +252,9 @@ function PlanFormBody({ plan, groups, onSaved }: { plan: Plan | null; groups: No
           <Switch />
         </Form.Item>
         <Form.Item name="allowCustomNode" label="允许导入自有落地节点" valuePropName="checked">
+          <Switch />
+        </Form.Item>
+        <Form.Item name="allowServerChain" label="允许服务端链式（中转）" valuePropName="checked" extra="用户自助配置；生效时会改入口面板的 Xray 配置并重启">
           <Switch />
         </Form.Item>
         <Form.Item name="remark" label="备注">

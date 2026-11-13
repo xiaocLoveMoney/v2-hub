@@ -7,6 +7,7 @@ import { setCsrfToken } from '../../api/client'
 import { SessionContext, type SessionContextValue } from '../../auth/session-context'
 import { PERMISSIONS } from '../../menu'
 import { NodesPage } from './NodesPage'
+import { ServerChainRulesPage } from './ServerChainRulesPage'
 import { ServerDetailPage } from './ServerDetailPage'
 import { ServersPage } from './ServersPage'
 
@@ -269,5 +270,67 @@ describe('NodesPage', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: /保\s*存/ }))
     await waitFor(() => expect(calls.some((c) => c.method === 'POST' && c.path === '/api/admin/node-groups')).toBe(true))
     expect(calls.find((c) => c.method === 'POST')?.body).toEqual({ name: 'vip', remark: '', nodeIds: [] })
+  })
+})
+
+describe('服务端链式（docs/03 §5.19）', () => {
+  const applyFailed = {
+    serverId: 1, isSupported: true, status: 'failed', ruleCount: 2, appliedRuleCount: 1, failCount: 3, isRetryStopped: true,
+    lastError: '重启后 Xray 未能运行，已回滚', lastAttemptAt: '2026-11-14T00:00:00Z', nextAttemptAt: null, appliedAt: '2026-11-13T00:00:00Z',
+  }
+
+  it('服务器详情显示下发状态与最近错误；停止自动重试后可点重试，带 CSRF 头', async () => {
+    const retried = { ...applyFailed, status: 'pending', failCount: 0, isRetryStopped: false, lastError: '' }
+    let current: unknown = applyFailed
+    const calls = mockServer({
+      'GET /api/admin/servers/1': () => ok({ ...server, status: 'online', lastError: '' }),
+      'GET /api/admin/servers/1/inbounds': () => ok([]),
+      'GET /api/admin/servers/1/chain-apply': () => ok(current),
+      'POST /api/admin/servers/1/chain-apply/retry': () => {
+        current = retried
+        return ok(retried)
+      },
+    })
+    renderWith(<ServerDetailPage />, '/servers/1', '/servers/:id')
+    expect(await screen.findByText('服务端链式下发')).toBeDefined()
+    expect(screen.getByText('下发失败')).toBeDefined()
+    expect(screen.getByText('1 / 2')).toBeDefined()
+    expect(screen.getByText(/已停止自动重试/)).toBeDefined()
+    expect(screen.getByText('重启后 Xray 未能运行，已回滚')).toBeDefined()
+    // antd 会在两个汉字的按钮文字中间插入空格
+    fireEvent.click(screen.getByRole('button', { name: /重\s?试/ }))
+    await waitFor(() => expect(calls.some((c) => c.method === 'POST' && c.path === '/api/admin/servers/1/chain-apply/retry')).toBe(true))
+    expect(calls.find((c) => c.method === 'POST')?.csrf).toBe(CSRF)
+    expect(await screen.findByText('待下发')).toBeDefined()
+  })
+
+  it('面板不支持时只给说明', async () => {
+    mockServer({
+      'GET /api/admin/servers/1': () => ok({ ...server, status: 'online', lastError: '' }),
+      'GET /api/admin/servers/1/inbounds': () => ok([]),
+      'GET /api/admin/servers/1/chain-apply': () => ok({ ...applyFailed, isSupported: false, status: 'none' }),
+    })
+    renderWith(<ServerDetailPage />, '/servers/1', '/servers/:id')
+    expect(await screen.findByText(/不支持改内核配置/)).toBeDefined()
+    expect(screen.queryByText('服务端链式下发')).toBeNull()
+  })
+
+  it('全站规则列表按状态显示，换入口服务器过滤后重新拉取', async () => {
+    const rule = {
+      id: 5, user: { id: 7, username: 'alice' }, entry: { nodeId: 3, name: 'hk-1 · a', serverId: 1, serverName: 'hk-1' }, exit: { nodeId: 4, name: 'jp-1 · b' },
+      isEnabled: true, status: 'ok', blockedReason: '', applyStatus: 'applied', createdAt: '2026-11-14T00:00:00Z',
+    }
+    const blocked = { ...rule, id: 6, status: 'blocked', blockedReason: 'plan', applyStatus: '' }
+    const calls = mockServer({
+      'GET /api/admin/servers': () => ok([server]),
+      'GET /api/admin/server-chain-rules': () => ok({ items: [rule, blocked], total: 2 }),
+    })
+    renderWith(<ServerChainRulesPage />)
+    expect(await screen.findAllByText('alice #7')).toHaveLength(2)
+    expect(screen.getByText('生效')).toBeDefined()
+    expect(screen.getByText('阻断 · 套餐不支持')).toBeDefined()
+    fireEvent.mouseDown(screen.getByRole('combobox', { name: '按入口服务器过滤' }))
+    fireEvent.click(await screen.findByTitle('hk-1'))
+    await waitFor(() => expect(calls.filter((c) => c.path === '/api/admin/server-chain-rules')).toHaveLength(2))
   })
 })
