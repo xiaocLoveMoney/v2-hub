@@ -60,7 +60,7 @@ export function UserLayout() {
         <div className="hub-brand">{site.siteName}</div>
         <nav aria-label="主菜单">
           <ul className="hub-menu">
-            {groupMenu(visibleMenu(site)).map((g) => (
+            {groupMenu(visibleMenu(site, session.features)).map((g) => (
               <Fragment key={g.title ?? 'top'}>
                 {g.title !== undefined && <li className="hub-menu-header">{g.title}</li>}
                 {g.items.map((entry) => (

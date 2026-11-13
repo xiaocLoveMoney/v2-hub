@@ -2210,6 +2210,131 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/user/chain": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 链式代理总览：开关、上限、规则、自有落地节点与可选节点（docs/03 §5.18）
+         * @description 套餐没开链式时照常返回（allowed 为 false，已有规则状态为阻断），页面据此说明原因。
+         */
+        get: operations["getChainOverview"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/user/chain/rules": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 新建一条链式规则
+         * @description 入口与落地（平台节点时）必须是本人当前可用的节点；落地二选一。
+         *     套餐没开链式、或落地是自有节点而套餐没开自有落地时返回 403 feature_disabled；
+         *     落地是 hysteria2、入口与落地相同、超过上限返回 400；同一（入口，落地）已有规则返回 409。
+         */
+        post: operations["createChainRule"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/user/chain/rules/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * 改规则的名称与启用开关；他人的返回 404（R8）
+         * @description 入口与落地不能改，要换线路请删除后新建。套餐没开链式时返回 403 feature_disabled。
+         */
+        put: operations["updateChainRule"];
+        post?: never;
+        /** 删除规则；套餐没开链式时也允许；他人的返回 404（R8） */
+        delete: operations["deleteChainRule"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/user/chain/custom-nodes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 添加一个自有落地节点
+         * @description 链接保存时解析校验，解析不了或协议不支持返回 400；套餐没开自有落地返回 403 feature_disabled；
+         *     超过上限返回 400；同名返回 409。平台不向该地址发起任何连接（Ruling-38）。
+         */
+        post: operations["createCustomNode"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/user/chain/custom-nodes/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /** 改自有落地节点的名称或链接；他人的返回 404（R8） */
+        put: operations["updateCustomNode"];
+        post?: never;
+        /** 删除自有落地节点，引用它的规则一并删除；他人的返回 404（R8） */
+        delete: operations["deleteCustomNode"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/user/chain/custom-nodes/{id}/link": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        /** 取自有落地节点的原链接（凭据）；他人的返回 404（R8） */
+        get: operations["getCustomNodeLink"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/sub/{token}": {
         parameters: {
             query?: never;
@@ -2719,6 +2844,13 @@ export interface components {
             csrfToken: string;
             /** @description 真 = 管理员代入的只读会话，除退出外的写请求都会被拒（0.4.0，Ruling-33） */
             impersonated?: boolean;
+            /** @description 当前套餐开了哪些功能，决定菜单显隐；后端仍做最终校验（0.4.1） */
+            features?: {
+                /** @description 可以使用客户端链式 */
+                clientChain: boolean;
+                /** @description 可以添加自有落地节点 */
+                customNode: boolean;
+            };
         };
         UserSessionEnvelope: components["schemas"]["Envelope"] & {
             data?: components["schemas"]["UserSession"];
@@ -3685,6 +3817,112 @@ export interface components {
              * @description 入账后的余额
              */
             balance: number;
+        };
+        /**
+         * @description ok = 通畅（配置与授权成立，平台不探测连通性，Ruling-38）；blocked = 阻断，不进订阅
+         * @enum {string}
+         */
+        ChainStatus: "ok" | "blocked";
+        /**
+         * @description 阻断原因；plan = 套餐不支持，entry = 入口节点当前不可用，exit = 落地节点当前不可用；通畅时为空串
+         * @enum {string}
+         */
+        ChainBlockedReason: "" | "plan" | "entry" | "exit";
+        /**
+         * @description node = 平台节点，custom = 自有落地节点
+         * @enum {string}
+         */
+        ChainExitKind: "node" | "custom";
+        /** @description 新建规则时可选的平台节点（本人当前可用） */
+        ChainNodeOption: {
+            /** Format: int64 */
+            id: number;
+            name: string;
+            region: string;
+            protocol: string;
+            /** @description 能否作落地；hysteria2 不能 */
+            canBeExit: boolean;
+        };
+        ChainRule: {
+            /** Format: int64 */
+            id: number;
+            /** @description 用户起的名称，没起为空串 */
+            name: string;
+            /** @description 订阅里显示的节点名；没起名称时为“入口名 → 落地名” */
+            displayName: string;
+            entry: {
+                /** Format: int64 */
+                nodeId: number;
+                name: string;
+            };
+            exit: {
+                kind: components["schemas"]["ChainExitKind"];
+                /**
+                 * Format: int64
+                 * @description 平台节点 id 或自有落地节点 id，取决于 kind
+                 */
+                id: number;
+                name: string;
+                protocol: string;
+            };
+            isEnabled: boolean;
+            status: components["schemas"]["ChainStatus"];
+            blockedReason: components["schemas"]["ChainBlockedReason"];
+            /** Format: date-time */
+            createdAt: string;
+        };
+        /** @description exitNodeId 与 exitCustomNodeId 必须恰好给一个 */
+        ChainRuleInput: {
+            /** Format: int64 */
+            entryNodeId: number;
+            /** Format: int64 */
+            exitNodeId?: number;
+            /** Format: int64 */
+            exitCustomNodeId?: number;
+            /** @description 可选；省略或空串 = 用“入口名 → 落地名” */
+            name?: string;
+            /** @default true */
+            isEnabled: boolean;
+        };
+        ChainRuleUpdateInput: {
+            name: string;
+            isEnabled: boolean;
+        };
+        /** @description 自有落地节点；原链接属于凭据，不在这里返回 */
+        CustomNode: {
+            /** Format: int64 */
+            id: number;
+            name: string;
+            /** @enum {string} */
+            protocol: "vless" | "vmess" | "trojan" | "shadowsocks" | "socks";
+            address: string;
+            port: number;
+            /** @description 引用它的规则数；删除前据此提示 */
+            ruleCount: number;
+            /** Format: date-time */
+            createdAt: string;
+        };
+        CustomNodeInput: {
+            /** @description 分享链接（vless / vmess / trojan / ss）或 socks5://[用户名:口令@]地址:端口 */
+            link: string;
+            /** @description 可选；省略或空串 = 取链接里的名称 */
+            name?: string;
+        };
+        CustomNodeUpdateInput: {
+            name: string;
+            /** @description 省略 = 不改链接 */
+            link?: string;
+        };
+        ChainOverview: {
+            /** @description 套餐是否允许客户端链式 */
+            allowed: boolean;
+            /** @description 套餐是否允许自有落地节点 */
+            customNodeAllowed: boolean;
+            maxRules: number;
+            maxCustomNodes: number;
+            rules: components["schemas"]["ChainRule"][];
+            customNodes: components["schemas"]["CustomNode"][];
+            nodes: components["schemas"]["ChainNodeOption"][];
         };
     };
     responses: {
@@ -8021,6 +8259,244 @@ export interface operations {
                 };
             };
             400: components["responses"]["InvalidArgument"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    getChainOverview: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 链式代理总览 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["ChainOverview"];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["UserForbidden"];
+        };
+    };
+    createChainRule: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ChainRuleInput"];
+            };
+        };
+        responses: {
+            /** @description 新建的规则 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["ChainRule"];
+                    };
+                };
+            };
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["UserForbidden"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    updateChainRule: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ChainRuleUpdateInput"];
+            };
+        };
+        responses: {
+            /** @description 改后的规则 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["ChainRule"];
+                    };
+                };
+            };
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["UserForbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    deleteChainRule: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 已删除 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["UserForbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    createCustomNode: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CustomNodeInput"];
+            };
+        };
+        responses: {
+            /** @description 新建的自有落地节点 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["CustomNode"];
+                    };
+                };
+            };
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["UserForbidden"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    updateCustomNode: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CustomNodeUpdateInput"];
+            };
+        };
+        responses: {
+            /** @description 改后的自有落地节点 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["CustomNode"];
+                    };
+                };
+            };
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["UserForbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    deleteCustomNode: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 已删除 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["UserForbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    getCustomNodeLink: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 原链接 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["NodeLink"];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["UserForbidden"];
             404: components["responses"]["NotFound"];
         };
     };

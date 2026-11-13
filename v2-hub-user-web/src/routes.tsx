@@ -3,6 +3,7 @@ import { UserLayout } from './layout/UserLayout'
 import { ROUTES } from './menu'
 import { AccountPage } from './pages/AccountPage'
 import { AnnouncementsPage } from './pages/AnnouncementsPage'
+import { ChainPage } from './pages/chain/ChainPage'
 import { ImpersonatePage } from './pages/auth/ImpersonatePage'
 import { RegisterPage } from './pages/auth/RegisterPage'
 import { ResetPage } from './pages/auth/ResetPage'
@@ -41,6 +42,7 @@ export const routes: RouteObject[] = [
       { path: ROUTES.SHARED_ACCOUNTS, element: <SharedAccountsPage /> },
       { path: ROUTES.TICKETS, element: <TicketsPage /> },
       { path: ROUTES.TICKET_DETAIL, element: <TicketDetailPage /> },
+      { path: ROUTES.CHAIN, element: <ChainPage /> },
       { path: '*', element: <NotFoundPage /> },
     ],
   },
