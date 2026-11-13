@@ -26,6 +26,8 @@ type PortalAuthenticator interface {
 	EnableTOTP(ctx context.Context, p *service.UserPrincipal, code string, ip *netip.Addr) error
 	DisableTOTP(ctx context.Context, p *service.UserPrincipal, code string, ip *netip.Addr) error
 	ListLoginLogs(ctx context.Context, p *service.UserPrincipal) ([]service.LoginLogItem, error)
+	IssueImpersonateTicket(ctx context.Context, actor *service.AdminPrincipal, userID int64, ip *netip.Addr) (*service.ImpersonateTicket, error)
+	RedeemImpersonateTicket(ctx context.Context, ticket string, ip *netip.Addr, userAgent string) (*service.PortalLoginResult, error)
 }
 
 type userBriefVO struct {
@@ -41,13 +43,16 @@ type userSessionVO struct {
 	User        userBriefVO `json:"user"`
 	CSRFToken   string      `json:"csrfToken"`
 	TOTPEnabled bool        `json:"totpEnabled"`
+	// 0.4.0 起：真 = 管理员代入的只读会话（docs/03 §5.17）
+	Impersonated bool `json:"impersonated"`
 }
 
 func toUserSessionVO(p *service.UserPrincipal) userSessionVO {
 	return userSessionVO{
-		User:        userBriefVO{ID: p.UserID, Username: p.Username, Status: p.Status, Email: optionalText(p.Email), IsEmailVerified: p.EmailVerified},
-		CSRFToken:   p.CSRFToken,
-		TOTPEnabled: p.TOTPEnabled,
+		User:         userBriefVO{ID: p.UserID, Username: p.Username, Status: p.Status, Email: optionalText(p.Email), IsEmailVerified: p.EmailVerified},
+		CSRFToken:    p.CSRFToken,
+		TOTPEnabled:  p.TOTPEnabled,
+		Impersonated: p.Impersonated(),
 	}
 }
 
@@ -76,6 +81,11 @@ func (h *handlers) requireUser(allowDisabled bool, next userHandler) http.Handle
 		}
 		if isUnsafeMethod(r.Method) && !csrfMatches(r.Header.Get(headerCSRF), p.CSRFToken) {
 			writeError(w, r, &service.Error{Code: service.CodePermissionDenied, Message: msgCSRFFailed})
+			return
+		}
+		// 代入会话只读：除退出外的写请求一律拒绝（Ruling-33）
+		if p.Impersonated() && isUnsafeMethod(r.Method) && r.URL.Path != userLogoutPath {
+			writeError(w, r, &service.Error{Code: service.CodePermissionDenied, Message: msgImpersonateReadOnly})
 			return
 		}
 		if !allowDisabled {
@@ -213,4 +223,57 @@ func (h *handlers) listUserLoginLogs(w http.ResponseWriter, r *http.Request, p *
 		out = append(out, loginLogVO{ClientIP: l.ClientIP, IsSuccess: l.IsSuccess, CreatedAt: l.CreatedAt})
 	}
 	writeOK(w, out)
+}
+
+const (
+	userLogoutPath         = "/api/user/auth/logout"
+	msgImpersonateReadOnly = "正在以用户身份查看，不能执行写操作"
+)
+
+// impersonateTicketVO 对应 hub-api.yaml ImpersonateTicket；ticket 属于凭据，不写日志。
+type impersonateTicketVO struct {
+	Ticket    string    `json:"ticket"`
+	ExpiresAt time.Time `json:"expiresAt"`
+	PortalURL string    `json:"portalUrl"`
+}
+
+// impersonateUser 给管理员签发切换为该用户身份的一次性票据（impersonate:write，docs/03 §5.17）。
+func (h *handlers) impersonateUser(w http.ResponseWriter, r *http.Request, p *service.AdminPrincipal) {
+	id, err := pathID(r)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	t, err := h.portalAuth.IssueImpersonateTicket(r.Context(), p, id, clientIP(r, h.trustedProxies))
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	cur, err := h.settings.Current(r.Context())
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeOK(w, impersonateTicketVO{Ticket: t.Ticket, ExpiresAt: t.ExpiresAt, PortalURL: cur.Site.PortalURL})
+}
+
+// impersonateRequest 对应 hub-api.yaml ImpersonateInput。
+type impersonateRequest struct {
+	Ticket string `json:"ticket"`
+}
+
+// redeemImpersonateTicket 用票据换取只读的代入会话并下发会话 Cookie。
+func (h *handlers) redeemImpersonateTicket(w http.ResponseWriter, r *http.Request) {
+	var req impersonateRequest
+	if err := decodeJSON(w, r, &req); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	res, err := h.portalAuth.RedeemImpersonateTicket(r.Context(), req.Ticket, clientIP(r, h.trustedProxies), r.Header.Get(headerUserAgent))
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	http.SetCookie(w, h.userSessionCookie(res.Token, res.ExpiresAt))
+	writeOK(w, toUserSessionVO(res.Principal))
 }

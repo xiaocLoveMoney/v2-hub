@@ -45,19 +45,20 @@ func (q *Queries) ClearUserTOTP(ctx context.Context, id int64) (int64, error) {
 }
 
 const createUserSession = `-- name: CreateUserSession :one
-INSERT INTO user_session (token_hash, user_id, csrf_token, client_ip, user_agent, expires_at, idle_until)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
+INSERT INTO user_session (token_hash, user_id, csrf_token, client_ip, user_agent, expires_at, idle_until, impersonator_admin_id)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 RETURNING id
 `
 
 type CreateUserSessionParams struct {
-	TokenHash []byte
-	UserID    int64
-	CsrfToken string
-	ClientIp  *netip.Addr
-	UserAgent pgtype.Text
-	ExpiresAt pgtype.Timestamptz
-	IdleUntil pgtype.Timestamptz
+	TokenHash           []byte
+	UserID              int64
+	CsrfToken           string
+	ClientIp            *netip.Addr
+	UserAgent           pgtype.Text
+	ExpiresAt           pgtype.Timestamptz
+	IdleUntil           pgtype.Timestamptz
+	ImpersonatorAdminID pgtype.Int8
 }
 
 func (q *Queries) CreateUserSession(ctx context.Context, arg CreateUserSessionParams) (int64, error) {
@@ -69,6 +70,7 @@ func (q *Queries) CreateUserSession(ctx context.Context, arg CreateUserSessionPa
 		arg.UserAgent,
 		arg.ExpiresAt,
 		arg.IdleUntil,
+		arg.ImpersonatorAdminID,
 	)
 	var id int64
 	err := row.Scan(&id)
@@ -111,6 +113,18 @@ type DeleteOtherUserSessionsParams struct {
 func (q *Queries) DeleteOtherUserSessions(ctx context.Context, arg DeleteOtherUserSessionsParams) error {
 	_, err := q.db.Exec(ctx, deleteOtherUserSessions, arg.UserID, arg.KeepID)
 	return err
+}
+
+const deleteStaleImpersonateTickets = `-- name: DeleteStaleImpersonateTickets :execrows
+DELETE FROM impersonate_ticket WHERE expires_at <= $1
+`
+
+func (q *Queries) DeleteStaleImpersonateTickets(ctx context.Context, expiresAt pgtype.Timestamptz) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteStaleImpersonateTickets, expiresAt)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const deleteUserSessionByID = `-- name: DeleteUserSessionByID :exec
@@ -236,8 +250,67 @@ func (q *Queries) GetEndUserLoginSecretHash(ctx context.Context, id int64) (stri
 	return password_hash, err
 }
 
+const getImpersonateTicketForUpdate = `-- name: GetImpersonateTicketForUpdate :one
+SELECT id, admin_id, user_id, expires_at, used_at FROM impersonate_ticket WHERE ticket_hash = $1 FOR UPDATE
+`
+
+type GetImpersonateTicketForUpdateRow struct {
+	ID        int64
+	AdminID   int64
+	UserID    int64
+	ExpiresAt pgtype.Timestamptz
+	UsedAt    pgtype.Timestamptz
+}
+
+// 兑换时锁住票据行，一张票只能换一次会话
+func (q *Queries) GetImpersonateTicketForUpdate(ctx context.Context, ticketHash []byte) (GetImpersonateTicketForUpdateRow, error) {
+	row := q.db.QueryRow(ctx, getImpersonateTicketForUpdate, ticketHash)
+	var i GetImpersonateTicketForUpdateRow
+	err := row.Scan(
+		&i.ID,
+		&i.AdminID,
+		&i.UserID,
+		&i.ExpiresAt,
+		&i.UsedAt,
+	)
+	return i, err
+}
+
+const getUserForImpersonate = `-- name: GetUserForImpersonate :one
+
+SELECT id, username, status, is_disabled, (totp_secret_enc IS NOT NULL)::boolean AS totp_enabled,
+       email, (email_verified_at IS NOT NULL)::boolean AS is_email_verified
+FROM end_user WHERE id = $1 AND deleted_at IS NULL
+`
+
+type GetUserForImpersonateRow struct {
+	ID              int64
+	Username        string
+	Status          string
+	IsDisabled      bool
+	TotpEnabled     bool
+	Email           pgtype.Text
+	IsEmailVerified bool
+}
+
+// 切换为用户身份（docs/03 §5.17）-----------------------------------------------------
+func (q *Queries) GetUserForImpersonate(ctx context.Context, id int64) (GetUserForImpersonateRow, error) {
+	row := q.db.QueryRow(ctx, getUserForImpersonate, id)
+	var i GetUserForImpersonateRow
+	err := row.Scan(
+		&i.ID,
+		&i.Username,
+		&i.Status,
+		&i.IsDisabled,
+		&i.TotpEnabled,
+		&i.Email,
+		&i.IsEmailVerified,
+	)
+	return i, err
+}
+
 const getUserSessionByTokenHash = `-- name: GetUserSessionByTokenHash :one
-SELECT s.id, s.user_id, s.csrf_token, s.expires_at, s.idle_until, u.username, u.status, u.is_disabled,
+SELECT s.id, s.user_id, s.csrf_token, s.expires_at, s.idle_until, s.impersonator_admin_id, u.username, u.status, u.is_disabled,
        (u.totp_secret_enc IS NOT NULL)::boolean AS totp_enabled,
        (u.deleted_at IS NOT NULL)::boolean AS is_deleted,
        u.email, (u.email_verified_at IS NOT NULL)::boolean AS is_email_verified
@@ -247,18 +320,19 @@ WHERE s.token_hash = $1
 `
 
 type GetUserSessionByTokenHashRow struct {
-	ID              int64
-	UserID          int64
-	CsrfToken       string
-	ExpiresAt       pgtype.Timestamptz
-	IdleUntil       pgtype.Timestamptz
-	Username        string
-	Status          string
-	IsDisabled      bool
-	TotpEnabled     bool
-	IsDeleted       bool
-	Email           pgtype.Text
-	IsEmailVerified bool
+	ID                  int64
+	UserID              int64
+	CsrfToken           string
+	ExpiresAt           pgtype.Timestamptz
+	IdleUntil           pgtype.Timestamptz
+	ImpersonatorAdminID pgtype.Int8
+	Username            string
+	Status              string
+	IsDisabled          bool
+	TotpEnabled         bool
+	IsDeleted           bool
+	Email               pgtype.Text
+	IsEmailVerified     bool
 }
 
 func (q *Queries) GetUserSessionByTokenHash(ctx context.Context, tokenHash []byte) (GetUserSessionByTokenHashRow, error) {
@@ -270,6 +344,7 @@ func (q *Queries) GetUserSessionByTokenHash(ctx context.Context, tokenHash []byt
 		&i.CsrfToken,
 		&i.ExpiresAt,
 		&i.IdleUntil,
+		&i.ImpersonatorAdminID,
 		&i.Username,
 		&i.Status,
 		&i.IsDisabled,
@@ -296,6 +371,29 @@ func (q *Queries) GetUserTOTP(ctx context.Context, id int64) (GetUserTOTPRow, er
 	var i GetUserTOTPRow
 	err := row.Scan(&i.TotpSecretEnc, &i.TotpPendingEnc, &i.TotpLastStep)
 	return i, err
+}
+
+const insertImpersonateTicket = `-- name: InsertImpersonateTicket :exec
+INSERT INTO impersonate_ticket (ticket_hash, admin_id, user_id, expires_at, created_at) VALUES ($1, $2, $3, $4, $5)
+`
+
+type InsertImpersonateTicketParams struct {
+	TicketHash []byte
+	AdminID    int64
+	UserID     int64
+	ExpiresAt  pgtype.Timestamptz
+	CreatedAt  pgtype.Timestamptz
+}
+
+func (q *Queries) InsertImpersonateTicket(ctx context.Context, arg InsertImpersonateTicketParams) error {
+	_, err := q.db.Exec(ctx, insertImpersonateTicket,
+		arg.TicketHash,
+		arg.AdminID,
+		arg.UserID,
+		arg.ExpiresAt,
+		arg.CreatedAt,
+	)
+	return err
 }
 
 const insertUserLoginLog = `-- name: InsertUserLoginLog :exec
@@ -350,6 +448,20 @@ func (q *Queries) ListUserLoginLogs(ctx context.Context, arg ListUserLoginLogsPa
 		return nil, err
 	}
 	return items, nil
+}
+
+const markImpersonateTicketUsed = `-- name: MarkImpersonateTicketUsed :exec
+UPDATE impersonate_ticket SET used_at = $2 WHERE id = $1
+`
+
+type MarkImpersonateTicketUsedParams struct {
+	ID     int64
+	UsedAt pgtype.Timestamptz
+}
+
+func (q *Queries) MarkImpersonateTicketUsed(ctx context.Context, arg MarkImpersonateTicketUsedParams) error {
+	_, err := q.db.Exec(ctx, markImpersonateTicketUsed, arg.ID, arg.UsedAt)
+	return err
 }
 
 const setUserTOTPPending = `-- name: SetUserTOTPPending :exec

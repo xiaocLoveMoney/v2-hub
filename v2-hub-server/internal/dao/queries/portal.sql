@@ -18,12 +18,12 @@ WHERE email = sqlc.arg(email)::text AND deleted_at IS NULL;
 SELECT password_hash FROM end_user WHERE id = $1 AND deleted_at IS NULL;
 
 -- name: CreateUserSession :one
-INSERT INTO user_session (token_hash, user_id, csrf_token, client_ip, user_agent, expires_at, idle_until)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
+INSERT INTO user_session (token_hash, user_id, csrf_token, client_ip, user_agent, expires_at, idle_until, impersonator_admin_id)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 RETURNING id;
 
 -- name: GetUserSessionByTokenHash :one
-SELECT s.id, s.user_id, s.csrf_token, s.expires_at, s.idle_until, u.username, u.status, u.is_disabled,
+SELECT s.id, s.user_id, s.csrf_token, s.expires_at, s.idle_until, s.impersonator_admin_id, u.username, u.status, u.is_disabled,
        (u.totp_secret_enc IS NOT NULL)::boolean AS totp_enabled,
        (u.deleted_at IS NOT NULL)::boolean AS is_deleted,
        u.email, (u.email_verified_at IS NOT NULL)::boolean AS is_email_verified
@@ -79,3 +79,23 @@ LIMIT $2;
 
 -- name: DeleteOldUserLoginLogs :execrows
 DELETE FROM user_login_log WHERE created_at < $1;
+
+-- 切换为用户身份（docs/03 §5.17）-----------------------------------------------------
+
+-- name: GetUserForImpersonate :one
+SELECT id, username, status, is_disabled, (totp_secret_enc IS NOT NULL)::boolean AS totp_enabled,
+       email, (email_verified_at IS NOT NULL)::boolean AS is_email_verified
+FROM end_user WHERE id = $1 AND deleted_at IS NULL;
+
+-- name: InsertImpersonateTicket :exec
+INSERT INTO impersonate_ticket (ticket_hash, admin_id, user_id, expires_at, created_at) VALUES ($1, $2, $3, $4, $5);
+
+-- name: GetImpersonateTicketForUpdate :one
+-- 兑换时锁住票据行，一张票只能换一次会话
+SELECT id, admin_id, user_id, expires_at, used_at FROM impersonate_ticket WHERE ticket_hash = $1 FOR UPDATE;
+
+-- name: MarkImpersonateTicketUsed :exec
+UPDATE impersonate_ticket SET used_at = $2 WHERE id = $1;
+
+-- name: DeleteStaleImpersonateTickets :execrows
+DELETE FROM impersonate_ticket WHERE expires_at <= $1;
