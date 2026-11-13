@@ -30,6 +30,7 @@ type Querier interface {
 	CountNodes(ctx context.Context, arg CountNodesParams) (int64, error)
 	CountNodesByIDs(ctx context.Context, ids []int64) (int64, error)
 	CountPermissionsByCodes(ctx context.Context, codes []string) (int64, error)
+	CountSubscribeLogs(ctx context.Context, userID pgtype.Int8) (int64, error)
 	CountUsers(ctx context.Context, arg CountUsersParams) (int64, error)
 	CreateAdmin(ctx context.Context, arg CreateAdminParams) (CreateAdminRow, error)
 	CreateAdminSession(ctx context.Context, arg CreateAdminSessionParams) error
@@ -49,6 +50,7 @@ type Querier interface {
 	DeleteExpiredUserSessions(ctx context.Context, expiresAt pgtype.Timestamptz) (int64, error)
 	DeleteInbound(ctx context.Context, id int64) error
 	DeleteNodeGroup(ctx context.Context, id int64) (int64, error)
+	DeleteOldSubscribeLogs(ctx context.Context, createdAt pgtype.Timestamptz) (int64, error)
 	DeleteOldUserLoginLogs(ctx context.Context, createdAt pgtype.Timestamptz) (int64, error)
 	DeleteOtherUserSessions(ctx context.Context, arg DeleteOtherUserSessionsParams) error
 	DeletePlan(ctx context.Context, id int64) (int64, error)
@@ -84,15 +86,20 @@ type Querier interface {
 	GetServerConn(ctx context.Context, id int64) (GetServerConnRow, error)
 	// 影响分享链接的入站与对外地址摘要；变了就要重新向面板取全部链接（docs/03 §5.4 节点来源）
 	GetServerLinkFingerprint(ctx context.Context, serverID int64) (string, error)
+	// 订阅与客户后台数据（docs/03 §5.4、§5.5）。
+	GetUserBySubTokenHash(ctx context.Context, subTokenHash []byte) (GetUserBySubTokenHashRow, error)
+	GetUserDashboard(ctx context.Context, arg GetUserDashboardParams) (GetUserDashboardRow, error)
 	// 读写配额前加行锁，避免流量任务与管理员操作互相覆盖
 	GetUserQuota(ctx context.Context, id int64) (GetUserQuotaRow, error)
 	GetUserSessionByTokenHash(ctx context.Context, tokenHash []byte) (GetUserSessionByTokenHashRow, error)
+	GetUserSubToken(ctx context.Context, id int64) ([]byte, error)
 	GetUserTOTP(ctx context.Context, id int64) (GetUserTOTPRow, error)
 	InsertAdminRoles(ctx context.Context, arg InsertAdminRolesParams) error
 	InsertAuditLog(ctx context.Context, arg InsertAuditLogParams) error
 	InsertNodeGroupItems(ctx context.Context, arg InsertNodeGroupItemsParams) error
 	InsertPlanNodeGroups(ctx context.Context, arg InsertPlanNodeGroupsParams) error
 	InsertRolePermissions(ctx context.Context, arg InsertRolePermissionsParams) error
+	InsertSubscribeLog(ctx context.Context, arg InsertSubscribeLogParams) error
 	InsertUserLoginLog(ctx context.Context, arg InsertUserLoginLogParams) error
 	ListActiveUserIDs(ctx context.Context) ([]int64, error)
 	ListAdmins(ctx context.Context, arg ListAdminsParams) ([]ListAdminsRow, error)
@@ -115,13 +122,22 @@ type Querier interface {
 	ListRolePermissionCodes(ctx context.Context) ([]ListRolePermissionCodesRow, error)
 	ListRoles(ctx context.Context) ([]ListRolesRow, error)
 	ListRolesByCodes(ctx context.Context, codes []string) ([]ListRolesByCodesRow, error)
+	// 这些服务器上全部对外地址（含未授权的），用来判断一条链接是不是某个对外地址的
+	ListServerEndpointAddrs(ctx context.Context, serverIds []int64) ([]ListServerEndpointAddrsRow, error)
 	ListServerProvisions(ctx context.Context, serverID int64) ([]ListServerProvisionsRow, error)
 	// 服务器（docs/03 §2、§3 T1–T4、§5.1）---------------------------------------
 	ListServers(ctx context.Context) ([]ListServersRow, error)
+	ListSubscribeLogs(ctx context.Context, arg ListSubscribeLogsParams) ([]ListSubscribeLogsRow, error)
 	ListUserLoginLogs(ctx context.Context, arg ListUserLoginLogsParams) ([]ListUserLoginLogsRow, error)
+	// 客户后台节点列表：按节点组分段，状态取平台缓存（docs/03 §5.5）
+	ListUserNodeGroups(ctx context.Context, id int64) ([]ListUserNodeGroupsRow, error)
+	ListUserProvisionLinks(ctx context.Context, userID int64) ([]ListUserProvisionLinksRow, error)
 	ListUserProvisions(ctx context.Context, userID int64) ([]ListUserProvisionsRow, error)
 	// 用户涉及的服务器：已有下发的，加上期望下发到的
 	ListUserServerIDs(ctx context.Context, userID int64) ([]int64, error)
+	// 用户被授权且可输出的节点：节点启用、入站启用且未缺失、服务器未停用、对外地址未缺失未停用
+	ListUserSubNodes(ctx context.Context, id int64) ([]ListUserSubNodesRow, error)
+	ListUserTrafficHourly(ctx context.Context, arg ListUserTrafficHourlyParams) ([]ListUserTrafficHourlyRow, error)
 	ListUsers(ctx context.Context, arg ListUsersParams) ([]ListUsersRow, error)
 	// 对账需要的用户信息：已有下发或期望下发到该服务器的用户（含待删除的）
 	ListUsersByIDs(ctx context.Context, ids []int64) ([]ListUsersByIDsRow, error)
@@ -137,6 +153,8 @@ type Querier interface {
 	RepointEndpoint(ctx context.Context, arg RepointEndpointParams) error
 	// 面板把该标识分给了新入站：仍挂着它的未缺失记录对应的旧入站已被删，标记缺失（docs/03 §5.1 面板标识复用）
 	RetireInboundByRef(ctx context.Context, arg RetireInboundByRefParams) ([]int64, error)
+	// 重置订阅：换 token 并轮换连接凭据（docs/03 §5.4 重置）
+	RotateUserSubscription(ctx context.Context, arg RotateUserSubscriptionParams) (int64, error)
 	SaveUserQuota(ctx context.Context, arg SaveUserQuotaParams) error
 	SetAdminTOTPPending(ctx context.Context, arg SetAdminTOTPPendingParams) error
 	SetInboundEnabledLocal(ctx context.Context, arg SetInboundEnabledLocalParams) error
@@ -150,6 +168,8 @@ type Querier interface {
 	SetServerToken(ctx context.Context, arg SetServerTokenParams) error
 	SetUserCredential(ctx context.Context, arg SetUserCredentialParams) error
 	SetUserPasswordHash(ctx context.Context, arg SetUserPasswordHashParams) (int64, error)
+	// 只在还没有 token 时写入，避免并发请求互相覆盖
+	SetUserSubToken(ctx context.Context, arg SetUserSubTokenParams) (int64, error)
 	SetUserTOTPPending(ctx context.Context, arg SetUserTOTPPendingParams) error
 	TouchAdminSession(ctx context.Context, arg TouchAdminSessionParams) error
 	TouchUserLastUsed(ctx context.Context, arg TouchUserLastUsedParams) error
