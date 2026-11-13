@@ -51,9 +51,11 @@ type Querier interface {
 	CountOrders(ctx context.Context, arg CountOrdersParams) (int64, error)
 	// 这个用户除本单以外实付 > 0 的订单数，用来判断是不是“首笔消费”
 	CountOtherPaidOrders(ctx context.Context, arg CountOtherPaidOrdersParams) (int64, error)
+	CountPayments(ctx context.Context, arg CountPaymentsParams) (int64, error)
 	CountPermissionsByCodes(ctx context.Context, codes []string) (int64, error)
 	CountPlansByIDs(ctx context.Context, ids []int64) (int64, error)
 	CountPublishedAnnouncements(ctx context.Context) (int64, error)
+	CountRebates(ctx context.Context, inviterID int64) (int64, error)
 	CountSubscribeLogs(ctx context.Context, userID pgtype.Int8) (int64, error)
 	CountTickets(ctx context.Context, arg CountTicketsParams) (int64, error)
 	CountTicketsCreatedSince(ctx context.Context, arg CountTicketsCreatedSinceParams) (int64, error)
@@ -79,6 +81,10 @@ type Querier interface {
 	CreateTutorial(ctx context.Context, arg CreateTutorialParams) (int64, error)
 	CreateUser(ctx context.Context, arg CreateUserParams) (int64, error)
 	CreateUserSession(ctx context.Context, arg CreateUserSessionParams) (int64, error)
+	DailyOrders(ctx context.Context, arg DailyOrdersParams) ([]DailyOrdersRow, error)
+	DailyRebates(ctx context.Context, arg DailyRebatesParams) ([]DailyRebatesRow, error)
+	// 按平台时区的自然日汇总充值入账（充值码 + 在线充值）
+	DailyTopups(ctx context.Context, arg DailyTopupsParams) ([]DailyTopupsRow, error)
 	DeleteAdminRoles(ctx context.Context, adminID int64) error
 	DeleteAdminSessionByID(ctx context.Context, id int64) error
 	DeleteAdminSessionByTokenHash(ctx context.Context, tokenHash []byte) error
@@ -123,6 +129,7 @@ type Querier interface {
 	// 邮箱是否已被占用：等于某个用户的邮箱，或等于某个（存量、含 @ 的）用户名（docs/03 §5.8 冲突）
 	ExistsEndUserIdentity(ctx context.Context, email string) (bool, error)
 	ExistsPlan(ctx context.Context, id int64) (bool, error)
+	ExpirePayments(ctx context.Context, expiresAt pgtype.Timestamptz) (int64, error)
 	GetActiveEmailCodeForUpdate(ctx context.Context, arg GetActiveEmailCodeForUpdateParams) (GetActiveEmailCodeForUpdateRow, error)
 	GetAdminByID(ctx context.Context, id int64) (GetAdminByIDRow, error)
 	GetAdminByUsername(ctx context.Context, username string) (GetAdminByUsernameRow, error)
@@ -149,6 +156,8 @@ type Querier interface {
 	// 注册时锁住邀请码行，计数与上限的判断在同一事务内完成（并发注册不超发）
 	GetInviteCodeForUpdate(ctx context.Context, code string) (GetInviteCodeForUpdateRow, error)
 	GetInviteCodeOwner(ctx context.Context, id int64) (pgtype.Int8, error)
+	// 入账前锁住充值单，重复通知只入账一次
+	GetPaymentByTradeNoForUpdate(ctx context.Context, tradeNo string) (GetPaymentByTradeNoForUpdateRow, error)
 	GetPlan(ctx context.Context, id int64) (GetPlanRow, error)
 	// 一个时长选项连同它的套餐；是否上架由调用方判断（自动续费也用这条）
 	GetPlanPriceForSale(ctx context.Context, id int64) (GetPlanPriceForSaleRow, error)
@@ -203,6 +212,8 @@ type Querier interface {
 	InsertMailOutbox(ctx context.Context, arg InsertMailOutboxParams) (int64, error)
 	InsertNodeGroupItems(ctx context.Context, arg InsertNodeGroupItemsParams) error
 	InsertOrder(ctx context.Context, arg InsertOrderParams) (int64, error)
+	// 在线充值单、返利列表与收支统计（docs/03 §5.13–§5.16）--------------------------------
+	InsertPayment(ctx context.Context, arg InsertPaymentParams) (int64, error)
 	InsertPlanNodeGroups(ctx context.Context, arg InsertPlanNodeGroupsParams) error
 	InsertRebate(ctx context.Context, arg InsertRebateParams) (int64, error)
 	InsertRolePermissions(ctx context.Context, arg InsertRolePermissionsParams) error
@@ -242,6 +253,7 @@ type Querier interface {
 	ListNodeGroups(ctx context.Context) ([]ListNodeGroupsRow, error)
 	ListNodes(ctx context.Context, arg ListNodesParams) ([]ListNodesRow, error)
 	ListOrders(ctx context.Context, arg ListOrdersParams) ([]ListOrdersRow, error)
+	ListPayments(ctx context.Context, arg ListPaymentsParams) ([]ListPaymentsRow, error)
 	ListPermissionCodesForAdmin(ctx context.Context, adminID int64) ([]string, error)
 	ListPermissions(ctx context.Context) ([]ListPermissionsRow, error)
 	// 全部套餐的时长选项（docs/03 §5.12），按套餐、天数升序；套餐数量有限，一次取完在内存里归组
@@ -251,6 +263,7 @@ type Querier interface {
 	ListPlans(ctx context.Context) ([]ListPlansRow, error)
 	// 用户端：只有已发布的，置顶在前、新的在前；only_popup 为真时只取标了弹窗的
 	ListPublishedAnnouncements(ctx context.Context, arg ListPublishedAnnouncementsParams) ([]ListPublishedAnnouncementsRow, error)
+	ListRebates(ctx context.Context, arg ListRebatesParams) ([]ListRebatesRow, error)
 	// 本人最近的返利记录（docs/03 §5.16 返利去向）；被邀请人的用户名由调用方打码
 	ListRebatesByInviter(ctx context.Context, arg ListRebatesByInviterParams) ([]ListRebatesByInviterRow, error)
 	ListRoleCodesByAdminIDs(ctx context.Context, adminIds []int64) ([]ListRoleCodesByAdminIDsRow, error)
@@ -308,6 +321,7 @@ type Querier interface {
 	MarkMailFailed(ctx context.Context, arg MarkMailFailedParams) error
 	// 发送成功后清空正文（docs/03 §5.7 发件箱）
 	MarkMailSent(ctx context.Context, id int64) error
+	MarkPaymentPaid(ctx context.Context, arg MarkPaymentPaidParams) error
 	MarkTopupCodeUsed(ctx context.Context, arg MarkTopupCodeUsedParams) error
 	// 待删除期间把用户名换成占位名并清空邮箱，原用户名与邮箱随即可被重新注册（docs/03 §5.8 注销账号）
 	MarkUserDeleted(ctx context.Context, id int64) (int64, error)
@@ -356,6 +370,7 @@ type Querier interface {
 	SetUserSubToken(ctx context.Context, arg SetUserSubTokenParams) (int64, error)
 	SetUserTOTPPending(ctx context.Context, arg SetUserTOTPPendingParams) error
 	SumRebateByInviter(ctx context.Context, inviterID pgtype.Int8) (int64, error)
+	SumUserBalances(ctx context.Context) (int64, error)
 	// 同一邮箱同一用途只有最新一条有效
 	SupersedeEmailCodes(ctx context.Context, arg SupersedeEmailCodesParams) error
 	TouchAdminSession(ctx context.Context, arg TouchAdminSessionParams) error

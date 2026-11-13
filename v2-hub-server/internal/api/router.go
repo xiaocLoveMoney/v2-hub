@@ -61,6 +61,10 @@ type Deps struct {
 	Wallet WalletManager
 	// Shop 提供流量包、优惠码、询价、下单、订单与钱包总览（docs/03 §5.12、§5.13、§5.16）。
 	Shop ShopManager
+	// Finance 提供收支统计与返利列表（docs/03 §5.16）。
+	Finance FinanceManager
+	// Pay 提供在线充值单与支付回调（docs/03 §5.15）。
+	Pay PayManager
 	// Cookie 是会话 Cookie 属性。
 	Cookie CookieConfig
 	// TrustedProxies 是可采信 X-Forwarded-For 的直连网段（如 Caddy 所在 docker 网络）。
@@ -81,6 +85,8 @@ type handlers struct {
 	tickets        TicketManager
 	wallet         WalletManager
 	shop           ShopManager
+	finance        FinanceManager
+	pay            PayManager
 	cookie         CookieConfig
 	trustedProxies []netip.Prefix
 }
@@ -88,7 +94,7 @@ type handlers struct {
 // NewRouter 返回注册好全部路由的 http.Handler。路由与 hub-api.yaml 的 paths 逐条对应。
 func NewRouter(deps Deps) http.Handler {
 	h := &handlers{auth: deps.Auth, rbac: deps.RBAC, panels: deps.Panels, users: deps.Users, portalAuth: deps.PortalAuth, portal: deps.Portal,
-		settings: deps.Settings, mail: deps.Mail, account: deps.Account, content: deps.Content, tickets: deps.Tickets, wallet: deps.Wallet, shop: deps.Shop, cookie: deps.Cookie, trustedProxies: deps.TrustedProxies}
+		settings: deps.Settings, mail: deps.Mail, account: deps.Account, content: deps.Content, tickets: deps.Tickets, wallet: deps.Wallet, shop: deps.Shop, finance: deps.Finance, pay: deps.Pay, cookie: deps.Cookie, trustedProxies: deps.TrustedProxies}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", handleHealthz)
 	mux.HandleFunc("GET /readyz", newReadyzHandler(deps.Database, deps.PingTimeout))
@@ -159,6 +165,9 @@ func NewRouter(deps Deps) http.Handler {
 	mux.HandleFunc("DELETE /api/admin/coupons/{id}", h.requireAdmin(service.PermShopWrite, h.deleteCoupon))
 	mux.HandleFunc("GET /api/admin/orders", h.requireAdmin(service.PermFinanceRead, h.listOrders))
 	mux.HandleFunc("GET /api/admin/wallet-ledger", h.requireAdmin(service.PermFinanceRead, h.listWalletLedger))
+	mux.HandleFunc("GET /api/admin/payments", h.requireAdmin(service.PermFinanceRead, h.listPayments))
+	mux.HandleFunc("GET /api/admin/rebates", h.requireAdmin(service.PermFinanceRead, h.listRebates))
+	mux.HandleFunc("GET /api/admin/finance/stats", h.requireAdmin(service.PermFinanceRead, h.getFinanceStats))
 	mux.HandleFunc("GET /api/admin/topup-codes", h.requireAdmin(service.PermFinanceRead, h.listTopupCodes))
 	mux.HandleFunc("POST /api/admin/topup-codes", h.requireAdmin(service.PermFinanceWrite, h.createTopupCodes))
 	mux.HandleFunc("PUT /api/admin/topup-codes/{id}", h.requireAdmin(service.PermFinanceWrite, h.updateTopupCode))
@@ -245,6 +254,9 @@ func NewRouter(deps Deps) http.Handler {
 	mux.HandleFunc("POST /api/user/orders", h.requireUser(false, h.createOrder))
 	mux.HandleFunc("GET /api/user/wallet", h.requireUser(false, h.getWallet))
 	mux.HandleFunc("PUT /api/user/wallet/auto-renew", h.requireUser(false, h.setAutoRenew))
+	mux.HandleFunc("POST /api/user/wallet/payments", h.requireUser(false, h.createPayment))
+	// 支付网关回调：没有会话与 CSRF，真实性靠网关实现验签
+	mux.HandleFunc("POST /api/pay/notify/{gateway}", h.paymentNotify)
 	mux.HandleFunc("GET /api/user/wallet/ledger", h.requireUser(false, h.listOwnLedger))
 	mux.HandleFunc("POST /api/user/wallet/redeem", h.requireUser(false, h.redeemTopupCode))
 

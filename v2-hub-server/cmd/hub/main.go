@@ -29,6 +29,7 @@ import (
 	"v2-hub-server/internal/manager/mail"
 	"v2-hub-server/internal/manager/panel"
 	"v2-hub-server/internal/manager/panel/xui"
+	"v2-hub-server/internal/manager/pay"
 	"v2-hub-server/internal/service"
 )
 
@@ -147,6 +148,13 @@ func runServer(args []string) error {
 	users := service.NewUserService(pool, sealer, panels, service.UserConfig{Location: quotaLoc, Subscription: subCfg, Settings: settings}, nil)
 	account := service.NewAccountService(pool, sealer, service.AccountDeps{Settings: settings, Mail: mails, Users: users, Portal: portalAuth}, nil)
 	shop := service.NewShopService(pool, settings, users, mails, nil)
+	// M5 不带具体支付网关（Ruling-28）：注册表为空，在线充值入口不出现；接入网关时在这里注册，密钥走环境变量
+	gateways, err := pay.NewRegistry()
+	if err != nil {
+		return err
+	}
+	payments := service.NewPayService(pool, settings, gateways, nil)
+	go job.RunSessionCleanup(ctx, job.PurgeFunc(payments.ExpirePayments), cfg.Auth.SessionCleanupInterval)
 	// 用量任务每轮的“推进用户”换成商店的入口：先做到期的扣余额续费，再推进状态，最后发提醒邮件（docs/03 §5.16）
 	go job.RunUserSync(ctx, billingSyncer{UserService: users, shop: shop}, job.UserSyncConfig{
 		TrafficInterval: cfg.User.TrafficInterval, ReconcileInterval: cfg.User.ReconcileInterval, Concurrency: cfg.Panel.Concurrency,
@@ -172,6 +180,8 @@ func runServer(args []string) error {
 			Tickets:        service.NewTicketService(pool, settings, mails, nil),
 			Wallet:         service.NewWalletService(pool, sealer, settings, nil),
 			Shop:           shop,
+			Finance:        shop,
+			Pay:            payments,
 			Cookie:         api.CookieConfig{Secure: secureCookie},
 			TrustedProxies: trusted,
 		}),
