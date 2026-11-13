@@ -23,5 +23,5 @@ cd it && bash run_all.sh                           # 联调回归（会重置库
 ```
 
 - 变更纪律：提 PR；破坏性变更在 PR 描述列受影响目录并在同一 PR 改引用方（Ruling-3）。
-- 版本：git tag `vX.Y[.Z]`，当前 `v0.2`（M1：面板聚合、入站与节点；hub-api 0.2.4）。
+- 版本：git tag `vX.Y[.Z]`，当前 `v0.3`（M2：用户、套餐与下发；hub-api 0.2.5）。
 - SQL 由使用者手工执行（`reset_db.sh` 重置、`migrations/` 增量），模块不自动建表。
