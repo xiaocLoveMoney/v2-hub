@@ -17,10 +17,11 @@ start_module() {
   wait_port "$port" 30 || { echo "start_module: $dir 在 $port 端口 30s 未就绪, 日志 /tmp/it-$dir.log"; return 1; }
 }
 
-wait_port() {  # wait_port <端口> <秒>
+wait_port() {  # wait_port <端口> <秒>：IPv4 或 IPv6 回环任一可连即就绪（vite 按 localhost 解析，可能只监听 ::1）
   local port="$1" n="${2:-30}"
   for ((i=0; i<n; i++)); do
     (echo >/dev/tcp/127.0.0.1/"$port") 2>/dev/null && return 0
+    (echo >/dev/tcp/::1/"$port") 2>/dev/null && return 0
     sleep 1
   done
   return 1
