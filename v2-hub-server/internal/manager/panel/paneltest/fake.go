@@ -26,6 +26,7 @@ type Fake struct {
 	nextID    int
 	nextGroup int
 	failWith  error
+	core      fakeCore
 	// Calls 记录调用的方法名，便于断言。
 	Calls []string
 }
@@ -39,6 +40,7 @@ func New() *Fake {
 		creds:    make(map[string][2]string, 8),
 		online:   make(map[string]bool, 8),
 		nextID:   1,
+		core:     newFakeCore(),
 	}
 }
 
@@ -84,7 +86,7 @@ func (f *Fake) enter(method string) error {
 
 // Capabilities 实现 panel.Provider。
 func (f *Fake) Capabilities() panel.Capabilities {
-	return panel.Capabilities{OnlineClients: true, CoreType: panel.CoreXray, Endpoints: true, MultiInboundClients: true}
+	return panel.Capabilities{OnlineClients: true, CoreType: panel.CoreXray, Endpoints: true, MultiInboundClients: true, CoreConfig: true}
 }
 
 // Probe 实现 panel.Provider。

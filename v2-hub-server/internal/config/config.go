@@ -51,6 +51,10 @@ const (
 	defaultUserTrafficInterval   = time.Minute
 	defaultUserReconcileInterval = 5 * time.Minute
 	defaultUserTimeZone          = "Local"
+
+	// 服务端链式下发，语义见 docs/03 §5.19
+	defaultChainApplyInterval    = 30 * time.Second
+	defaultChainMinApplyInterval = 60 * time.Second
 )
 
 // ErrInvalidConfig 表示配置内容不合法。
@@ -64,8 +68,16 @@ type Config struct {
 	Panel    PanelConfig    `yaml:"panel"`
 	User     UserConfig     `yaml:"user"`
 	Portal   PortalConfig   `yaml:"portal"`
+	Chain    ChainConfig    `yaml:"chain"`
 	// Subscription 是订阅设置（docs/03 §5.4）；M4 起移入系统设置表。
 	Subscription SubscriptionConfig `yaml:"subscription"`
+}
+
+// ChainConfig 是服务端链式下发的节奏（docs/03 §5.19）：ApplyInterval 是后台检查间隔，
+// MinApplyInterval 是同一台服务器两次下发的最小间隔（每次下发都会重启该服务器的内核）。
+type ChainConfig struct {
+	ApplyInterval    time.Duration `yaml:"applyInterval"`
+	MinApplyInterval time.Duration `yaml:"minApplyInterval"`
 }
 
 // SubscriptionConfig 是订阅的系统级设置。
@@ -195,6 +207,9 @@ func defaults() Config {
 		TrafficInterval:   defaultUserTrafficInterval,
 		ReconcileInterval: defaultUserReconcileInterval,
 		TimeZone:          defaultUserTimeZone,
+	}, Chain: ChainConfig{
+		ApplyInterval:    defaultChainApplyInterval,
+		MinApplyInterval: defaultChainMinApplyInterval,
 	}, Portal: PortalConfig{
 		SessionIdleTimeout: defaultPortalSessionIdleTimeout,
 		SessionMaxAge:      defaultPortalSessionMaxAge,
@@ -234,6 +249,9 @@ func (c Config) validate() error {
 	}
 	if _, err := c.User.Location(); err != nil {
 		return err
+	}
+	if c.Chain.ApplyInterval <= 0 || c.Chain.MinApplyInterval <= 0 {
+		return fmt.Errorf("%w: chain intervals must be positive", ErrInvalidConfig)
 	}
 	po := c.Portal
 	if po.SessionIdleTimeout <= a.SessionTouchInterval || po.SessionMaxAge < po.SessionIdleTimeout || po.LoginLogRetention <= 0 {

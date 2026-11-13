@@ -32,6 +32,10 @@ user:
   trafficInterval: 1m
   reconcileInterval: 5m
   timeZone: Local
+# 服务端链式下发，语义见 docs/03 §5.19：后台检查间隔；同一台服务器两次下发的最小间隔（每次下发都会重启该服务器的 Xray）
+chain:
+  applyInterval: 30s
+  minApplyInterval: 60s
 # 终端用户会话，语义见 docs/03 §5.3；登录频控与 Cookie 的 Secure 沿用 auth 段
 portal:
   sessionIdleTimeout: 168h

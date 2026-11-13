@@ -161,6 +161,10 @@ func runServer(args []string) error {
 	})
 
 	go job.RunSessionCleanup(ctx, job.PurgeFunc(users.PurgeSubscribeLogs), cfg.Auth.SessionCleanupInterval)
+	chainCfg := service.DefaultChainApplyConfig()
+	chainCfg.MinInterval = cfg.Chain.MinApplyInterval
+	chainApplier := service.NewChainApplier(pool, sealer, users, panels, chainCfg, nil)
+	go job.RunChainApply(ctx, chainApplier, cfg.Chain.ApplyInterval)
 
 	srv := &http.Server{
 		Addr: cfg.Server.ListenAddr,
@@ -182,7 +186,8 @@ func runServer(args []string) error {
 			Shop:           shop,
 			Finance:        shop,
 			Pay:            payments,
-			Chain:          service.NewChainService(pool, sealer),
+			Chain:          service.NewChainService(pool, sealer, chainApplier),
+			ChainApply:     chainApplier,
 			Cookie:         api.CookieConfig{Secure: secureCookie},
 			TrustedProxies: trusted,
 		}),

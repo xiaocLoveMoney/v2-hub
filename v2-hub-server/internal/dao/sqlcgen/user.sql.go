@@ -76,8 +76,8 @@ func (q *Queries) CountUsers(ctx context.Context, arg CountUsersParams) (int64, 
 
 const createPlan = `-- name: CreatePlan :one
 INSERT INTO plan (name, traffic_limit, duration_days, start_on_first_use, limit_ip, traffic_reset, traffic_reset_day,
-                  allow_client_chain, allow_custom_node, remark, is_on_sale, is_trial, sort_order, description)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+                  allow_client_chain, allow_custom_node, remark, is_on_sale, is_trial, sort_order, description, allow_server_chain)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
 RETURNING id
 `
 
@@ -96,6 +96,7 @@ type CreatePlanParams struct {
 	IsTrial          bool
 	SortOrder        int32
 	Description      string
+	AllowServerChain bool
 }
 
 func (q *Queries) CreatePlan(ctx context.Context, arg CreatePlanParams) (int64, error) {
@@ -114,6 +115,7 @@ func (q *Queries) CreatePlan(ctx context.Context, arg CreatePlanParams) (int64, 
 		arg.IsTrial,
 		arg.SortOrder,
 		arg.Description,
+		arg.AllowServerChain,
 	)
 	var id int64
 	err := row.Scan(&id)
@@ -418,7 +420,7 @@ func (q *Queries) ListPlanPrices(ctx context.Context) ([]ListPlanPricesRow, erro
 const listPlans = `-- name: ListPlans :many
 
 SELECT p.id, p.name, p.traffic_limit, p.duration_days, p.start_on_first_use, p.limit_ip, p.traffic_reset, p.traffic_reset_day,
-       p.allow_client_chain, p.allow_custom_node, p.remark, p.is_on_sale, p.is_trial, p.sort_order, p.description, p.created_at,
+       p.allow_client_chain, p.allow_custom_node, p.allow_server_chain, p.remark, p.is_on_sale, p.is_trial, p.sort_order, p.description, p.created_at,
        COALESCE((SELECT array_agg(g.node_group_id ORDER BY g.node_group_id) FROM plan_node_group g WHERE g.plan_id = p.id), '{}')::bigint[] AS node_group_ids,
        (SELECT COUNT(*) FROM end_user u WHERE u.plan_id = p.id AND u.deleted_at IS NULL)::int AS user_count
 FROM plan p
@@ -436,6 +438,7 @@ type ListPlansRow struct {
 	TrafficResetDay  int32
 	AllowClientChain bool
 	AllowCustomNode  bool
+	AllowServerChain bool
 	Remark           string
 	IsOnSale         bool
 	IsTrial          bool
@@ -467,6 +470,7 @@ func (q *Queries) ListPlans(ctx context.Context) ([]ListPlansRow, error) {
 			&i.TrafficResetDay,
 			&i.AllowClientChain,
 			&i.AllowCustomNode,
+			&i.AllowServerChain,
 			&i.Remark,
 			&i.IsOnSale,
 			&i.IsTrial,
@@ -998,7 +1002,7 @@ func (q *Queries) TouchUserLastUsed(ctx context.Context, arg TouchUserLastUsedPa
 const updatePlan = `-- name: UpdatePlan :execrows
 UPDATE plan SET name = $2, traffic_limit = $3, duration_days = $4, start_on_first_use = $5, limit_ip = $6,
     traffic_reset = $7, traffic_reset_day = $8, allow_client_chain = $9, allow_custom_node = $10, remark = $11,
-    is_on_sale = $12, is_trial = $13, sort_order = $14, description = $15, updated_at = now()
+    is_on_sale = $12, is_trial = $13, sort_order = $14, description = $15, allow_server_chain = $16, updated_at = now()
 WHERE id = $1
 `
 
@@ -1018,6 +1022,7 @@ type UpdatePlanParams struct {
 	IsTrial          bool
 	SortOrder        int32
 	Description      string
+	AllowServerChain bool
 }
 
 func (q *Queries) UpdatePlan(ctx context.Context, arg UpdatePlanParams) (int64, error) {
@@ -1037,6 +1042,7 @@ func (q *Queries) UpdatePlan(ctx context.Context, arg UpdatePlanParams) (int64, 
 		arg.IsTrial,
 		arg.SortOrder,
 		arg.Description,
+		arg.AllowServerChain,
 	)
 	if err != nil {
 		return 0, err

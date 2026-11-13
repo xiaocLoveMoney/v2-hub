@@ -3,7 +3,8 @@
 REPO_ROOT := $(abspath ..)
 SQLC_IMAGE := sqlc/sqlc:1.31.1
 GOVULNCHECK_VERSION := v1.9.0
-CONFIG := etc/hub-server.yaml
+# 联调可传 CONFIG=另一份配置（如缩短下发间隔）
+CONFIG ?= etc/hub-server.yaml
 
 # 开发库连接串：未显式设置 HUB_DATABASE_URL 时，从契约目录的 deploy/.env（init_env.sh 生成）拼出。
 DEV_ENV_FILE := contract/deploy/.env

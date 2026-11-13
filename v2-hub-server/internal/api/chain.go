@@ -20,12 +20,16 @@ type ChainManager interface {
 	UpdateCustomNode(ctx context.Context, p *service.UserPrincipal, id int64, name, link string) (*service.CustomNode, error)
 	DeleteCustomNode(ctx context.Context, p *service.UserPrincipal, id int64) error
 	CustomNodeLink(ctx context.Context, p *service.UserPrincipal, id int64) (string, error)
+	CreateServerRule(ctx context.Context, p *service.UserPrincipal, in service.ServerChainRuleInput) (*service.ServerChainRule, error)
+	UpdateServerRule(ctx context.Context, p *service.UserPrincipal, id int64, enabled bool) (*service.ServerChainRule, error)
+	DeleteServerRule(ctx context.Context, p *service.UserPrincipal, id int64) error
 }
 
 // userFeaturesVO 对应 hub-api.yaml UserSession.features：当前套餐开了哪些功能，决定菜单显隐。
 type userFeaturesVO struct {
 	ClientChain bool `json:"clientChain"`
 	CustomNode  bool `json:"customNode"`
+	ServerChain bool `json:"serverChain"`
 }
 
 // sessionVO 组装会话信息并带上套餐的功能开关。开关读不到时按都未开返回并留痕：
@@ -37,17 +41,18 @@ func (h *handlers) sessionVO(r *http.Request, p *service.UserPrincipal) userSess
 		slog.Error("load chain features", "user_id", p.UserID, "err", err)
 		return vo
 	}
-	vo.Features = userFeaturesVO{ClientChain: flags.Chain, CustomNode: flags.CustomNode}
+	vo.Features = userFeaturesVO{ClientChain: flags.Chain, CustomNode: flags.CustomNode, ServerChain: flags.ServerChain}
 	return vo
 }
 
 // chainNodeOptionVO 对应 hub-api.yaml ChainNodeOption。
 type chainNodeOptionVO struct {
-	ID        int64  `json:"id"`
-	Name      string `json:"name"`
-	Region    string `json:"region"`
-	Protocol  string `json:"protocol"`
-	CanBeExit bool   `json:"canBeExit"`
+	ID               int64  `json:"id"`
+	Name             string `json:"name"`
+	Region           string `json:"region"`
+	Protocol         string `json:"protocol"`
+	CanBeExit        bool   `json:"canBeExit"`
+	CanBeServerEntry bool   `json:"canBeServerEntry"`
 }
 
 type chainEntryVO struct {
@@ -102,10 +107,13 @@ func toCustomNodeVO(n service.CustomNode) customNodeVO {
 type chainOverviewVO struct {
 	Allowed           bool                `json:"allowed"`
 	CustomNodeAllowed bool                `json:"customNodeAllowed"`
+	ServerAllowed     bool                `json:"serverAllowed"`
 	MaxRules          int                 `json:"maxRules"`
 	MaxCustomNodes    int                 `json:"maxCustomNodes"`
+	MaxServerRules    int                 `json:"maxServerRules"`
 	Rules             []chainRuleVO       `json:"rules"`
 	CustomNodes       []customNodeVO      `json:"customNodes"`
+	ServerRules       []serverChainRuleVO `json:"serverRules"`
 	Nodes             []chainNodeOptionVO `json:"nodes"`
 }
 
@@ -137,8 +145,10 @@ func (h *handlers) getChainOverview(w http.ResponseWriter, r *http.Request, p *s
 		return
 	}
 	vo := chainOverviewVO{
-		Allowed: o.Flags.Chain, CustomNodeAllowed: o.Flags.CustomNode, MaxRules: service.MaxChainRules, MaxCustomNodes: service.MaxCustomNodes,
-		Rules: make([]chainRuleVO, 0, len(o.Rules)), CustomNodes: make([]customNodeVO, 0, len(o.CustomNodes)), Nodes: make([]chainNodeOptionVO, 0, len(o.Nodes)),
+		Allowed: o.Flags.Chain, CustomNodeAllowed: o.Flags.CustomNode, ServerAllowed: o.Flags.ServerChain,
+		MaxRules: service.MaxChainRules, MaxCustomNodes: service.MaxCustomNodes, MaxServerRules: service.MaxServerChainRules,
+		Rules: make([]chainRuleVO, 0, len(o.Rules)), CustomNodes: make([]customNodeVO, 0, len(o.CustomNodes)),
+		ServerRules: mapSlice(o.ServerRules, toServerChainRuleVO), Nodes: make([]chainNodeOptionVO, 0, len(o.Nodes)),
 	}
 	for _, rule := range o.Rules {
 		vo.Rules = append(vo.Rules, toChainRuleVO(rule))
@@ -147,7 +157,9 @@ func (h *handlers) getChainOverview(w http.ResponseWriter, r *http.Request, p *s
 		vo.CustomNodes = append(vo.CustomNodes, toCustomNodeVO(n))
 	}
 	for _, n := range o.Nodes {
-		vo.Nodes = append(vo.Nodes, chainNodeOptionVO{ID: n.ID, Name: n.Name, Region: n.Region, Protocol: n.Protocol, CanBeExit: n.CanBeExit})
+		vo.Nodes = append(vo.Nodes, chainNodeOptionVO{
+			ID: n.ID, Name: n.Name, Region: n.Region, Protocol: n.Protocol, CanBeExit: n.CanBeExit, CanBeServerEntry: n.CanBeServerEntry,
+		})
 	}
 	writeOK(w, vo)
 }
