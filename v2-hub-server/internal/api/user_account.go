@@ -37,6 +37,8 @@ type siteInfoVO struct {
 	CheckinEnabled      bool   `json:"checkinEnabled"`
 	TicketEnabled       bool   `json:"ticketEnabled"`
 	SharedEnabled       bool   `json:"sharedEnabled"`
+	ShopEnabled         bool   `json:"shopEnabled"`
+	Currency            string `json:"currency"`
 }
 
 func (h *handlers) getSiteInfo(w http.ResponseWriter, r *http.Request) {
@@ -48,6 +50,7 @@ func (h *handlers) getSiteInfo(w http.ResponseWriter, r *http.Request) {
 	writeOK(w, siteInfoVO{
 		SiteName: info.SiteName, RegisterMode: info.RegisterMode, EmailVerifyRequired: info.EmailVerifyRequired, MailEnabled: info.MailEnabled,
 		CheckinEnabled: info.CheckinEnabled, TicketEnabled: info.TicketEnabled, SharedEnabled: info.SharedEnabled,
+		ShopEnabled: info.ShopEnabled, Currency: info.Currency,
 	})
 }
 

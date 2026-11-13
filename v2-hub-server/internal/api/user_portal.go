@@ -70,6 +70,8 @@ type dashboardVO struct {
 	// 0.3.0 起：最新一条公告与最新一条弹窗公告，没有为 null
 	Announcement      *announcementVO `json:"announcement"`
 	PopupAnnouncement *announcementVO `json:"popupAnnouncement"`
+	// 0.4.0 起：余额（分）
+	Balance int64 `json:"balance"`
 }
 
 func (h *handlers) getUserDashboard(w http.ResponseWriter, r *http.Request, p *service.UserPrincipal) {
@@ -87,7 +89,7 @@ func (h *handlers) getUserDashboard(w http.ResponseWriter, r *http.Request, p *s
 	writeOK(w, dashboardVO{
 		Announcement: optionalAnnouncementVO(latest), PopupAnnouncement: optionalAnnouncementVO(popup),
 		Status: d.Status, PlanName: d.PlanName, TrafficLimit: d.TrafficLimit, TrafficUsed: d.TrafficUsed, TrafficToday: d.TrafficToday,
-		ExpiresAt: d.ExpiresAt, PendingDays: d.PendingDays, LimitIP: d.LimitIP, OnlineDevices: &online, LastUsedAt: d.LastUsedAt, NodeCount: d.NodeCount,
+		ExpiresAt: d.ExpiresAt, PendingDays: d.PendingDays, LimitIP: d.LimitIP, OnlineDevices: &online, LastUsedAt: d.LastUsedAt, NodeCount: d.NodeCount, Balance: d.Balance,
 	})
 }
 

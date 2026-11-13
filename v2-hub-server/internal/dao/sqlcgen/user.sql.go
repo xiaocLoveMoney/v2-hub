@@ -75,8 +75,8 @@ func (q *Queries) CountUsers(ctx context.Context, arg CountUsersParams) (int64, 
 }
 
 const createPlan = `-- name: CreatePlan :one
-INSERT INTO plan (name, traffic_limit, duration_days, start_on_first_use, limit_ip, renew_every_days, renew_month_day,
-                  renew_weekday, renew_max, traffic_reset, traffic_reset_day, allow_client_chain, allow_custom_node, remark)
+INSERT INTO plan (name, traffic_limit, duration_days, start_on_first_use, limit_ip, traffic_reset, traffic_reset_day,
+                  allow_client_chain, allow_custom_node, remark, is_on_sale, is_trial, sort_order, description)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
 RETURNING id
 `
@@ -87,15 +87,15 @@ type CreatePlanParams struct {
 	DurationDays     int32
 	StartOnFirstUse  bool
 	LimitIp          int32
-	RenewEveryDays   int32
-	RenewMonthDay    int32
-	RenewWeekday     int32
-	RenewMax         int32
 	TrafficReset     string
 	TrafficResetDay  int32
 	AllowClientChain bool
 	AllowCustomNode  bool
 	Remark           string
+	IsOnSale         bool
+	IsTrial          bool
+	SortOrder        int32
+	Description      string
 }
 
 func (q *Queries) CreatePlan(ctx context.Context, arg CreatePlanParams) (int64, error) {
@@ -105,15 +105,15 @@ func (q *Queries) CreatePlan(ctx context.Context, arg CreatePlanParams) (int64, 
 		arg.DurationDays,
 		arg.StartOnFirstUse,
 		arg.LimitIp,
-		arg.RenewEveryDays,
-		arg.RenewMonthDay,
-		arg.RenewWeekday,
-		arg.RenewMax,
 		arg.TrafficReset,
 		arg.TrafficResetDay,
 		arg.AllowClientChain,
 		arg.AllowCustomNode,
 		arg.Remark,
+		arg.IsOnSale,
+		arg.IsTrial,
+		arg.SortOrder,
+		arg.Description,
 	)
 	var id int64
 	err := row.Scan(&id)
@@ -165,6 +165,20 @@ func (q *Queries) DeletePlan(ctx context.Context, id int64) (int64, error) {
 	return result.RowsAffected(), nil
 }
 
+const deletePlanPricesExcept = `-- name: DeletePlanPricesExcept :exec
+DELETE FROM plan_price WHERE plan_id = $1 AND NOT (duration_days = ANY($2::int[]))
+`
+
+type DeletePlanPricesExceptParams struct {
+	PlanID   int64
+	KeepDays []int32
+}
+
+func (q *Queries) DeletePlanPricesExcept(ctx context.Context, arg DeletePlanPricesExceptParams) error {
+	_, err := q.db.Exec(ctx, deletePlanPricesExcept, arg.PlanID, arg.KeepDays)
+	return err
+}
+
 const deleteProvision = `-- name: DeleteProvision :exec
 DELETE FROM provision WHERE user_id = $1 AND server_id = $2
 `
@@ -180,8 +194,7 @@ func (q *Queries) DeleteProvision(ctx context.Context, arg DeleteProvisionParams
 }
 
 const getPlan = `-- name: GetPlan :one
-SELECT id, name, traffic_limit, duration_days, start_on_first_use, limit_ip, renew_every_days, renew_month_day,
-       renew_weekday, renew_max, traffic_reset, traffic_reset_day
+SELECT id, name, traffic_limit, duration_days, start_on_first_use, limit_ip, traffic_reset, traffic_reset_day, is_on_sale, is_trial
 FROM plan WHERE id = $1
 `
 
@@ -192,12 +205,10 @@ type GetPlanRow struct {
 	DurationDays    int32
 	StartOnFirstUse bool
 	LimitIp         int32
-	RenewEveryDays  int32
-	RenewMonthDay   int32
-	RenewWeekday    int32
-	RenewMax        int32
 	TrafficReset    string
 	TrafficResetDay int32
+	IsOnSale        bool
+	IsTrial         bool
 }
 
 func (q *Queries) GetPlan(ctx context.Context, id int64) (GetPlanRow, error) {
@@ -210,12 +221,10 @@ func (q *Queries) GetPlan(ctx context.Context, id int64) (GetPlanRow, error) {
 		&i.DurationDays,
 		&i.StartOnFirstUse,
 		&i.LimitIp,
-		&i.RenewEveryDays,
-		&i.RenewMonthDay,
-		&i.RenewWeekday,
-		&i.RenewMax,
 		&i.TrafficReset,
 		&i.TrafficResetDay,
+		&i.IsOnSale,
+		&i.IsTrial,
 	)
 	return i, err
 }
@@ -369,11 +378,47 @@ func (q *Queries) ListDesiredClients(ctx context.Context, serverID int64) ([]Lis
 	return items, nil
 }
 
+const listPlanPrices = `-- name: ListPlanPrices :many
+SELECT id, plan_id, duration_days, price FROM plan_price ORDER BY plan_id, duration_days
+`
+
+type ListPlanPricesRow struct {
+	ID           int64
+	PlanID       int64
+	DurationDays int32
+	Price        int64
+}
+
+// 全部套餐的时长选项（docs/03 §5.12），按套餐、天数升序；套餐数量有限，一次取完在内存里归组
+func (q *Queries) ListPlanPrices(ctx context.Context) ([]ListPlanPricesRow, error) {
+	rows, err := q.db.Query(ctx, listPlanPrices)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListPlanPricesRow{}
+	for rows.Next() {
+		var i ListPlanPricesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.PlanID,
+			&i.DurationDays,
+			&i.Price,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listPlans = `-- name: ListPlans :many
 
-SELECT p.id, p.name, p.traffic_limit, p.duration_days, p.start_on_first_use, p.limit_ip, p.renew_every_days,
-       p.renew_month_day, p.renew_weekday, p.renew_max, p.traffic_reset, p.traffic_reset_day,
-       p.allow_client_chain, p.allow_custom_node, p.remark, p.created_at,
+SELECT p.id, p.name, p.traffic_limit, p.duration_days, p.start_on_first_use, p.limit_ip, p.traffic_reset, p.traffic_reset_day,
+       p.allow_client_chain, p.allow_custom_node, p.remark, p.is_on_sale, p.is_trial, p.sort_order, p.description, p.created_at,
        COALESCE((SELECT array_agg(g.node_group_id ORDER BY g.node_group_id) FROM plan_node_group g WHERE g.plan_id = p.id), '{}')::bigint[] AS node_group_ids,
        (SELECT COUNT(*) FROM end_user u WHERE u.plan_id = p.id AND u.deleted_at IS NULL)::int AS user_count
 FROM plan p
@@ -387,15 +432,15 @@ type ListPlansRow struct {
 	DurationDays     int32
 	StartOnFirstUse  bool
 	LimitIp          int32
-	RenewEveryDays   int32
-	RenewMonthDay    int32
-	RenewWeekday     int32
-	RenewMax         int32
 	TrafficReset     string
 	TrafficResetDay  int32
 	AllowClientChain bool
 	AllowCustomNode  bool
 	Remark           string
+	IsOnSale         bool
+	IsTrial          bool
+	SortOrder        int32
+	Description      string
 	CreatedAt        pgtype.Timestamptz
 	NodeGroupIds     []int64
 	UserCount        int32
@@ -418,15 +463,15 @@ func (q *Queries) ListPlans(ctx context.Context) ([]ListPlansRow, error) {
 			&i.DurationDays,
 			&i.StartOnFirstUse,
 			&i.LimitIp,
-			&i.RenewEveryDays,
-			&i.RenewMonthDay,
-			&i.RenewWeekday,
-			&i.RenewMax,
 			&i.TrafficReset,
 			&i.TrafficResetDay,
 			&i.AllowClientChain,
 			&i.AllowCustomNode,
 			&i.Remark,
+			&i.IsOnSale,
+			&i.IsTrial,
+			&i.SortOrder,
+			&i.Description,
 			&i.CreatedAt,
 			&i.NodeGroupIds,
 			&i.UserCount,
@@ -576,7 +621,7 @@ SELECT u.id, u.username, u.remark, u.plan_id, COALESCE(p.name, '')::text AS plan
        u.expires_at, u.pending_days, u.limit_ip, u.renew_every_days, u.renew_month_day, u.renew_weekday, u.renew_max,
        u.renew_count, u.traffic_reset, u.traffic_reset_day, u.is_disabled, u.status, u.created_at,
        (u.totp_secret_enc IS NOT NULL)::boolean AS totp_enabled, u.last_used_at,
-       u.email, (u.email_verified_at IS NOT NULL)::boolean AS is_email_verified, u.invited_by,
+       u.email, (u.email_verified_at IS NOT NULL)::boolean AS is_email_verified, u.invited_by, u.balance, u.auto_renew,
        COALESCE(iu.username, '')::text AS invited_by_username,
        (SELECT COUNT(*) FROM provision v WHERE v.user_id = u.id AND v.status = 'synced')::int AS synced_count,
        (SELECT COUNT(*) FROM provision v WHERE v.user_id = u.id AND v.status = 'pending')::int AS pending_count,
@@ -628,6 +673,8 @@ type ListUsersRow struct {
 	Email             pgtype.Text
 	IsEmailVerified   bool
 	InvitedBy         pgtype.Int8
+	Balance           int64
+	AutoRenew         bool
 	InvitedByUsername string
 	SyncedCount       int32
 	PendingCount      int32
@@ -676,6 +723,8 @@ func (q *Queries) ListUsers(ctx context.Context, arg ListUsersParams) ([]ListUse
 			&i.Email,
 			&i.IsEmailVerified,
 			&i.InvitedBy,
+			&i.Balance,
+			&i.AutoRenew,
 			&i.InvitedByUsername,
 			&i.SyncedCount,
 			&i.PendingCount,
@@ -948,8 +997,8 @@ func (q *Queries) TouchUserLastUsed(ctx context.Context, arg TouchUserLastUsedPa
 
 const updatePlan = `-- name: UpdatePlan :execrows
 UPDATE plan SET name = $2, traffic_limit = $3, duration_days = $4, start_on_first_use = $5, limit_ip = $6,
-    renew_every_days = $7, renew_month_day = $8, renew_weekday = $9, renew_max = $10, traffic_reset = $11,
-    traffic_reset_day = $12, allow_client_chain = $13, allow_custom_node = $14, remark = $15, updated_at = now()
+    traffic_reset = $7, traffic_reset_day = $8, allow_client_chain = $9, allow_custom_node = $10, remark = $11,
+    is_on_sale = $12, is_trial = $13, sort_order = $14, description = $15, updated_at = now()
 WHERE id = $1
 `
 
@@ -960,15 +1009,15 @@ type UpdatePlanParams struct {
 	DurationDays     int32
 	StartOnFirstUse  bool
 	LimitIp          int32
-	RenewEveryDays   int32
-	RenewMonthDay    int32
-	RenewWeekday     int32
-	RenewMax         int32
 	TrafficReset     string
 	TrafficResetDay  int32
 	AllowClientChain bool
 	AllowCustomNode  bool
 	Remark           string
+	IsOnSale         bool
+	IsTrial          bool
+	SortOrder        int32
+	Description      string
 }
 
 func (q *Queries) UpdatePlan(ctx context.Context, arg UpdatePlanParams) (int64, error) {
@@ -979,15 +1028,15 @@ func (q *Queries) UpdatePlan(ctx context.Context, arg UpdatePlanParams) (int64, 
 		arg.DurationDays,
 		arg.StartOnFirstUse,
 		arg.LimitIp,
-		arg.RenewEveryDays,
-		arg.RenewMonthDay,
-		arg.RenewWeekday,
-		arg.RenewMax,
 		arg.TrafficReset,
 		arg.TrafficResetDay,
 		arg.AllowClientChain,
 		arg.AllowCustomNode,
 		arg.Remark,
+		arg.IsOnSale,
+		arg.IsTrial,
+		arg.SortOrder,
+		arg.Description,
 	)
 	if err != nil {
 		return 0, err
@@ -1010,6 +1059,23 @@ func (q *Queries) UpdateUserRemark(ctx context.Context, arg UpdateUserRemarkPara
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const upsertPlanPrice = `-- name: UpsertPlanPrice :exec
+INSERT INTO plan_price (plan_id, duration_days, price) VALUES ($1, $2, $3)
+ON CONFLICT (plan_id, duration_days) DO UPDATE SET price = EXCLUDED.price
+`
+
+type UpsertPlanPriceParams struct {
+	PlanID       int64
+	DurationDays int32
+	Price        int64
+}
+
+// 按（套餐, 天数）定位：已有的只改价，保住 id（用户的自动续费与订单快照都引用它）
+func (q *Queries) UpsertPlanPrice(ctx context.Context, arg UpsertPlanPriceParams) error {
+	_, err := q.db.Exec(ctx, upsertPlanPrice, arg.PlanID, arg.DurationDays, arg.Price)
+	return err
 }
 
 const upsertProvision = `-- name: UpsertProvision :one

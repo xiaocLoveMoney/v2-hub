@@ -46,16 +46,40 @@ type planBody struct {
 	DurationDays     int     `json:"durationDays"`
 	StartOnFirstUse  bool    `json:"startOnFirstUse"`
 	LimitIP          int     `json:"limitIp"`
-	RenewEveryDays   int     `json:"renewEveryDays"`
-	RenewMonthDay    int     `json:"renewMonthDay"`
-	RenewWeekday     int     `json:"renewWeekday"`
-	RenewMax         int     `json:"renewMax"`
 	TrafficReset     string  `json:"trafficReset"`
 	TrafficResetDay  int     `json:"trafficResetDay"`
 	AllowClientChain bool    `json:"allowClientChain"`
 	AllowCustomNode  bool    `json:"allowCustomNode"`
 	Remark           string  `json:"remark"`
 	NodeGroupIDs     []int64 `json:"nodeGroupIds"`
+	IsOnSale         bool    `json:"isOnSale"`
+	IsTrial          bool    `json:"isTrial"`
+	SortOrder        int     `json:"sortOrder"`
+	Description      string  `json:"description"`
+}
+
+// planPriceBody 对应 hub-api.yaml PlanPriceInput；金额为整数分。
+type planPriceBody struct {
+	DurationDays int   `json:"durationDays"`
+	Price        int64 `json:"price"`
+}
+
+// planRequest 对应 hub-api.yaml PlanInput：prices 省略（nil）表示不改时长选项，给出则整体替换。
+type planRequest struct {
+	planBody
+	Prices *[]planPriceBody `json:"prices"`
+}
+
+func (r planRequest) input() service.PlanInput {
+	in := r.planBody.input()
+	if r.Prices == nil {
+		return in
+	}
+	in.Prices = make([]service.PlanPriceInput, 0, len(*r.Prices))
+	for _, p := range *r.Prices {
+		in.Prices = append(in.Prices, service.PlanPriceInput{DurationDays: p.DurationDays, Price: p.Price})
+	}
+	return in
 }
 
 // input 转成业务输入；trafficReset / trafficResetDay 省略时取契约默认值（never / 1）。
@@ -69,9 +93,9 @@ func (b planBody) input() service.PlanInput {
 	}
 	return service.PlanInput{
 		Name: b.Name, AllowClientChain: b.AllowClientChain, AllowCustomNode: b.AllowCustomNode, Remark: b.Remark, NodeGroupIDs: b.NodeGroupIDs,
+		OnSale: b.IsOnSale, Trial: b.IsTrial, SortOrder: b.SortOrder, Description: b.Description,
 		PlanQuota: service.PlanQuota{
 			TrafficLimit: b.TrafficLimit, DurationDays: b.DurationDays, StartOnFirstUse: b.StartOnFirstUse, LimitIP: b.LimitIP,
-			RenewEveryDays: b.RenewEveryDays, RenewMonthDay: b.RenewMonthDay, RenewWeekday: b.RenewWeekday, RenewMax: b.RenewMax,
 			TrafficReset: reset, TrafficResetDay: day,
 		},
 	}
@@ -80,9 +104,16 @@ func (b planBody) input() service.PlanInput {
 // planVO 对应 hub-api.yaml Plan。
 type planVO struct {
 	planBody
-	ID        int64     `json:"id"`
-	UserCount int       `json:"userCount"`
-	CreatedAt time.Time `json:"createdAt"`
+	ID        int64         `json:"id"`
+	UserCount int           `json:"userCount"`
+	CreatedAt time.Time     `json:"createdAt"`
+	Prices    []planPriceVO `json:"prices"`
+}
+
+// planPriceVO 对应 hub-api.yaml PlanPrice。
+type planPriceVO struct {
+	ID int64 `json:"id"`
+	planPriceBody
 }
 
 func toPlanVO(p service.Plan) planVO {
@@ -91,13 +122,17 @@ func toPlanVO(p service.Plan) planVO {
 	if groups == nil {
 		groups = []int64{}
 	}
+	prices := make([]planPriceVO, 0, len(p.SavedPrices))
+	for _, sp := range p.SavedPrices {
+		prices = append(prices, planPriceVO{ID: sp.ID, planPriceBody: planPriceBody{DurationDays: sp.DurationDays, Price: sp.Price}})
+	}
 	return planVO{
-		ID: p.ID, UserCount: p.UserCount, CreatedAt: p.CreatedAt,
+		ID: p.ID, UserCount: p.UserCount, CreatedAt: p.CreatedAt, Prices: prices,
 		planBody: planBody{
 			Name: p.Name, TrafficLimit: q.TrafficLimit, DurationDays: q.DurationDays, StartOnFirstUse: q.StartOnFirstUse, LimitIP: q.LimitIP,
-			RenewEveryDays: q.RenewEveryDays, RenewMonthDay: q.RenewMonthDay, RenewWeekday: q.RenewWeekday, RenewMax: q.RenewMax,
 			TrafficReset: q.TrafficReset, TrafficResetDay: q.TrafficResetDay, AllowClientChain: p.AllowClientChain,
 			AllowCustomNode: p.AllowCustomNode, Remark: p.Remark, NodeGroupIDs: groups,
+			IsOnSale: p.OnSale, IsTrial: p.Trial, SortOrder: p.SortOrder, Description: p.Description,
 		},
 	}
 }
@@ -144,6 +179,8 @@ type userVO struct {
 	IsEmailVerified   bool    `json:"isEmailVerified"`
 	InvitedBy         *int64  `json:"invitedBy"`
 	InvitedByUsername string  `json:"invitedByUsername"`
+	Balance           int64   `json:"balance"`
+	AutoRenew         bool    `json:"autoRenew"`
 }
 
 func toUserVO(u service.User) userVO {
@@ -152,6 +189,7 @@ func toUserVO(u service.User) userVO {
 		ID: u.ID, Username: u.Username, Remark: u.Remark, PlanID: u.PlanID, PlanName: u.PlanName, Status: u.Status,
 		IsDisabled: q.Disabled, RenewCount: q.RenewCount, CreatedAt: u.CreatedAt, TOTPEnabled: u.TOTPEnabled, LastUsedAt: u.LastUsedAt,
 		Email: optionalText(u.Email), IsEmailVerified: u.EmailVerified, InvitedBy: u.InvitedBy, InvitedByUsername: u.InvitedByUsername,
+		Balance: u.Balance, AutoRenew: u.AutoRenew,
 		Provisions: provisionCountsVO{Synced: u.Provisions.Synced, Pending: u.Provisions.Pending, Failed: u.Provisions.Failed},
 		quotaBody: quotaBody{
 			TrafficLimit: q.TrafficLimit, TrafficUsed: q.TrafficUsed, ExpiresAt: q.ExpiresAt, PendingDays: q.PendingDays, LimitIP: q.LimitIP,
@@ -183,7 +221,7 @@ func (h *handlers) listPlans(w http.ResponseWriter, r *http.Request, _ *service.
 }
 
 func (h *handlers) createPlan(w http.ResponseWriter, r *http.Request, p *service.AdminPrincipal) {
-	var req planBody
+	var req planRequest
 	if err := decodeJSON(w, r, &req); err != nil {
 		writeError(w, r, err)
 		return
@@ -202,7 +240,7 @@ func (h *handlers) updatePlan(w http.ResponseWriter, r *http.Request, p *service
 		writeError(w, r, err)
 		return
 	}
-	var req planBody
+	var req planRequest
 	if err := decodeJSON(w, r, &req); err != nil {
 		writeError(w, r, err)
 		return

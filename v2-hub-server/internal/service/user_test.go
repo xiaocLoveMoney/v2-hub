@@ -268,7 +268,6 @@ func TestPlanAndUserValidation(t *testing.T) {
 	ctx := context.Background()
 	bad := []PlanQuota{
 		{TrafficLimit: -1, TrafficReset: TrafficResetNever, TrafficResetDay: 1},
-		{RenewEveryDays: 30, RenewMonthDay: 1, TrafficReset: TrafficResetNever, TrafficResetDay: 1},
 		{TrafficReset: "yearly", TrafficResetDay: 1},
 		{TrafficReset: TrafficResetMonthly, TrafficResetDay: 32},
 	}

@@ -51,6 +51,17 @@ const (
 	maxSubIntervalHours = 168
 	maxLogRetentionDays = 365
 	maxEmailLen         = 254
+	maxRebatePercent    = 100
+	maxNotifyExpireDays = 30
+	maxNotifyTrafficPct = 50
+
+	defaultCurrency         = "CNY"
+	defaultNotifyExpireDays = 3
+	defaultNotifyTrafficPct = 10
+
+	// 返利方式（docs/03 §5.16）。
+	RebateFirst  = "first"
+	RebateAlways = "always"
 
 	ActionSettingUpdate = "setting.update"
 	targetSetting       = "setting"
@@ -74,13 +85,39 @@ type Settings struct {
 	Shared       SharedSettings
 	Mail         MailSettings
 	Subscription SubscriptionSettings
+	Shop         ShopSettings
+	Rebate       RebateSettings
+	Notify       NotifySettings
 }
 
-// SiteSettings 是站点名与时区。
+// SiteSettings 是站点名、时区与客户门户的对外地址。
 type SiteSettings struct {
 	Name     string
 	Timezone string
+	// PortalURL 是客户门户的对外地址，切换为用户身份时用；空串 = 与管理端同源（docs/03 §5.17）。
+	PortalURL string
 }
+
+// ShopSettings 是商店开关与显示币种（docs/03 §5.12）。
+type ShopSettings struct {
+	Enabled  bool
+	Currency string
+}
+
+// RebateSettings 是邀请返利（docs/03 §5.16）：Percent 为 0 即关闭。
+type RebateSettings struct {
+	Percent int
+	Mode    string
+}
+
+// NotifySettings 是到期与流量提醒邮件的阈值（docs/03 §5.16）：0 = 不提醒。
+type NotifySettings struct {
+	ExpireDays     int
+	TrafficPercent int
+}
+
+// shopCurrencies 是可选的显示币种；只影响前端显示，不做换算（Ruling-29）。
+var shopCurrencies = []string{"CNY", "USD", "EUR", "HKD", "JPY"}
 
 // RegisterSettings 是注册相关设置。
 type RegisterSettings struct {
@@ -240,6 +277,50 @@ var settingDefs = map[string]settingDef{
 			return decodeSetting(raw, validTimezone, func(v string) { s.Site.Timezone = v })
 		},
 	},
+	"site.portalUrl": {
+		get: func(s *Settings) any { return s.Site.PortalURL },
+		set: func(s *Settings, raw json.RawMessage) error {
+			return decodeSetting(raw, validBaseURL, func(v string) { s.Site.PortalURL = strings.TrimRight(v, "/") })
+		},
+	},
+	"shop.enabled": {
+		get: func(s *Settings) any { return s.Shop.Enabled },
+		set: func(s *Settings, raw json.RawMessage) error {
+			return decodeSetting(raw, nil, func(v bool) { s.Shop.Enabled = v })
+		},
+	},
+	"shop.currency": {
+		get: func(s *Settings) any { return s.Shop.Currency },
+		set: func(s *Settings, raw json.RawMessage) error {
+			ok := func(v string) bool { return slices.Contains(shopCurrencies, v) }
+			return decodeSetting(raw, ok, func(v string) { s.Shop.Currency = v })
+		},
+	},
+	"rebate.percent": {
+		get: func(s *Settings) any { return s.Rebate.Percent },
+		set: func(s *Settings, raw json.RawMessage) error {
+			return decodeSetting(raw, intBetween(0, maxRebatePercent), func(v int) { s.Rebate.Percent = v })
+		},
+	},
+	"rebate.mode": {
+		get: func(s *Settings) any { return s.Rebate.Mode },
+		set: func(s *Settings, raw json.RawMessage) error {
+			ok := func(v string) bool { return v == RebateFirst || v == RebateAlways }
+			return decodeSetting(raw, ok, func(v string) { s.Rebate.Mode = v })
+		},
+	},
+	"notify.expireDays": {
+		get: func(s *Settings) any { return s.Notify.ExpireDays },
+		set: func(s *Settings, raw json.RawMessage) error {
+			return decodeSetting(raw, intBetween(0, maxNotifyExpireDays), func(v int) { s.Notify.ExpireDays = v })
+		},
+	},
+	"notify.trafficPercent": {
+		get: func(s *Settings) any { return s.Notify.TrafficPercent },
+		set: func(s *Settings, raw json.RawMessage) error {
+			return decodeSetting(raw, intBetween(0, maxNotifyTrafficPct), func(v int) { s.Notify.TrafficPercent = v })
+		},
+	},
 	"register.mode": {
 		get: func(s *Settings) any { return s.Register.Mode },
 		set: func(s *Settings, raw json.RawMessage) error {
@@ -394,6 +475,9 @@ func defaultSettings(sub SubscriptionConfig) Settings {
 		Checkin:  CheckinSettings{MinMB: defaultCheckinMinMB, MaxMB: defaultCheckinMaxMB},
 		Ticket:   TicketSettings{Enabled: true},
 		Mail:     MailSettings{RatePerMinute: defaultMailRatePerMin},
+		Shop:     ShopSettings{Currency: defaultCurrency},
+		Rebate:   RebateSettings{Mode: RebateFirst},
+		Notify:   NotifySettings{ExpireDays: defaultNotifyExpireDays, TrafficPercent: defaultNotifyTrafficPct},
 		Subscription: SubscriptionSettings{
 			BaseURL: strings.TrimRight(sub.BaseURL, "/"), Title: title, UpdateIntervalHours: interval, InfoNodes: sub.InfoNodes, LogRetentionDays: retention,
 		},

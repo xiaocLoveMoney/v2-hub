@@ -106,6 +106,18 @@ func NewUserService(pool *pgxpool.Pool, sealer *crypto.Sealer, panels *PanelServ
 
 // ---- 套餐 ----------------------------------------------------------------------
 
+// PlanPriceInput 是一个时长选项的输入（docs/03 §5.12）：天数 + 价格（分）。
+type PlanPriceInput struct {
+	DurationDays int
+	Price        int64
+}
+
+// PlanPrice 是已保存的时长选项。
+type PlanPrice struct {
+	ID int64
+	PlanPriceInput
+}
+
 // PlanInput 是新建 / 修改套餐的输入。
 type PlanInput struct {
 	Name             string
@@ -114,14 +126,23 @@ type PlanInput struct {
 	AllowCustomNode  bool
 	Remark           string
 	NodeGroupIDs     []int64
+	// 售卖属性（docs/03 §5.12）
+	OnSale      bool
+	Trial       bool
+	SortOrder   int
+	Description string
+	// Prices 为 nil 表示不改时长选项；非 nil（含空切片）表示整体替换。
+	Prices []PlanPriceInput
 }
 
 // Plan 是套餐视图。
 type Plan struct {
 	ID int64
 	PlanInput
-	UserCount int
-	CreatedAt time.Time
+	// SavedPrices 是已保存的时长选项（带 id），按天数升序。
+	SavedPrices []PlanPrice
+	UserCount   int
+	CreatedAt   time.Time
 }
 
 func validateRenewal(everyDays, monthDay, weekday, maxTimes int) error {
@@ -148,10 +169,34 @@ func validatePlanQuota(p PlanQuota) error {
 	if p.TrafficLimit < 0 || p.DurationDays < 0 || p.DurationDays > maxDurationDays || p.LimitIP < 0 || p.LimitIP > maxLimitIP {
 		return newError(CodeInvalidArgument, "流量、时长或 IP 限制超出范围")
 	}
-	if err := validateRenewal(p.RenewEveryDays, p.RenewMonthDay, p.RenewWeekday, p.RenewMax); err != nil {
-		return err
-	}
 	return validateReset(p.TrafficReset, p.TrafficResetDay)
+}
+
+// validatePlanSale 校验售卖属性与时长选项：最多 6 个、天数不重复、价格在范围内。
+func validatePlanSale(in PlanInput) error {
+	if in.SortOrder < 0 || in.SortOrder > maxSortOrder {
+		return newError(CodeInvalidArgument, msgBadSortOrder)
+	}
+	if utf8.RuneCountInString(in.Description) > maxPlanDescriptionLen {
+		return newError(CodeInvalidArgument, fmt.Sprintf("卖点说明不能超过 %d 个字符", maxPlanDescriptionLen))
+	}
+	if len(in.Prices) > maxPlanPrices {
+		return newError(CodeInvalidArgument, fmt.Sprintf("时长选项最多 %d 个", maxPlanPrices))
+	}
+	seen := make(map[int]struct{}, len(in.Prices))
+	for _, p := range in.Prices {
+		if p.DurationDays < minPriceDays || p.DurationDays > maxPriceDays {
+			return newError(CodeInvalidArgument, fmt.Sprintf("时长选项的天数须为 %d–%d", minPriceDays, maxPriceDays))
+		}
+		if p.Price < 0 || p.Price > maxMoney {
+			return newError(CodeInvalidArgument, msgBadMoney)
+		}
+		if _, dup := seen[p.DurationDays]; dup {
+			return newError(CodeInvalidArgument, "时长选项的天数不能重复")
+		}
+		seen[p.DurationDays] = struct{}{}
+	}
+	return nil
 }
 
 func (s *UserService) validatePlanInput(ctx context.Context, q *sqlcgen.Queries, in PlanInput) (PlanInput, error) {
@@ -163,6 +208,10 @@ func (s *UserService) validatePlanInput(ctx context.Context, q *sqlcgen.Queries,
 		return in, newError(CodeInvalidArgument, "备注过长")
 	}
 	if err := validatePlanQuota(in.PlanQuota); err != nil {
+		return in, err
+	}
+	in.Description = strings.TrimSpace(in.Description)
+	if err := validatePlanSale(in); err != nil {
 		return in, err
 	}
 	in.NodeGroupIDs = dedupeIDs(in.NodeGroupIDs)
@@ -196,26 +245,37 @@ func planFromRow(r sqlcgen.ListPlansRow) Plan {
 		ID: r.ID,
 		PlanInput: PlanInput{
 			Name: r.Name, AllowClientChain: r.AllowClientChain, AllowCustomNode: r.AllowCustomNode, Remark: r.Remark,
-			NodeGroupIDs: r.NodeGroupIds,
+			NodeGroupIDs: r.NodeGroupIds, OnSale: r.IsOnSale, Trial: r.IsTrial, SortOrder: int(r.SortOrder), Description: r.Description,
 			PlanQuota: PlanQuota{
 				TrafficLimit: r.TrafficLimit, DurationDays: int(r.DurationDays), StartOnFirstUse: r.StartOnFirstUse,
-				LimitIP: int(r.LimitIp), RenewEveryDays: int(r.RenewEveryDays), RenewMonthDay: int(r.RenewMonthDay),
-				RenewWeekday: int(r.RenewWeekday), RenewMax: int(r.RenewMax), TrafficReset: r.TrafficReset, TrafficResetDay: int(r.TrafficResetDay),
+				LimitIP: int(r.LimitIp), TrafficReset: r.TrafficReset, TrafficResetDay: int(r.TrafficResetDay),
 			},
 		},
-		UserCount: int(r.UserCount), CreatedAt: r.CreatedAt.Time,
+		SavedPrices: []PlanPrice{}, UserCount: int(r.UserCount), CreatedAt: r.CreatedAt.Time,
 	}
 }
 
-// ListPlans 返回全部套餐。
+// ListPlans 返回全部套餐，各带自己的时长选项。
 func (s *UserService) ListPlans(ctx context.Context) ([]Plan, error) {
 	rows, err := s.q.ListPlans(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("list plans: %w", err)
 	}
+	prices, err := s.q.ListPlanPrices(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list plan prices: %w", err)
+	}
+	byPlan := make(map[int64][]PlanPrice, len(rows))
+	for _, p := range prices {
+		byPlan[p.PlanID] = append(byPlan[p.PlanID], PlanPrice{ID: p.ID, PlanPriceInput: PlanPriceInput{DurationDays: int(p.DurationDays), Price: p.Price}})
+	}
 	out := make([]Plan, 0, len(rows))
 	for _, r := range rows {
-		out = append(out, planFromRow(r))
+		plan := planFromRow(r)
+		if saved, ok := byPlan[r.ID]; ok {
+			plan.SavedPrices = saved
+		}
+		out = append(out, plan)
 	}
 	return out, nil
 }
@@ -237,10 +297,28 @@ func planParams(in PlanInput) sqlcgen.CreatePlanParams {
 	p := in.PlanQuota
 	return sqlcgen.CreatePlanParams{
 		Name: in.Name, TrafficLimit: p.TrafficLimit, DurationDays: int32(p.DurationDays), StartOnFirstUse: p.StartOnFirstUse,
-		LimitIp: int32(p.LimitIP), RenewEveryDays: int32(p.RenewEveryDays), RenewMonthDay: int32(p.RenewMonthDay),
-		RenewWeekday: int32(p.RenewWeekday), RenewMax: int32(p.RenewMax), TrafficReset: p.TrafficReset, TrafficResetDay: int32(p.TrafficResetDay),
+		LimitIp: int32(p.LimitIP), TrafficReset: p.TrafficReset, TrafficResetDay: int32(p.TrafficResetDay),
 		AllowClientChain: in.AllowClientChain, AllowCustomNode: in.AllowCustomNode, Remark: in.Remark,
+		IsOnSale: in.OnSale, IsTrial: in.Trial, SortOrder: int32(in.SortOrder), Description: in.Description,
 	}
+}
+
+// setPlanPrices 整体替换套餐的时长选项：留下的按（套餐, 天数）原地改价、保住 id，不在新清单里的删除。prices 为 nil 时不动。
+func setPlanPrices(ctx context.Context, q *sqlcgen.Queries, planID int64, prices []PlanPriceInput) error {
+	if prices == nil {
+		return nil
+	}
+	keep := make([]int32, 0, len(prices))
+	for _, p := range prices {
+		if err := q.UpsertPlanPrice(ctx, sqlcgen.UpsertPlanPriceParams{PlanID: planID, DurationDays: int32(p.DurationDays), Price: p.Price}); err != nil {
+			return fmt.Errorf("upsert plan %d price for %d days: %w", planID, p.DurationDays, err)
+		}
+		keep = append(keep, int32(p.DurationDays))
+	}
+	if err := q.DeletePlanPricesExcept(ctx, sqlcgen.DeletePlanPricesExceptParams{PlanID: planID, KeepDays: keep}); err != nil {
+		return fmt.Errorf("prune plan %d prices: %w", planID, err)
+	}
+	return nil
 }
 
 func setPlanGroups(ctx context.Context, q *sqlcgen.Queries, planID int64, groups []int64) error {
@@ -270,6 +348,9 @@ func (s *UserService) CreatePlan(ctx context.Context, actor *AdminPrincipal, in 
 		if err := setPlanGroups(ctx, q, id, v.NodeGroupIDs); err != nil {
 			return err
 		}
+		if err := setPlanPrices(ctx, q, id, v.Prices); err != nil {
+			return err
+		}
 		return writeAudit(ctx, q, AuditEntry{ActorType: ActorAdmin, ActorID: actor.AdminID, Action: ActionPlanCreate, TargetType: targetPlan,
 			TargetID: fmt.Sprint(id), ClientIP: ip, Detail: map[string]any{"name": v.Name}})
 	})
@@ -289,9 +370,9 @@ func (s *UserService) UpdatePlan(ctx context.Context, actor *AdminPrincipal, id 
 		p := planParams(v)
 		n, err := q.UpdatePlan(ctx, sqlcgen.UpdatePlanParams{
 			ID: id, Name: p.Name, TrafficLimit: p.TrafficLimit, DurationDays: p.DurationDays, StartOnFirstUse: p.StartOnFirstUse,
-			LimitIp: p.LimitIp, RenewEveryDays: p.RenewEveryDays, RenewMonthDay: p.RenewMonthDay, RenewWeekday: p.RenewWeekday,
-			RenewMax: p.RenewMax, TrafficReset: p.TrafficReset, TrafficResetDay: p.TrafficResetDay,
+			LimitIp: p.LimitIp, TrafficReset: p.TrafficReset, TrafficResetDay: p.TrafficResetDay,
 			AllowClientChain: p.AllowClientChain, AllowCustomNode: p.AllowCustomNode, Remark: p.Remark,
+			IsOnSale: p.IsOnSale, IsTrial: p.IsTrial, SortOrder: p.SortOrder, Description: p.Description,
 		})
 		if err != nil {
 			if isUniqueViolation(err) {
@@ -303,6 +384,9 @@ func (s *UserService) UpdatePlan(ctx context.Context, actor *AdminPrincipal, id 
 			return newError(CodeNotFound, msgPlanNotFound)
 		}
 		if err := setPlanGroups(ctx, q, id, v.NodeGroupIDs); err != nil {
+			return err
+		}
+		if err := setPlanPrices(ctx, q, id, v.Prices); err != nil {
 			return err
 		}
 		return writeAudit(ctx, q, AuditEntry{ActorType: ActorAdmin, ActorID: actor.AdminID, Action: ActionPlanUpdate, TargetType: targetPlan,
@@ -361,6 +445,9 @@ type User struct {
 	EmailVerified     bool
 	InvitedBy         *int64
 	InvitedByUsername string
+	// Balance 是余额（分）；AutoRenew 表示开了扣余额自动续费（docs/03 §5.14、§5.16）。
+	Balance   int64
+	AutoRenew bool
 }
 
 // UserFilter 是用户列表的筛选条件。
@@ -450,8 +537,7 @@ func saveQuota(ctx context.Context, q *sqlcgen.Queries, id int64, planID pgtype.
 func planQuotaFromRow(p sqlcgen.GetPlanRow) PlanQuota {
 	return PlanQuota{
 		TrafficLimit: p.TrafficLimit, DurationDays: int(p.DurationDays), StartOnFirstUse: p.StartOnFirstUse, LimitIP: int(p.LimitIp),
-		RenewEveryDays: int(p.RenewEveryDays), RenewMonthDay: int(p.RenewMonthDay), RenewWeekday: int(p.RenewWeekday),
-		RenewMax: int(p.RenewMax), TrafficReset: p.TrafficReset, TrafficResetDay: int(p.TrafficResetDay),
+		TrafficReset: p.TrafficReset, TrafficResetDay: int(p.TrafficResetDay),
 	}
 }
 
@@ -635,6 +721,7 @@ func userFromRow(r sqlcgen.ListUsersRow) User {
 		Provisions:  ProvisionCounts{Synced: int(r.SyncedCount), Pending: int(r.PendingCount), Failed: int(r.FailedCount)},
 		TOTPEnabled: r.TotpEnabled, LastUsedAt: timePtr(r.LastUsedAt),
 		Email: r.Email.String, EmailVerified: r.IsEmailVerified, InvitedByUsername: r.InvitedByUsername,
+		Balance: r.Balance, AutoRenew: r.AutoRenew,
 	}
 	if r.InvitedBy.Valid {
 		id := r.InvitedBy.Int64
@@ -910,6 +997,10 @@ func (s *UserService) deleteUser(ctx context.Context, id int64, audit AuditEntry
 		var err error
 		if servers, err = q.ListUserServerIDs(ctx, id); err != nil {
 			return fmt.Errorf("list servers of user %d: %w", id, err)
+		}
+		// 剩余余额作废并留一条流水，之后订单与流水保留、user_id 置空（Ruling-32）
+		if err := forfeitBalance(ctx, q, id, s.now()); err != nil {
+			return err
 		}
 		n, err := q.MarkUserDeleted(ctx, id)
 		if err != nil {
