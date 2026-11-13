@@ -14,12 +14,17 @@ const (
 	PermServerWrite = "server:write"
 	PermNodeRead    = "node:read"
 	PermNodeWrite   = "node:write"
+	PermUserRead    = "user:read"
+	PermUserWrite   = "user:write"
+	PermPlanRead    = "plan:read"
+	PermPlanWrite   = "plan:write"
 )
 
 // AllPermissions 是全部权限码，super_admin 隐式拥有（docs/03 §4）。
 var AllPermissions = []string{
 	PermAdminRead, PermAdminWrite, PermAuditRead,
 	PermServerRead, PermServerWrite, PermNodeRead, PermNodeWrite,
+	PermUserRead, PermUserWrite, PermPlanRead, PermPlanWrite,
 }
 
 // RoleSuperAdmin 是内置超级管理员角色 code。

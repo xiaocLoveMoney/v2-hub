@@ -132,8 +132,29 @@ type EndpointMove struct {
 	NewGroupRef string
 }
 
+// ClientSpec 是平台期望的一个面板 client（docs/03 §5.2 下发）。凭据各协议共用：UUID 给 vless / vmess，
+// Auth 给 trojan、hysteria 与 shadowsocks（SS2022 由面板派生合法密钥）。面板上不设额度与到期。
+type ClientSpec struct {
+	Email       string
+	UUID        string
+	Auth        string
+	LimitIP     int
+	Enabled     bool
+	InboundRefs []string
+}
+
+// Client 是面板上一个 client 的现状；Up / Down 是面板累计的流量计数（字节）。
+type Client struct {
+	Email       string
+	Enabled     bool
+	LimitIP     int
+	InboundRefs []string
+	Up          int64
+	Down        int64
+}
+
 // Provider 是一台面板的操作集合。实现必须并发安全。
-// M1 覆盖探测、入站与对外地址；client 相关方法在 M2 加入。
+// M1 覆盖探测、入站与对外地址；M2 加入 client 下发与流量。
 type Provider interface {
 	Capabilities() Capabilities
 	Probe(ctx context.Context) (PanelInfo, error)
@@ -154,6 +175,18 @@ type Provider interface {
 	// RemoveEndpoint 只删除 key 指定的一个地址，同组其它地址保留（docs/03 §5.1 删除对外地址）。
 	// 组或地址已不存在时返回 ErrNotFound；组被拆分时返回换到新组的地址。
 	RemoveEndpoint(ctx context.Context, key EndpointKey) ([]EndpointMove, error)
+
+	// ListClients 返回面板上全部 client 及其累计流量。
+	ListClients(ctx context.Context) ([]Client, error)
+	// AddClient 新建 client 并挂到 spec.InboundRefs。
+	AddClient(ctx context.Context, spec ClientSpec) error
+	// UpdateClient 修改 client 的启停与 IP 限制，凭据与挂载不变。
+	UpdateClient(ctx context.Context, spec ClientSpec) error
+	AttachClient(ctx context.Context, email string, inboundRefs []string) error
+	DetachClient(ctx context.Context, email string, inboundRefs []string) error
+	// SetClientsEnabled 批量启停（3x-ui 禁用 client 会重启 Xray，调用方应合并成一批）。
+	SetClientsEnabled(ctx context.Context, emails []string, enabled bool) error
+	DeleteClient(ctx context.Context, email string) error
 }
 
 // ErrorKind 是面板错误的分类，service 层据此决定状态转移（docs/03 T2、T3）与对外错误码。

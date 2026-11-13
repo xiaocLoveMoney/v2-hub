@@ -24,13 +24,15 @@ type fakePanel struct {
 	mu        sync.Mutex
 	inbounds  map[int64]map[string]any
 	hosts     []map[string]any // Host 组对象，形状同 /hosts/get
+	clients   map[string]map[string]any
+	lastBody  map[string]any
 	nextID    int64
 	nextGroup int
 	status    int // 非 0 时所有请求返回该状态码
 }
 
 func newFakePanel() *fakePanel {
-	return &fakePanel{inbounds: map[int64]map[string]any{}, nextID: 1}
+	return &fakePanel{inbounds: map[int64]map[string]any{}, clients: map[string]map[string]any{}, nextID: 1}
 }
 
 func (f *fakePanel) reply(w http.ResponseWriter, success bool, msg string, obj any) {
@@ -66,6 +68,49 @@ func (f *fakePanel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case path == "/server/status":
 		f.reply(w, true, "", map[string]any{"panelVersion": "3.11.0", "panelGuid": "guid-1", "cpu": 3.2, "publicIP": map[string]any{"ipv4": "203.0.113.1"}})
+	case path == "/clients/list":
+		rows := make([]map[string]any, 0, len(f.clients))
+		for _, c := range f.clients {
+			rows = append(rows, c)
+		}
+		f.reply(w, true, "", rows)
+	case path == "/clients/add":
+		f.lastBody = body
+		cl := body["client"].(map[string]any)
+		cl["inboundIds"] = body["inboundIds"]
+		cl["traffic"] = map[string]any{"up": 0, "down": 0}
+		f.clients[cl["email"].(string)] = cl
+		f.reply(w, true, "Inbound client(s) have been added.", nil)
+	case strings.HasPrefix(path, "/clients/update/"):
+		cl := f.clients[strings.TrimPrefix(path, "/clients/update/")]
+		cl["limitIp"], cl["enable"] = body["limitIp"], body["enable"]
+		f.reply(w, true, "", nil)
+	case strings.HasPrefix(path, "/clients/del/"):
+		email := strings.TrimPrefix(path, "/clients/del/")
+		if _, ok := f.clients[email]; !ok {
+			f.reply(w, false, "client not found", nil)
+			return
+		}
+		delete(f.clients, email)
+		f.reply(w, true, "", nil)
+	case path == "/clients/bulkEnable", path == "/clients/bulkDisable":
+		for _, e := range body["emails"].([]any) {
+			f.clients[e.(string)]["enable"] = path == "/clients/bulkEnable"
+		}
+		f.reply(w, true, "", nil)
+	case strings.HasSuffix(path, "/attach"), strings.HasSuffix(path, "/detach"):
+		parts := strings.Split(strings.TrimPrefix(path, "/clients/"), "/")
+		cl := f.clients[parts[0]]
+		cur := cl["inboundIds"].([]any)
+		for _, id := range body["inboundIds"].([]any) {
+			if parts[1] == "attach" {
+				cur = append(cur, id)
+				continue
+			}
+			cur = slices.DeleteFunc(cur, func(x any) bool { return x == id })
+		}
+		cl["inboundIds"] = cur
+		f.reply(w, true, "", nil)
 	case path == "/server/getNewX25519Cert":
 		f.reply(w, true, "", map[string]any{"privateKey": "NEW-PRIV", "publicKey": "NEW-PUB"})
 	case path == "/inbounds/list":
@@ -404,6 +449,55 @@ func TestInboundConfigAndKeys(t *testing.T) {
 	}
 	if _, err := c.GenerateKeys(ctx, panel.KeyKind("rsa")); !errors.Is(err, panel.ErrRejected) {
 		t.Fatalf("unknown kind err = %v", err)
+	}
+}
+
+// TestClientOps 覆盖 M2 下发用到的 client 操作：新建时额度与到期为 0、凭据各协议共用、挂载 / 启停 / 删除。
+func TestClientOps(t *testing.T) {
+	fp := newFakePanel()
+	c, _ := newTestClient(t, fp, testToken)
+	ctx := context.Background()
+	spec := panel.ClientSpec{Email: "u1-abc123", UUID: "uuid-1", Auth: "sec-1", LimitIP: 2, Enabled: true, InboundRefs: []string{"1", "2"}}
+	if err := c.AddClient(ctx, spec); err != nil {
+		t.Fatalf("AddClient: %v", err)
+	}
+	sent := fp.lastBody["client"].(map[string]any)
+	if sent["totalGB"] != float64(0) || sent["expiryTime"] != float64(0) || sent["id"] != "uuid-1" || sent["password"] != "sec-1" || sent["auth"] != "sec-1" {
+		t.Fatalf("add body = %v", sent)
+	}
+	if err := c.AttachClient(ctx, spec.Email, []string{"3"}); err != nil {
+		t.Fatalf("AttachClient: %v", err)
+	}
+	if err := c.DetachClient(ctx, spec.Email, []string{"1"}); err != nil {
+		t.Fatalf("DetachClient: %v", err)
+	}
+	if err := c.SetClientsEnabled(ctx, []string{spec.Email}, false); err != nil {
+		t.Fatalf("SetClientsEnabled: %v", err)
+	}
+	spec.LimitIP = 5
+	spec.Enabled = false
+	if err := c.UpdateClient(ctx, spec); err != nil {
+		t.Fatalf("UpdateClient: %v", err)
+	}
+	fp.mu.Lock()
+	fp.clients[spec.Email]["traffic"] = map[string]any{"up": 100, "down": 250}
+	fp.mu.Unlock()
+	list, err := c.ListClients(ctx)
+	if err != nil || len(list) != 1 {
+		t.Fatalf("ListClients = %+v, %v", list, err)
+	}
+	got := list[0]
+	if got.Enabled || got.LimitIP != 5 || got.Up != 100 || got.Down != 250 || strings.Join(got.InboundRefs, ",") != "2,3" {
+		t.Fatalf("client = %+v", got)
+	}
+	if err := c.DeleteClient(ctx, spec.Email); err != nil {
+		t.Fatalf("DeleteClient: %v", err)
+	}
+	if err := c.DeleteClient(ctx, spec.Email); !errors.Is(err, panel.ErrRejected) {
+		t.Fatalf("delete twice err = %v", err)
+	}
+	if err := c.AddClient(ctx, panel.ClientSpec{Email: "x", InboundRefs: []string{"bad"}}); !errors.Is(err, panel.ErrRejected) {
+		t.Fatalf("bad ref err = %v", err)
 	}
 }
 
