@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: v2-hub API
-  version: 0.2.7
+  version: 0.3.0
   description: |
     v2-hub 对外接口契约（hub-server 提供，v2-hub-admin-web / v2-hub-user-web 消费）。
     - 管理端接口前缀 /api/admin，客户端接口前缀 /api/user，订阅端点前缀 /sub。
@@ -33,8 +33,16 @@ tags:
     description: 服务器（server:*）、入站与节点（node:*），docs/03 §5.1
   - name: admin-users
     description: 套餐（plan:*）与用户（user:*），docs/03 §5.2
+  - name: admin-settings
+    description: 系统设置与发件箱（setting:*），docs/03 §5.6、§5.7
+  - name: admin-content
+    description: 公告、教程与共享账号（content:*），docs/03 §5.9
+  - name: admin-tickets
+    description: 工单（ticket:*），docs/03 §5.10
   - name: user-auth
     description: 终端用户登录、登出、当前会话、口令与两步验证（docs/03 §5.3）
+  - name: user-account
+    description: 账号自助：邮箱绑定、注销、邀请码（docs/03 §5.8）
   - name: user-portal
     description: 客户后台数据：仪表盘、用量、节点、订阅地址、登录与订阅记录（docs/03 §5.4、§5.5）；身份只取自会话（R8）
   - name: subscription
@@ -1348,6 +1356,579 @@ paths:
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "403": { $ref: "#/components/responses/PermissionDenied" }
 
+  /api/admin/settings:
+    get:
+      tags: [admin-settings]
+      operationId: getSettings
+      summary: 全部系统设置（setting:read）
+      responses:
+        "200":
+          description: 全部系统设置
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/Settings" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+    put:
+      tags: [admin-settings]
+      operationId: updateSettings
+      summary: 修改系统设置：只改请求里出现的键，任一项不合法则整体不保存（setting:write）
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SettingsInput" }
+      responses:
+        "200":
+          description: 修改系统设置：只改请求里出现的键，任一项不合法则整体不保存
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/Settings" }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+  /api/admin/settings/test-mail:
+    post:
+      tags: [admin-settings]
+      operationId: sendTestMail
+      summary: 向指定地址发一封测试邮件并返回 SMTP 结果（setting:write）
+      description: |
+        邮件未配置时返回 403 feature_disabled。
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TestMailInput" }
+      responses:
+        "200": { $ref: "#/components/responses/Ok" }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "502": { $ref: "#/components/responses/UpstreamUnavailable" }
+  /api/admin/mail-outbox:
+    get:
+      tags: [admin-settings]
+      operationId: listMailOutbox
+      summary: 发件箱记录分页，按时间倒序；不含正文（setting:read）
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+        - { name: status, in: query, schema: { $ref: "#/components/schemas/MailStatus" } }
+      responses:
+        "200":
+          description: 发件箱记录分页，按时间倒序；不含正文
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/MailOutboxPage" }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+  /api/admin/invite-codes:
+    get:
+      tags: [admin-users]
+      operationId: listInviteCodes
+      summary: 邀请码分页（user:read）
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+        - { name: kind, in: query, description: 省略为全部, schema: { type: string, enum: [admin, user] } }
+      responses:
+        "200":
+          description: 邀请码分页
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/InviteCodePage" }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+    post:
+      tags: [admin-users]
+      operationId: createInviteCode
+      summary: 新建管理员邀请码，码由服务端生成（user:write）
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/InviteCodeInput" }
+      responses:
+        "200":
+          description: 新建管理员邀请码，码由服务端生成
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/InviteCode" }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+  /api/admin/invite-codes/{id}:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    put:
+      tags: [admin-users]
+      operationId: updateInviteCode
+      summary: 修改邀请码的次数、到期、备注与停用（个人码只能停用 / 启用；user:write）
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/InviteCodeInput" }
+      responses:
+        "200":
+          description: 修改邀请码的次数、到期、备注与停用
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/InviteCode" }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      tags: [admin-users]
+      operationId: deleteInviteCode
+      summary: 删除管理员邀请码（个人码不可删，返回 409；user:write）
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      responses:
+        "200": { $ref: "#/components/responses/Ok" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /api/admin/announcements:
+    get:
+      tags: [admin-content]
+      operationId: listAnnouncements
+      summary: 公告分页，含草稿（content:read）
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+      responses:
+        "200":
+          description: 公告分页，含草稿
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/AnnouncementPage" }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+    post:
+      tags: [admin-content]
+      operationId: createAnnouncement
+      summary: 新建公告（content:write）
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AnnouncementInput" }
+      responses:
+        "200":
+          description: 新建公告
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/Announcement" }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+  /api/admin/announcements/{id}:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    put:
+      tags: [admin-content]
+      operationId: updateAnnouncement
+      summary: 修改公告（content:write）
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AnnouncementInput" }
+      responses:
+        "200":
+          description: 修改公告
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/Announcement" }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      tags: [admin-content]
+      operationId: deleteAnnouncement
+      summary: 删除公告（content:write）
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      responses:
+        "200": { $ref: "#/components/responses/Ok" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/admin/announcements/{id}/mail:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    post:
+      tags: [admin-content]
+      operationId: mailAnnouncement
+      summary: 把已发布的公告群发给有已验证邮箱且未停用的用户，每条只能发一次（content:write）
+      description: |
+        草稿或已群发过返回 409；邮件未配置返回 403 feature_disabled。
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      responses:
+        "200":
+          description: 把已发布的公告群发给有已验证邮箱且未停用的用户，每条只能发一次
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/MailBatchResult" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /api/admin/tutorials:
+    get:
+      tags: [admin-content]
+      operationId: listTutorials
+      summary: 全部教程，含未发布（content:read）
+      responses:
+        "200":
+          description: 全部教程，含未发布
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { type: array, items: { $ref: "#/components/schemas/Tutorial" } }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+    post:
+      tags: [admin-content]
+      operationId: createTutorial
+      summary: 新建教程（content:write）
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TutorialInput" }
+      responses:
+        "200":
+          description: 新建教程
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/Tutorial" }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+  /api/admin/tutorials/{id}:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    put:
+      tags: [admin-content]
+      operationId: updateTutorial
+      summary: 修改教程（content:write）
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TutorialInput" }
+      responses:
+        "200":
+          description: 修改教程
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/Tutorial" }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      tags: [admin-content]
+      operationId: deleteTutorial
+      summary: 删除教程（content:write）
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      responses:
+        "200": { $ref: "#/components/responses/Ok" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/admin/shared-accounts:
+    get:
+      tags: [admin-content]
+      operationId: listSharedAccounts
+      summary: 全部共享账号，不含口令（content:read）
+      responses:
+        "200":
+          description: 全部共享账号，不含口令
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { type: array, items: { $ref: "#/components/schemas/SharedAccount" } }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+    post:
+      tags: [admin-content]
+      operationId: createSharedAccount
+      summary: 新建共享账号（content:write）
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SharedAccountInput" }
+      responses:
+        "200":
+          description: 新建共享账号
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/SharedAccount" }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+  /api/admin/shared-accounts/{id}:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    put:
+      tags: [admin-content]
+      operationId: updateSharedAccount
+      summary: 修改共享账号；credential 省略或为空表示沿用原值（content:write）
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SharedAccountInput" }
+      responses:
+        "200":
+          description: 修改共享账号；credential 省略或为空表示沿用原值
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/SharedAccount" }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      tags: [admin-content]
+      operationId: deleteSharedAccount
+      summary: 删除共享账号（content:write）
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      responses:
+        "200": { $ref: "#/components/responses/Ok" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/admin/shared-accounts/{id}/credential:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    get:
+      tags: [admin-content]
+      operationId: getSharedAccountCredential
+      summary: 读取共享账号口令，记审计（content:write）
+      responses:
+        "200":
+          description: 读取共享账号口令，记审计
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/SharedCredential" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/admin/tickets:
+    get:
+      tags: [admin-tickets]
+      operationId: listTickets
+      summary: 工单分页，按最近回复倒序（ticket:read）
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+        - { name: status, in: query, schema: { $ref: "#/components/schemas/TicketStatus" } }
+        - { name: userId, in: query, schema: { type: integer, format: int64, minimum: 1 } }
+      responses:
+        "200":
+          description: 工单分页，按最近回复倒序
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/TicketPage" }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+  /api/admin/tickets/{id}:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    get:
+      tags: [admin-tickets]
+      operationId: getTicket
+      summary: 工单与全部消息（ticket:read）
+      responses:
+        "200":
+          description: 工单与全部消息
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/TicketDetail" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/admin/tickets/{id}/messages:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    post:
+      tags: [admin-tickets]
+      operationId: replyTicket
+      summary: 管理员回复，状态变为 answered（ticket:write）
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TicketMessageInput" }
+      responses:
+        "200":
+          description: 管理员回复，状态变为 answered
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/TicketDetail" }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/admin/tickets/{id}/close:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    post:
+      tags: [admin-tickets]
+      operationId: closeTicket
+      summary: 关闭工单（ticket:write）
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      responses:
+        "200":
+          description: 关闭工单
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/TicketDetail" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "404": { $ref: "#/components/responses/NotFound" }
   /api/user/auth/login:
     post:
       tags: [user-auth]
@@ -1650,6 +2231,454 @@ paths:
         "400": { $ref: "#/components/responses/InvalidArgument" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "403": { $ref: "#/components/responses/AccountDisabled" }
+  /api/user/site:
+    get:
+      tags: [user-auth]
+      operationId: getSiteInfo
+      summary: 客户门户未登录即可读的站点信息（docs/03 §5.6 公开子集）
+      security: []
+      responses:
+        "200":
+          description: 客户门户未登录即可读的站点信息
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/SiteInfo" }
+  /api/user/auth/email-code:
+    post:
+      tags: [user-auth]
+      operationId: sendEmailCode
+      summary: 发注册或找回口令的邮箱验证码（docs/03 §5.7）
+      description: |
+        找回口令对不存在的邮箱同样返回成功。邮件未配置、或用途为 register 而注册已关闭时返回 403 feature_disabled。
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/EmailCodeInput" }
+      responses:
+        "200": { $ref: "#/components/responses/Ok" }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "403": { $ref: "#/components/responses/FeatureDisabled" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /api/user/auth/register:
+    post:
+      tags: [user-auth]
+      operationId: registerUser
+      summary: 自助注册，成功后直接登录（docs/03 §5.8）
+      description: |
+        注册关闭返回 403 feature_disabled；邀请码或邮箱验证码无效返回 400；用户名或邮箱已占用返回 409。
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RegisterInput" }
+      responses:
+        "200":
+          description: 自助注册，成功后直接登录
+          headers:
+            Set-Cookie:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/UserSession" }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "403": { $ref: "#/components/responses/FeatureDisabled" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /api/user/auth/password/reset:
+    post:
+      tags: [user-auth]
+      operationId: resetOwnPassword
+      summary: 凭邮箱验证码重设口令，该用户全部会话失效；不关闭两步验证（Ruling-23）
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PasswordResetInput" }
+      responses:
+        "200": { $ref: "#/components/responses/Ok" }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "403": { $ref: "#/components/responses/FeatureDisabled" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /api/user/account/email-code:
+    post:
+      tags: [user-account]
+      operationId: sendBindEmailCode
+      summary: 向新邮箱发换绑验证码
+      security: [{ userSession: [] }]
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/BindEmailCodeInput" }
+      responses:
+        "200": { $ref: "#/components/responses/Ok" }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/UserForbidden" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /api/user/account/email:
+    put:
+      tags: [user-account]
+      operationId: bindEmail
+      summary: 绑定或换绑邮箱：当前口令 + 新邮箱的验证码
+      security: [{ userSession: [] }]
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/BindEmailInput" }
+      responses:
+        "200":
+          description: 绑定或换绑邮箱：当前口令 + 新邮箱的验证码
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/UserSession" }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/UserForbidden" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /api/user/account/delete:
+    post:
+      tags: [user-account]
+      operationId: deleteOwnAccount
+      summary: 注销账号：当前口令（已开两步验证另须验证码）；按删除用户处理并清除会话
+      security: [{ userSession: [] }]
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AccountDeleteInput" }
+      responses:
+        "200": { $ref: "#/components/responses/Ok" }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/AccountDisabled" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /api/user/invite:
+    get:
+      tags: [user-account]
+      operationId: getInvite
+      summary: 本人的邀请码与已邀请的人；首次查看时生成个人码
+      security: [{ userSession: [] }]
+      responses:
+        "200":
+          description: 本人的邀请码与已邀请的人；首次查看时生成个人码
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/InviteInfo" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/AccountDisabled" }
+  /api/user/invite/reset:
+    post:
+      tags: [user-account]
+      operationId: resetInviteCode
+      summary: 重置个人邀请码，旧码作废，已用次数不清零
+      security: [{ userSession: [] }]
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      responses:
+        "200":
+          description: 重置个人邀请码，旧码作废，已用次数不清零
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/InviteInfo" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/UserForbidden" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /api/user/announcements:
+    get:
+      tags: [user-portal]
+      operationId: listUserAnnouncements
+      summary: 已发布的公告分页，置顶在前、新的在前
+      security: [{ userSession: [] }]
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+      responses:
+        "200":
+          description: 已发布的公告分页，置顶在前、新的在前
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/AnnouncementPage" }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/AccountDisabled" }
+  /api/user/tutorials:
+    get:
+      tags: [user-portal]
+      operationId: listUserTutorials
+      summary: 已发布的教程，按平台与排序
+      security: [{ userSession: [] }]
+      responses:
+        "200":
+          description: 已发布的教程，按平台与排序
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { type: array, items: { $ref: "#/components/schemas/Tutorial" } }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/AccountDisabled" }
+  /api/user/shared-accounts:
+    get:
+      tags: [user-portal]
+      operationId: listUserSharedAccounts
+      summary: 本人可见的共享账号，不含口令（docs/03 §5.9）
+      security: [{ userSession: [] }]
+      responses:
+        "200":
+          description: 本人可见的共享账号，不含口令
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { type: array, items: { $ref: "#/components/schemas/SharedAccount" } }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/UserForbidden" }
+  /api/user/shared-accounts/{id}/credential:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    get:
+      tags: [user-portal]
+      operationId: getUserSharedAccountCredential
+      summary: 读取一条共享账号的口令，记审计；不可见的条目返回 404
+      security: [{ userSession: [] }]
+      responses:
+        "200":
+          description: 读取一条共享账号的口令，记审计；不可见的条目返回 404
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/SharedCredential" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/UserForbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/user/tickets:
+    get:
+      tags: [user-portal]
+      operationId: listOwnTickets
+      summary: 本人的工单分页，按最近回复倒序
+      security: [{ userSession: [] }]
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+      responses:
+        "200":
+          description: 本人的工单分页，按最近回复倒序
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/TicketPage" }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/AccountDisabled" }
+    post:
+      tags: [user-portal]
+      operationId: createTicket
+      summary: 新建工单（docs/03 §5.10）
+      description: |
+        未关闭的工单已达上限返回 409；工单未开启返回 403 feature_disabled。
+      security: [{ userSession: [] }]
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TicketCreateInput" }
+      responses:
+        "200":
+          description: 新建工单
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/TicketDetail" }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/UserForbidden" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /api/user/tickets/{id}:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    get:
+      tags: [user-portal]
+      operationId: getOwnTicket
+      summary: 本人的一张工单与全部消息；他人的返回 404（R8）
+      security: [{ userSession: [] }]
+      responses:
+        "200":
+          description: 本人的一张工单与全部消息；他人的返回 404
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/TicketDetail" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/AccountDisabled" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/user/tickets/{id}/messages:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    post:
+      tags: [user-portal]
+      operationId: replyOwnTicket
+      summary: 回复工单，状态变为 open（已关闭的会重新打开）
+      security: [{ userSession: [] }]
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TicketMessageInput" }
+      responses:
+        "200":
+          description: 回复工单，状态变为 open
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/TicketDetail" }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/UserForbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /api/user/tickets/{id}/close:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    post:
+      tags: [user-portal]
+      operationId: closeOwnTicket
+      summary: 关闭本人的工单
+      security: [{ userSession: [] }]
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      responses:
+        "200":
+          description: 关闭本人的工单
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/TicketDetail" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/AccountDisabled" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/user/checkin:
+    get:
+      tags: [user-portal]
+      operationId: getCheckin
+      summary: 签到状态与最近 30 条记录（docs/03 §5.11）
+      security: [{ userSession: [] }]
+      responses:
+        "200":
+          description: 签到状态与最近 30 条记录
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/CheckinInfo" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/AccountDisabled" }
+    post:
+      tags: [user-portal]
+      operationId: checkin
+      summary: 签到：随机奖励流量加到当前额度
+      description: |
+        今天已签到或不满足条件返回 409；签到未开启返回 403 feature_disabled。
+      security: [{ userSession: [] }]
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      responses:
+        "200":
+          description: 签到：随机奖励流量加到当前额度
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/CheckinResult" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/UserForbidden" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "429": { $ref: "#/components/responses/RateLimited" }
 
   /sub/{token}:
     get:
@@ -1753,6 +2782,16 @@ components:
           schema: { $ref: "#/components/schemas/Envelope" }
     UpstreamUnavailable:
       description: upstream_unavailable（面板不可达、拒绝 token 或返回异常）
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Envelope" }
+    FeatureDisabled:
+      description: feature_disabled（功能未开启：注册关闭、邮件未配置等）
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Envelope" }
+    UserForbidden:
+      description: account_disabled、feature_disabled（功能未开启）或 permission_denied（CSRF 校验失败）
       content:
         application/json:
           schema: { $ref: "#/components/schemas/Envelope" }
@@ -2221,13 +3260,18 @@ components:
                 failed: { type: integer }
             totpEnabled: { type: boolean, description: 是否已开启两步验证（0.2.6） }
             lastUsedAt: { type: [string, "null"], format: date-time, description: 最近一次产生流量的时间（0.2.6） }
+            email: { type: [string, "null"], description: 未绑定为 null（0.3.0） }
+            isEmailVerified: { type: boolean, description: 0.3.0 }
+            invitedBy: { type: [integer, "null"], format: int64, description: 邀请人用户 id（0.3.0） }
+            invitedByUsername: { type: string, description: 没有邀请人时为空串（0.3.0） }
             createdAt: { type: string, format: date-time }
     UserCreateInput:
       type: object
       required: [username, password]
       properties:
-        username: { type: string, minLength: 3, maxLength: 64, pattern: "^[A-Za-z0-9_.@-]+$" }
+        username: { $ref: "#/components/schemas/Username" }
         password: { $ref: "#/components/schemas/UserPassword" }
+        email: { $ref: "#/components/schemas/Email" }
         remark: { type: string, maxLength: 255 }
         planId: { type: integer, format: int64, minimum: 1, description: 省略则不分配套餐（无可用节点） }
     UserUpdateInput:
@@ -2236,6 +3280,7 @@ components:
       properties:
         remark: { type: string, maxLength: 255 }
         isDisabled: { type: boolean }
+        email: { type: string, maxLength: 254, description: 省略不改；空串清除；其余按邮箱校验并视为已验证（0.3.0） }
     Provision:
       type: object
       required: [serverId, serverName, email, status, lastError, retryCount, syncedAt, updatedAt]
@@ -2269,6 +3314,8 @@ components:
             id: { type: integer, format: int64 }
             username: { type: string }
             status: { $ref: "#/components/schemas/UserStatus" }
+            email: { type: [string, "null"], description: 未绑定为 null（0.3.0） }
+            isEmailVerified: { type: boolean, description: 0.3.0 }
         totpEnabled: { type: boolean }
         csrfToken: { type: string }
     UserSessionEnvelope:
@@ -2292,6 +3339,8 @@ components:
         onlineDevices: { type: [integer, "null"], description: 各面板在线 client 数之和；面板都不提供时为 null }
         lastUsedAt: { type: [string, "null"], format: date-time }
         nodeCount: { type: integer, description: 当前可用节点数 }
+        announcement: { oneOf: [{ $ref: "#/components/schemas/Announcement" }, { type: "null" }], description: 最新一条已发布公告（0.3.0） }
+        popupAnnouncement: { oneOf: [{ $ref: "#/components/schemas/Announcement" }, { type: "null" }], description: 最新一条标了弹窗的已发布公告（0.3.0） }
     TrafficPoint:
       type: object
       required: [hour, up, down]
@@ -2363,3 +3412,374 @@ components:
       properties:
         items: { type: array, items: { $ref: "#/components/schemas/SubscribeLog" } }
         total: { type: integer, format: int64 }
+    Email:
+      type: string
+      format: email
+      maxLength: 254
+    EmailCode:
+      type: string
+      pattern: "^[0-9]{6}$"
+    Markdown:
+      type: string
+      maxLength: 20000
+      description: Markdown 源文本；前端渲染不执行原始 HTML（Ruling-25）
+    RegisterMode:
+      type: string
+      enum: [open, invite, closed]
+    SiteInfo:
+      type: object
+      required: [siteName, registerMode, emailVerifyRequired, mailEnabled, checkinEnabled, ticketEnabled, sharedEnabled]
+      properties:
+        siteName: { type: string }
+        registerMode: { $ref: "#/components/schemas/RegisterMode" }
+        emailVerifyRequired: { type: boolean, description: 注册是否要先验证邮箱（设置为真且邮件可用） }
+        mailEnabled: { type: boolean, description: 邮件是否可用；为假时找回口令与换绑邮箱不可用 }
+        checkinEnabled: { type: boolean }
+        ticketEnabled: { type: boolean }
+        sharedEnabled: { type: boolean }
+    Settings:
+      type: object
+      description: 全部系统设置（docs/03 §5.6 设置清单），键名去掉点号改驼峰分组
+      required: [site, register, invite, checkin, ticket, shared, mail, subscription, mailEnabled]
+      properties:
+        mailEnabled: { type: boolean, readOnly: true, description: SMTP 环境变量是否已配置（Ruling-24），不可经接口修改 }
+        site:
+          type: object
+          required: [name, timezone]
+          properties:
+            name: { type: string, minLength: 1, maxLength: 32 }
+            timezone: { type: string, minLength: 1, maxLength: 64, description: IANA 时区名 }
+        register:
+          type: object
+          required: [mode, emailVerify, emailAllow, emailBlock, planId]
+          properties:
+            mode: { $ref: "#/components/schemas/RegisterMode" }
+            emailVerify: { type: boolean }
+            emailAllow: { type: array, maxItems: 100, items: { type: string, maxLength: 253 } }
+            emailBlock: { type: array, maxItems: 100, items: { type: string, maxLength: 253 } }
+            planId: { type: integer, format: int64, minimum: 0, description: 0 = 注册不送套餐 }
+        invite:
+          type: object
+          required: [userEnabled, userMaxUses]
+          properties:
+            userEnabled: { type: boolean }
+            userMaxUses: { type: integer, minimum: 0, maximum: 10000 }
+        checkin:
+          type: object
+          required: [enabled, minMb, maxMb]
+          properties:
+            enabled: { type: boolean }
+            minMb: { type: integer, minimum: 1, maximum: 102400 }
+            maxMb: { type: integer, minimum: 1, maximum: 102400 }
+        ticket:
+          type: object
+          required: [enabled, notifyEmail]
+          properties:
+            enabled: { type: boolean }
+            notifyEmail: { type: string, maxLength: 254, description: 空串 = 不通知 }
+        shared:
+          type: object
+          required: [enabled]
+          properties:
+            enabled: { type: boolean }
+        mail:
+          type: object
+          required: [ratePerMinute]
+          properties:
+            ratePerMinute: { type: integer, minimum: 1, maximum: 600 }
+        subscription:
+          type: object
+          required: [baseUrl, title, updateIntervalHours, infoNodes, logRetentionDays]
+          properties:
+            baseUrl: { type: string, maxLength: 255, description: 空串 = 取请求的协议与主机 }
+            title: { type: string, minLength: 1, maxLength: 64 }
+            updateIntervalHours: { type: integer, minimum: 1, maximum: 168 }
+            infoNodes: { type: boolean }
+            logRetentionDays: { type: integer, minimum: 1, maximum: 365 }
+    SettingsInput:
+      type: object
+      description: 与 Settings 同形，但各分组与各键都可省略；只改出现的键
+      properties:
+        site: { type: object, additionalProperties: true }
+        register: { type: object, additionalProperties: true }
+        invite: { type: object, additionalProperties: true }
+        checkin: { type: object, additionalProperties: true }
+        ticket: { type: object, additionalProperties: true }
+        shared: { type: object, additionalProperties: true }
+        mail: { type: object, additionalProperties: true }
+        subscription: { type: object, additionalProperties: true }
+    TestMailInput:
+      type: object
+      required: [to]
+      properties:
+        to: { $ref: "#/components/schemas/Email" }
+    MailStatus:
+      type: string
+      enum: [pending, sent, failed]
+    MailOutboxItem:
+      type: object
+      required: [id, recipient, subject, status, attempts, lastError, createdAt, sentAt]
+      properties:
+        id: { type: integer, format: int64 }
+        recipient: { type: string }
+        subject: { type: string }
+        status: { $ref: "#/components/schemas/MailStatus" }
+        attempts: { type: integer }
+        lastError: { type: string }
+        createdAt: { type: string, format: date-time }
+        sentAt: { type: [string, "null"], format: date-time }
+    MailOutboxPage:
+      type: object
+      required: [items, total]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/MailOutboxItem" } }
+        total: { type: integer, format: int64 }
+    MailBatchResult:
+      type: object
+      required: [queued]
+      properties:
+        queued: { type: integer, description: 入发件箱的封数 }
+    InviteCodeInput:
+      type: object
+      required: [maxUses, isDisabled]
+      properties:
+        maxUses: { type: integer, minimum: 0, maximum: 100000, description: 0 = 不限；个人码忽略本项 }
+        expiresAt: { type: [string, "null"], format: date-time }
+        remark: { type: string, maxLength: 255 }
+        isDisabled: { type: boolean }
+    InviteCode:
+      type: object
+      required: [id, code, kind, ownerUsername, maxUses, usedCount, expiresAt, isDisabled, remark, createdAt]
+      properties:
+        id: { type: integer, format: int64 }
+        code: { type: string }
+        kind: { type: string, enum: [admin, user] }
+        ownerUserId: { type: [integer, "null"], format: int64 }
+        ownerUsername: { type: string, description: 管理员码为空串 }
+        maxUses: { type: integer, description: 个人码为设置 invite.userMaxUses 的当前值 }
+        usedCount: { type: integer }
+        expiresAt: { type: [string, "null"], format: date-time }
+        isDisabled: { type: boolean }
+        remark: { type: string }
+        createdAt: { type: string, format: date-time }
+    InviteCodePage:
+      type: object
+      required: [items, total]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/InviteCode" } }
+        total: { type: integer, format: int64 }
+    InviteInfo:
+      type: object
+      required: [enabled, code, maxUses, usedCount, invitees]
+      properties:
+        enabled: { type: boolean, description: 设置 invite.userEnabled 且本人的码未被停用 }
+        code: { type: string, description: 未开启时为空串 }
+        maxUses: { type: integer, description: 0 = 不限 }
+        usedCount: { type: integer }
+        invitees:
+          type: array
+          description: 最近 100 个被邀请人
+          items:
+            type: object
+            required: [username, createdAt]
+            properties:
+              username: { type: string, description: 打码后的用户名 }
+              createdAt: { type: string, format: date-time }
+    EmailCodeInput:
+      type: object
+      required: [email, purpose]
+      properties:
+        email: { $ref: "#/components/schemas/Email" }
+        purpose: { type: string, enum: [register, reset] }
+    RegisterInput:
+      type: object
+      required: [username, email, password]
+      properties:
+        username: { $ref: "#/components/schemas/Username" }
+        email: { $ref: "#/components/schemas/Email" }
+        password: { $ref: "#/components/schemas/UserPassword" }
+        inviteCode: { type: string, minLength: 1, maxLength: 16 }
+        emailCode: { $ref: "#/components/schemas/EmailCode" }
+    PasswordResetInput:
+      type: object
+      required: [email, emailCode, newPassword]
+      properties:
+        email: { $ref: "#/components/schemas/Email" }
+        emailCode: { $ref: "#/components/schemas/EmailCode" }
+        newPassword: { $ref: "#/components/schemas/UserPassword" }
+    BindEmailCodeInput:
+      type: object
+      required: [email]
+      properties:
+        email: { $ref: "#/components/schemas/Email" }
+    BindEmailInput:
+      type: object
+      required: [currentPassword, email, emailCode]
+      properties:
+        currentPassword: { type: string, minLength: 1, maxLength: 128 }
+        email: { $ref: "#/components/schemas/Email" }
+        emailCode: { $ref: "#/components/schemas/EmailCode" }
+    AccountDeleteInput:
+      type: object
+      required: [currentPassword]
+      properties:
+        currentPassword: { type: string, minLength: 1, maxLength: 128 }
+        totpCode: { $ref: "#/components/schemas/TotpCode" }
+    AnnouncementInput:
+      type: object
+      required: [title, content, isPinned, isPopup, isPublished]
+      properties:
+        title: { type: string, minLength: 1, maxLength: 100 }
+        content: { $ref: "#/components/schemas/Markdown" }
+        isPinned: { type: boolean }
+        isPopup: { type: boolean }
+        isPublished: { type: boolean, description: 由假变真时记发布时间；由真变假退回草稿 }
+    Announcement:
+      type: object
+      required: [id, title, content, isPinned, isPopup, publishedAt]
+      properties:
+        id: { type: integer, format: int64 }
+        title: { type: string }
+        content: { $ref: "#/components/schemas/Markdown" }
+        isPinned: { type: boolean }
+        isPopup: { type: boolean }
+        publishedAt: { type: [string, "null"], format: date-time, description: null = 草稿（只在管理端出现） }
+        mailedAt: { type: [string, "null"], format: date-time, description: 只在管理端返回 }
+        createdAt: { type: string, format: date-time, description: 只在管理端返回 }
+    AnnouncementPage:
+      type: object
+      required: [items, total]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/Announcement" } }
+        total: { type: integer, format: int64 }
+    TutorialPlatform:
+      type: string
+      enum: [windows, macos, android, ios, linux, router]
+    TutorialLink:
+      type: object
+      required: [label, url]
+      properties:
+        label: { type: string, minLength: 1, maxLength: 32 }
+        url: { type: string, maxLength: 512, pattern: "^https://", description: 只收 https 地址 }
+    TutorialInput:
+      type: object
+      required: [platform, clientName, isPublished]
+      properties:
+        platform: { $ref: "#/components/schemas/TutorialPlatform" }
+        clientName: { type: string, minLength: 1, maxLength: 64 }
+        summary: { type: string, maxLength: 255 }
+        links: { type: array, maxItems: 5, items: { $ref: "#/components/schemas/TutorialLink" } }
+        content: { $ref: "#/components/schemas/Markdown" }
+        sortOrder: { type: integer, minimum: 0, maximum: 100000 }
+        isPublished: { type: boolean }
+    Tutorial:
+      type: object
+      required: [id, platform, clientName, summary, links, content, sortOrder, isPublished]
+      properties:
+        id: { type: integer, format: int64 }
+        platform: { $ref: "#/components/schemas/TutorialPlatform" }
+        clientName: { type: string }
+        summary: { type: string }
+        links: { type: array, items: { $ref: "#/components/schemas/TutorialLink" } }
+        content: { $ref: "#/components/schemas/Markdown" }
+        sortOrder: { type: integer }
+        isPublished: { type: boolean }
+    SharedAccountInput:
+      type: object
+      required: [name, category, account, isPublished]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 64 }
+        category: { type: string, minLength: 1, maxLength: 32 }
+        account: { type: string, minLength: 1, maxLength: 255 }
+        credential: { type: string, maxLength: 255, description: 新建时必填；修改时省略或空串表示沿用原值 }
+        remark: { type: string, maxLength: 255 }
+        sortOrder: { type: integer, minimum: 0, maximum: 100000 }
+        isPublished: { type: boolean }
+        planIds: { type: array, maxItems: 100, items: { type: integer, format: int64, minimum: 1 }, description: 空 = 所有有套餐的用户可见 }
+    SharedAccount:
+      type: object
+      required: [id, name, category, account, remark, sortOrder]
+      properties:
+        id: { type: integer, format: int64 }
+        name: { type: string }
+        category: { type: string }
+        account: { type: string }
+        remark: { type: string }
+        sortOrder: { type: integer }
+        isPublished: { type: boolean, description: 只在管理端返回 }
+        planIds: { type: array, items: { type: integer, format: int64 }, description: 只在管理端返回 }
+    SharedCredential:
+      type: object
+      required: [credential]
+      properties:
+        credential: { type: string, description: 凭据，前端默认不显示，点击才取 }
+    TicketStatus:
+      type: string
+      enum: [open, answered, closed]
+    Ticket:
+      type: object
+      required: [id, subject, status, lastReplyAt, createdAt]
+      properties:
+        id: { type: integer, format: int64 }
+        subject: { type: string }
+        status: { $ref: "#/components/schemas/TicketStatus" }
+        lastReplyAt: { type: string, format: date-time }
+        createdAt: { type: string, format: date-time }
+        userId: { type: integer, format: int64, description: 只在管理端返回 }
+        username: { type: string, description: 只在管理端返回 }
+    TicketPage:
+      type: object
+      required: [items, total]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/Ticket" } }
+        total: { type: integer, format: int64 }
+    TicketMessage:
+      type: object
+      required: [id, authorKind, content, createdAt]
+      properties:
+        id: { type: integer, format: int64 }
+        authorKind: { type: string, enum: [user, admin] }
+        authorName: { type: string, description: 只在管理端返回：管理员用户名；用户侧一律显示“客服” }
+        content: { type: string, description: 纯文本，按原样显示 }
+        createdAt: { type: string, format: date-time }
+    TicketDetail:
+      allOf:
+        - $ref: "#/components/schemas/Ticket"
+        - type: object
+          required: [messages]
+          properties:
+            messages: { type: array, items: { $ref: "#/components/schemas/TicketMessage" } }
+    TicketCreateInput:
+      type: object
+      required: [subject, content]
+      properties:
+        subject: { type: string, minLength: 1, maxLength: 100 }
+        content: { type: string, minLength: 1, maxLength: 5000 }
+    TicketMessageInput:
+      type: object
+      required: [content]
+      properties:
+        content: { type: string, minLength: 1, maxLength: 5000 }
+    CheckinInfo:
+      type: object
+      required: [enabled, canCheckin, reason, checkedToday, logs]
+      properties:
+        enabled: { type: boolean }
+        canCheckin: { type: boolean }
+        reason: { type: string, description: 不能签到的原因，可以签到时为空串 }
+        checkedToday: { type: boolean }
+        logs:
+          type: array
+          description: 最近 30 条
+          items:
+            type: object
+            required: [date, rewardBytes]
+            properties:
+              date: { type: string, format: date }
+              rewardBytes: { type: integer, format: int64 }
+    CheckinResult:
+      type: object
+      required: [rewardBytes, trafficLimit]
+      properties:
+        rewardBytes: { type: integer, format: int64 }
+        trafficLimit: { type: integer, format: int64, description: 奖励后的流量额度 }
