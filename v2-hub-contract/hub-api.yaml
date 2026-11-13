@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: v2-hub API
-  version: 0.2.4
+  version: 0.2.5
   description: |
     v2-hub 对外接口契约（hub-server 提供，v2-hub-admin-web / v2-hub-user-web 消费）。
     - 管理端接口前缀 /api/admin，客户端接口前缀 /api/user，订阅端点前缀 /sub。
@@ -13,6 +13,7 @@ info:
     0.2.1：两步验证（docs/03 §4.3）——登录可带 totpCode，新增 totp_required 错误码与 TOTP 开启 / 关闭 / 重置接口。
     0.2.3：删除对外地址只删所点的那一个；对“面板上已不存在”的入站做编辑 / 启停 / 确认漂移 / 添加对外地址返回 409（docs/03 §5.1）。
     0.2.4：入站表单与 3x-ui 同构（Ruling-16）——新增读取面板完整入站配置、代理面板生成密钥两个接口。
+    0.2.5：M2 套餐与用户（docs/03 §5.2）——套餐增删改查、用户增删改查、分配 / 续费套餐、直接改用量与额度、重置口令、下发状态与手动对账。
 servers:
   - url: http://127.0.0.1:8080
     description: 本地开发
@@ -27,6 +28,8 @@ tags:
     description: 审计日志（需 audit:read）
   - name: admin-panel
     description: 服务器（server:*）、入站与节点（node:*），docs/03 §5.1
+  - name: admin-users
+    description: 套餐（plan:*）与用户（user:*），docs/03 §5.2
 security:
   - adminSession: []
 paths:
@@ -968,6 +971,323 @@ paths:
         "403": { $ref: "#/components/responses/PermissionDenied" }
         "404": { $ref: "#/components/responses/NotFound" }
 
+  /api/admin/plans:
+    get:
+      tags: [admin-users]
+      operationId: listPlans
+      summary: 全部套餐（plan:read）
+      responses:
+        "200":
+          description: 套餐列表
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { type: array, items: { $ref: "#/components/schemas/Plan" } }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+    post:
+      tags: [admin-users]
+      operationId: createPlan
+      summary: 新建套餐（plan:write）
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PlanInput" }
+      responses:
+        "200":
+          description: 新建的套餐
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/Plan" }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /api/admin/plans/{id}:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    put:
+      tags: [admin-users]
+      operationId: updatePlan
+      summary: 修改套餐（不影响已分配的用户，docs/03 §5.2；plan:write）
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PlanInput" }
+      responses:
+        "200":
+          description: 修改后的套餐
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/Plan" }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+    delete:
+      tags: [admin-users]
+      operationId: deletePlan
+      summary: 删除套餐（用户保留已拷贝的额度与到期，所属套餐置空；plan:write）
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      responses:
+        "200": { $ref: "#/components/responses/Ok" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/admin/users:
+    get:
+      tags: [admin-users]
+      operationId: listUsers
+      summary: 用户分页（user:read）
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+        - { name: keyword, in: query, description: 按用户名或备注模糊匹配, schema: { type: string, maxLength: 64 } }
+        - { name: status, in: query, schema: { $ref: "#/components/schemas/UserStatus" } }
+        - { name: planId, in: query, schema: { type: integer, format: int64, minimum: 1 } }
+      responses:
+        "200":
+          description: 用户分页
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        required: [items, total]
+                        properties:
+                          items:
+                            type: array
+                            items: { $ref: "#/components/schemas/User" }
+                          total: { type: integer, format: int64 }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+    post:
+      tags: [admin-users]
+      operationId: createUser
+      summary: 新建用户，可同时分配套餐（docs/03 U1；user:write）
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UserCreateInput" }
+      responses:
+        "200":
+          description: 新建的用户
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/User" }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /api/admin/users/{id}:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    get:
+      tags: [admin-users]
+      operationId: getUser
+      summary: 用户详情（user:read）
+      responses:
+        "200":
+          description: 用户
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/User" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    put:
+      tags: [admin-users]
+      operationId: updateUser
+      summary: 修改备注、停用 / 启用（docs/03 U8；user:write）
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UserUpdateInput" }
+      responses:
+        "200":
+          description: 修改后的用户
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/User" }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      tags: [admin-users]
+      operationId: deleteUser
+      summary: 删除用户：先删各面板 client，面板不可达时记为待删除（docs/03 §5.2；user:write）
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      responses:
+        "200": { $ref: "#/components/responses/Ok" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/admin/users/{id}/plan:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    post:
+      tags: [admin-users]
+      operationId: assignUserPlan
+      summary: 分配或续费套餐：到期顺延、已用清零（docs/03 U6；user:write）
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, required: [planId], properties: { planId: { type: integer, format: int64, minimum: 1 } } }
+      responses:
+        "200":
+          description: 续费后的用户
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/User" }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /api/admin/users/{id}/quota:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    put:
+      tags: [admin-users]
+      operationId: updateUserQuota
+      summary: 直接改用户的已用、额度、到期、IP 限制、自动续期与周期重置（整体替换，记审计；docs/03 U7；user:write）
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UserQuotaInput" }
+      responses:
+        "200":
+          description: 修改后的用户
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/User" }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /api/admin/users/{id}/password:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    put:
+      tags: [admin-users]
+      operationId: resetUserPassword
+      summary: 重置用户的客户后台登录口令（user:write）
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, required: [password], properties: { password: { $ref: "#/components/schemas/Password" } } }
+      responses:
+        "200": { $ref: "#/components/responses/Ok" }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/admin/users/{id}/provisions:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    get:
+      tags: [admin-users]
+      operationId: listUserProvisions
+      summary: 用户在各面板上的下发状态（user:read）
+      responses:
+        "200":
+          description: 下发状态
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { type: array, items: { $ref: "#/components/schemas/Provision" } }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/admin/users/{id}/reconcile:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    post:
+      tags: [admin-users]
+      operationId: reconcileUser
+      summary: 立即对账该用户涉及的全部面板（手动重试；user:write）
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      responses:
+        "200": { $ref: "#/components/responses/Ok" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
 components:
   securitySchemes:
     adminSession:
@@ -1418,3 +1738,108 @@ components:
           type: array
           maxItems: 5000
           items: { type: integer, format: int64 }
+    TrafficReset:
+      type: string
+      enum: [never, hourly, daily, weekly, monthly]
+    UserStatus:
+      type: string
+      enum: [active, limited, expired, disabled]
+    ProvisionStatus:
+      type: string
+      enum: [pending, synced, failed]
+    PlanInput:
+      type: object
+      required: [name, trafficLimit, durationDays, nodeGroupIds]
+      description: 配额模型照 3x-ui 的 client（docs/03 §5.2）；自动续期三种方式最多选一种
+      properties:
+        name: { type: string, minLength: 1, maxLength: 64 }
+        trafficLimit: { type: integer, format: int64, minimum: 0, description: 流量额度（字节），0 不限 }
+        durationDays: { type: integer, minimum: 0, maximum: 36500, description: 时长（天），0 不限 }
+        startOnFirstUse: { type: boolean, default: false, description: 首次使用后才开始计时 }
+        limitIp: { type: integer, minimum: 0, maximum: 1000, default: 0 }
+        renewEveryDays: { type: integer, minimum: 0, maximum: 3650, default: 0 }
+        renewMonthDay: { type: integer, minimum: 0, maximum: 31, default: 0 }
+        renewWeekday: { type: integer, minimum: 0, maximum: 7, default: 0, description: 1–7 = 周一至周日 }
+        renewMax: { type: integer, minimum: 0, maximum: 10000, default: 0, description: 0 不限 }
+        trafficReset: { $ref: "#/components/schemas/TrafficReset" }
+        trafficResetDay: { type: integer, minimum: 1, maximum: 31, default: 1 }
+        allowClientChain: { type: boolean, default: false }
+        allowCustomNode: { type: boolean, default: false }
+        remark: { type: string, maxLength: 255 }
+        nodeGroupIds:
+          type: array
+          maxItems: 500
+          items: { type: integer, format: int64 }
+    Plan:
+      allOf:
+        - $ref: "#/components/schemas/PlanInput"
+        - type: object
+          required: [id, userCount, createdAt]
+          properties:
+            id: { type: integer, format: int64 }
+            userCount: { type: integer, description: 当前分配了该套餐的用户数 }
+            createdAt: { type: string, format: date-time }
+    UserQuotaInput:
+      type: object
+      required: [trafficLimit, trafficUsed, expiresAt, pendingDays, limitIp, renewEveryDays, renewMonthDay, renewWeekday, renewMax, trafficReset, trafficResetDay]
+      properties:
+        trafficLimit: { type: integer, format: int64, minimum: 0 }
+        trafficUsed: { type: integer, format: int64, minimum: 0 }
+        expiresAt: { type: [string, "null"], format: date-time, description: null 表示不过期（或等待首次使用） }
+        pendingDays: { type: integer, minimum: 0, maximum: 36500, description: ">0 且 expiresAt 为 null：首次使用后起算的天数" }
+        limitIp: { type: integer, minimum: 0, maximum: 1000 }
+        renewEveryDays: { type: integer, minimum: 0, maximum: 3650 }
+        renewMonthDay: { type: integer, minimum: 0, maximum: 31 }
+        renewWeekday: { type: integer, minimum: 0, maximum: 7 }
+        renewMax: { type: integer, minimum: 0, maximum: 10000 }
+        trafficReset: { $ref: "#/components/schemas/TrafficReset" }
+        trafficResetDay: { type: integer, minimum: 1, maximum: 31 }
+    User:
+      allOf:
+        - $ref: "#/components/schemas/UserQuotaInput"
+        - type: object
+          required: [id, username, remark, planId, planName, status, isDisabled, renewCount, provisions, createdAt]
+          properties:
+            id: { type: integer, format: int64 }
+            username: { type: string }
+            remark: { type: string }
+            planId: { type: [integer, "null"], format: int64 }
+            planName: { type: string }
+            status: { $ref: "#/components/schemas/UserStatus" }
+            isDisabled: { type: boolean }
+            renewCount: { type: integer }
+            provisions:
+              type: object
+              description: 各面板下发状态计数
+              required: [synced, pending, failed]
+              properties:
+                synced: { type: integer }
+                pending: { type: integer }
+                failed: { type: integer }
+            createdAt: { type: string, format: date-time }
+    UserCreateInput:
+      type: object
+      required: [username, password]
+      properties:
+        username: { type: string, minLength: 3, maxLength: 64, pattern: "^[A-Za-z0-9_.@-]+$" }
+        password: { $ref: "#/components/schemas/Password" }
+        remark: { type: string, maxLength: 255 }
+        planId: { type: integer, format: int64, minimum: 1, description: 省略则不分配套餐（无可用节点） }
+    UserUpdateInput:
+      type: object
+      required: [remark, isDisabled]
+      properties:
+        remark: { type: string, maxLength: 255 }
+        isDisabled: { type: boolean }
+    Provision:
+      type: object
+      required: [serverId, serverName, email, status, lastError, retryCount, syncedAt, updatedAt]
+      properties:
+        serverId: { type: integer, format: int64 }
+        serverName: { type: string }
+        email: { type: string, description: 面板上的 client email }
+        status: { $ref: "#/components/schemas/ProvisionStatus" }
+        lastError: { type: string }
+        retryCount: { type: integer }
+        syncedAt: { type: [string, "null"], format: date-time }
+        updatedAt: { type: string, format: date-time }
