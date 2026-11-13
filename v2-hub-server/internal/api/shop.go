@@ -32,6 +32,7 @@ type ShopManager interface {
 	ListOrders(ctx context.Context, f service.OrderFilter, pq service.PageQuery) (*service.Page[service.Order], error)
 	ListOwnOrders(ctx context.Context, p *service.UserPrincipal, pq service.PageQuery) (*service.Page[service.Order], error)
 	GetShop(ctx context.Context, p *service.UserPrincipal) (*service.Shop, error)
+	PublicPlans(ctx context.Context) ([]service.ShopPlan, error)
 	QuoteOrder(ctx context.Context, p *service.UserPrincipal, in service.OrderInput) (*service.Quote, error)
 	CreateOrder(ctx context.Context, p *service.UserPrincipal, in service.OrderInput, ip *netip.Addr) (*service.Order, error)
 	GetWallet(ctx context.Context, p *service.UserPrincipal) (*service.Wallet, error)

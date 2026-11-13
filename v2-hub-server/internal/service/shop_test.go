@@ -470,3 +470,29 @@ func TestAutoRenewSwitch(t *testing.T) {
 		t.Fatalf("turning auto renew off must always work: %+v, %v", w, err)
 	}
 }
+
+func TestPublicPlans(t *testing.T) {
+	f := newShopFixture(t)
+	ctx := context.Background()
+	f.salePlan(t, "标准版", 0, false)
+	f.salePlan(t, "试用", 0, true)
+	set := func(patch map[string]any) {
+		t.Helper()
+		if _, err := updateSettings(t, f.settings, f.actor, patch); err != nil {
+			t.Fatal(err)
+		}
+	}
+	set(map[string]any{"shop.enabled": true})
+	if plans, err := f.shop.PublicPlans(ctx); err != nil || len(plans) != 0 {
+		t.Fatalf("landing off should hide plans: %+v, %v", plans, err)
+	}
+	set(map[string]any{"landing.enabled": true})
+	plans, err := f.shop.PublicPlans(ctx)
+	if err != nil || len(plans) != 1 || plans[0].Name != "标准版" || len(plans[0].Prices) != 2 || plans[0].Current || plans[0].CanBuy {
+		t.Fatalf("public plans = %+v, %v", plans, err)
+	}
+	set(map[string]any{"shop.enabled": false})
+	if plans, err = f.shop.PublicPlans(ctx); err != nil || len(plans) != 0 {
+		t.Fatalf("shop off should hide plans: %+v, %v", plans, err)
+	}
+}

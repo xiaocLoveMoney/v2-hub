@@ -324,7 +324,7 @@ func (s *PanelService) CreateServer(ctx context.Context, actor *AdminPrincipal, 
 		if err := q.SetServerToken(ctx, sqlcgen.SetServerTokenParams{ID: id, ApiTokenEnc: sealed}); err != nil {
 			return fmt.Errorf("save server token: %w", err)
 		}
-		if err := q.SetServerProbeResult(ctx, probeParams(id, info, nil)); err != nil {
+		if err := q.SetServerProbeResult(ctx, probeParams(id, info, nil, s.now())); err != nil {
 			return fmt.Errorf("save probe result: %w", err)
 		}
 		return writeAudit(ctx, q, AuditEntry{
@@ -353,10 +353,11 @@ func redactURL(raw string) string {
 	return u.Scheme + "://" + u.Host
 }
 
-func probeParams(id int64, info *panel.PanelInfo, probeErr error) sqlcgen.SetServerProbeResultParams {
+func probeParams(id int64, info *panel.PanelInfo, probeErr error, probedAt time.Time) sqlcgen.SetServerProbeResultParams {
 	if probeErr == nil && info != nil {
 		return sqlcgen.SetServerProbeResultParams{
 			ID: id, Status: ServerStatusOnline, IsOnline: true, PanelVersion: info.Version, PanelGuid: info.GUID, StatusSnapshot: info.Status,
+			ProbedAt: pgtype.Timestamptz{Time: probedAt, Valid: true},
 		}
 	}
 	status := ServerStatusOffline
@@ -370,11 +371,11 @@ func probeParams(id int64, info *panel.PanelInfo, probeErr error) sqlcgen.SetSer
 	} else if errors.As(probeErr, &se) {
 		msg = se.Message
 	}
-	return sqlcgen.SetServerProbeResultParams{ID: id, Status: status, LastError: truncate(msg, maxLastErrorLen)}
+	return sqlcgen.SetServerProbeResultParams{ID: id, Status: status, LastError: truncate(msg, maxLastErrorLen), ProbedAt: pgtype.Timestamptz{Time: probedAt, Valid: true}}
 }
 
 func (s *PanelService) recordProbeError(ctx context.Context, id int64, err error) {
-	if perr := s.q.SetServerProbeResult(ctx, probeParams(id, nil, err)); perr != nil {
+	if perr := s.q.SetServerProbeResult(ctx, probeParams(id, nil, err, s.now())); perr != nil {
 		// 只是状态回写失败，不影响主流程；原错误已在调用处返回或记录
 		slog.Warn("record probe error", "server_id", id, "err", perr)
 	}
@@ -434,7 +435,7 @@ func (s *PanelService) UpdateServer(ctx context.Context, actor *AdminPrincipal, 
 			}
 		}
 		if info != nil {
-			if err := q.SetServerProbeResult(ctx, probeParams(id, info, nil)); err != nil {
+			if err := q.SetServerProbeResult(ctx, probeParams(id, info, nil, s.now())); err != nil {
 				return fmt.Errorf("save probe result: %w", err)
 			}
 		}
@@ -474,7 +475,7 @@ func (s *PanelService) ProbeServer(ctx context.Context, id int64) error {
 		return err
 	}
 	info, probeErr := p.Probe(ctx)
-	params := probeParams(id, &info, probeErr)
+	params := probeParams(id, &info, probeErr, s.now())
 	if err := s.q.SetServerProbeResult(ctx, params); err != nil {
 		return fmt.Errorf("save probe result of server %d: %w", id, err)
 	}

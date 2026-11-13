@@ -22,10 +22,13 @@ type Querier interface {
 	BumpInviteCodeUse(ctx context.Context, id int64) error
 	// 领取到期的待发邮件并顺延下次尝试时间（租约），发送在事务外进行；并发的任务实例不会领到同一封
 	ClaimDueMail(ctx context.Context, arg ClaimDueMailParams) ([]ClaimDueMailRow, error)
+	// 领取到期的待发消息并顺延下次尝试时间（租约），发送在事务外进行
+	ClaimDueTelegram(ctx context.Context, arg ClaimDueTelegramParams) ([]ClaimDueTelegramRow, error)
 	ClearAdminTOTP(ctx context.Context, id int64) (int64, error)
 	ClearCouponPlans(ctx context.Context, couponID int64) error
 	ClearNodeGroupItems(ctx context.Context, nodeGroupID int64) error
 	ClearPlanNodeGroups(ctx context.Context, planID int64) error
+	ClearServerAlert(ctx context.Context, id int64) error
 	ClearSharedAccountPlans(ctx context.Context, sharedAccountID int64) error
 	ClearUserTOTP(ctx context.Context, id int64) (int64, error)
 	ClearUserTrafficNotified(ctx context.Context, id int64) error
@@ -50,6 +53,8 @@ type Querier interface {
 	CountNodeGroupsByIDs(ctx context.Context, ids []int64) (int64, error)
 	CountNodes(ctx context.Context, arg CountNodesParams) (int64, error)
 	CountNodesByIDs(ctx context.Context, ids []int64) (int64, error)
+	CountOfflineServers(ctx context.Context) (int32, error)
+	CountOpenTickets(ctx context.Context) (int32, error)
 	CountOpenTicketsByUser(ctx context.Context, userID int64) (int64, error)
 	CountOrders(ctx context.Context, arg CountOrdersParams) (int64, error)
 	// 这个用户除本单以外实付 > 0 的订单数，用来判断是不是“首笔消费”
@@ -62,10 +67,12 @@ type Querier interface {
 	CountServerChainRules(ctx context.Context, userID int64) (int64, error)
 	CountSubscribeLogs(ctx context.Context, userID pgtype.Int8) (int64, error)
 	CountTickets(ctx context.Context, arg CountTicketsParams) (int64, error)
+	CountTicketsCreatedBetween(ctx context.Context, arg CountTicketsCreatedBetweenParams) (int32, error)
 	CountTicketsCreatedSince(ctx context.Context, arg CountTicketsCreatedSinceParams) (int64, error)
 	CountTopupCodes(ctx context.Context, arg CountTopupCodesParams) (int64, error)
 	CountUserTicketMessagesSince(ctx context.Context, arg CountUserTicketMessagesSinceParams) (int64, error)
 	CountUsers(ctx context.Context, arg CountUsersParams) (int64, error)
+	CountUsersCreatedBetween(ctx context.Context, arg CountUsersCreatedBetweenParams) (int32, error)
 	CouponCoversPlan(ctx context.Context, arg CouponCoversPlanParams) (bool, error)
 	CouponExists(ctx context.Context, id int64) (bool, error)
 	CreateAdmin(ctx context.Context, arg CreateAdminParams) (CreateAdminRow, error)
@@ -89,6 +96,10 @@ type Querier interface {
 	DailyRebates(ctx context.Context, arg DailyRebatesParams) ([]DailyRebatesRow, error)
 	// 按平台时区的自然日汇总充值入账（充值码 + 在线充值）
 	DailyTopups(ctx context.Context, arg DailyTopupsParams) ([]DailyTopupsRow, error)
+	// 平台时区下每个自然日的流量合计（上行 + 下行）
+	DailyTraffic(ctx context.Context, arg DailyTrafficParams) ([]DailyTrafficRow, error)
+	DashboardServers(ctx context.Context) (DashboardServersRow, error)
+	DashboardUsers(ctx context.Context, arg DashboardUsersParams) (DashboardUsersRow, error)
 	DeleteAdminRoles(ctx context.Context, adminID int64) error
 	DeleteAdminSessionByID(ctx context.Context, id int64) error
 	DeleteAdminSessionByTokenHash(ctx context.Context, tokenHash []byte) error
@@ -167,6 +178,7 @@ type Querier interface {
 	// 注册时锁住邀请码行，计数与上限的判断在同一事务内完成（并发注册不超发）
 	GetInviteCodeForUpdate(ctx context.Context, code string) (GetInviteCodeForUpdateRow, error)
 	GetInviteCodeOwner(ctx context.Context, id int64) (pgtype.Int8, error)
+	GetJobState(ctx context.Context, key string) (string, error)
 	// 入账前锁住充值单，重复通知只入账一次
 	GetPaymentByTradeNoForUpdate(ctx context.Context, tradeNo string) (GetPaymentByTradeNoForUpdateRow, error)
 	GetPlan(ctx context.Context, id int64) (GetPlanRow, error)
@@ -238,6 +250,8 @@ type Querier interface {
 	InsertServerChainRule(ctx context.Context, arg InsertServerChainRuleParams) (int64, error)
 	InsertSharedAccountPlans(ctx context.Context, arg InsertSharedAccountPlansParams) error
 	InsertSubscribeLog(ctx context.Context, arg InsertSubscribeLogParams) error
+	// 运营：Telegram 发件箱、后台任务状态、掉线告警、仪表盘与公开套餐（docs/03 §5.20）-----------
+	InsertTelegramOutbox(ctx context.Context, arg InsertTelegramOutboxParams) (int64, error)
 	InsertTicketMessage(ctx context.Context, arg InsertTicketMessageParams) error
 	InsertTopupCode(ctx context.Context, arg InsertTopupCodeParams) error
 	InsertUserLoginLog(ctx context.Context, arg InsertUserLoginLogParams) error
@@ -245,6 +259,8 @@ type Querier interface {
 	// 全站服务端规则（管理端只读，Ruling-41），按 id 倒序分页
 	ListAdminServerChainRules(ctx context.Context, arg ListAdminServerChainRulesParams) ([]ListAdminServerChainRulesRow, error)
 	ListAdmins(ctx context.Context, arg ListAdminsParams) ([]ListAdminsRow, error)
+	// 启用中、不在线达到阈值且这次掉线还没告警的服务器
+	ListAlertDueServers(ctx context.Context, before pgtype.Timestamptz) ([]ListAlertDueServersRow, error)
 	// 公告、教程、共享账号、工单与签到（docs/03 §5.9–§5.11）。
 	// ---- 公告 ----
 	// 管理端：含草稿，新的在前
@@ -282,6 +298,7 @@ type Querier interface {
 	ListMailableUserEmails(ctx context.Context) ([]string, error)
 	ListNodeGroups(ctx context.Context) ([]ListNodeGroupsRow, error)
 	ListNodes(ctx context.Context, arg ListNodesParams) ([]ListNodesRow, error)
+	ListOfflineServers(ctx context.Context, rowLimit int32) ([]ListOfflineServersRow, error)
 	ListOrders(ctx context.Context, arg ListOrdersParams) ([]ListOrdersRow, error)
 	ListPayments(ctx context.Context, arg ListPaymentsParams) ([]ListPaymentsRow, error)
 	ListPermissionCodesForAdmin(ctx context.Context, adminID int64) ([]string, error)
@@ -296,6 +313,8 @@ type Querier interface {
 	ListRebates(ctx context.Context, arg ListRebatesParams) ([]ListRebatesRow, error)
 	// 本人最近的返利记录（docs/03 §5.16 返利去向）；被邀请人的用户名由调用方打码
 	ListRebatesByInviter(ctx context.Context, arg ListRebatesByInviterParams) ([]ListRebatesByInviterRow, error)
+	// 发过告警、现在已恢复在线或已被停用的服务器
+	ListRecoveredServers(ctx context.Context) ([]ListRecoveredServersRow, error)
 	ListRoleCodesByAdminIDs(ctx context.Context, adminIds []int64) ([]ListRoleCodesByAdminIDsRow, error)
 	ListRoleCodesForAdmin(ctx context.Context, adminID int64) ([]string, error)
 	ListRolePermissionCodes(ctx context.Context) ([]ListRolePermissionCodesRow, error)
@@ -359,6 +378,9 @@ type Querier interface {
 	// 发送成功后清空正文（docs/03 §5.7 发件箱）
 	MarkMailSent(ctx context.Context, id int64) error
 	MarkPaymentPaid(ctx context.Context, arg MarkPaymentPaidParams) error
+	MarkServerAlerted(ctx context.Context, arg MarkServerAlertedParams) error
+	MarkTelegramFailed(ctx context.Context, arg MarkTelegramFailedParams) error
+	MarkTelegramSent(ctx context.Context, arg MarkTelegramSentParams) error
 	MarkTopupCodeUsed(ctx context.Context, arg MarkTopupCodeUsedParams) error
 	// 待删除期间把用户名换成占位名并清空邮箱，原用户名与邮箱随即可被重新注册（docs/03 §5.8 注销账号）
 	MarkUserDeleted(ctx context.Context, id int64) (int64, error)
@@ -367,6 +389,7 @@ type Querier interface {
 	PurgeDeletedUsers(ctx context.Context) (int64, error)
 	PurgeEmailCodes(ctx context.Context, createdAt pgtype.Timestamptz) (int64, error)
 	PurgeMailOutbox(ctx context.Context, createdAt pgtype.Timestamptz) (int64, error)
+	PurgeTelegramOutbox(ctx context.Context, createdAt pgtype.Timestamptz) (int64, error)
 	RenameCustomNode(ctx context.Context, arg RenameCustomNodeParams) (int64, error)
 	// 删除对外地址拆分了面板上的组：被挪到新组的地址改写组标识，保留原记录与节点（docs/03 §5.1）
 	RepointEndpoint(ctx context.Context, arg RepointEndpointParams) error
@@ -391,12 +414,14 @@ type Querier interface {
 	SetProvisionLinks(ctx context.Context, arg SetProvisionLinksParams) error
 	SetServerChainRuleEnabled(ctx context.Context, arg SetServerChainRuleEnabledParams) (int64, error)
 	SetServerOnlineClients(ctx context.Context, arg SetServerOnlineClientsParams) error
-	// T1–T3 的落库：status、last_error 由调用方按转移表算好；is_online 时才刷新版本、GUID、快照与最近在线时间
+	// T1–T3 的落库：status、last_error 由调用方按转移表算好；is_online 时才刷新版本、GUID、快照与最近在线时间。
+	// 不在线起始时间（docs/03 §5.20 掉线告警）：回到 online 清空，离开 online 时记下第一次的时刻
 	SetServerProbeResult(ctx context.Context, arg SetServerProbeResultParams) error
 	SetServerProvisionsOnline(ctx context.Context, arg SetServerProvisionsOnlineParams) error
 	SetServerSynced(ctx context.Context, id int64) error
 	SetServerToken(ctx context.Context, arg SetServerTokenParams) error
 	SetSharedAccountCredential(ctx context.Context, arg SetSharedAccountCredentialParams) error
+	SetTelegramRetry(ctx context.Context, arg SetTelegramRetryParams) error
 	// touch_reply 为真时把最近回复时间推到 now（有新消息）；关闭时记关闭时间，重新打开时清掉
 	SetTicketStatus(ctx context.Context, arg SetTicketStatusParams) error
 	SetTopupCodeDisabled(ctx context.Context, arg SetTopupCodeDisabledParams) error
@@ -411,7 +436,10 @@ type Querier interface {
 	// 只在还没有 token 时写入，避免并发请求互相覆盖
 	SetUserSubToken(ctx context.Context, arg SetUserSubTokenParams) (int64, error)
 	SetUserTOTPPending(ctx context.Context, arg SetUserTOTPPendingParams) error
+	SumOrdersBetween(ctx context.Context, arg SumOrdersBetweenParams) (int64, error)
 	SumRebateByInviter(ctx context.Context, inviterID pgtype.Int8) (int64, error)
+	SumTopupsBetween(ctx context.Context, arg SumTopupsBetweenParams) (int64, error)
+	SumTrafficBetween(ctx context.Context, arg SumTrafficBetweenParams) (int64, error)
 	SumUserBalances(ctx context.Context) (int64, error)
 	// 同一邮箱同一用途只有最新一条有效
 	SupersedeEmailCodes(ctx context.Context, arg SupersedeEmailCodesParams) error
@@ -440,6 +468,7 @@ type Querier interface {
 	UpsertEndpoint(ctx context.Context, arg UpsertEndpointParams) (int64, error)
 	// 平台写入面板成功后的落库：摘要即“已确认”状态，清除漂移与缺失标记
 	UpsertInboundFromPlatform(ctx context.Context, arg UpsertInboundFromPlatformParams) (int64, error)
+	UpsertJobState(ctx context.Context, arg UpsertJobStateParams) error
 	// 按（套餐, 天数）定位：已有的只改价，保住 id（用户的自动续费与订单快照都引用它）
 	UpsertPlanPrice(ctx context.Context, arg UpsertPlanPriceParams) error
 	// cred_version 只在写面板成功（synced）时推进；失败时保留原值，下次对账继续换凭据

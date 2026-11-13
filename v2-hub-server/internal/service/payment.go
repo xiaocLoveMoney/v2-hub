@@ -53,18 +53,20 @@ type PayService struct {
 	store
 	settings *SettingsService
 	gateways *pay.Registry
+	telegram *TelegramService
 	now      func() time.Time
 	rate     *ratelimit.FailureGuard
 }
 
 // NewPayService 创建在线充值服务。gateways 为空表示没有配置任何网关：充值入口不出现，发起接口返回 CodeFeatureDisabled。
 // now 为 nil 时用 time.Now。
-func NewPayService(pool *pgxpool.Pool, settings *SettingsService, gateways *pay.Registry, now func() time.Time) *PayService {
+// telegram 为 nil 表示入账时不发 Telegram 通知（docs/03 §5.20）。
+func NewPayService(pool *pgxpool.Pool, settings *SettingsService, gateways *pay.Registry, telegram *TelegramService, now func() time.Time) *PayService {
 	if now == nil {
 		now = time.Now
 	}
 	rate := ratelimit.NewFailureGuard(ratelimit.FailureGuardConfig{MaxFailures: paymentsPerHour, Window: time.Hour, Lockout: time.Hour, MaxKeys: shopGuardMaxKeys}, now)
-	return &PayService{store: newStore(pool), settings: settings, gateways: gateways, now: now, rate: rate}
+	return &PayService{store: newStore(pool), settings: settings, gateways: gateways, telegram: telegram, now: now, rate: rate}
 }
 
 // GatewayInfo 是展示给用户的充值方式。
@@ -209,6 +211,7 @@ func (s *PayService) confirm(ctx context.Context, gatewayCode string, n *pay.Not
 		} else if _, err := applyLedger(ctx, q, ledgerChange{UserID: row.UserID.Int64, Amount: row.Amount, Kind: LedgerTopupOnline, Ref: ledgerRef{Type: refPayment, ID: row.ID}}, now); err != nil {
 			return err
 		}
+		s.telegram.Notify(ctx, q, TelegramEventPayment, fmt.Sprintf("在线充值入账：充值单 %s，%s 元（%s）", n.TradeNo, formatCents(row.Amount), gatewayCode))
 		return writeAudit(ctx, q, AuditEntry{ActorType: ActorSystem, Action: ActionPaymentPaid, TargetType: targetPayment, TargetID: fmt.Sprint(row.ID),
 			Detail: map[string]any{"tradeNo": n.TradeNo, "gateway": gatewayCode, "amount": row.Amount}})
 	})

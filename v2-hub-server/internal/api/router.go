@@ -69,6 +69,9 @@ type Deps struct {
 	Chain ChainManager
 	// ChainApply 提供服务端链式的下发状态、重试与全站规则（docs/03 §5.19）。
 	ChainApply ChainApplyManager
+	// Telegram 提供 Telegram 测试消息，Ops 提供管理端总览（docs/03 §5.20）。
+	Telegram TelegramManager
+	Ops      OpsManager
 	// Cookie 是会话 Cookie 属性。
 	Cookie CookieConfig
 	// TrustedProxies 是可采信 X-Forwarded-For 的直连网段（如 Caddy 所在 docker 网络）。
@@ -93,6 +96,8 @@ type handlers struct {
 	pay            PayManager
 	chain          ChainManager
 	chainApply     ChainApplyManager
+	telegram       TelegramManager
+	ops            OpsManager
 	cookie         CookieConfig
 	trustedProxies []netip.Prefix
 }
@@ -100,7 +105,7 @@ type handlers struct {
 // NewRouter 返回注册好全部路由的 http.Handler。路由与 hub-api.yaml 的 paths 逐条对应。
 func NewRouter(deps Deps) http.Handler {
 	h := &handlers{auth: deps.Auth, rbac: deps.RBAC, panels: deps.Panels, users: deps.Users, portalAuth: deps.PortalAuth, portal: deps.Portal,
-		settings: deps.Settings, mail: deps.Mail, account: deps.Account, content: deps.Content, tickets: deps.Tickets, wallet: deps.Wallet, shop: deps.Shop, finance: deps.Finance, pay: deps.Pay, chain: deps.Chain, chainApply: deps.ChainApply, cookie: deps.Cookie, trustedProxies: deps.TrustedProxies}
+		settings: deps.Settings, mail: deps.Mail, account: deps.Account, content: deps.Content, tickets: deps.Tickets, wallet: deps.Wallet, shop: deps.Shop, finance: deps.Finance, pay: deps.Pay, chain: deps.Chain, chainApply: deps.ChainApply, telegram: deps.Telegram, ops: deps.Ops, cookie: deps.Cookie, trustedProxies: deps.TrustedProxies}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", handleHealthz)
 	mux.HandleFunc("GET /readyz", newReadyzHandler(deps.Database, deps.PingTimeout))
@@ -177,6 +182,8 @@ func NewRouter(deps Deps) http.Handler {
 	mux.HandleFunc("GET /api/admin/payments", h.requireAdmin(service.PermFinanceRead, h.listPayments))
 	mux.HandleFunc("GET /api/admin/rebates", h.requireAdmin(service.PermFinanceRead, h.listRebates))
 	mux.HandleFunc("GET /api/admin/finance/stats", h.requireAdmin(service.PermFinanceRead, h.getFinanceStats))
+	mux.HandleFunc("GET /api/admin/finance/stats.csv", h.requireAdmin(service.PermFinanceRead, h.exportFinanceStats))
+	mux.HandleFunc("GET /api/admin/dashboard", h.requireAdmin("", h.getAdminDashboard))
 	mux.HandleFunc("GET /api/admin/topup-codes", h.requireAdmin(service.PermFinanceRead, h.listTopupCodes))
 	mux.HandleFunc("POST /api/admin/topup-codes", h.requireAdmin(service.PermFinanceWrite, h.createTopupCodes))
 	mux.HandleFunc("PUT /api/admin/topup-codes/{id}", h.requireAdmin(service.PermFinanceWrite, h.updateTopupCode))
@@ -195,6 +202,7 @@ func NewRouter(deps Deps) http.Handler {
 	mux.HandleFunc("GET /api/admin/settings", h.requireAdmin(service.PermSettingRead, h.getSettings))
 	mux.HandleFunc("PUT /api/admin/settings", h.requireAdmin(service.PermSettingWrite, h.updateSettings))
 	mux.HandleFunc("POST /api/admin/settings/test-mail", h.requireAdmin(service.PermSettingWrite, h.sendTestMail))
+	mux.HandleFunc("POST /api/admin/settings/test-telegram", h.requireAdmin(service.PermSettingWrite, h.sendTestTelegram))
 	mux.HandleFunc("GET /api/admin/mail-outbox", h.requireAdmin(service.PermSettingRead, h.listMailOutbox))
 
 	mux.HandleFunc("GET /api/admin/announcements", h.requireAdmin(service.PermContentRead, h.listAnnouncements))
@@ -218,6 +226,7 @@ func NewRouter(deps Deps) http.Handler {
 
 	// 未登录可用：站点信息与邮箱验证码（docs/03 §5.6 公开子集、§5.7）
 	mux.HandleFunc("GET /api/user/site", h.getSiteInfo)
+	mux.HandleFunc("GET /api/user/site/plans", h.getPublicPlans)
 	mux.HandleFunc("POST /api/user/auth/email-code", h.sendEmailCode)
 	mux.HandleFunc("POST /api/user/auth/register", h.registerUser)
 	mux.HandleFunc("POST /api/user/auth/password/reset", h.resetOwnSecret)

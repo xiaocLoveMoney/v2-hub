@@ -18,6 +18,20 @@ type SettingsManager interface {
 	Update(ctx context.Context, actor *service.AdminPrincipal, patch map[string]json.RawMessage, ip *netip.Addr) (service.Settings, error)
 }
 
+// TelegramManager 是 Telegram 测试接口需要的能力（由 service.TelegramService 实现，docs/03 §5.20）。
+type TelegramManager interface {
+	Enabled() bool
+	SendTest(ctx context.Context, actor *service.AdminPrincipal, ip *netip.Addr) error
+}
+
+func (h *handlers) sendTestTelegram(w http.ResponseWriter, r *http.Request, p *service.AdminPrincipal) {
+	if err := h.telegram.SendTest(r.Context(), p, clientIP(r, h.trustedProxies)); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeOK(w, nil)
+}
+
 // MailManager 是发件箱接口需要的业务能力（由 service.MailService 实现）。
 type MailManager interface {
 	Enabled() bool
@@ -86,20 +100,54 @@ type subscriptionSettingsVO struct {
 	LogRetentionDays    int    `json:"logRetentionDays"`
 }
 
+type alertSettingsVO struct {
+	Emails         []string `json:"emails"`
+	OfflineMinutes int      `json:"offlineMinutes"`
+}
+
+type telegramSettingsVO struct {
+	ChatID         string `json:"chatId"`
+	NotifyAlerts   bool   `json:"notifyAlerts"`
+	NotifyTickets  bool   `json:"notifyTickets"`
+	NotifyPayments bool   `json:"notifyPayments"`
+}
+
+type reportSettingsVO struct {
+	DailyEnabled bool `json:"dailyEnabled"`
+	DailyHour    int  `json:"dailyHour"`
+}
+
+type landingSettingsVO struct {
+	Enabled  bool   `json:"enabled"`
+	Headline string `json:"headline"`
+	Intro    string `json:"intro"`
+}
+
+type supportSettingsVO struct {
+	URL   string `json:"url"`
+	Label string `json:"label"`
+}
+
 // settingsVO 对应 hub-api.yaml Settings。
 type settingsVO struct {
-	MailEnabled  bool                   `json:"mailEnabled"`
-	Site         siteSettingsVO         `json:"site"`
-	Register     registerSettingsVO     `json:"register"`
-	Invite       inviteSettingsVO       `json:"invite"`
-	Checkin      checkinSettingsVO      `json:"checkin"`
-	Ticket       ticketSettingsVO       `json:"ticket"`
-	Shared       sharedSettingsVO       `json:"shared"`
-	Mail         mailSettingsVO         `json:"mail"`
-	Subscription subscriptionSettingsVO `json:"subscription"`
-	Shop         shopSettingsVO         `json:"shop"`
-	Rebate       rebateSettingsVO       `json:"rebate"`
-	Notify       notifySettingsVO       `json:"notify"`
+	MailEnabled     bool                   `json:"mailEnabled"`
+	TelegramEnabled bool                   `json:"telegramEnabled"`
+	Alert           alertSettingsVO        `json:"alert"`
+	Telegram        telegramSettingsVO     `json:"telegram"`
+	Report          reportSettingsVO       `json:"report"`
+	Landing         landingSettingsVO      `json:"landing"`
+	Support         supportSettingsVO      `json:"support"`
+	Site            siteSettingsVO         `json:"site"`
+	Register        registerSettingsVO     `json:"register"`
+	Invite          inviteSettingsVO       `json:"invite"`
+	Checkin         checkinSettingsVO      `json:"checkin"`
+	Ticket          ticketSettingsVO       `json:"ticket"`
+	Shared          sharedSettingsVO       `json:"shared"`
+	Mail            mailSettingsVO         `json:"mail"`
+	Subscription    subscriptionSettingsVO `json:"subscription"`
+	Shop            shopSettingsVO         `json:"shop"`
+	Rebate          rebateSettingsVO       `json:"rebate"`
+	Notify          notifySettingsVO       `json:"notify"`
 }
 
 func nonNil(v []string) []string {
@@ -109,13 +157,19 @@ func nonNil(v []string) []string {
 	return v
 }
 
-func toSettingsVO(s service.Settings, mailEnabled bool) settingsVO {
+func toSettingsVO(s service.Settings, mailEnabled, telegramEnabled bool) settingsVO {
 	return settingsVO{
-		MailEnabled: mailEnabled,
-		Site:        siteSettingsVO{Name: s.Site.Name, Timezone: s.Site.Timezone, PortalURL: s.Site.PortalURL},
-		Shop:        shopSettingsVO{Enabled: s.Shop.Enabled, Currency: s.Shop.Currency},
-		Rebate:      rebateSettingsVO{Percent: s.Rebate.Percent, Mode: s.Rebate.Mode},
-		Notify:      notifySettingsVO{ExpireDays: s.Notify.ExpireDays, TrafficPercent: s.Notify.TrafficPercent},
+		MailEnabled: mailEnabled, TelegramEnabled: telegramEnabled,
+		Alert: alertSettingsVO{Emails: nonNil(s.Alert.Emails), OfflineMinutes: s.Alert.OfflineMinutes},
+		Telegram: telegramSettingsVO{ChatID: s.Telegram.ChatID, NotifyAlerts: s.Telegram.NotifyAlerts, NotifyTickets: s.Telegram.NotifyTickets,
+			NotifyPayments: s.Telegram.NotifyPayments},
+		Report:  reportSettingsVO{DailyEnabled: s.Report.DailyEnabled, DailyHour: s.Report.DailyHour},
+		Landing: landingSettingsVO{Enabled: s.Landing.Enabled, Headline: s.Landing.Headline, Intro: s.Landing.Intro},
+		Support: supportSettingsVO{URL: s.Support.URL, Label: s.Support.Label},
+		Site:    siteSettingsVO{Name: s.Site.Name, Timezone: s.Site.Timezone, PortalURL: s.Site.PortalURL},
+		Shop:    shopSettingsVO{Enabled: s.Shop.Enabled, Currency: s.Shop.Currency},
+		Rebate:  rebateSettingsVO{Percent: s.Rebate.Percent, Mode: s.Rebate.Mode},
+		Notify:  notifySettingsVO{ExpireDays: s.Notify.ExpireDays, TrafficPercent: s.Notify.TrafficPercent},
 		Register: registerSettingsVO{Mode: s.Register.Mode, EmailVerify: s.Register.EmailVerify, EmailAllow: nonNil(s.Register.EmailAllow),
 			EmailBlock: nonNil(s.Register.EmailBlock), PlanID: s.Register.PlanID},
 		Invite:  inviteSettingsVO{UserEnabled: s.Invite.UserEnabled, UserMaxUses: s.Invite.UserMaxUses},
@@ -134,7 +188,7 @@ func (h *handlers) getSettings(w http.ResponseWriter, r *http.Request, _ *servic
 		writeError(w, r, err)
 		return
 	}
-	writeOK(w, toSettingsVO(cur, h.mail.Enabled()))
+	writeOK(w, toSettingsVO(cur, h.mail.Enabled(), h.telegram.Enabled()))
 }
 
 func (h *handlers) updateSettings(w http.ResponseWriter, r *http.Request, p *service.AdminPrincipal) {
@@ -154,7 +208,7 @@ func (h *handlers) updateSettings(w http.ResponseWriter, r *http.Request, p *ser
 		writeError(w, r, err)
 		return
 	}
-	writeOK(w, toSettingsVO(next, h.mail.Enabled()))
+	writeOK(w, toSettingsVO(next, h.mail.Enabled(), h.telegram.Enabled()))
 }
 
 type testMailRequest struct {

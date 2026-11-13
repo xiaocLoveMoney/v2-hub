@@ -98,6 +98,9 @@ type SiteInfo struct {
 	ShopEnabled         bool
 	// Currency 是金额的显示币种（docs/03 §5.12）。
 	Currency string
+	// Landing 与 Support 是落地页与客服入口（docs/03 §5.20）；落地页没开时标题与介绍为空。
+	Landing LandingSettings
+	Support SupportSettings
 }
 
 // Site 返回公开的站点信息。
@@ -109,8 +112,17 @@ func (s *AccountService) Site(ctx context.Context) (*SiteInfo, error) {
 	return &SiteInfo{
 		SiteName: cur.Site.Name, RegisterMode: cur.Register.Mode, EmailVerifyRequired: s.emailVerifyRequired(cur), MailEnabled: s.mail.Enabled(),
 		CheckinEnabled: cur.Checkin.Enabled, TicketEnabled: cur.Ticket.Enabled, SharedEnabled: cur.Shared.Enabled,
-		ShopEnabled: cur.Shop.Enabled, Currency: cur.Shop.Currency,
+		ShopEnabled: cur.Shop.Enabled, Currency: cur.Shop.Currency, Support: cur.Support,
+		Landing: publicLanding(cur.Landing),
 	}, nil
+}
+
+// publicLanding 落地页没开时不外露标题与介绍。
+func publicLanding(l LandingSettings) LandingSettings {
+	if !l.Enabled {
+		return LandingSettings{}
+	}
+	return l
 }
 
 // emailVerifyRequired：设置为真且邮件可用时注册才要验证码（docs/03 §5.6 register.emailVerify）。

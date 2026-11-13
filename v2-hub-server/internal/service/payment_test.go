@@ -28,7 +28,7 @@ func newPayFixture(t *testing.T) *payFixture {
 	if err != nil {
 		t.Fatalf("NewRegistry: %v", err)
 	}
-	return &payFixture{shopFixture: sf, gateway: gw, pay: NewPayService(sf.pool, sf.settings, reg, sf.clock.now)}
+	return &payFixture{shopFixture: sf, gateway: gw, pay: NewPayService(sf.pool, sf.settings, reg, nil, sf.clock.now)}
 }
 
 func (f *payFixture) notify(tradeNo, gatewayTradeNo string, amount int64, sign, status string) (string, error) {
@@ -146,7 +146,7 @@ func TestPaymentCreateGuards(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewRegistry: %v", err)
 	}
-	none := NewPayService(f.pool, f.settings, empty, f.clock.now)
+	none := NewPayService(f.pool, f.settings, empty, nil, f.clock.now)
 	if _, err := none.CreatePayment(ctx, alice, paytest.Code, payAmount, nil); !errors.Is(err, ErrFeatureDisabled) || len(none.Gateways()) != 0 {
 		t.Fatalf("payment without any gateway = %v, want feature_disabled", err)
 	}
@@ -223,6 +223,34 @@ func TestFinanceStatsByDay(t *testing.T) {
 	}
 	if _, err := f.shop.FinanceStats(ctx, maxStatsDays+1); !errors.Is(err, ErrInvalidArgument) {
 		t.Fatalf("too many days = %v, want invalid_argument", err)
+	}
+	// 按月（docs/03 §5.20 财务报表）：本月一项合计等于按日合计；导出 CSV 带 BOM、元为单位、末行合计
+	monthly, err := f.shop.FinanceStatsBy(ctx, FinanceQuery{Granularity: StatsByMonth, Months: 2})
+	if err != nil || len(monthly.Days) != 2 || monthly.Granularity != StatsByMonth {
+		t.Fatalf("monthly = %+v, %v", monthly, err)
+	}
+	var monthTopup, monthSpend int64
+	for _, m := range monthly.Days {
+		monthTopup, monthSpend = monthTopup+m.Topup, monthSpend+m.Spend
+	}
+	if monthTopup != 2*topupAmount || monthSpend != priceMonth || !strings.HasSuffix(monthly.Days[1].Date, "-01") {
+		t.Fatalf("monthly days = %+v", monthly.Days)
+	}
+	for what, fq := range map[string]FinanceQuery{
+		"bad granularity": {Granularity: "week"},
+		"too many months": {Granularity: StatsByMonth, Months: maxStatsMonths + 1},
+	} {
+		if _, err := f.shop.FinanceStatsBy(ctx, fq); !errors.Is(err, ErrInvalidArgument) {
+			t.Fatalf("%s = %v, want invalid_argument", what, err)
+		}
+	}
+	csvBody, name, err := f.shop.ExportFinanceCSV(ctx, f.actor, FinanceQuery{Granularity: StatsByDay, Days: 3}, nil)
+	if err != nil || !strings.HasPrefix(string(csvBody), "\uFEFF日期,") || !strings.HasPrefix(name, "finance-day-") {
+		t.Fatalf("csv = %q %q, %v", csvBody, name, err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(csvBody)), "\n")
+	if len(lines) != 5 || !strings.HasPrefix(lines[4], "合计,") || !strings.Contains(lines[1], formatCents(2*topupAmount)) {
+		t.Fatalf("csv lines = %q", lines)
 	}
 
 	rebates, err := f.shop.ListRebates(ctx, ivy.UserID, PageQuery{})

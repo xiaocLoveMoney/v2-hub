@@ -242,7 +242,7 @@ func (s *PanelService) SyncServer(ctx context.Context, actor *AdminPrincipal, id
 		return nil, newError(CodeConflict, msgServerDisabled)
 	}
 	info, probeErr := p.Probe(ctx)
-	if err := s.q.SetServerProbeResult(ctx, probeParams(id, &info, probeErr)); err != nil {
+	if err := s.q.SetServerProbeResult(ctx, probeParams(id, &info, probeErr, s.now())); err != nil {
 		return nil, fmt.Errorf("save probe result of server %d: %w", id, err)
 	}
 	if probeErr != nil {

@@ -240,30 +240,34 @@ func (q *Queries) ListServers(ctx context.Context) ([]ListServersRow, error) {
 const setServerProbeResult = `-- name: SetServerProbeResult :exec
 UPDATE server
 SET status = $1::varchar,
-    last_error = $2::varchar,
-    last_seen_at = CASE WHEN $3::bool THEN now() ELSE last_seen_at END,
-    panel_version = CASE WHEN $3::bool THEN $4::varchar ELSE panel_version END,
-    panel_guid = CASE WHEN $3::bool THEN $5::varchar ELSE panel_guid END,
-    status_snapshot = CASE WHEN $3::bool THEN $6::jsonb ELSE status_snapshot END
-WHERE id = $7
+    offline_since = CASE WHEN $2::bool THEN NULL ELSE coalesce(offline_since, $3::timestamptz) END,
+    last_error = $4::varchar,
+    last_seen_at = CASE WHEN $2::bool THEN now() ELSE last_seen_at END,
+    panel_version = CASE WHEN $2::bool THEN $5::varchar ELSE panel_version END,
+    panel_guid = CASE WHEN $2::bool THEN $6::varchar ELSE panel_guid END,
+    status_snapshot = CASE WHEN $2::bool THEN $7::jsonb ELSE status_snapshot END
+WHERE id = $8
 `
 
 type SetServerProbeResultParams struct {
 	Status         string
-	LastError      string
 	IsOnline       bool
+	ProbedAt       pgtype.Timestamptz
+	LastError      string
 	PanelVersion   string
 	PanelGuid      string
 	StatusSnapshot []byte
 	ID             int64
 }
 
-// T1–T3 的落库：status、last_error 由调用方按转移表算好；is_online 时才刷新版本、GUID、快照与最近在线时间
+// T1–T3 的落库：status、last_error 由调用方按转移表算好；is_online 时才刷新版本、GUID、快照与最近在线时间。
+// 不在线起始时间（docs/03 §5.20 掉线告警）：回到 online 清空，离开 online 时记下第一次的时刻
 func (q *Queries) SetServerProbeResult(ctx context.Context, arg SetServerProbeResultParams) error {
 	_, err := q.db.Exec(ctx, setServerProbeResult,
 		arg.Status,
-		arg.LastError,
 		arg.IsOnline,
+		arg.ProbedAt,
+		arg.LastError,
 		arg.PanelVersion,
 		arg.PanelGuid,
 		arg.StatusSnapshot,

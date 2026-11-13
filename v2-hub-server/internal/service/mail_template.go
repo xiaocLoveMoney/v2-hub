@@ -87,6 +87,11 @@ var (
 		"【{{.Site}}】工单待处理",
 		"工单“{{.Title}}”有用户的新消息，请到管理端处理。\n\n— {{.Site}}\n",
 		`<p>工单“{{.Title}}”有用户的新消息，请到管理端处理。</p>`)
+	// mailTplOps 是给管理员的运营通知（掉线告警、恢复、日报，docs/03 §5.20）：标题 + 已排好的多行纯文本
+	mailTplOps = mustMailTemplate("ops",
+		"【{{.Site}}】{{.Title}}",
+		"{{.Title}}\n\n{{.Body}}\n\n— {{.Site}}\n",
+		`<h3>{{.Title}}</h3><div style="white-space:pre-wrap">{{.Body}}</div>`)
 )
 
 func renderMail(t mailTemplate, v mailVars) (mailContent, error) {

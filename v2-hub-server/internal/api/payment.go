@@ -39,6 +39,8 @@ type PayManager interface {
 // FinanceManager 是收支统计与返利列表的业务接口，由 service.ShopService 实现。
 type FinanceManager interface {
 	FinanceStats(ctx context.Context, days int) (*service.FinanceStats, error)
+	FinanceStatsBy(ctx context.Context, fq service.FinanceQuery) (*service.FinanceStats, error)
+	ExportFinanceCSV(ctx context.Context, actor *service.AdminPrincipal, fq service.FinanceQuery, ip *netip.Addr) ([]byte, string, error)
 	ListRebates(ctx context.Context, inviterID int64, pq service.PageQuery) (*service.Page[service.RebateRecord], error)
 }
 
@@ -202,26 +204,23 @@ type statsTotalsVO struct {
 
 // financeStatsVO 对应 hub-api.yaml FinanceStats。
 type financeStatsVO struct {
-	Days   []dayStatsVO  `json:"days"`
-	Totals statsTotalsVO `json:"totals"`
+	Granularity string        `json:"granularity"`
+	Days        []dayStatsVO  `json:"days"`
+	Totals      statsTotalsVO `json:"totals"`
 }
 
 func (h *handlers) getFinanceStats(w http.ResponseWriter, r *http.Request, _ *service.AdminPrincipal) {
-	days := 0
-	if raw := r.URL.Query().Get(queryDays); raw != "" {
-		v, err := strconv.Atoi(raw)
-		if err != nil || v < 1 {
-			writeError(w, r, badRequest(msgBadDays))
-			return
-		}
-		days = v
-	}
-	stats, err := h.finance.FinanceStats(r.Context(), days)
+	fq, err := financeQuery(r)
 	if err != nil {
 		writeError(w, r, err)
 		return
 	}
-	out := financeStatsVO{Days: make([]dayStatsVO, 0, len(stats.Days)), Totals: statsTotalsVO{Balance: stats.Balance, Topup: stats.Topup, Spend: stats.Spend, Rebate: stats.Rebate}}
+	stats, err := h.finance.FinanceStatsBy(r.Context(), fq)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	out := financeStatsVO{Granularity: stats.Granularity, Days: make([]dayStatsVO, 0, len(stats.Days)), Totals: statsTotalsVO{Balance: stats.Balance, Topup: stats.Topup, Spend: stats.Spend, Rebate: stats.Rebate}}
 	for _, d := range stats.Days {
 		out.Days = append(out.Days, dayStatsVO{Date: d.Date, Topup: d.Topup, Spend: d.Spend, Rebate: d.Rebate, OrderCount: d.OrderCount})
 	}
