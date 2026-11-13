@@ -102,6 +102,8 @@ CREATE TABLE server (
     status_snapshot JSONB,                                 -- 最近一次探测的资源快照（CPU、内存、在线时长等）
     online_clients  INTEGER      NOT NULL DEFAULT 0,       -- 面板在线 client 数（docs/03 §5.5）
     last_synced_at  TIMESTAMPTZ,
+    offline_since   TIMESTAMPTZ,                           -- 离开 online 的时刻；online 时为空（docs/03 §5.20 掉线告警）
+    alert_sent_at   TIMESTAMPTZ,                           -- 这次掉线已发告警的时刻；未发为空
     created_at      TIMESTAMPTZ  NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ  NOT NULL DEFAULT now(),
     CONSTRAINT uk_server_name UNIQUE (name)
@@ -383,6 +385,29 @@ CREATE TABLE mail_outbox (
 );
 CREATE INDEX idx_mail_outbox_queue ON mail_outbox (priority, next_attempt_at) WHERE status = 'pending';
 CREATE INDEX idx_mail_outbox_created_at ON mail_outbox (created_at);
+
+-- Telegram 发件箱（docs/03 §5.20，Ruling-42）：纯文本，发出或放弃后清空正文；记录保留 30 天
+CREATE TABLE telegram_outbox (
+    id              BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    chat_id         VARCHAR(64)  NOT NULL,
+    text            TEXT,                              -- NULL = 已清空
+    status          VARCHAR(16)  NOT NULL DEFAULT 'pending',
+    attempts        INTEGER      NOT NULL DEFAULT 0,
+    next_attempt_at TIMESTAMPTZ  NOT NULL DEFAULT now(),
+    last_error      VARCHAR(255) NOT NULL DEFAULT '',  -- 脱敏后的错误，不含 token
+    sent_at         TIMESTAMPTZ,
+    created_at      TIMESTAMPTZ  NOT NULL DEFAULT now(),
+    CONSTRAINT ck_telegram_outbox_status CHECK (status IN ('pending', 'sent', 'failed'))
+);
+CREATE INDEX idx_telegram_outbox_queue ON telegram_outbox (next_attempt_at) WHERE status = 'pending';
+CREATE INDEX idx_telegram_outbox_created_at ON telegram_outbox (created_at);
+
+-- 后台任务的少量持久状态（如日报已发到哪一天），一行一个键
+CREATE TABLE job_state (
+    key        VARCHAR(64)  PRIMARY KEY,
+    value      VARCHAR(255) NOT NULL,
+    updated_at TIMESTAMPTZ  NOT NULL DEFAULT now()
+);
 
 -- 公告（docs/03 §5.9）：正文为 Markdown 源文本（Ruling-25）。
 CREATE TABLE announcement (

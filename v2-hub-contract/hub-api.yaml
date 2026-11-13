@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: v2-hub API
-  version: 0.4.2
+  version: 0.4.3
   description: |
     v2-hub 对外接口契约（hub-server 提供，v2-hub-admin-web / v2-hub-user-web 消费）。
     - 管理端接口前缀 /api/admin，客户端接口前缀 /api/user，订阅端点前缀 /sub。
@@ -35,7 +35,9 @@ tags:
   - name: admin-users
     description: 套餐（plan:*）与用户（user:*），docs/03 §5.2
   - name: admin-settings
-    description: 系统设置与发件箱（setting:*），docs/03 §5.6、§5.7
+    description: 系统设置、发件箱与 Telegram 测试（setting:*），docs/03 §5.6、§5.7、§5.20
+  - name: admin-dashboard
+    description: 管理端总览，各区块按权限码出现（docs/03 §5.20，0.4.3）
   - name: admin-content
     description: 公告、教程与共享账号（content:*），docs/03 §5.9
   - name: admin-tickets
@@ -210,6 +212,24 @@ paths:
         "409": { $ref: "#/components/responses/Conflict" }
         "429": { $ref: "#/components/responses/RateLimited" }
 
+  /api/admin/dashboard:
+    get:
+      tags: [admin-dashboard]
+      operationId: getAdminDashboard
+      summary: 管理端总览（任何已登录管理员；docs/03 §5.20，0.4.3）
+      description: 缺对应权限码的区块为 null：users、traffic 要 user:read，servers 要 server:read，finance 要 finance:read，tickets 要 ticket:read。
+      responses:
+        "200":
+          description: 总览
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/AdminDashboard" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
   /api/admin/permissions:
     get:
       tags: [admin-rbac]
@@ -1500,6 +1520,20 @@ paths:
         "403": { $ref: "#/components/responses/PermissionDenied" }
         "429": { $ref: "#/components/responses/RateLimited" }
         "502": { $ref: "#/components/responses/UpstreamUnavailable" }
+  /api/admin/settings/test-telegram:
+    post:
+      tags: [admin-settings]
+      operationId: sendTestTelegram
+      summary: 向设置里的 Telegram 会话发一条测试消息并返回结果（setting:write；docs/03 §5.20，0.4.3）
+      description: token（环境变量 HUB_TELEGRAM_BOT_TOKEN）或会话 id 为空时返回 403 feature_disabled；Bot API 拒绝或不可达返回 502，说明里不含 token。
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      responses:
+        "200": { $ref: "#/components/responses/Ok" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "502": { $ref: "#/components/responses/UpstreamUnavailable" }
   /api/admin/mail-outbox:
     get:
       tags: [admin-settings]
@@ -2399,9 +2433,11 @@ paths:
     get:
       tags: [admin-finance]
       operationId: getFinanceStats
-      summary: 按天的充值、消费与返利合计，以及当前余额总和（finance:read）
+      summary: 按天或按月的充值、消费与返利合计，以及当前余额总和（finance:read）
       parameters:
-        - { name: days, in: query, description: 最近多少天（按平台时区的自然日）, schema: { type: integer, minimum: 1, maximum: 90, default: 30 } }
+        - { name: granularity, in: query, description: day = 按日，month = 按月（0.4.3）, schema: { $ref: "#/components/schemas/FinanceGranularity" } }
+        - { name: days, in: query, description: 按日时最近多少天（按平台时区的自然日；0.4.3 起上限 366）, schema: { type: integer, minimum: 1, maximum: 366, default: 30 } }
+        - { name: months, in: query, description: 按月时最近多少个月（含本月，0.4.3）, schema: { type: integer, minimum: 1, maximum: 24, default: 12 } }
       responses:
         "200":
           description: 按天的充值、消费与返利合计，以及当前余额总和
@@ -2413,6 +2449,27 @@ paths:
                   - type: object
                     properties:
                       data: { $ref: "#/components/schemas/FinanceStats" }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+  /api/admin/finance/stats.csv:
+    get:
+      tags: [admin-finance]
+      operationId: exportFinanceStats
+      summary: 把收支统计导出为 CSV（finance:read；docs/03 §5.20，0.4.3）
+      description: 参数同 /api/admin/finance/stats。不走响应信封；UTF-8 带 BOM，金额以元为单位、两位小数；记审计。
+      parameters:
+        - { name: granularity, in: query, schema: { $ref: "#/components/schemas/FinanceGranularity" } }
+        - { name: days, in: query, schema: { type: integer, minimum: 1, maximum: 366, default: 30 } }
+        - { name: months, in: query, schema: { type: integer, minimum: 1, maximum: 24, default: 12 } }
+      responses:
+        "200":
+          description: CSV 文件
+          headers:
+            Content-Disposition: { schema: { type: string }, description: attachment; filename=finance-<粒度>-<日期>.csv }
+          content:
+            text/csv:
+              schema: { type: string }
         "400": { $ref: "#/components/responses/InvalidArgument" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "403": { $ref: "#/components/responses/PermissionDenied" }
@@ -2794,6 +2851,24 @@ paths:
                   - type: object
                     properties:
                       data: { $ref: "#/components/schemas/SiteInfo" }
+  /api/user/site/plans:
+    get:
+      tags: [user-auth]
+      operationId: getPublicPlans
+      summary: 落地页用的在售套餐（未登录可读；docs/03 §5.20，0.4.3）
+      description: 只在落地页与商店都开启时返回在售的非试用套餐，否则返回空数组；不含任何与访问者有关的字段。
+      security: []
+      responses:
+        "200":
+          description: 在售套餐
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { type: array, items: { $ref: "#/components/schemas/PublicPlan" } }
   /api/user/auth/email-code:
     post:
       tags: [user-auth]
@@ -4595,12 +4670,66 @@ components:
         sharedEnabled: { type: boolean }
         shopEnabled: { type: boolean, description: 商店与钱包是否开启（0.4.0） }
         currency: { $ref: "#/components/schemas/Currency" }
+        landing:
+          type: object
+          description: 落地页（0.4.3）；enabled 为假时 headline 与 intro 为空串
+          required: [enabled, headline, intro]
+          properties:
+            enabled: { type: boolean }
+            headline: { type: string, description: 空串 = 用站点名 }
+            intro: { type: string, description: Markdown，按公告规则渲染（Ruling-25） }
+        support:
+          type: object
+          description: 客服入口（0.4.3，Ruling-44）；url 为空串时不显示
+          required: [url, label]
+          properties:
+            url: { type: string }
+            label: { type: string }
     Settings:
       type: object
       description: 全部系统设置（docs/03 §5.6 设置清单），键名去掉点号改驼峰分组
-      required: [site, register, invite, checkin, ticket, shared, mail, subscription, shop, rebate, notify, mailEnabled]
+      required: [site, register, invite, checkin, ticket, shared, mail, subscription, shop, rebate, notify, mailEnabled, alert, telegram, report, landing, support, telegramEnabled]
       properties:
         mailEnabled: { type: boolean, readOnly: true, description: SMTP 环境变量是否已配置（Ruling-24），不可经接口修改 }
+        telegramEnabled: { type: boolean, readOnly: true, description: 环境变量 HUB_TELEGRAM_BOT_TOKEN 是否已配置（0.4.3，Ruling-42） }
+        alert:
+          type: object
+          description: 掉线告警（0.4.3，docs/03 §5.20）
+          required: [emails, offlineMinutes]
+          properties:
+            emails: { type: array, maxItems: 10, items: { type: string, maxLength: 254 } }
+            offlineMinutes: { type: integer, minimum: 1, maximum: 60 }
+        telegram:
+          type: object
+          description: Telegram 管理员通知（0.4.3，Ruling-42）
+          required: [chatId, notifyAlerts, notifyTickets, notifyPayments]
+          properties:
+            chatId: { type: string, maxLength: 64, description: 空串 = 不发 }
+            notifyAlerts: { type: boolean }
+            notifyTickets: { type: boolean }
+            notifyPayments: { type: boolean }
+        report:
+          type: object
+          description: 运营日报（0.4.3）
+          required: [dailyEnabled, dailyHour]
+          properties:
+            dailyEnabled: { type: boolean }
+            dailyHour: { type: integer, minimum: 0, maximum: 23 }
+        landing:
+          type: object
+          description: 落地页（0.4.3）
+          required: [enabled, headline, intro]
+          properties:
+            enabled: { type: boolean }
+            headline: { type: string, maxLength: 64 }
+            intro: { type: string, maxLength: 2000 }
+        support:
+          type: object
+          description: 客服入口（0.4.3，Ruling-44）
+          required: [url, label]
+          properties:
+            url: { type: string, maxLength: 255, description: https:// 地址或空串 }
+            label: { type: string, minLength: 1, maxLength: 16 }
         site:
           type: object
           required: [name, timezone]
@@ -4688,6 +4817,11 @@ components:
         rebate: { type: object, additionalProperties: true }
         notify: { type: object, additionalProperties: true }
         subscription: { type: object, additionalProperties: true }
+        alert: { type: object, additionalProperties: true }
+        telegram: { type: object, additionalProperties: true }
+        report: { type: object, additionalProperties: true }
+        landing: { type: object, additionalProperties: true }
+        support: { type: object, additionalProperties: true }
     TestMailInput:
       type: object
       required: [to]
@@ -5230,13 +5364,18 @@ components:
       properties:
         items: { type: array, items: { $ref: "#/components/schemas/Rebate" } }
         total: { type: integer, format: int64 }
+    FinanceGranularity:
+      type: string
+      enum: [day, month]
+      default: day
     FinanceStats:
       type: object
       required: [days, totals]
       properties:
+        granularity: { $ref: "#/components/schemas/FinanceGranularity" }
         days:
           type: array
-          description: 按平台时区的自然日，旧的在前；没有流水的日期也给 0
+          description: 按平台时区的自然日（按月时为每月 1 日，代表整月），旧的在前；没有流水的日期也给 0
           items:
             type: object
             required: [date, topup, spend, rebate, orderCount]
@@ -5282,6 +5421,79 @@ components:
         canBuy: { type: boolean }
         reason: { type: string, description: 不能买的原因，可以买时为空串 }
         prices: { type: array, items: { $ref: "#/components/schemas/PlanPrice" } }
+    PublicPlan:
+      type: object
+      description: 落地页展示的在售套餐（0.4.3）；不含与访问者有关的字段
+      required: [id, name, description, trafficLimit, trafficReset, limitIp, nodeCount, prices]
+      properties:
+        id: { type: integer, format: int64 }
+        name: { type: string }
+        description: { type: string, description: 卖点说明，纯文本，一行一条 }
+        trafficLimit: { type: integer, format: int64, description: 字节，0 不限 }
+        trafficReset: { $ref: "#/components/schemas/TrafficReset" }
+        limitIp: { type: integer }
+        nodeCount: { type: integer }
+        prices: { type: array, items: { $ref: "#/components/schemas/PlanPrice" } }
+    AdminDashboard:
+      type: object
+      description: 管理端总览（0.4.3，docs/03 §5.20）；缺权限的区块为 null
+      required: [users, traffic, servers, finance, tickets]
+      properties:
+        users:
+          type: [object, "null"]
+          required: [total, active, newToday, new7d, online]
+          properties:
+            total: { type: integer }
+            active: { type: integer }
+            newToday: { type: integer }
+            new7d: { type: integer }
+            online: { type: integer, description: 当前在线人数（各面板在线 client 去重到用户） }
+        traffic:
+          type: [object, "null"]
+          required: [today, days]
+          properties:
+            today: { type: integer, format: int64, description: 今日流量（字节） }
+            days:
+              type: array
+              description: 近 7 个自然日（含今天），旧的在前
+              items:
+                type: object
+                required: [date, bytes]
+                properties:
+                  date: { type: string, format: date }
+                  bytes: { type: integer, format: int64 }
+        servers:
+          type: [object, "null"]
+          required: [total, online, nodeCount, offline]
+          properties:
+            total: { type: integer }
+            online: { type: integer }
+            nodeCount: { type: integer }
+            offline:
+              type: array
+              maxItems: 10
+              description: 启用中但不在线的服务器
+              items:
+                type: object
+                required: [id, name, status, offlineSince]
+                properties:
+                  id: { type: integer, format: int64 }
+                  name: { type: string }
+                  status: { type: string, enum: [unknown, online, offline, auth_failed] }
+                  offlineSince: { type: [string, "null"], format: date-time }
+        finance:
+          type: [object, "null"]
+          required: [todaySpend, todayTopup, monthSpend, monthTopup]
+          properties:
+            todaySpend: { type: integer, format: int64 }
+            todayTopup: { type: integer, format: int64 }
+            monthSpend: { type: integer, format: int64 }
+            monthTopup: { type: integer, format: int64 }
+        tickets:
+          type: [object, "null"]
+          required: [open]
+          properties:
+            open: { type: integer, description: 待回复（open）工单数 }
     ShopTrafficPack:
       type: object
       required: [id, name, trafficBytes, price]
