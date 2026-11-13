@@ -48,8 +48,12 @@ func newAPIServer(t *testing.T) (*httptest.Server, *service.RBACService) {
 		t.Fatalf("NewAuthService: %v", err)
 	}
 	rbac := service.NewRBACService(pool)
+	// 不接 SMTP：邮件相关接口应整体返回 feature_disabled（Ruling-24）
+	settings := service.NewSettingsService(pool, service.SubscriptionConfig{}, nil)
+	mails := service.NewMailService(pool, sealer, nil, settings, nil)
 	srv := httptest.NewServer(NewRouter(Deps{
 		Database: pool, PingTimeout: time.Second, Auth: auth, RBAC: rbac,
+		Settings: settings, Mail: mails, Account: service.NewAccountService(pool, sealer, settings, mails, nil),
 		Cookie: CookieConfig{Secure: false}, TrustedProxies: []netip.Prefix{},
 	}))
 	t.Cleanup(srv.Close)

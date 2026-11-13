@@ -60,8 +60,10 @@ var endUserNamePattern = regexp.MustCompile(`^[A-Za-z0-9_.@-]{3,64}$`)
 type UserConfig struct {
 	// Location 是自动续期与周期重置用的时区（每月几号、每周几、0 点）。
 	Location *time.Location
-	// Subscription 是订阅设置（docs/03 §5.4）。
+	// Subscription 是订阅设置（docs/03 §5.4）；Settings 非空时只作读设置失败时的兜底。
 	Subscription SubscriptionConfig
+	// Settings 是系统设置服务；非空时订阅设置以设置表为准（docs/03 §5.6）。
+	Settings *SettingsService
 }
 
 // UserService 负责套餐、用户、配额、下发对账与用量（docs/03 §5.2）。面板操作经 PanelService 打开的 Provider（Ruling-8）。

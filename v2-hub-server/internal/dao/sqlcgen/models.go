@@ -40,6 +40,19 @@ type AdminSession struct {
 	CreatedAt pgtype.Timestamptz
 }
 
+type Announcement struct {
+	ID          int64
+	Title       string
+	Content     string
+	IsPinned    bool
+	IsPopup     bool
+	PublishedAt pgtype.Timestamptz
+	MailedAt    pgtype.Timestamptz
+	CreatedBy   pgtype.Int8
+	CreatedAt   pgtype.Timestamptz
+	UpdatedAt   pgtype.Timestamptz
+}
+
 type AuditLog struct {
 	ID         int64
 	ActorType  string
@@ -48,6 +61,26 @@ type AuditLog struct {
 	TargetType pgtype.Text
 	TargetID   pgtype.Text
 	Detail     []byte
+	ClientIp   *netip.Addr
+	CreatedAt  pgtype.Timestamptz
+}
+
+type CheckinLog struct {
+	ID          int64
+	UserID      int64
+	CheckinDate pgtype.Date
+	RewardBytes int64
+	CreatedAt   pgtype.Timestamptz
+}
+
+type EmailCode struct {
+	ID         int64
+	Email      string
+	Purpose    string
+	CodeHash   []byte
+	Attempts   int32
+	ExpiresAt  pgtype.Timestamptz
+	ConsumedAt pgtype.Timestamptz
 	ClientIp   *netip.Addr
 	CreatedAt  pgtype.Timestamptz
 }
@@ -83,6 +116,10 @@ type EndUser struct {
 	SubTokenEnc        []byte
 	CredVersion        int32
 	LastUsedAt         pgtype.Timestamptz
+	Email              pgtype.Text
+	EmailVerifiedAt    pgtype.Timestamptz
+	InvitedBy          pgtype.Int8
+	InviteCodeID       pgtype.Int8
 	CreatedAt          pgtype.Timestamptz
 	UpdatedAt          pgtype.Timestamptz
 }
@@ -120,6 +157,34 @@ type Inbound struct {
 	IsMissing       bool
 	CreatedAt       pgtype.Timestamptz
 	UpdatedAt       pgtype.Timestamptz
+}
+
+type InviteCode struct {
+	ID          int64
+	Code        string
+	OwnerUserID pgtype.Int8
+	MaxUses     int32
+	UsedCount   int32
+	ExpiresAt   pgtype.Timestamptz
+	IsDisabled  bool
+	Remark      string
+	CreatedBy   pgtype.Int8
+	CreatedAt   pgtype.Timestamptz
+}
+
+type MailOutbox struct {
+	ID            int64
+	AadKey        string
+	Recipient     string
+	Subject       string
+	BodyEnc       []byte
+	Priority      int16
+	Status        string
+	Attempts      int32
+	NextAttemptAt pgtype.Timestamptz
+	LastError     string
+	SentAt        pgtype.Timestamptz
+	CreatedAt     pgtype.Timestamptz
 }
 
 type Node struct {
@@ -235,6 +300,31 @@ type Server struct {
 	UpdatedAt      pgtype.Timestamptz
 }
 
+type Setting struct {
+	Key       string
+	Value     []byte
+	UpdatedBy pgtype.Int8
+	UpdatedAt pgtype.Timestamptz
+}
+
+type SharedAccount struct {
+	ID            int64
+	Name          string
+	Category      string
+	Account       string
+	CredentialEnc []byte
+	Remark        string
+	SortOrder     int32
+	IsPublished   bool
+	CreatedAt     pgtype.Timestamptz
+	UpdatedAt     pgtype.Timestamptz
+}
+
+type SharedAccountPlan struct {
+	SharedAccountID int64
+	PlanID          int64
+}
+
 type SubscribeLog struct {
 	ID        int64
 	UserID    int64
@@ -242,6 +332,39 @@ type SubscribeLog struct {
 	ClientIp  *netip.Addr
 	UserAgent string
 	CreatedAt pgtype.Timestamptz
+}
+
+type Ticket struct {
+	ID          int64
+	UserID      int64
+	Subject     string
+	Status      string
+	LastReplyAt pgtype.Timestamptz
+	ClosedAt    pgtype.Timestamptz
+	CreatedAt   pgtype.Timestamptz
+	UpdatedAt   pgtype.Timestamptz
+}
+
+type TicketMessage struct {
+	ID         int64
+	TicketID   int64
+	AuthorKind string
+	AdminID    pgtype.Int8
+	Content    string
+	CreatedAt  pgtype.Timestamptz
+}
+
+type Tutorial struct {
+	ID          int64
+	Platform    string
+	ClientName  string
+	Summary     string
+	Links       []byte
+	Content     string
+	SortOrder   int32
+	IsPublished bool
+	CreatedAt   pgtype.Timestamptz
+	UpdatedAt   pgtype.Timestamptz
 }
 
 type UserLoginLog struct {

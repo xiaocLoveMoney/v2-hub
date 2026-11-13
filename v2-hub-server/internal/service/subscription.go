@@ -114,13 +114,28 @@ type SubscriptionInfo struct {
 
 var subscriptionFormats = []string{render.FormatBase64, render.FormatMihomo, render.FormatSingBox, render.FormatXray}
 
-func (s *UserService) subscriptionInfo(token, requestBase string) *SubscriptionInfo {
-	base := strings.TrimRight(s.cfg.Subscription.BaseURL, "/")
+// subConfig 返回当前生效的订阅设置：接了系统设置就以设置表为准（docs/03 §5.6 订阅设置），否则用构造时给的值。
+// 读设置失败时退回构造时的值并留痕——订阅端点不能因为设置读不到而整体不可用。
+func (s *UserService) subConfig(ctx context.Context) SubscriptionConfig {
+	if s.cfg.Settings == nil {
+		return s.cfg.Subscription
+	}
+	cur, err := s.cfg.Settings.Current(ctx)
+	if err != nil {
+		slog.Error("load subscription settings, falling back to config file", "err", err)
+		return s.cfg.Subscription
+	}
+	return cur.subscriptionConfig()
+}
+
+func (s *UserService) subscriptionInfo(ctx context.Context, token, requestBase string) *SubscriptionInfo {
+	cfg := s.subConfig(ctx)
+	base := strings.TrimRight(cfg.BaseURL, "/")
 	if base == "" {
 		base = strings.TrimRight(requestBase, "/")
 	}
 	u := base + subPathPrefix + token
-	info := &SubscriptionInfo{URL: u, UpdateIntervalHours: s.cfg.Subscription.UpdateIntervalHours, Formats: make([]SubscriptionFormatLink, 0, len(subscriptionFormats))}
+	info := &SubscriptionInfo{URL: u, UpdateIntervalHours: cfg.UpdateIntervalHours, Formats: make([]SubscriptionFormatLink, 0, len(subscriptionFormats))}
 	for _, f := range subscriptionFormats {
 		info.Formats = append(info.Formats, SubscriptionFormatLink{Format: f, URL: u + "?" + queryFormat + "=" + f})
 	}
@@ -133,7 +148,7 @@ func (s *UserService) GetSubscription(ctx context.Context, p *UserPrincipal, req
 	if err != nil {
 		return nil, err
 	}
-	return s.subscriptionInfo(token, requestBase), nil
+	return s.subscriptionInfo(ctx, token, requestBase), nil
 }
 
 func (s *UserService) ensureSubToken(ctx context.Context, userID int64) (string, error) {
@@ -225,7 +240,7 @@ func (s *UserService) ResetOwnSubscription(ctx context.Context, p *UserPrincipal
 	if err != nil {
 		return nil, err
 	}
-	return s.subscriptionInfo(token, requestBase), nil
+	return s.subscriptionInfo(ctx, token, requestBase), nil
 }
 
 // ResetUserSubscription 由管理员重置某用户的订阅（user:write）。
@@ -310,13 +325,14 @@ func (s *UserService) RenderSubscription(ctx context.Context, req SubscriptionRe
 	}
 	s.subGuards.token.RecordFailure(tokenKey)
 
+	cfg := s.subConfig(ctx)
 	var items []subItem
 	if user.Status == UserStatusActive {
 		if items, err = s.loadSubItems(ctx, user.ID); err != nil {
 			return nil, err
 		}
 	}
-	body, contentType, err := renderSubscription(format, s.subInfoTexts(user), items)
+	body, contentType, err := renderSubscription(format, s.subInfoTexts(cfg, user), items)
 	if err != nil {
 		return nil, err
 	}
@@ -326,11 +342,11 @@ func (s *UserService) RenderSubscription(ctx context.Context, req SubscriptionRe
 		// 记录写失败不影响订阅下发，但必须留痕
 		slog.Error("insert subscribe log", "user_id", user.ID, "err", err)
 	}
-	return &SubscriptionResult{Body: body, ContentType: contentType, Headers: s.subHeaders(user)}, nil
+	return &SubscriptionResult{Body: body, ContentType: contentType, Headers: subHeaders(cfg, user)}, nil
 }
 
 // subInfoTexts 返回说明节点的文字：非 active 只有一条原因；active 且开启信息节点时是剩余流量与到期时间。
-func (s *UserService) subInfoTexts(u sqlcgen.GetUserBySubTokenHashRow) []string {
+func (s *UserService) subInfoTexts(cfg SubscriptionConfig, u sqlcgen.GetUserBySubTokenHashRow) []string {
 	switch u.Status {
 	case UserStatusExpired:
 		return []string{"套餐已到期，请续费"}
@@ -340,7 +356,7 @@ func (s *UserService) subInfoTexts(u sqlcgen.GetUserBySubTokenHashRow) []string 
 		return []string{"账号已停用，请联系管理员"}
 	default:
 	}
-	if !s.cfg.Subscription.InfoNodes {
+	if !cfg.InfoNodes {
 		return nil
 	}
 	traffic := "流量：不限"
@@ -359,7 +375,7 @@ func (s *UserService) subInfoTexts(u sqlcgen.GetUserBySubTokenHashRow) []string 
 	return []string{traffic, expiry}
 }
 
-func (s *UserService) subHeaders(u sqlcgen.GetUserBySubTokenHashRow) map[string]string {
+func subHeaders(cfg SubscriptionConfig, u sqlcgen.GetUserBySubTokenHashRow) map[string]string {
 	info := fmt.Sprintf("upload=0; download=%d", u.TrafficUsed)
 	if u.TrafficLimit > 0 {
 		info += fmt.Sprintf("; total=%d", u.TrafficLimit)
@@ -367,10 +383,10 @@ func (s *UserService) subHeaders(u sqlcgen.GetUserBySubTokenHashRow) map[string]
 	if u.ExpiresAt.Valid {
 		info += fmt.Sprintf("; expire=%d", u.ExpiresAt.Time.Unix())
 	}
-	title := s.cfg.Subscription.Title
+	title := cfg.Title
 	return map[string]string{
 		headerUserinfo:   info,
-		headerInterval:   fmt.Sprint(s.cfg.Subscription.UpdateIntervalHours),
+		headerInterval:   fmt.Sprint(cfg.UpdateIntervalHours),
 		headerTitle:      "base64:" + base64.StdEncoding.EncodeToString([]byte(title)),
 		headerDispostion: "attachment; filename*=UTF-8''" + url.PathEscape(title),
 	}
@@ -571,7 +587,7 @@ func (s *UserService) ListSubscribeLogs(ctx context.Context, userID int64, pq Pa
 
 // PurgeSubscribeLogs 删除超出保留期的订阅记录，返回删除条数（定时任务调用）。
 func (s *UserService) PurgeSubscribeLogs(ctx context.Context) (int64, error) {
-	cutoff := pgtype.Timestamptz{Time: s.now().Add(-s.cfg.Subscription.LogRetention), Valid: true}
+	cutoff := pgtype.Timestamptz{Time: s.now().Add(-s.subConfig(ctx).LogRetention), Valid: true}
 	n, err := s.q.DeleteOldSubscribeLogs(ctx, cutoff)
 	if err != nil {
 		return 0, fmt.Errorf("delete old subscribe logs: %w", err)

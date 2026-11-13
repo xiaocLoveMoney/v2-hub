@@ -37,7 +37,8 @@ portal:
   sessionIdleTimeout: 168h
   sessionMaxAge: 720h
   loginLogRetention: 2160h
-# 订阅，语义见 docs/03 §5.4（M4 起移入系统设置表）。baseUrl 留空时用请求自身的地址；生产填用户域名根地址
+# 订阅，语义见 docs/03 §5.4。自 M4 起以系统设置表为准（管理端 → 系统设置），这里只是设置表里还没有对应键时的默认值。
+# baseUrl 留空时用请求自身的地址；生产填用户域名根地址
 subscription:
   baseUrl: ""
   title: v2-hub
