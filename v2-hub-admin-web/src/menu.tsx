@@ -1,11 +1,17 @@
 import {
+  AccountBookOutlined,
   AuditOutlined,
+  BarChartOutlined,
   BookOutlined,
   ClusterOutlined,
+  CreditCardOutlined,
   CustomerServiceOutlined,
   DashboardOutlined,
   DeploymentUnitOutlined,
   GiftOutlined,
+  PayCircleOutlined,
+  PercentageOutlined,
+  RocketOutlined,
   HistoryOutlined,
   KeyOutlined,
   LockOutlined,
@@ -14,6 +20,8 @@ import {
   ProfileOutlined,
   SafetyOutlined,
   SettingOutlined,
+  ShoppingCartOutlined,
+  TagsOutlined,
   TeamOutlined,
   UserOutlined,
 } from '@ant-design/icons'
@@ -34,6 +42,14 @@ export const ROUTES = {
   PLANS: '/plans',
   INVITE_CODES: '/invite-codes',
   SUBSCRIBE_LOGS: '/subscribe-logs',
+  TRAFFIC_PACKS: '/shop/traffic-packs',
+  COUPONS: '/shop/coupons',
+  TOPUP_CODES: '/shop/topup-codes',
+  ORDERS: '/shop/orders',
+  WALLET_LEDGER: '/shop/ledger',
+  PAYMENTS: '/shop/payments',
+  REBATES: '/shop/rebates',
+  FINANCE_STATS: '/shop/stats',
   ADMINS: '/system/admins',
   ROLES: '/system/roles',
   AUDIT_LOGS: '/system/audit-logs',
@@ -61,6 +77,11 @@ export const PERMISSIONS = {
   CONTENT_WRITE: 'content:write',
   TICKET_READ: 'ticket:read',
   TICKET_WRITE: 'ticket:write',
+  SHOP_READ: 'shop:read',
+  SHOP_WRITE: 'shop:write',
+  FINANCE_READ: 'finance:read',
+  FINANCE_WRITE: 'finance:write',
+  IMPERSONATE_WRITE: 'impersonate:write',
 } as const
 
 /** 一个菜单项；permission 为空表示登录即可见。 */
@@ -73,10 +94,11 @@ export interface MenuEntry {
   group?: string
 }
 
-// 分组照 docs/05：我的 / 节点 / 用户 / 系统，交易分组随 M5 加入
+// 分组照 docs/05：我的 / 节点 / 用户 / 交易 / 系统
 const GROUP_MINE = '我的'
 const GROUP_NODES = '节点'
 const GROUP_USERS = '用户'
+const GROUP_SHOP = '交易'
 const GROUP_SYSTEM = '系统'
 
 /** 左侧菜单表：增减菜单只改这张表，菜单显示与路由守卫都以它为准。 */
@@ -92,6 +114,14 @@ export const MENU: readonly MenuEntry[] = [
   { path: ROUTES.PLANS, label: '套餐', icon: <ProfileOutlined />, permission: PERMISSIONS.PLAN_READ, group: GROUP_USERS },
   { path: ROUTES.INVITE_CODES, label: '邀请码', icon: <GiftOutlined />, permission: PERMISSIONS.USER_READ, group: GROUP_USERS },
   { path: ROUTES.SUBSCRIBE_LOGS, label: '订阅记录', icon: <HistoryOutlined />, permission: PERMISSIONS.USER_READ, group: GROUP_USERS },
+  { path: ROUTES.TRAFFIC_PACKS, label: '流量包', icon: <RocketOutlined />, permission: PERMISSIONS.SHOP_READ, group: GROUP_SHOP },
+  { path: ROUTES.COUPONS, label: '优惠码', icon: <TagsOutlined />, permission: PERMISSIONS.SHOP_READ, group: GROUP_SHOP },
+  { path: ROUTES.TOPUP_CODES, label: '充值码', icon: <CreditCardOutlined />, permission: PERMISSIONS.FINANCE_READ, group: GROUP_SHOP },
+  { path: ROUTES.ORDERS, label: '订单', icon: <ShoppingCartOutlined />, permission: PERMISSIONS.FINANCE_READ, group: GROUP_SHOP },
+  { path: ROUTES.WALLET_LEDGER, label: '余额流水', icon: <AccountBookOutlined />, permission: PERMISSIONS.FINANCE_READ, group: GROUP_SHOP },
+  { path: ROUTES.PAYMENTS, label: '充值单', icon: <PayCircleOutlined />, permission: PERMISSIONS.FINANCE_READ, group: GROUP_SHOP },
+  { path: ROUTES.REBATES, label: '返利', icon: <PercentageOutlined />, permission: PERMISSIONS.FINANCE_READ, group: GROUP_SHOP },
+  { path: ROUTES.FINANCE_STATS, label: '收支统计', icon: <BarChartOutlined />, permission: PERMISSIONS.FINANCE_READ, group: GROUP_SHOP },
   { path: ROUTES.ADMINS, label: '管理员', icon: <TeamOutlined />, permission: PERMISSIONS.ADMIN_READ, group: GROUP_SYSTEM },
   { path: ROUTES.ROLES, label: '角色与权限', icon: <SafetyOutlined />, permission: PERMISSIONS.ADMIN_READ, group: GROUP_SYSTEM },
   { path: ROUTES.AUDIT_LOGS, label: '审计日志', icon: <AuditOutlined />, permission: PERMISSIONS.AUDIT_READ, group: GROUP_SYSTEM },
