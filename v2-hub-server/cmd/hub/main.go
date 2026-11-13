@@ -169,6 +169,7 @@ func runServer(args []string) error {
 			Content:        service.NewContentService(pool, sealer, settings, mails, nil),
 			Tickets:        service.NewTicketService(pool, settings, mails, nil),
 			Wallet:         service.NewWalletService(pool, sealer, settings, nil),
+			Shop:           service.NewShopService(pool, settings, users, nil),
 			Cookie:         api.CookieConfig{Secure: secureCookie},
 			TrustedProxies: trusted,
 		}),
