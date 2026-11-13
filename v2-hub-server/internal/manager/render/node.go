@@ -20,6 +20,7 @@ const (
 	ProtoTrojan      = "trojan"
 	ProtoShadowsocks = "shadowsocks"
 	ProtoHysteria2   = "hysteria2"
+	ProtoSocks       = "socks" // SOCKS5，只来自用户的自有落地节点（docs/03 §5.18）
 )
 
 // 传输与安全层取值。
@@ -42,6 +43,8 @@ const (
 	schemeSS        = "ss"
 	schemeHysteria2 = "hysteria2"
 	schemeHy2       = "hy2"
+	schemeSocks5    = "socks5"
+	schemeSocks     = "socks"
 	schemeSep       = "://"
 
 	vmessDefaultCipher = "auto"
@@ -59,7 +62,8 @@ type ProxyNode struct {
 	Port     int
 
 	UUID     string // vless / vmess
-	Password string // trojan / shadowsocks / hysteria2
+	Username string // socks
+	Password string // trojan / shadowsocks / hysteria2 / socks
 	Method   string // shadowsocks 加密方式；vmess 的 scy
 	Flow     string // vless flow
 	AlterID  int    // vmess
@@ -104,6 +108,8 @@ func ParseLink(link string) (ProxyNode, error) {
 		return parseURLLink(link, ProtoHysteria2)
 	case schemeSS:
 		return parseShadowsocks(link)
+	case schemeSocks5, schemeSocks:
+		return parseSocks(link)
 	default:
 		return ProxyNode{}, ErrUnsupportedLink
 	}
@@ -300,6 +306,36 @@ func cutLast(s, sep string) (string, string, bool) {
 		return s, "", false
 	}
 	return s[:i], s[i+len(sep):], true
+}
+
+// parseSocks 解析 socks5://[user:pass@]host:port#name；也接受 v2rayN 的 socks://base64(user:pass)@host:port 形状。
+func parseSocks(link string) (ProxyNode, error) {
+	u, err := url.Parse(strings.TrimSpace(link))
+	if err != nil {
+		return ProxyNode{}, ErrUnsupportedLink
+	}
+	host, port, err := splitHostPort(u)
+	if err != nil {
+		return ProxyNode{}, err
+	}
+	n := ProxyNode{Name: u.Fragment, Protocol: ProtoSocks, Address: host, Port: port, Network: NetTCP, Security: SecNone}
+	if u.User == nil {
+		return n, nil
+	}
+	if pw, hasPW := u.User.Password(); hasPW {
+		n.Username, n.Password = u.User.Username(), pw
+		return n, nil
+	}
+	raw, err := decodeBase64Loose(u.User.Username())
+	if err != nil {
+		return ProxyNode{}, ErrUnsupportedLink
+	}
+	user, pw, ok := strings.Cut(string(raw), ":")
+	if !ok || user == "" {
+		return ProxyNode{}, ErrUnsupportedLink
+	}
+	n.Username, n.Password = user, pw
+	return n, nil
 }
 
 // Rewrite 返回把名称与地址换成 name、address 后的链接，其余参数原样保留（Base64 订阅用）。

@@ -412,13 +412,13 @@ func renderSubscription(format string, infoTexts []string, items []subItem) ([]b
 	}
 	switch format {
 	case render.FormatMihomo:
-		out, err := render.Mihomo(nodes)
+		out, err := render.Mihomo(nodes, nil)
 		return out, contentTypeYAML, err
 	case render.FormatSingBox:
-		out, err := render.SingBox(nodes)
+		out, err := render.SingBox(nodes, nil)
 		return out, contentTypeJSONU, err
 	default:
-		out, err := render.Xray(nodes)
+		out, err := render.Xray(nodes, nil)
 		return out, contentTypeJSONU, err
 	}
 }

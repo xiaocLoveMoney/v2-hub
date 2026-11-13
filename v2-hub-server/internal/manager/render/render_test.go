@@ -154,7 +154,7 @@ func checkGolden(t *testing.T, name string, got []byte) {
 }
 
 func TestMihomoGolden(t *testing.T) {
-	out, err := Mihomo(sampleNodes(t))
+	out, err := Mihomo(sampleNodes(t), nil)
 	if err != nil {
 		t.Fatalf("Mihomo: %v", err)
 	}
@@ -183,7 +183,7 @@ func TestMihomoGolden(t *testing.T) {
 }
 
 func TestSingBoxGolden(t *testing.T) {
-	out, err := SingBox(sampleNodes(t))
+	out, err := SingBox(sampleNodes(t), nil)
 	if err != nil {
 		t.Fatalf("SingBox: %v", err)
 	}
@@ -206,7 +206,7 @@ func TestSingBoxGolden(t *testing.T) {
 }
 
 func TestXrayGolden(t *testing.T) {
-	out, err := Xray(sampleNodes(t))
+	out, err := Xray(sampleNodes(t), nil)
 	if err != nil {
 		t.Fatalf("Xray: %v", err)
 	}
@@ -230,21 +230,195 @@ func TestBase64AndEmptyInputs(t *testing.T) {
 		t.Fatalf("Base64 = %q, %v", raw, err)
 	}
 	// 没有任何节点时仍输出可解析的配置
-	if m, err := Mihomo(nil); err != nil || !strings.Contains(string(m), GroupSelect) {
+	if m, err := Mihomo(nil, nil); err != nil || !strings.Contains(string(m), GroupSelect) {
 		t.Fatalf("Mihomo(nil) = %q, %v", m, err)
 	}
-	if s, err := SingBox([]ProxyNode{InfoNode("已到期")}); err != nil || strings.Contains(string(s), `"urltest"`) {
+	if s, err := SingBox([]ProxyNode{InfoNode("已到期")}, nil); err != nil || strings.Contains(string(s), `"urltest"`) {
 		t.Fatalf("SingBox(info only) should have no urltest group: %v", err)
 	}
-	if x, err := Xray(nil); err != nil || strings.TrimSpace(string(x)) != "[]" {
+	if x, err := Xray(nil, nil); err != nil || strings.TrimSpace(string(x)) != "[]" {
 		t.Fatalf("Xray(nil) = %q, %v", x, err)
 	}
 }
 
 func TestUniqueNames(t *testing.T) {
-	got := uniqueNames([]ProxyNode{{Name: "a"}, {Name: "a"}, {Name: ""}, {Name: "a"}, {Protocol: "vless", Address: "h"}})
+	keepAll := func(ProxyNode) bool { return true }
+	got := selectNodes([]ProxyNode{{Name: "a"}, {Name: "a"}, {Name: ""}, {Name: "a"}, {Protocol: "vless", Address: "h"}}, nil, keepAll).names
 	want := []string{"a", "a 2", "-", "a 3", "vless-h"}
 	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("uniqueNames = %q, want %q", got, want)
+		t.Fatalf("names = %q, want %q", got, want)
 	}
+}
+
+// 自有落地节点的 SOCKS5 地址；用户名与口令是示例值。
+const (
+	sampleSocksUser = "sample-user"
+	linkSocksAuth   = "socks5://" + sampleSocksUser + ":" + sampleAuth + "@home.example.net:1080#home-socks"
+	linkSocksPlain  = "socks5://203.0.113.9:1080"
+)
+
+func TestParseSocks(t *testing.T) {
+	encoded := "socks://" + base64.StdEncoding.EncodeToString([]byte(sampleSocksUser+":"+sampleAuth)) + "@home.example.net:1080#home-socks"
+	withAuth := ProxyNode{
+		Name: "home-socks", Protocol: ProtoSocks, Address: "home.example.net", Port: 1080,
+		Username: sampleSocksUser, Password: sampleAuth, Network: NetTCP, Security: SecNone,
+	}
+	cases := []struct {
+		name string
+		link string
+		want ProxyNode
+	}{
+		{"user and password", linkSocksAuth, withAuth},
+		{"base64 userinfo", encoded, withAuth},
+		{"no auth", linkSocksPlain, ProxyNode{Protocol: ProtoSocks, Address: "203.0.113.9", Port: 1080, Network: NetTCP, Security: SecNone}},
+	}
+	for _, c := range cases {
+		got, err := ParseLink(c.link)
+		if err != nil || !reflect.DeepEqual(got, c.want) {
+			t.Errorf("%s: ParseLink = %+v, %v; want %+v", c.name, got, err, c.want)
+		}
+	}
+	for _, bad := range []string{"socks5://home.example.net", "socks5://home.example.net:0", "socks5://only-user@home.example.net:1080", "socks5://:1080"} {
+		if _, err := ParseLink(bad); !errors.Is(err, ErrUnsupportedLink) {
+			t.Errorf("ParseLink(%q) error = %v, want ErrUnsupportedLink", bad, err)
+		}
+	}
+}
+
+// sampleNodes 里各节点的下标（0 是说明节点）。
+const (
+	idxInfo    = 0
+	idxReality = 1
+	idxTrojan  = 3
+	idxSS      = 4
+	idxHy2     = 5
+	idxGRPC    = 6
+)
+
+const (
+	chainNameHome    = "家宽落地"
+	chainNameDefault = "hk-reality-u1 → us-trojan-u1"
+	// 与入口节点重名的链路名，输出时应追加序号
+	chainNameClash = "hk-reality-u1 2"
+)
+
+// sampleChains 覆盖：落地为平台节点（默认名）、落地为自有 SOCKS5、入口是说明节点 / 下标越界（都不输出）、
+// 入口为 hysteria2 且与普通节点重名（Xray 不支持该入口，不输出）。
+func sampleChains(t *testing.T, nodes []ProxyNode) []Chain {
+	t.Helper()
+	socks, err := ParseLink(linkSocksAuth)
+	if err != nil {
+		t.Fatalf("ParseLink socks: %v", err)
+	}
+	return []Chain{
+		{Entry: idxReality, Exit: nodes[idxTrojan]},
+		{Name: chainNameHome, Entry: idxGRPC, Exit: socks},
+		{Name: "入口是说明节点", Entry: idxInfo, Exit: socks},
+		{Name: "下标越界", Entry: len(nodes), Exit: socks},
+		{Name: "下标为负", Entry: -1, Exit: socks},
+		{Name: "hk-reality-u1", Entry: idxHy2, Exit: nodes[idxSS]},
+	}
+}
+
+func TestMihomoChains(t *testing.T) {
+	nodes := sampleNodes(t)
+	out, err := Mihomo(nodes, sampleChains(t, nodes))
+	if err != nil {
+		t.Fatalf("Mihomo: %v", err)
+	}
+	var cfg struct {
+		Proxies []map[string]any `yaml:"proxies"`
+		Groups  []struct {
+			Name    string   `yaml:"name"`
+			Proxies []string `yaml:"proxies"`
+		} `yaml:"proxy-groups"`
+	}
+	if err := yaml.Unmarshal(out, &cfg); err != nil {
+		t.Fatalf("output is not valid YAML: %v", err)
+	}
+	dialers := make(map[string]string, len(cfg.Proxies))
+	for _, p := range cfg.Proxies {
+		if d, ok := p["dialer-proxy"].(string); ok {
+			dialers[p["name"].(string)] = d
+		}
+	}
+	want := map[string]string{chainNameDefault: "hk-reality-u1", chainNameHome: "jp-grpc-u1", chainNameClash: "tw-hy2-u1"}
+	if !reflect.DeepEqual(dialers, want) {
+		t.Fatalf("dialer-proxy = %v, want %v", dialers, want)
+	}
+	// 链路进手动选择组、不进自动测速组
+	if len(cfg.Proxies) != 11 || len(cfg.Groups[0].Proxies) != 12 || len(cfg.Groups[1].Proxies) != 7 {
+		t.Fatalf("proxies=%d select=%d auto=%d", len(cfg.Proxies), len(cfg.Groups[0].Proxies), len(cfg.Groups[1].Proxies))
+	}
+	checkGolden(t, "mihomo-chain.golden.yaml", out)
+}
+
+func TestSingBoxChains(t *testing.T) {
+	nodes := sampleNodes(t)
+	out, err := SingBox(nodes, sampleChains(t, nodes))
+	if err != nil {
+		t.Fatalf("SingBox: %v", err)
+	}
+	var cfg struct {
+		Outbounds []struct {
+			Type      string   `json:"type"`
+			Tag       string   `json:"tag"`
+			Detour    string   `json:"detour"`
+			Outbounds []string `json:"outbounds"`
+		} `json:"outbounds"`
+	}
+	if err := json.Unmarshal(out, &cfg); err != nil {
+		t.Fatalf("output is not valid JSON: %v", err)
+	}
+	detours := make(map[string]string, len(cfg.Outbounds))
+	for _, o := range cfg.Outbounds {
+		if o.Detour != "" {
+			detours[o.Tag] = o.Detour
+		}
+	}
+	want := map[string]string{chainNameDefault: "hk-reality-u1", chainNameHome: "jp-grpc-u1", chainNameClash: "tw-hy2-u1"}
+	if !reflect.DeepEqual(detours, want) {
+		t.Fatalf("detour = %v, want %v", detours, want)
+	}
+	if len(cfg.Outbounds[0].Outbounds) != 12 || len(cfg.Outbounds[1].Outbounds) != 7 {
+		t.Fatalf("select=%d auto=%d", len(cfg.Outbounds[0].Outbounds), len(cfg.Outbounds[1].Outbounds))
+	}
+	checkGolden(t, "singbox-chain.golden.json", out)
+}
+
+func TestXrayChains(t *testing.T) {
+	nodes := sampleNodes(t)
+	out, err := Xray(nodes, sampleChains(t, nodes))
+	if err != nil {
+		t.Fatalf("Xray: %v", err)
+	}
+	var configs []struct {
+		Remarks   string `json:"remarks"`
+		Outbounds []struct {
+			Tag      string `json:"tag"`
+			Protocol string `json:"protocol"`
+			Stream   struct {
+				Sockopt struct {
+					DialerProxy string `json:"dialerProxy"`
+				} `json:"sockopt"`
+			} `json:"streamSettings"`
+		} `json:"outbounds"`
+	}
+	if err := json.Unmarshal(out, &configs); err != nil {
+		t.Fatalf("output is not valid JSON: %v", err)
+	}
+	// 6 个普通节点 + 2 条链路；入口是 hysteria2 的那条 Xray 不支持，不输出
+	if len(configs) != 8 || configs[6].Remarks != chainNameDefault || configs[7].Remarks != chainNameHome {
+		t.Fatalf("configs = %d", len(configs))
+	}
+	for _, c := range configs[6:] {
+		ob := c.Outbounds
+		if len(ob) != 3 || ob[0].Tag != xrayProxyTag || ob[0].Stream.Sockopt.DialerProxy != xrayChainEntryTag || ob[1].Tag != xrayChainEntryTag || ob[2].Tag != tagDirect {
+			t.Fatalf("%s: outbounds = %+v", c.Remarks, ob)
+		}
+	}
+	if configs[7].Outbounds[0].Protocol != "socks" || configs[7].Outbounds[1].Protocol != "vless" {
+		t.Fatalf("home chain protocols = %s via %s", configs[7].Outbounds[0].Protocol, configs[7].Outbounds[1].Protocol)
+	}
+	checkGolden(t, "xray-chain.golden.json", out)
 }

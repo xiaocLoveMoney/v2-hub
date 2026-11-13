@@ -6,10 +6,11 @@ import (
 )
 
 const (
-	singBoxMixedPort = 2080
-	singBoxListen    = "127.0.0.1"
-	ruleSetGeoIPCN   = "geoip-cn"
-	ruleSetGeoIPURL  = "https://raw.githubusercontent.com/SagerNet/sing-geoip/rule-set/geoip-cn.srs"
+	singBoxMixedPort    = 2080
+	singBoxListen       = "127.0.0.1"
+	ruleSetGeoIPCN      = "geoip-cn"
+	ruleSetGeoIPURL     = "https://raw.githubusercontent.com/SagerNet/sing-geoip/rule-set/geoip-cn.srs"
+	singBoxSocksVersion = "5"
 )
 
 func singBoxSupports(n ProxyNode) bool {
@@ -90,6 +91,11 @@ func singBoxOutbound(n ProxyNode, tag string) map[string]any {
 		withStream()
 	case ProtoShadowsocks:
 		o["type"], o["method"], o["password"] = "shadowsocks", n.Method, n.Password
+	case ProtoSocks:
+		o["type"], o["version"] = "socks", singBoxSocksVersion
+		if n.Username != "" {
+			o["username"], o["password"] = n.Username, n.Password
+		}
 	case ProtoHysteria2:
 		o["type"], o["password"] = "hysteria2", n.Password
 		tls := map[string]any{"enabled": true}
@@ -110,25 +116,32 @@ func singBoxOutbound(n ProxyNode, tag string) map[string]any {
 }
 
 // SingBox 渲染可直接运行的 sing-box 配置，分组与规则同 Mihomo（docs/03 §5.4）。
-func SingBox(nodes []ProxyNode) ([]byte, error) {
-	kept, names, realNames := filterNodes(nodes, singBoxSupports)
-	outbounds := make([]map[string]any, 0, len(kept)+3)
-	selectable := make([]string, 0, len(names)+1)
-	if len(realNames) > 0 {
+// 链路是带 detour 的落地出站，排在普通节点之后，只进手动选择组（docs/03 §5.18）。
+func SingBox(nodes []ProxyNode, chains []Chain) ([]byte, error) {
+	sel := selectNodes(nodes, chains, singBoxSupports)
+	outbounds := make([]map[string]any, 0, len(sel.nodes)+len(sel.chains)+3)
+	selectable := make([]string, 0, len(sel.names)+len(sel.chains)+1)
+	if len(sel.realNames) > 0 {
 		selectable = append(selectable, GroupAuto)
 	}
-	selectable = append(selectable, names...)
+	selectable = append(selectable, sel.names...)
+	selectable = append(selectable, sel.chainNames()...)
 	if len(selectable) == 0 {
 		selectable = append(selectable, tagDirect)
 	}
 	outbounds = append(outbounds, map[string]any{"type": "selector", "tag": GroupSelect, "outbounds": selectable})
-	if len(realNames) > 0 {
+	if len(sel.realNames) > 0 {
 		outbounds = append(outbounds, map[string]any{
-			"type": "urltest", "tag": GroupAuto, "outbounds": realNames, "url": probeURL, "interval": fmt.Sprintf("%ds", probeIntervalSec),
+			"type": "urltest", "tag": GroupAuto, "outbounds": sel.realNames, "url": probeURL, "interval": fmt.Sprintf("%ds", probeIntervalSec),
 		})
 	}
-	for i, n := range kept {
-		outbounds = append(outbounds, singBoxOutbound(n, names[i]))
+	for i, n := range sel.nodes {
+		outbounds = append(outbounds, singBoxOutbound(n, sel.names[i]))
+	}
+	for _, c := range sel.chains {
+		o := singBoxOutbound(c.exit, c.name)
+		o["detour"] = c.entryName
+		outbounds = append(outbounds, o)
 	}
 	outbounds = append(outbounds, map[string]any{"type": "direct", "tag": tagDirect})
 	cfg := map[string]any{

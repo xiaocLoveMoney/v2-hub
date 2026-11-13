@@ -10,6 +10,8 @@ const (
 	xrayHTTPPort  = 10809
 	xrayListen    = "127.0.0.1"
 	xrayProxyTag  = "proxy"
+	// xrayChainEntryTag 是链路配置里入口出站的 tag（docs/03 §6）。
+	xrayChainEntryTag = "chain-entry"
 )
 
 func xraySupports(n ProxyNode) bool {
@@ -59,8 +61,8 @@ func xrayStream(n ProxyNode) map[string]any {
 	return s
 }
 
-func xrayOutbound(n ProxyNode) map[string]any {
-	o := map[string]any{"tag": xrayProxyTag, "streamSettings": xrayStream(n)}
+func xrayOutbound(n ProxyNode, tag string) map[string]any {
+	o := map[string]any{"tag": tag, "streamSettings": xrayStream(n)}
 	switch n.Protocol {
 	case ProtoVLESS:
 		user := map[string]any{"id": n.UUID, "encryption": "none"}
@@ -79,6 +81,13 @@ func xrayOutbound(n ProxyNode) map[string]any {
 	case ProtoShadowsocks:
 		o["protocol"] = "shadowsocks"
 		o["settings"] = map[string]any{"servers": []map[string]any{{"address": n.Address, "port": n.Port, "method": n.Method, "password": n.Password}}}
+	case ProtoSocks:
+		server := map[string]any{"address": n.Address, "port": n.Port}
+		if n.Username != "" {
+			server["users"] = []map[string]any{{"user": n.Username, "pass": n.Password}}
+		}
+		o["protocol"] = "socks"
+		o["settings"] = map[string]any{"servers": []map[string]any{server}}
 	default:
 		// xraySupports 已排除其余协议
 	}
@@ -86,30 +95,45 @@ func xrayOutbound(n ProxyNode) map[string]any {
 }
 
 // Xray 渲染一个 JSON 数组，每个节点一份完整的 Xray 客户端配置（remarks 为节点名），
+// xrayConfig 拼一份完整的客户端配置；proxies 的第一个是默认出站。
+func xrayConfig(remarks string, proxies ...map[string]any) map[string]any {
+	outbounds := make([]map[string]any, 0, len(proxies)+1)
+	outbounds = append(outbounds, proxies...)
+	outbounds = append(outbounds, map[string]any{"tag": tagDirect, "protocol": "freedom"})
+	return map[string]any{
+		"remarks": remarks,
+		"log":     map[string]any{"loglevel": "warning"},
+		"inbounds": []map[string]any{
+			{"tag": "socks", "listen": xrayListen, "port": xraySocksPort, "protocol": "socks", "settings": map[string]any{"udp": true}},
+			{"tag": "http", "listen": xrayListen, "port": xrayHTTPPort, "protocol": "http"},
+		},
+		"outbounds": outbounds,
+		"routing": map[string]any{
+			"domainStrategy": "IPIfNonMatch",
+			"rules": []map[string]any{
+				{"type": "field", "ip": []string{"geoip:private", "geoip:cn"}, "outboundTag": tagDirect},
+				{"type": "field", "domain": []string{"geosite:cn"}, "outboundTag": tagDirect},
+			},
+		},
+	}
+}
+
 // 与 v2rayN / v2rayNG 的 JSON 订阅形状一致；说明节点与 Xray 不支持的协议不输出。
-func Xray(nodes []ProxyNode) ([]byte, error) {
-	kept, names, _ := filterNodes(nodes, xraySupports)
-	configs := make([]map[string]any, 0, len(kept))
-	for i, n := range kept {
-		configs = append(configs, map[string]any{
-			"remarks": names[i],
-			"log":     map[string]any{"loglevel": "warning"},
-			"inbounds": []map[string]any{
-				{"tag": "socks", "listen": xrayListen, "port": xraySocksPort, "protocol": "socks", "settings": map[string]any{"udp": true}},
-				{"tag": "http", "listen": xrayListen, "port": xrayHTTPPort, "protocol": "http"},
-			},
-			"outbounds": []map[string]any{
-				xrayOutbound(n),
-				{"tag": tagDirect, "protocol": "freedom"},
-			},
-			"routing": map[string]any{
-				"domainStrategy": "IPIfNonMatch",
-				"rules": []map[string]any{
-					{"type": "field", "ip": []string{"geoip:private", "geoip:cn"}, "outboundTag": tagDirect},
-					{"type": "field", "domain": []string{"geosite:cn"}, "outboundTag": tagDirect},
-				},
-			},
-		})
+// 每条链路也是单独一份配置：落地出站的 sockopt.dialerProxy 指向同一份配置里的入口出站（docs/03 §5.18）。
+func Xray(nodes []ProxyNode, chains []Chain) ([]byte, error) {
+	sel := selectNodes(nodes, chains, xraySupports)
+	configs := make([]map[string]any, 0, len(sel.nodes)+len(sel.chains))
+	for i, n := range sel.nodes {
+		configs = append(configs, xrayConfig(sel.names[i], xrayOutbound(n, xrayProxyTag)))
+	}
+	for _, c := range sel.chains {
+		exit := xrayOutbound(c.exit, xrayProxyTag)
+		stream, ok := exit["streamSettings"].(map[string]any)
+		if !ok {
+			return nil, fmt.Errorf("xray chain %q: unexpected stream settings type %T", c.name, exit["streamSettings"])
+		}
+		stream["sockopt"] = map[string]any{"dialerProxy": xrayChainEntryTag}
+		configs = append(configs, xrayConfig(c.name, exit, xrayOutbound(c.entry, xrayChainEntryTag)))
 	}
 	out, err := json.MarshalIndent(configs, "", "  ")
 	if err != nil {
