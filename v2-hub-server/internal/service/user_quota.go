@@ -48,16 +48,12 @@ type Quota struct {
 	Disabled           bool
 }
 
-// PlanQuota 是套餐里会拷给用户的配额模板。
+// PlanQuota 是套餐里会拷给用户的配额模板。免费续期不在套餐上，只由管理员在用户上设置（Ruling-20）。
 type PlanQuota struct {
 	TrafficLimit    int64
 	DurationDays    int
 	StartOnFirstUse bool
 	LimitIP         int
-	RenewEveryDays  int
-	RenewMonthDay   int
-	RenewWeekday    int
-	RenewMax        int
 	TrafficReset    string
 	TrafficResetDay int
 }
@@ -199,10 +195,10 @@ func lastResetBoundary(cycle string, day int, now time.Time, loc *time.Location)
 }
 
 // ApplyPlan 分配或续费套餐（U6）：拷入套餐配额；未到期从原到期日顺延，已到期从当前时刻起算；已用清零。
+// 用户上的免费续期设置保持不变，只把已续期次数归零。
 func (q *Quota) ApplyPlan(p PlanQuota, now time.Time) {
 	q.TrafficLimit = p.TrafficLimit
 	q.LimitIP = p.LimitIP
-	q.RenewEveryDays, q.RenewMonthDay, q.RenewWeekday, q.RenewMax = p.RenewEveryDays, p.RenewMonthDay, p.RenewWeekday, p.RenewMax
 	q.RenewCount = 0
 	q.TrafficReset, q.TrafficResetDay = p.TrafficReset, p.TrafficResetDay
 	q.TrafficUsed = 0

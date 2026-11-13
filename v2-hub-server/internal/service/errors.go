@@ -19,12 +19,16 @@ const (
 	CodeInternal         Code = "internal"
 	// CodeFeatureDisabled 表示功能未开启（注册关闭、邮件未配置等，docs/03 §5）。
 	CodeFeatureDisabled Code = "feature_disabled"
+	// CodeInsufficientBalance 表示余额不足以支付本次下单（docs/03 §5.13）；Error.Data 带差额。
+	CodeInsufficientBalance Code = "insufficient_balance"
 )
 
 // Error 是业务错误：Code 决定 HTTP 状态，Message 是可直接展示给用户的中文说明（不含内部细节）。
 type Error struct {
 	Code    Code
 	Message string
+	// Data 是随错误一起返回给前端的附加数据（如余额不足时的差额）；多数错误为 nil。不得放内部细节。
+	Data any
 }
 
 func (e *Error) Error() string {
@@ -48,6 +52,7 @@ var (
 	ErrTOTPRequired     = &Error{Code: CodeTOTPRequired}
 	ErrUpstream         = &Error{Code: CodeUpstream}
 	ErrFeatureDisabled  = &Error{Code: CodeFeatureDisabled}
+	ErrInsufficient     = &Error{Code: CodeInsufficientBalance}
 )
 
 func newError(code Code, message string) *Error {

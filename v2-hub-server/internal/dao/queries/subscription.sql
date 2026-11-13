@@ -62,7 +62,7 @@ DELETE FROM subscribe_log WHERE created_at < $1;
 
 -- name: GetUserDashboard :one
 SELECT u.status, coalesce(p.name, '')::text AS plan_name, u.traffic_limit, u.traffic_used, u.expires_at, u.pending_days,
-       u.limit_ip, u.last_used_at,
+       u.limit_ip, u.last_used_at, u.balance,
        (SELECT COUNT(*) FROM provision v WHERE v.user_id = u.id AND v.is_online)::int AS online_devices,
        (SELECT coalesce(sum(t.up + t.down), 0) FROM user_traffic_hourly t
          WHERE t.user_id = u.id AND t.hour >= sqlc.arg(day_start)::timestamptz)::bigint AS traffic_today

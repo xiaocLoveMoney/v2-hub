@@ -26,8 +26,24 @@ type MailManager interface {
 }
 
 type siteSettingsVO struct {
-	Name     string `json:"name"`
-	Timezone string `json:"timezone"`
+	Name      string `json:"name"`
+	Timezone  string `json:"timezone"`
+	PortalURL string `json:"portalUrl"`
+}
+
+type shopSettingsVO struct {
+	Enabled  bool   `json:"enabled"`
+	Currency string `json:"currency"`
+}
+
+type rebateSettingsVO struct {
+	Percent int    `json:"percent"`
+	Mode    string `json:"mode"`
+}
+
+type notifySettingsVO struct {
+	ExpireDays     int `json:"expireDays"`
+	TrafficPercent int `json:"trafficPercent"`
 }
 
 type registerSettingsVO struct {
@@ -81,6 +97,9 @@ type settingsVO struct {
 	Shared       sharedSettingsVO       `json:"shared"`
 	Mail         mailSettingsVO         `json:"mail"`
 	Subscription subscriptionSettingsVO `json:"subscription"`
+	Shop         shopSettingsVO         `json:"shop"`
+	Rebate       rebateSettingsVO       `json:"rebate"`
+	Notify       notifySettingsVO       `json:"notify"`
 }
 
 func nonNil(v []string) []string {
@@ -93,7 +112,10 @@ func nonNil(v []string) []string {
 func toSettingsVO(s service.Settings, mailEnabled bool) settingsVO {
 	return settingsVO{
 		MailEnabled: mailEnabled,
-		Site:        siteSettingsVO{Name: s.Site.Name, Timezone: s.Site.Timezone},
+		Site:        siteSettingsVO{Name: s.Site.Name, Timezone: s.Site.Timezone, PortalURL: s.Site.PortalURL},
+		Shop:        shopSettingsVO{Enabled: s.Shop.Enabled, Currency: s.Shop.Currency},
+		Rebate:      rebateSettingsVO{Percent: s.Rebate.Percent, Mode: s.Rebate.Mode},
+		Notify:      notifySettingsVO{ExpireDays: s.Notify.ExpireDays, TrafficPercent: s.Notify.TrafficPercent},
 		Register: registerSettingsVO{Mode: s.Register.Mode, EmailVerify: s.Register.EmailVerify, EmailAllow: nonNil(s.Register.EmailAllow),
 			EmailBlock: nonNil(s.Register.EmailBlock), PlanID: s.Register.PlanID},
 		Invite:  inviteSettingsVO{UserEnabled: s.Invite.UserEnabled, UserMaxUses: s.Invite.UserMaxUses},

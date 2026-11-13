@@ -73,6 +73,38 @@ type CheckinLog struct {
 	CreatedAt   pgtype.Timestamptz
 }
 
+type Coupon struct {
+	ID             int64
+	Code           string
+	Kind           string
+	Value          int64
+	AllPlans       bool
+	ForTrafficPack bool
+	MinAmount      int64
+	MaxUses        int32
+	MaxUsesPerUser int32
+	UsedCount      int32
+	StartsAt       pgtype.Timestamptz
+	EndsAt         pgtype.Timestamptz
+	IsDisabled     bool
+	Remark         string
+	CreatedAt      pgtype.Timestamptz
+	UpdatedAt      pgtype.Timestamptz
+}
+
+type CouponPlan struct {
+	CouponID int64
+	PlanID   int64
+}
+
+type CouponUsage struct {
+	ID        int64
+	CouponID  int64
+	UserID    pgtype.Int8
+	OrderID   int64
+	CreatedAt pgtype.Timestamptz
+}
+
 type EmailCode struct {
 	ID         int64
 	Email      string
@@ -120,6 +152,11 @@ type EndUser struct {
 	EmailVerifiedAt    pgtype.Timestamptz
 	InvitedBy          pgtype.Int8
 	InviteCodeID       pgtype.Int8
+	Balance            int64
+	AutoRenew          bool
+	PlanPriceID        pgtype.Int8
+	ExpireNotifiedFor  pgtype.Timestamptz
+	TrafficNotified    bool
 	CreatedAt          pgtype.Timestamptz
 	UpdatedAt          pgtype.Timestamptz
 }
@@ -135,6 +172,16 @@ type Endpoint struct {
 	IsMissing      bool
 	CreatedAt      pgtype.Timestamptz
 	UpdatedAt      pgtype.Timestamptz
+}
+
+type ImpersonateTicket struct {
+	ID         int64
+	TicketHash []byte
+	AdminID    int64
+	UserID     int64
+	ExpiresAt  pgtype.Timestamptz
+	UsedAt     pgtype.Timestamptz
+	CreatedAt  pgtype.Timestamptz
 }
 
 type Inbound struct {
@@ -213,6 +260,20 @@ type NodeGroupItem struct {
 	NodeID      int64
 }
 
+type Payment struct {
+	ID             int64
+	TradeNo        string
+	UserID         pgtype.Int8
+	Username       string
+	Gateway        string
+	Amount         int64
+	Status         string
+	GatewayTradeNo pgtype.Text
+	ExpiresAt      pgtype.Timestamptz
+	PaidAt         pgtype.Timestamptz
+	CreatedAt      pgtype.Timestamptz
+}
+
 type Permission struct {
 	ID        int64
 	Code      string
@@ -227,15 +288,15 @@ type Plan struct {
 	DurationDays     int32
 	StartOnFirstUse  bool
 	LimitIp          int32
-	RenewEveryDays   int32
-	RenewMonthDay    int32
-	RenewWeekday     int32
-	RenewMax         int32
 	TrafficReset     string
 	TrafficResetDay  int32
 	AllowClientChain bool
 	AllowCustomNode  bool
 	Remark           string
+	IsOnSale         bool
+	IsTrial          bool
+	SortOrder        int32
+	Description      string
 	CreatedAt        pgtype.Timestamptz
 	UpdatedAt        pgtype.Timestamptz
 }
@@ -243,6 +304,14 @@ type Plan struct {
 type PlanNodeGroup struct {
 	PlanID      int64
 	NodeGroupID int64
+}
+
+type PlanPrice struct {
+	ID           int64
+	PlanID       int64
+	DurationDays int32
+	Price        int64
+	CreatedAt    pgtype.Timestamptz
 }
 
 type Provision struct {
@@ -261,6 +330,19 @@ type Provision struct {
 	LinksSyncedAt pgtype.Timestamptz
 	IsOnline      bool
 	UpdatedAt     pgtype.Timestamptz
+}
+
+type Rebate struct {
+	ID              int64
+	InviterID       pgtype.Int8
+	InviterUsername string
+	InviteeID       pgtype.Int8
+	InviteeUsername string
+	OrderID         int64
+	OrderAmount     int64
+	Percent         int32
+	Amount          int64
+	CreatedAt       pgtype.Timestamptz
 }
 
 type Role struct {
@@ -325,6 +407,24 @@ type SharedAccountPlan struct {
 	PlanID          int64
 }
 
+type ShopOrder struct {
+	ID             int64
+	OrderNo        string
+	UserID         pgtype.Int8
+	Username       string
+	Kind           string
+	PlanID         pgtype.Int8
+	TrafficPackID  pgtype.Int8
+	Item           []byte
+	IsTrial        bool
+	AmountOriginal int64
+	AmountDiscount int64
+	AmountPaid     int64
+	CouponID       pgtype.Int8
+	CouponCode     string
+	CreatedAt      pgtype.Timestamptz
+}
+
 type SubscribeLog struct {
 	ID        int64
 	UserID    int64
@@ -354,6 +454,34 @@ type TicketMessage struct {
 	CreatedAt  pgtype.Timestamptz
 }
 
+type TopupCode struct {
+	ID             int64
+	CodeHash       []byte
+	CodeEnc        []byte
+	AadKey         string
+	CodeTail       string
+	Amount         int64
+	Batch          string
+	ExpiresAt      pgtype.Timestamptz
+	IsDisabled     bool
+	UsedBy         pgtype.Int8
+	UsedByUsername string
+	UsedAt         pgtype.Timestamptz
+	CreatedBy      pgtype.Int8
+	CreatedAt      pgtype.Timestamptz
+}
+
+type TrafficPack struct {
+	ID           int64
+	Name         string
+	TrafficBytes int64
+	Price        int64
+	IsOnSale     bool
+	SortOrder    int32
+	CreatedAt    pgtype.Timestamptz
+	UpdatedAt    pgtype.Timestamptz
+}
+
 type Tutorial struct {
 	ID          int64
 	Platform    string
@@ -376,15 +504,16 @@ type UserLoginLog struct {
 }
 
 type UserSession struct {
-	ID        int64
-	TokenHash []byte
-	UserID    int64
-	CsrfToken string
-	ClientIp  *netip.Addr
-	UserAgent pgtype.Text
-	ExpiresAt pgtype.Timestamptz
-	IdleUntil pgtype.Timestamptz
-	CreatedAt pgtype.Timestamptz
+	ID                  int64
+	TokenHash           []byte
+	UserID              int64
+	CsrfToken           string
+	ClientIp            *netip.Addr
+	UserAgent           pgtype.Text
+	ExpiresAt           pgtype.Timestamptz
+	IdleUntil           pgtype.Timestamptz
+	ImpersonatorAdminID pgtype.Int8
+	CreatedAt           pgtype.Timestamptz
 }
 
 type UserTrafficHourly struct {
@@ -392,4 +521,18 @@ type UserTrafficHourly struct {
 	Hour   pgtype.Timestamptz
 	Up     int64
 	Down   int64
+}
+
+type WalletLedger struct {
+	ID           int64
+	UserID       pgtype.Int8
+	Username     string
+	Kind         string
+	Amount       int64
+	BalanceAfter int64
+	RefType      string
+	RefID        pgtype.Int8
+	Remark       string
+	AdminID      pgtype.Int8
+	CreatedAt    pgtype.Timestamptz
 }

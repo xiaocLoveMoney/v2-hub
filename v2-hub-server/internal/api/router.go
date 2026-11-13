@@ -57,6 +57,8 @@ type Deps struct {
 	Content ContentManager
 	// Tickets 提供工单（docs/03 §5.10）。
 	Tickets TicketManager
+	// Wallet 提供余额流水与充值码（docs/03 §5.14、§5.15）。
+	Wallet WalletManager
 	// Cookie 是会话 Cookie 属性。
 	Cookie CookieConfig
 	// TrustedProxies 是可采信 X-Forwarded-For 的直连网段（如 Caddy 所在 docker 网络）。
@@ -75,6 +77,7 @@ type handlers struct {
 	account        AccountManager
 	content        ContentManager
 	tickets        TicketManager
+	wallet         WalletManager
 	cookie         CookieConfig
 	trustedProxies []netip.Prefix
 }
@@ -82,7 +85,7 @@ type handlers struct {
 // NewRouter 返回注册好全部路由的 http.Handler。路由与 hub-api.yaml 的 paths 逐条对应。
 func NewRouter(deps Deps) http.Handler {
 	h := &handlers{auth: deps.Auth, rbac: deps.RBAC, panels: deps.Panels, users: deps.Users, portalAuth: deps.PortalAuth, portal: deps.Portal,
-		settings: deps.Settings, mail: deps.Mail, account: deps.Account, content: deps.Content, tickets: deps.Tickets, cookie: deps.Cookie, trustedProxies: deps.TrustedProxies}
+		settings: deps.Settings, mail: deps.Mail, account: deps.Account, content: deps.Content, tickets: deps.Tickets, wallet: deps.Wallet, cookie: deps.Cookie, trustedProxies: deps.TrustedProxies}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", handleHealthz)
 	mux.HandleFunc("GET /readyz", newReadyzHandler(deps.Database, deps.PingTimeout))
@@ -140,6 +143,14 @@ func NewRouter(deps Deps) http.Handler {
 	mux.HandleFunc("GET /api/admin/users/{id}/provisions", h.requireAdmin(service.PermUserRead, h.listUserProvisions))
 	mux.HandleFunc("POST /api/admin/users/{id}/reconcile", h.requireAdmin(service.PermUserWrite, h.reconcileUser))
 	mux.HandleFunc("DELETE /api/admin/users/{id}/totp", h.requireAdmin(service.PermUserWrite, h.clearUserTOTP))
+	mux.HandleFunc("POST /api/admin/users/{id}/balance", h.requireAdmin(service.PermFinanceWrite, h.adjustUserBalance))
+
+	mux.HandleFunc("GET /api/admin/wallet-ledger", h.requireAdmin(service.PermFinanceRead, h.listWalletLedger))
+	mux.HandleFunc("GET /api/admin/topup-codes", h.requireAdmin(service.PermFinanceRead, h.listTopupCodes))
+	mux.HandleFunc("POST /api/admin/topup-codes", h.requireAdmin(service.PermFinanceWrite, h.createTopupCodes))
+	mux.HandleFunc("PUT /api/admin/topup-codes/{id}", h.requireAdmin(service.PermFinanceWrite, h.updateTopupCode))
+	mux.HandleFunc("DELETE /api/admin/topup-codes/{id}", h.requireAdmin(service.PermFinanceWrite, h.deleteTopupCode))
+	mux.HandleFunc("GET /api/admin/topup-codes/{id}/code", h.requireAdmin(service.PermFinanceWrite, h.revealTopupCode))
 	mux.HandleFunc("POST /api/admin/users/{id}/subscription/reset", h.requireAdmin(service.PermUserWrite, h.resetUserSubscription))
 	mux.HandleFunc("GET /api/admin/subscribe-logs", h.requireAdmin(service.PermUserRead, h.listSubscribeLogs))
 	mux.HandleFunc("DELETE /api/admin/endpoints/{id}", h.requireAdmin(service.PermNodeWrite, h.deleteEndpoint))
@@ -214,6 +225,8 @@ func NewRouter(deps Deps) http.Handler {
 	mux.HandleFunc("POST /api/user/tickets/{id}/close", h.requireUser(false, h.closeOwnTicket))
 	mux.HandleFunc("GET /api/user/checkin", h.requireUser(false, h.getCheckin))
 	mux.HandleFunc("POST /api/user/checkin", h.requireUser(false, h.checkin))
+	mux.HandleFunc("GET /api/user/wallet/ledger", h.requireUser(false, h.listOwnLedger))
+	mux.HandleFunc("POST /api/user/wallet/redeem", h.requireUser(false, h.redeemTopupCode))
 
 	// 账号自助（docs/03 §5.8）
 	mux.HandleFunc("POST /api/user/account/email-code", h.requireUser(false, h.sendBindEmailCode))

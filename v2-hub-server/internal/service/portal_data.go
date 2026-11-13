@@ -35,6 +35,8 @@ type Dashboard struct {
 	OnlineDevices int
 	LastUsedAt    *time.Time
 	NodeCount     int
+	// Balance 是余额（分）。
+	Balance int64
 }
 
 // GetDashboard 返回本人的套餐、用量、到期、在线设备与可用节点数。
@@ -55,7 +57,7 @@ func (s *UserService) GetDashboard(ctx context.Context, p *UserPrincipal) (*Dash
 	return &Dashboard{
 		Status: row.Status, PlanName: row.PlanName, TrafficLimit: row.TrafficLimit, TrafficUsed: row.TrafficUsed,
 		TrafficToday: row.TrafficToday, ExpiresAt: timePtr(row.ExpiresAt), PendingDays: int(row.PendingDays), LimitIP: int(row.LimitIp),
-		OnlineDevices: int(row.OnlineDevices), LastUsedAt: timePtr(row.LastUsedAt), NodeCount: len(nodes),
+		OnlineDevices: int(row.OnlineDevices), LastUsedAt: timePtr(row.LastUsedAt), NodeCount: len(nodes), Balance: row.Balance,
 	}, nil
 }
 

@@ -95,6 +95,9 @@ type SiteInfo struct {
 	CheckinEnabled      bool
 	TicketEnabled       bool
 	SharedEnabled       bool
+	ShopEnabled         bool
+	// Currency 是金额的显示币种（docs/03 §5.12）。
+	Currency string
 }
 
 // Site 返回公开的站点信息。
@@ -106,6 +109,7 @@ func (s *AccountService) Site(ctx context.Context) (*SiteInfo, error) {
 	return &SiteInfo{
 		SiteName: cur.Site.Name, RegisterMode: cur.Register.Mode, EmailVerifyRequired: s.emailVerifyRequired(cur), MailEnabled: s.mail.Enabled(),
 		CheckinEnabled: cur.Checkin.Enabled, TicketEnabled: cur.Ticket.Enabled, SharedEnabled: cur.Shared.Enabled,
+		ShopEnabled: cur.Shop.Enabled, Currency: cur.Shop.Currency,
 	}, nil
 }
 

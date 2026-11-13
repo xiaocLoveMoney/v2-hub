@@ -46,6 +46,8 @@ var statusByCode = map[service.Code]int{
 	service.CodeUpstream:         http.StatusBadGateway,
 	service.CodeAccountDisabled:  http.StatusForbidden,
 	service.CodeFeatureDisabled:  http.StatusForbidden,
+	// 余额不足按“当前状态不允许”处理，前端凭 code 与 data.shortfall 引导充值（docs/03 §5 错误码表）
+	service.CodeInsufficientBalance: http.StatusConflict,
 }
 
 func writeOK(w http.ResponseWriter, data any) {
@@ -57,7 +59,7 @@ func writeError(w http.ResponseWriter, r *http.Request, err error) {
 	var se *service.Error
 	if errors.As(err, &se) {
 		if status, ok := statusByCode[se.Code]; ok {
-			writeJSON(w, status, envelope{Code: string(se.Code), Message: se.Message})
+			writeJSON(w, status, envelope{Code: string(se.Code), Message: se.Message, Data: se.Data})
 			return
 		}
 	}
