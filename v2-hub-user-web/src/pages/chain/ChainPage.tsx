@@ -6,6 +6,7 @@ import { mutate, useRemote } from '../../hooks/use-remote'
 import { CustomNodesCard } from './CustomNodesCard'
 import { chainStatusLabel, isChainOk } from './labels'
 import { CreateRuleModal, RenameRuleModal } from './RuleModals'
+import { ServerRulesCard } from './ServerRulesCard'
 
 const EXIT_KIND_CUSTOM: ChainRule['exit']['kind'] = 'custom'
 
@@ -70,7 +71,8 @@ function RulesCard({ overview, onChanged }: RulesCardProps) {
   )
 
   return (
-    <Card title={`链式规则（${rules.length} / ${overview.maxRules}）`} extra={createButton}>
+    <Card title={`客户端链式（${rules.length} / ${overview.maxRules}）`} extra={createButton}>
+      {!overview.allowed && overview.serverAllowed && <Alert tone="info">当前套餐不支持客户端链式；已有的规则处于阻断状态、不会出现在订阅里，仍可删除。</Alert>}
       {overview.allowed && isFull && <Alert tone="info">已达 {overview.maxRules} 条上限，删除不用的再新建。</Alert>}
       {overview.allowed && !hasNodes && <Alert tone="info">当前没有可用的节点，暂时无法新建规则。</Alert>}
       {rules.length === 0 ? (
@@ -153,12 +155,13 @@ function NotesCard() {
         <li>状态“通畅”表示配置与授权成立，平台不探测连通性，也不连接你填写的地址；能否连通以客户端实测为准。</li>
         <li>阻断的规则会保留但不进订阅，原因消除后（如续上支持的套餐、节点恢复）自动恢复通畅。</li>
         <li>落地是平台节点时，同一份流量在入口与落地各计一次；落地是自有节点时只计入口。</li>
+        <li>服务端链式不改订阅：入口服务器把你的流量转发到落地出网，入口与落地两边都计流量；每次生效会让入口服务器的 Xray 重启一次。</li>
       </ul>
     </Card>
   )
 }
 
-/** 链式代理（docs/03 §5.18、docs/06 §5 M6）：一个接口取全，任何写操作成功后整体重取。 */
+/** 链式代理（docs/03 §5.18、§5.19，docs/06 §5 M6 / M7）：一个接口取全，任何写操作成功后整体重取。 */
 export function ChainPage() {
   const chain = useRemote<ChainOverview>(loadChain)
   const overview = chain.data
@@ -167,10 +170,13 @@ export function ChainPage() {
     <>
       <PageHeader title="链式代理" />
       {chain.error !== null && <Alert tone="plain">{chain.error.message}</Alert>}
-      {overview !== null && !overview.allowed && <Alert tone="warning">当前套餐不支持链式代理：已有的规则处于阻断状态、不会出现在订阅里，仍可查看与删除。</Alert>}
+      {overview !== null && !overview.allowed && !overview.serverAllowed && (
+        <Alert tone="warning">当前套餐不支持链式代理：已有的规则处于阻断状态、不会生效，仍可查看与删除。</Alert>
+      )}
       {overview !== null && (
         <>
           <RulesCard overview={overview} onChanged={chain.reload} />
+          <ServerRulesCard overview={overview} onChanged={chain.reload} />
           <div className="hub-grid-2">
             <CustomNodesCard overview={overview} onChanged={chain.reload} />
             <NotesCard />
