@@ -33,6 +33,7 @@ type UserManager interface {
 	ResetUserPassword(ctx context.Context, actor *service.AdminPrincipal, id int64, pw string, ip *netip.Addr) error
 	ListUserProvisions(ctx context.Context, id int64) ([]service.Provision, error)
 	ReconcileUser(ctx context.Context, id int64) error
+	ClearUserTOTP(ctx context.Context, actor *service.AdminPrincipal, id int64, ip *netip.Addr) error
 }
 
 // planBody 对应 hub-api.yaml PlanInput。
@@ -404,6 +405,19 @@ func (h *handlers) reconcileUser(w http.ResponseWriter, r *http.Request, _ *serv
 		return
 	}
 	if err := h.users.ReconcileUser(r.Context(), id); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeOK(w, nil)
+}
+
+func (h *handlers) clearUserTOTP(w http.ResponseWriter, r *http.Request, p *service.AdminPrincipal) {
+	id, err := pathID(r)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	if err := h.users.ClearUserTOTP(r.Context(), p, id, clientIP(r, h.trustedProxies)); err != nil {
 		writeError(w, r, err)
 		return
 	}

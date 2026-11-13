@@ -456,20 +456,13 @@ type UserCreateInput struct {
 	PlanID   int64
 }
 
-func validateLoginSecret(pw string) error {
-	if n := utf8.RuneCountInString(pw); n < minPasswordLen || n > maxPasswordLen {
-		return newError(CodeInvalidArgument, fmt.Sprintf("口令长度须为 %d–%d 个字符", minPasswordLen, maxPasswordLen))
-	}
-	return nil
-}
-
 // CreateUser 新建用户（U1），可同时分配套餐（U6）；面板凭据在此生成并加密保存。
 func (s *UserService) CreateUser(ctx context.Context, actor *AdminPrincipal, in UserCreateInput, ip *netip.Addr) (*User, error) {
 	in.Username = strings.TrimSpace(in.Username)
 	if !endUserNamePattern.MatchString(in.Username) {
 		return nil, newError(CodeInvalidArgument, "用户名须为 3–64 位字母、数字或 _ . @ -")
 	}
-	if err := validateLoginSecret(in.Password); err != nil {
+	if err := validateUserLoginSecret(in.Password); err != nil {
 		return nil, err
 	}
 	if utf8.RuneCountInString(in.Remark) > maxUserRemarkLen {
@@ -761,7 +754,7 @@ func (s *UserService) UpdateQuota(ctx context.Context, actor *AdminPrincipal, id
 
 // ResetUserPassword 重置客户后台登录口令。
 func (s *UserService) ResetUserPassword(ctx context.Context, actor *AdminPrincipal, id int64, pw string, ip *netip.Addr) error {
-	if err := validateLoginSecret(pw); err != nil {
+	if err := validateUserLoginSecret(pw); err != nil {
 		return err
 	}
 	hash, err := crypto.HashPassword(pw)
@@ -775,6 +768,10 @@ func (s *UserService) ResetUserPassword(ctx context.Context, actor *AdminPrincip
 		}
 		if n == 0 {
 			return newError(CodeNotFound, msgUserNotFound)
+		}
+		// 管理员重置口令后该用户全部会话失效（docs/03 §5.3）
+		if err := q.DeleteUserSessionsByUser(ctx, id); err != nil {
+			return fmt.Errorf("revoke sessions of user %d: %w", id, err)
 		}
 		return writeAudit(ctx, q, AuditEntry{ActorType: ActorAdmin, ActorID: actor.AdminID, Action: ActionUserPasswordReset, TargetType: targetUser, TargetID: fmt.Sprint(id), ClientIP: ip})
 	})

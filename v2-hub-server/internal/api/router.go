@@ -43,6 +43,8 @@ type Deps struct {
 	Panels PanelManager
 	// Users 提供套餐、用户与下发管理（docs/03 §5.2）。
 	Users UserManager
+	// PortalAuth 提供终端用户登录与会话校验（docs/03 §5.3）。
+	PortalAuth PortalAuthenticator
 	// Cookie 是会话 Cookie 属性。
 	Cookie CookieConfig
 	// TrustedProxies 是可采信 X-Forwarded-For 的直连网段（如 Caddy 所在 docker 网络）。
@@ -54,13 +56,14 @@ type handlers struct {
 	rbac           AdminManager
 	panels         PanelManager
 	users          UserManager
+	portalAuth     PortalAuthenticator
 	cookie         CookieConfig
 	trustedProxies []netip.Prefix
 }
 
 // NewRouter 返回注册好全部路由的 http.Handler。路由与 hub-api.yaml 的 paths 逐条对应。
 func NewRouter(deps Deps) http.Handler {
-	h := &handlers{auth: deps.Auth, rbac: deps.RBAC, panels: deps.Panels, users: deps.Users, cookie: deps.Cookie, trustedProxies: deps.TrustedProxies}
+	h := &handlers{auth: deps.Auth, rbac: deps.RBAC, panels: deps.Panels, users: deps.Users, portalAuth: deps.PortalAuth, cookie: deps.Cookie, trustedProxies: deps.TrustedProxies}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", handleHealthz)
 	mux.HandleFunc("GET /readyz", newReadyzHandler(deps.Database, deps.PingTimeout))
@@ -117,6 +120,7 @@ func NewRouter(deps Deps) http.Handler {
 	mux.HandleFunc("PUT /api/admin/users/{id}/password", h.requireAdmin(service.PermUserWrite, h.resetUserPassword))
 	mux.HandleFunc("GET /api/admin/users/{id}/provisions", h.requireAdmin(service.PermUserRead, h.listUserProvisions))
 	mux.HandleFunc("POST /api/admin/users/{id}/reconcile", h.requireAdmin(service.PermUserWrite, h.reconcileUser))
+	mux.HandleFunc("DELETE /api/admin/users/{id}/totp", h.requireAdmin(service.PermUserWrite, h.clearUserTOTP))
 	mux.HandleFunc("DELETE /api/admin/endpoints/{id}", h.requireAdmin(service.PermNodeWrite, h.deleteEndpoint))
 	mux.HandleFunc("GET /api/admin/nodes", h.requireAdmin(service.PermNodeRead, h.listNodes))
 	mux.HandleFunc("PUT /api/admin/nodes/{id}", h.requireAdmin(service.PermNodeWrite, h.updateNode))
@@ -124,6 +128,16 @@ func NewRouter(deps Deps) http.Handler {
 	mux.HandleFunc("POST /api/admin/node-groups", h.requireAdmin(service.PermNodeWrite, h.createNodeGroup))
 	mux.HandleFunc("PUT /api/admin/node-groups/{id}", h.requireAdmin(service.PermNodeWrite, h.updateNodeGroup))
 	mux.HandleFunc("DELETE /api/admin/node-groups/{id}", h.requireAdmin(service.PermNodeWrite, h.deleteNodeGroup))
+
+	// 客户后台（docs/03 §5.3–§5.5）：身份只取自会话（R8）。auth/me 与登出允许停用的账号访问。
+	mux.HandleFunc("POST /api/user/auth/login", h.userLogin)
+	mux.HandleFunc("POST /api/user/auth/logout", h.requireUser(true, h.userLogout))
+	mux.HandleFunc("GET /api/user/auth/me", h.requireUser(true, h.userMe))
+	mux.HandleFunc("PUT /api/user/auth/password", h.requireUser(false, h.userChangeSecret))
+	mux.HandleFunc("POST /api/user/auth/totp/setup", h.requireUser(false, h.userTotpSetup))
+	mux.HandleFunc("POST /api/user/auth/totp/enable", h.requireUser(false, h.userTotpEnable))
+	mux.HandleFunc("POST /api/user/auth/totp/disable", h.requireUser(false, h.userTotpDisable))
+	mux.HandleFunc("GET /api/user/login-logs", h.requireUser(false, h.listUserLoginLogs))
 	return withSecurityHeaders(mux)
 }
 

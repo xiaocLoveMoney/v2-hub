@@ -37,6 +37,11 @@ const (
 	defaultPanelRequestTimeout = 15 * time.Second
 	defaultPanelConcurrency    = 8
 
+	// 终端用户会话默认值，语义见 docs/03 §5.3
+	defaultPortalSessionIdleTimeout = 7 * 24 * time.Hour
+	defaultPortalSessionMaxAge      = 30 * 24 * time.Hour
+	defaultPortalLoginLogRetention  = 90 * 24 * time.Hour
+
 	defaultUserTrafficInterval   = time.Minute
 	defaultUserReconcileInterval = 5 * time.Minute
 	defaultUserTimeZone          = "Local"
@@ -52,6 +57,15 @@ type Config struct {
 	Auth     AuthConfig     `yaml:"auth"`
 	Panel    PanelConfig    `yaml:"panel"`
 	User     UserConfig     `yaml:"user"`
+	Portal   PortalConfig   `yaml:"portal"`
+}
+
+// PortalConfig 是终端用户会话参数（docs/03 §5.3）；登录频控、Cookie 的 Secure 与会话顺延节流沿用 auth 段。
+type PortalConfig struct {
+	SessionIdleTimeout time.Duration `yaml:"sessionIdleTimeout"`
+	SessionMaxAge      time.Duration `yaml:"sessionMaxAge"`
+	// LoginLogRetention 是登录记录的保留时长。
+	LoginLogRetention time.Duration `yaml:"loginLogRetention"`
 }
 
 // UserConfig 是用量采集、对账兜底与配额时区参数（docs/03 §5.2）。
@@ -161,6 +175,10 @@ func defaults() Config {
 		TrafficInterval:   defaultUserTrafficInterval,
 		ReconcileInterval: defaultUserReconcileInterval,
 		TimeZone:          defaultUserTimeZone,
+	}, Portal: PortalConfig{
+		SessionIdleTimeout: defaultPortalSessionIdleTimeout,
+		SessionMaxAge:      defaultPortalSessionMaxAge,
+		LoginLogRetention:  defaultPortalLoginLogRetention,
 	}}
 }
 
@@ -191,6 +209,10 @@ func (c Config) validate() error {
 	}
 	if _, err := c.User.Location(); err != nil {
 		return err
+	}
+	po := c.Portal
+	if po.SessionIdleTimeout <= a.SessionTouchInterval || po.SessionMaxAge < po.SessionIdleTimeout || po.LoginLogRetention <= 0 {
+		return fmt.Errorf("%w: portal session durations out of range", ErrInvalidConfig)
 	}
 	return nil
 }

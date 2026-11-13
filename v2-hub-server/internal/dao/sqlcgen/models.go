@@ -76,6 +76,13 @@ type EndUser struct {
 	EmailCode          string
 	ClientCredEnc      []byte
 	DeletedAt          pgtype.Timestamptz
+	TotpSecretEnc      []byte
+	TotpPendingEnc     []byte
+	TotpLastStep       int64
+	SubTokenHash       []byte
+	SubTokenEnc        []byte
+	CredVersion        int32
+	LastUsedAt         pgtype.Timestamptz
 	CreatedAt          pgtype.Timestamptz
 	UpdatedAt          pgtype.Timestamptz
 }
@@ -174,17 +181,21 @@ type PlanNodeGroup struct {
 }
 
 type Provision struct {
-	ID         int64
-	UserID     int64
-	ServerID   int64
-	Email      string
-	Status     string
-	LastError  string
-	RetryCount int32
-	LastUp     int64
-	LastDown   int64
-	SyncedAt   pgtype.Timestamptz
-	UpdatedAt  pgtype.Timestamptz
+	ID            int64
+	UserID        int64
+	ServerID      int64
+	Email         string
+	Status        string
+	LastError     string
+	RetryCount    int32
+	LastUp        int64
+	LastDown      int64
+	SyncedAt      pgtype.Timestamptz
+	CredVersion   int32
+	LinksEnc      []byte
+	LinksSyncedAt pgtype.Timestamptz
+	IsOnline      bool
+	UpdatedAt     pgtype.Timestamptz
 }
 
 type Role struct {
@@ -218,9 +229,39 @@ type Server struct {
 	PanelVersion   string
 	PanelGuid      string
 	StatusSnapshot []byte
+	OnlineClients  int32
 	LastSyncedAt   pgtype.Timestamptz
 	CreatedAt      pgtype.Timestamptz
 	UpdatedAt      pgtype.Timestamptz
+}
+
+type SubscribeLog struct {
+	ID        int64
+	UserID    int64
+	Format    string
+	ClientIp  *netip.Addr
+	UserAgent string
+	CreatedAt pgtype.Timestamptz
+}
+
+type UserLoginLog struct {
+	ID        int64
+	UserID    int64
+	ClientIp  *netip.Addr
+	IsSuccess bool
+	CreatedAt pgtype.Timestamptz
+}
+
+type UserSession struct {
+	ID        int64
+	TokenHash []byte
+	UserID    int64
+	CsrfToken string
+	ClientIp  *netip.Addr
+	UserAgent pgtype.Text
+	ExpiresAt pgtype.Timestamptz
+	IdleUntil pgtype.Timestamptz
+	CreatedAt pgtype.Timestamptz
 }
 
 type UserTrafficHourly struct {

@@ -7,12 +7,12 @@ import (
 	"time"
 )
 
-// SessionPurger 能删除过期会话（由 service.AuthService 实现）。
+// SessionPurger 能删除过期会话（由 service.AuthService 与 service.PortalAuthService 实现）。
 type SessionPurger interface {
 	PurgeExpiredSessions(ctx context.Context) (int64, error)
 }
 
-// RunSessionCleanup 按 interval 周期清理过期管理员会话，阻塞到 ctx 取消。
+// RunSessionCleanup 按 interval 周期清理过期会话，阻塞到 ctx 取消。
 func RunSessionCleanup(ctx context.Context, purger SessionPurger, interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
@@ -38,6 +38,6 @@ func purgeOnce(ctx context.Context, purger SessionPurger) {
 		return
 	}
 	if n > 0 {
-		slog.Info("expired admin sessions purged", "count", n)
+		slog.Info("expired sessions purged", "count", n)
 	}
 }
