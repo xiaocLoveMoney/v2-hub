@@ -1,12 +1,19 @@
 import {
   AuditOutlined,
+  BookOutlined,
   ClusterOutlined,
+  CustomerServiceOutlined,
   DashboardOutlined,
   DeploymentUnitOutlined,
+  GiftOutlined,
   HistoryOutlined,
+  KeyOutlined,
   LockOutlined,
+  MailOutlined,
+  NotificationOutlined,
   ProfileOutlined,
   SafetyOutlined,
+  SettingOutlined,
   TeamOutlined,
   UserOutlined,
 } from '@ant-design/icons'
@@ -16,15 +23,22 @@ import type { ReactNode } from 'react'
 export const ROUTES = {
   LOGIN: '/login',
   DASHBOARD: '/',
+  ANNOUNCEMENTS: '/announcements',
+  TUTORIALS: '/tutorials',
+  SHARED_ACCOUNTS: '/shared-accounts',
+  TICKETS: '/tickets',
   SERVERS: '/servers',
   SERVER_DETAIL: '/servers/:id',
   NODES: '/nodes',
   USERS: '/users',
   PLANS: '/plans',
+  INVITE_CODES: '/invite-codes',
   SUBSCRIBE_LOGS: '/subscribe-logs',
   ADMINS: '/system/admins',
   ROLES: '/system/roles',
   AUDIT_LOGS: '/system/audit-logs',
+  SETTINGS: '/system/settings',
+  MAIL_OUTBOX: '/system/mail-outbox',
   SECURITY: '/account/security',
 } as const
 
@@ -41,6 +55,12 @@ export const PERMISSIONS = {
   USER_WRITE: 'user:write',
   PLAN_READ: 'plan:read',
   PLAN_WRITE: 'plan:write',
+  SETTING_READ: 'setting:read',
+  SETTING_WRITE: 'setting:write',
+  CONTENT_READ: 'content:read',
+  CONTENT_WRITE: 'content:write',
+  TICKET_READ: 'ticket:read',
+  TICKET_WRITE: 'ticket:write',
 } as const
 
 /** 一个菜单项；permission 为空表示登录即可见。 */
@@ -62,14 +82,21 @@ const GROUP_SYSTEM = '系统'
 /** 左侧菜单表：增减菜单只改这张表，菜单显示与路由守卫都以它为准。 */
 export const MENU: readonly MenuEntry[] = [
   { path: ROUTES.DASHBOARD, label: '总览', icon: <DashboardOutlined />, group: GROUP_MINE },
+  { path: ROUTES.ANNOUNCEMENTS, label: '公告', icon: <NotificationOutlined />, permission: PERMISSIONS.CONTENT_READ, group: GROUP_MINE },
+  { path: ROUTES.TUTORIALS, label: '教程', icon: <BookOutlined />, permission: PERMISSIONS.CONTENT_READ, group: GROUP_MINE },
+  { path: ROUTES.SHARED_ACCOUNTS, label: '共享账号', icon: <KeyOutlined />, permission: PERMISSIONS.CONTENT_READ, group: GROUP_MINE },
+  { path: ROUTES.TICKETS, label: '工单', icon: <CustomerServiceOutlined />, permission: PERMISSIONS.TICKET_READ, group: GROUP_MINE },
   { path: ROUTES.SERVERS, label: '服务器', icon: <ClusterOutlined />, permission: PERMISSIONS.SERVER_READ, group: GROUP_NODES },
   { path: ROUTES.NODES, label: '节点', icon: <DeploymentUnitOutlined />, permission: PERMISSIONS.NODE_READ, group: GROUP_NODES },
   { path: ROUTES.USERS, label: '用户', icon: <UserOutlined />, permission: PERMISSIONS.USER_READ, group: GROUP_USERS },
   { path: ROUTES.PLANS, label: '套餐', icon: <ProfileOutlined />, permission: PERMISSIONS.PLAN_READ, group: GROUP_USERS },
+  { path: ROUTES.INVITE_CODES, label: '邀请码', icon: <GiftOutlined />, permission: PERMISSIONS.USER_READ, group: GROUP_USERS },
   { path: ROUTES.SUBSCRIBE_LOGS, label: '订阅记录', icon: <HistoryOutlined />, permission: PERMISSIONS.USER_READ, group: GROUP_USERS },
   { path: ROUTES.ADMINS, label: '管理员', icon: <TeamOutlined />, permission: PERMISSIONS.ADMIN_READ, group: GROUP_SYSTEM },
   { path: ROUTES.ROLES, label: '角色与权限', icon: <SafetyOutlined />, permission: PERMISSIONS.ADMIN_READ, group: GROUP_SYSTEM },
   { path: ROUTES.AUDIT_LOGS, label: '审计日志', icon: <AuditOutlined />, permission: PERMISSIONS.AUDIT_READ, group: GROUP_SYSTEM },
+  { path: ROUTES.SETTINGS, label: '系统设置', icon: <SettingOutlined />, permission: PERMISSIONS.SETTING_READ, group: GROUP_SYSTEM },
+  { path: ROUTES.MAIL_OUTBOX, label: '发件记录', icon: <MailOutlined />, permission: PERMISSIONS.SETTING_READ, group: GROUP_SYSTEM },
   { path: ROUTES.SECURITY, label: '账号安全', icon: <LockOutlined />, group: GROUP_SYSTEM },
 ]
 

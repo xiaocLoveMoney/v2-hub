@@ -4,27 +4,41 @@ import { AdminLayout } from './layout/AdminLayout'
 import { MENU, PERMISSIONS, ROUTES } from './menu'
 import { LoginPage } from './pages/LoginPage'
 import { ComingSoonPage, DashboardPage, NotFoundPage, RequirePermission } from './pages/Placeholders'
+import { AnnouncementsPage } from './pages/content/AnnouncementsPage'
+import { SharedAccountsPage } from './pages/content/SharedAccountsPage'
+import { TicketsPage } from './pages/content/TicketsPage'
+import { TutorialsPage } from './pages/content/TutorialsPage'
 import { AdminsPage } from './pages/system/AdminsPage'
 import { AuditLogsPage } from './pages/system/AuditLogsPage'
+import { MailOutboxPage } from './pages/system/MailOutboxPage'
 import { RolesPage } from './pages/system/RolesPage'
+import { SettingsPage } from './pages/system/SettingsPage'
 import { SecurityPage } from './pages/SecurityPage'
 import { NodesPage } from './pages/panel/NodesPage'
 import { ServerDetailPage } from './pages/panel/ServerDetailPage'
 import { ServersPage } from './pages/panel/ServersPage'
+import { InviteCodesPage } from './pages/users/InviteCodesPage'
 import { PlansPage } from './pages/users/PlansPage'
 import { SubscribeLogsPage } from './pages/users/SubscribeLogsPage'
 import { UsersPage } from './pages/users/UsersPage'
 
 /** 已实现的页面；菜单表里其余路径显示交付里程碑占位。 */
 const PAGE_BY_PATH: Record<string, ReactNode> = {
+  [ROUTES.ANNOUNCEMENTS]: <AnnouncementsPage />,
+  [ROUTES.TUTORIALS]: <TutorialsPage />,
+  [ROUTES.SHARED_ACCOUNTS]: <SharedAccountsPage />,
+  [ROUTES.TICKETS]: <TicketsPage />,
   [ROUTES.SERVERS]: <ServersPage />,
   [ROUTES.NODES]: <NodesPage />,
   [ROUTES.USERS]: <UsersPage />,
   [ROUTES.PLANS]: <PlansPage />,
+  [ROUTES.INVITE_CODES]: <InviteCodesPage />,
   [ROUTES.SUBSCRIBE_LOGS]: <SubscribeLogsPage />,
   [ROUTES.ADMINS]: <AdminsPage />,
   [ROUTES.ROLES]: <RolesPage />,
   [ROUTES.AUDIT_LOGS]: <AuditLogsPage />,
+  [ROUTES.SETTINGS]: <SettingsPage />,
+  [ROUTES.MAIL_OUTBOX]: <MailOutboxPage />,
   [ROUTES.SECURITY]: <SecurityPage />,
 }
 

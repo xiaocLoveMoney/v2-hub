@@ -161,6 +161,41 @@ body {
   max-width: 320px;
 }
 
+.settings-card {
+  max-width: 720px;
+  margin-bottom: 16px;
+}
+
+.settings-card-extra {
+  margin-top: 24px;
+}
+
+.link-url-input {
+  min-width: 320px;
+}
+
+.ticket-message {
+  margin-bottom: 12px;
+  padding: 12px 16px;
+  background: var(--hub-code-bg);
+  border-radius: var(--hub-radius);
+}
+
+.ticket-message-admin {
+  border-left: 3px solid var(--hub-primary);
+}
+
+.ticket-message-meta {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+
+.ticket-message-content {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .admin-content {
   position: relative;
   margin: 10px 24px 24px;

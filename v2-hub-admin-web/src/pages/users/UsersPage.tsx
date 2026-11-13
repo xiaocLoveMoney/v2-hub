@@ -141,7 +141,21 @@ export function UsersPage() {
         </Space>
       ),
     },
+    {
+      title: '邮箱',
+      key: 'email',
+      render: (_: unknown, u: EndUser) =>
+        u.email === null || u.email === undefined ? (
+          '—'
+        ) : (
+          <Space size={4}>
+            {u.email}
+            {u.isEmailVerified !== true && <Tag>未验证</Tag>}
+          </Space>
+        ),
+    },
     { title: '套餐', dataIndex: 'planName', render: (v: string) => v || '—' },
+    { title: '邀请人', dataIndex: 'invitedByUsername', render: (v: string | undefined) => v || '—' },
     { title: '状态', dataIndex: 'status', render: (s: UserStatus) => <UserStatusTag status={s} /> },
     { title: '已用 / 额度', key: 'usage', render: (_: unknown, u: EndUser) => <UsageCell u={u} /> },
     { title: '到期', key: 'expiry', render: (_: unknown, u: EndUser) => <ExpiryCell u={u} /> },
