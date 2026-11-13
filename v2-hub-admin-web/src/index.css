@@ -1,10 +1,23 @@
 :root {
-  font-family: system-ui, -apple-system, 'Segoe UI', 'PingFang SC', sans-serif;
+  /* 设计变量（Ruling-21），与 src/theme.ts 的 PALETTE、docs/06 §4 一致 */
+  --hub-primary: #6777ef;
+  --hub-primary-glow: #acb5f6;
+  --hub-page-bg: #f4f6f9;
+  --hub-heading: #34395e;
+  --hub-body: #6c757d;
+  --hub-divider: #f9f9f9;
+  --hub-surface: #fff;
+  --hub-code-bg: #f6f8fa;
+  --hub-radius: 3px;
+  --hub-card-shadow: 0 4px 8px rgb(0 0 0 / 3%);
+  --hub-band-height: 115px;
+  font-family: 'Nunito Variable', Nunito, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', arial, sans-serif;
   line-height: 1.5;
 }
 
 body {
   margin: 0;
+  background: var(--hub-page-bg);
 }
 
 .login-page {
@@ -13,12 +26,14 @@ body {
   align-items: center;
   justify-content: center;
   padding: 16px;
-  background: #f5f7fa;
+  background: var(--hub-page-bg);
 }
 
 .login-card {
   width: 100%;
   max-width: 380px;
+  border-top: 2px solid var(--hub-primary);
+  box-shadow: var(--hub-card-shadow);
 }
 
 .login-alert {
@@ -29,21 +44,64 @@ body {
   min-height: 100vh;
 }
 
+.admin-sider {
+  box-shadow: var(--hub-card-shadow);
+  z-index: 2;
+}
+
 .admin-brand {
-  height: 56px;
+  height: 60px;
   display: flex;
   align-items: center;
-  padding: 0 24px;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 16px;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: var(--hub-heading);
+}
+
+/* 侧栏菜单：分组标题小号大写，当前项左侧一条主色竖线 */
+.admin-sider .ant-menu-item-group-title {
+  padding: 16px 25px 4px;
+  font-size: 10px;
   font-weight: 600;
-  font-size: 18px;
+  letter-spacing: 1.3px;
+  text-transform: uppercase;
+}
+
+.admin-sider .ant-menu-item {
+  padding-inline: 25px !important; /* antd 用内联样式写缩进，只能这样覆盖 */
+  font-weight: 500;
+}
+
+.admin-sider .ant-menu-item-selected {
+  font-weight: 600;
+  box-shadow: inset 4px 0 0 var(--hub-primary);
+}
+
+.admin-main {
+  position: relative;
+}
+
+/* 顶部主色色带，内容区压在它上面（docs/06 §4 外壳） */
+.admin-band {
+  position: absolute;
+  inset: 0 0 auto;
+  height: var(--hub-band-height);
+  background: var(--hub-primary);
 }
 
 .admin-header {
+  position: relative;
   display: flex;
   justify-content: flex-end;
   align-items: center;
-  background: #fff;
-  padding: 0 16px;
+}
+
+.admin-header-user {
+  color: var(--hub-surface);
+  font-weight: 600;
 }
 
 .page-header {
@@ -90,8 +148,8 @@ body {
   max-height: 240px;
   overflow: auto;
   padding: 12px;
-  background: #f6f8fa;
-  border-radius: 6px;
+  background: var(--hub-code-bg);
+  border-radius: var(--hub-radius);
   font-size: 12px;
 }
 
@@ -104,8 +162,24 @@ body {
 }
 
 .admin-content {
-  margin: 16px;
+  position: relative;
+  margin: 10px 24px 24px;
   padding: 24px;
-  background: #fff;
-  border-radius: 8px;
+  background: var(--hub-surface);
+  border-radius: var(--hub-radius);
+  box-shadow: var(--hub-card-shadow);
+}
+
+/* 徽章做成药丸形 */
+.ant-tag {
+  border-radius: 30px;
+  padding-inline: 10px;
+  font-weight: 600;
+}
+
+@media (width <= 992px) {
+  .admin-content {
+    margin: 10px 12px 16px;
+    padding: 16px;
+  }
 }
