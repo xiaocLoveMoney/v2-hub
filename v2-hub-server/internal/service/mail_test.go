@@ -37,19 +37,28 @@ func (s *fakeSender) messages() []mail.Message {
 	return append([]mail.Message(nil), s.sent...)
 }
 
+// accountFixture：在 portalFixture（内存面板、节点组、用户服务、终端用户认证）之上接系统设置、假发信器与账号自助服务。
 type accountFixture struct {
-	*settingsFixture
-	sender  *fakeSender
-	mail    *MailService
-	account *AccountService
+	*portalFixture
+	settings *SettingsService
+	sender   *fakeSender
+	mail     *MailService
+	account  *AccountService
 }
 
 func newAccountFixture(t *testing.T) *accountFixture {
 	t.Helper()
-	sf := newSettingsFixture(t)
+	pf := newPortalFixture(t)
+	settings := NewSettingsService(pf.pool, SubscriptionConfig{InfoNodes: true}, pf.clock.now)
 	sender := &fakeSender{}
-	mails := NewMailService(sf.pool, testSealer(t), sender, sf.settings, sf.clock.now)
-	return &accountFixture{settingsFixture: sf, sender: sender, mail: mails, account: NewAccountService(sf.pool, testSealer(t), sf.settings, mails, sf.clock.now)}
+	mails := NewMailService(pf.pool, testSealer(t), sender, settings, pf.clock.now)
+	account := NewAccountService(pf.pool, testSealer(t), AccountDeps{Settings: settings, Mail: mails, Users: pf.users, Portal: pf.portal}, pf.clock.now)
+	return &accountFixture{portalFixture: pf, settings: settings, sender: sender, mail: mails, account: account}
+}
+
+func (f *accountFixture) update(t *testing.T, patch map[string]any) (Settings, error) {
+	t.Helper()
+	return updateSettings(t, f.settings, f.actor, patch)
 }
 
 func (f *accountFixture) flush(t *testing.T) {

@@ -56,7 +56,7 @@ func (q *Queries) CountNodeGroupsByIDs(ctx context.Context, ids []int64) (int64,
 const countUsers = `-- name: CountUsers :one
 SELECT COUNT(*) FROM end_user u
 WHERE u.deleted_at IS NULL
-  AND ($1::text IS NULL OR u.username ILIKE '%' || $1 || '%' OR u.remark ILIKE '%' || $1 || '%') -- rule-ignore: 管理端按用户名 / 备注模糊搜索，只给管理员用且有分页上限；本项目是 PostgreSQL，mysql.md 不适用
+  AND ($1::text IS NULL OR u.username ILIKE '%' || $1 || '%' OR u.remark ILIKE '%' || $1 || '%' OR u.email ILIKE '%' || $1 || '%') -- rule-ignore: 管理端按用户名 / 备注 / 邮箱模糊搜索，只给管理员用且有分页上限；本项目是 PostgreSQL，mysql.md 不适用
   AND ($2::text IS NULL OR u.status = $2)
   AND ($3::bigint IS NULL OR u.plan_id = $3)
 `
@@ -121,16 +121,20 @@ func (q *Queries) CreatePlan(ctx context.Context, arg CreatePlanParams) (int64, 
 }
 
 const createUser = `-- name: CreateUser :one
-INSERT INTO end_user (username, password_hash, remark, email_code, client_cred_enc)
-VALUES ($1, $2, $3, $4, ''::bytea)
+INSERT INTO end_user (username, password_hash, remark, email_code, client_cred_enc, email, email_verified_at, invited_by, invite_code_id)
+VALUES ($1, $2, $3, $4, ''::bytea, $5, $6, $7, $8)
 RETURNING id
 `
 
 type CreateUserParams struct {
-	Username     string
-	PasswordHash string
-	Remark       string
-	EmailCode    string
+	Username        string
+	PasswordHash    string
+	Remark          string
+	EmailCode       string
+	Email           pgtype.Text
+	EmailVerifiedAt pgtype.Timestamptz
+	InvitedBy       pgtype.Int8
+	InviteCodeID    pgtype.Int8
 }
 
 func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (int64, error) {
@@ -139,6 +143,10 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (int64, 
 		arg.PasswordHash,
 		arg.Remark,
 		arg.EmailCode,
+		arg.Email,
+		arg.EmailVerifiedAt,
+		arg.InvitedBy,
+		arg.InviteCodeID,
 	)
 	var id int64
 	err := row.Scan(&id)
@@ -568,14 +576,17 @@ SELECT u.id, u.username, u.remark, u.plan_id, COALESCE(p.name, '')::text AS plan
        u.expires_at, u.pending_days, u.limit_ip, u.renew_every_days, u.renew_month_day, u.renew_weekday, u.renew_max,
        u.renew_count, u.traffic_reset, u.traffic_reset_day, u.is_disabled, u.status, u.created_at,
        (u.totp_secret_enc IS NOT NULL)::boolean AS totp_enabled, u.last_used_at,
+       u.email, (u.email_verified_at IS NOT NULL)::boolean AS is_email_verified, u.invited_by,
+       COALESCE(iu.username, '')::text AS invited_by_username,
        (SELECT COUNT(*) FROM provision v WHERE v.user_id = u.id AND v.status = 'synced')::int AS synced_count,
        (SELECT COUNT(*) FROM provision v WHERE v.user_id = u.id AND v.status = 'pending')::int AS pending_count,
        (SELECT COUNT(*) FROM provision v WHERE v.user_id = u.id AND v.status = 'failed')::int AS failed_count
 FROM end_user u
 LEFT JOIN plan p ON p.id = u.plan_id
+LEFT JOIN end_user iu ON iu.id = u.invited_by AND iu.deleted_at IS NULL
 WHERE u.deleted_at IS NULL
   AND ($1::bigint IS NULL OR u.id = $1)
-  AND ($2::text IS NULL OR u.username ILIKE '%' || $2 || '%' OR u.remark ILIKE '%' || $2 || '%') -- rule-ignore: 管理端按用户名 / 备注模糊搜索，只给管理员用且有分页上限；本项目是 PostgreSQL，mysql.md 不适用
+  AND ($2::text IS NULL OR u.username ILIKE '%' || $2 || '%' OR u.remark ILIKE '%' || $2 || '%' OR u.email ILIKE '%' || $2 || '%') -- rule-ignore: 管理端按用户名 / 备注 / 邮箱模糊搜索，只给管理员用且有分页上限；本项目是 PostgreSQL，mysql.md 不适用
   AND ($3::text IS NULL OR u.status = $3)
   AND ($4::bigint IS NULL OR u.plan_id = $4)
 ORDER BY u.id DESC
@@ -592,31 +603,35 @@ type ListUsersParams struct {
 }
 
 type ListUsersRow struct {
-	ID              int64
-	Username        string
-	Remark          string
-	PlanID          pgtype.Int8
-	PlanName        string
-	TrafficLimit    int64
-	TrafficUsed     int64
-	ExpiresAt       pgtype.Timestamptz
-	PendingDays     int32
-	LimitIp         int32
-	RenewEveryDays  int32
-	RenewMonthDay   int32
-	RenewWeekday    int32
-	RenewMax        int32
-	RenewCount      int32
-	TrafficReset    string
-	TrafficResetDay int32
-	IsDisabled      bool
-	Status          string
-	CreatedAt       pgtype.Timestamptz
-	TotpEnabled     bool
-	LastUsedAt      pgtype.Timestamptz
-	SyncedCount     int32
-	PendingCount    int32
-	FailedCount     int32
+	ID                int64
+	Username          string
+	Remark            string
+	PlanID            pgtype.Int8
+	PlanName          string
+	TrafficLimit      int64
+	TrafficUsed       int64
+	ExpiresAt         pgtype.Timestamptz
+	PendingDays       int32
+	LimitIp           int32
+	RenewEveryDays    int32
+	RenewMonthDay     int32
+	RenewWeekday      int32
+	RenewMax          int32
+	RenewCount        int32
+	TrafficReset      string
+	TrafficResetDay   int32
+	IsDisabled        bool
+	Status            string
+	CreatedAt         pgtype.Timestamptz
+	TotpEnabled       bool
+	LastUsedAt        pgtype.Timestamptz
+	Email             pgtype.Text
+	IsEmailVerified   bool
+	InvitedBy         pgtype.Int8
+	InvitedByUsername string
+	SyncedCount       int32
+	PendingCount      int32
+	FailedCount       int32
 }
 
 func (q *Queries) ListUsers(ctx context.Context, arg ListUsersParams) ([]ListUsersRow, error) {
@@ -658,6 +673,10 @@ func (q *Queries) ListUsers(ctx context.Context, arg ListUsersParams) ([]ListUse
 			&i.CreatedAt,
 			&i.TotpEnabled,
 			&i.LastUsedAt,
+			&i.Email,
+			&i.IsEmailVerified,
+			&i.InvitedBy,
+			&i.InvitedByUsername,
 			&i.SyncedCount,
 			&i.PendingCount,
 			&i.FailedCount,
@@ -718,9 +737,12 @@ func (q *Queries) ListUsersByIDs(ctx context.Context, ids []int64) ([]ListUsersB
 }
 
 const markUserDeleted = `-- name: MarkUserDeleted :execrows
-UPDATE end_user SET deleted_at = now(), status = 'disabled', updated_at = now() WHERE id = $1 AND deleted_at IS NULL
+UPDATE end_user
+SET deleted_at = now(), status = 'disabled', username = '~deleted-' || id, email = NULL, email_verified_at = NULL, updated_at = now()
+WHERE id = $1 AND deleted_at IS NULL
 `
 
+// 待删除期间把用户名换成占位名并清空邮箱，原用户名与邮箱随即可被重新注册（docs/03 §5.8 注销账号）
 func (q *Queries) MarkUserDeleted(ctx context.Context, id int64) (int64, error) {
 	result, err := q.db.Exec(ctx, markUserDeleted, id)
 	if err != nil {
@@ -872,6 +894,25 @@ type SetUserCredentialParams struct {
 func (q *Queries) SetUserCredential(ctx context.Context, arg SetUserCredentialParams) error {
 	_, err := q.db.Exec(ctx, setUserCredential, arg.ID, arg.ClientCredEnc)
 	return err
+}
+
+const setUserEmail = `-- name: SetUserEmail :execrows
+UPDATE end_user SET email = $1, email_verified_at = $2, updated_at = now()
+WHERE id = $3 AND deleted_at IS NULL
+`
+
+type SetUserEmailParams struct {
+	Email           pgtype.Text
+	EmailVerifiedAt pgtype.Timestamptz
+	ID              int64
+}
+
+func (q *Queries) SetUserEmail(ctx context.Context, arg SetUserEmailParams) (int64, error) {
+	result, err := q.db.Exec(ctx, setUserEmail, arg.Email, arg.EmailVerifiedAt, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const setUserPasswordHash = `-- name: SetUserPasswordHash :execrows

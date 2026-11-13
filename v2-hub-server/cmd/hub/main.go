@@ -144,8 +144,8 @@ func runServer(args []string) error {
 	mails := service.NewMailService(pool, sealer, sender, settings, nil)
 	go job.RunMailOutbox(ctx, mails, mailOutboxInterval)
 	go job.RunSessionCleanup(ctx, job.PurgeFunc(mails.PurgeOutbox), cfg.Auth.SessionCleanupInterval)
-	account := service.NewAccountService(pool, sealer, settings, mails, nil)
 	users := service.NewUserService(pool, sealer, panels, service.UserConfig{Location: quotaLoc, Subscription: subCfg, Settings: settings}, nil)
+	account := service.NewAccountService(pool, sealer, service.AccountDeps{Settings: settings, Mail: mails, Users: users, Portal: portalAuth}, nil)
 	go job.RunUserSync(ctx, users, job.UserSyncConfig{
 		TrafficInterval: cfg.User.TrafficInterval, ReconcileInterval: cfg.User.ReconcileInterval, Concurrency: cfg.Panel.Concurrency,
 	})

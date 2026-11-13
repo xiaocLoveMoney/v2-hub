@@ -152,6 +152,13 @@ func NewRouter(deps Deps) http.Handler {
 	// 未登录可用：站点信息与邮箱验证码（docs/03 §5.6 公开子集、§5.7）
 	mux.HandleFunc("GET /api/user/site", h.getSiteInfo)
 	mux.HandleFunc("POST /api/user/auth/email-code", h.sendEmailCode)
+	mux.HandleFunc("POST /api/user/auth/register", h.registerUser)
+	mux.HandleFunc("POST /api/user/auth/password/reset", h.resetOwnSecret)
+
+	mux.HandleFunc("GET /api/admin/invite-codes", h.requireAdmin(service.PermUserRead, h.listInviteCodes))
+	mux.HandleFunc("POST /api/admin/invite-codes", h.requireAdmin(service.PermUserWrite, h.createInviteCode))
+	mux.HandleFunc("PUT /api/admin/invite-codes/{id}", h.requireAdmin(service.PermUserWrite, h.updateInviteCode))
+	mux.HandleFunc("DELETE /api/admin/invite-codes/{id}", h.requireAdmin(service.PermUserWrite, h.deleteInviteCode))
 
 	// 客户后台（docs/03 §5.3–§5.5）：身份只取自会话（R8）。auth/me 与登出允许停用的账号访问。
 	mux.HandleFunc("POST /api/user/auth/login", h.userLogin)
@@ -169,6 +176,13 @@ func NewRouter(deps Deps) http.Handler {
 	mux.HandleFunc("GET /api/user/subscription", h.requireUser(false, h.getUserSubscription))
 	mux.HandleFunc("POST /api/user/subscription/reset", h.requireUser(false, h.resetOwnSubscription))
 	mux.HandleFunc("GET /api/user/subscribe-logs", h.requireUser(false, h.listOwnSubscribeLogs))
+
+	// 账号自助（docs/03 §5.8）
+	mux.HandleFunc("POST /api/user/account/email-code", h.requireUser(false, h.sendBindEmailCode))
+	mux.HandleFunc("PUT /api/user/account/email", h.requireUser(false, h.bindEmail))
+	mux.HandleFunc("POST /api/user/account/delete", h.requireUser(false, h.deleteOwnAccount))
+	mux.HandleFunc("GET /api/user/invite", h.requireUser(false, h.getInvite))
+	mux.HandleFunc("POST /api/user/invite/reset", h.requireUser(false, h.resetInviteCode))
 
 	// 订阅端点：凭 token 访问，供代理客户端直接拉取（docs/03 §5.4）
 	mux.HandleFunc("GET /sub/{token}", h.getSubscription)

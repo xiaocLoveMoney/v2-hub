@@ -151,19 +151,22 @@ func (q *Queries) EnableUserTOTP(ctx context.Context, arg EnableUserTOTPParams) 
 
 const getEndUserForLogin = `-- name: GetEndUserForLogin :one
 
-SELECT id, username, password_hash, status, is_disabled, totp_secret_enc, totp_last_step
+SELECT id, username, password_hash, status, is_disabled, totp_secret_enc, totp_last_step, email,
+       (email_verified_at IS NOT NULL)::boolean AS is_email_verified
 FROM end_user
 WHERE username = $1 AND deleted_at IS NULL
 `
 
 type GetEndUserForLoginRow struct {
-	ID            int64
-	Username      string
-	PasswordHash  string
-	Status        string
-	IsDisabled    bool
-	TotpSecretEnc []byte
-	TotpLastStep  int64
+	ID              int64
+	Username        string
+	PasswordHash    string
+	Status          string
+	IsDisabled      bool
+	TotpSecretEnc   []byte
+	TotpLastStep    int64
+	Email           pgtype.Text
+	IsEmailVerified bool
 }
 
 // 客户后台：终端用户会话、两步验证、登录记录（docs/03 §5.3）。
@@ -179,6 +182,45 @@ func (q *Queries) GetEndUserForLogin(ctx context.Context, username string) (GetE
 		&i.IsDisabled,
 		&i.TotpSecretEnc,
 		&i.TotpLastStep,
+		&i.Email,
+		&i.IsEmailVerified,
+	)
+	return i, err
+}
+
+const getEndUserForLoginByEmail = `-- name: GetEndUserForLoginByEmail :one
+SELECT id, username, password_hash, status, is_disabled, totp_secret_enc, totp_last_step, email,
+       (email_verified_at IS NOT NULL)::boolean AS is_email_verified
+FROM end_user
+WHERE email = $1::text AND deleted_at IS NULL
+`
+
+type GetEndUserForLoginByEmailRow struct {
+	ID              int64
+	Username        string
+	PasswordHash    string
+	Status          string
+	IsDisabled      bool
+	TotpSecretEnc   []byte
+	TotpLastStep    int64
+	Email           pgtype.Text
+	IsEmailVerified bool
+}
+
+// 按邮箱登录（docs/03 §5.3 登录）：调用方先按用户名找，找不到且输入含 @ 时才走这里；列与 GetEndUserForLogin 一致
+func (q *Queries) GetEndUserForLoginByEmail(ctx context.Context, email string) (GetEndUserForLoginByEmailRow, error) {
+	row := q.db.QueryRow(ctx, getEndUserForLoginByEmail, email)
+	var i GetEndUserForLoginByEmailRow
+	err := row.Scan(
+		&i.ID,
+		&i.Username,
+		&i.PasswordHash,
+		&i.Status,
+		&i.IsDisabled,
+		&i.TotpSecretEnc,
+		&i.TotpLastStep,
+		&i.Email,
+		&i.IsEmailVerified,
 	)
 	return i, err
 }
@@ -197,23 +239,26 @@ func (q *Queries) GetEndUserLoginSecretHash(ctx context.Context, id int64) (stri
 const getUserSessionByTokenHash = `-- name: GetUserSessionByTokenHash :one
 SELECT s.id, s.user_id, s.csrf_token, s.expires_at, s.idle_until, u.username, u.status, u.is_disabled,
        (u.totp_secret_enc IS NOT NULL)::boolean AS totp_enabled,
-       (u.deleted_at IS NOT NULL)::boolean AS is_deleted
+       (u.deleted_at IS NOT NULL)::boolean AS is_deleted,
+       u.email, (u.email_verified_at IS NOT NULL)::boolean AS is_email_verified
 FROM user_session s
 JOIN end_user u ON u.id = s.user_id
 WHERE s.token_hash = $1
 `
 
 type GetUserSessionByTokenHashRow struct {
-	ID          int64
-	UserID      int64
-	CsrfToken   string
-	ExpiresAt   pgtype.Timestamptz
-	IdleUntil   pgtype.Timestamptz
-	Username    string
-	Status      string
-	IsDisabled  bool
-	TotpEnabled bool
-	IsDeleted   bool
+	ID              int64
+	UserID          int64
+	CsrfToken       string
+	ExpiresAt       pgtype.Timestamptz
+	IdleUntil       pgtype.Timestamptz
+	Username        string
+	Status          string
+	IsDisabled      bool
+	TotpEnabled     bool
+	IsDeleted       bool
+	Email           pgtype.Text
+	IsEmailVerified bool
 }
 
 func (q *Queries) GetUserSessionByTokenHash(ctx context.Context, tokenHash []byte) (GetUserSessionByTokenHashRow, error) {
@@ -230,6 +275,8 @@ func (q *Queries) GetUserSessionByTokenHash(ctx context.Context, tokenHash []byt
 		&i.IsDisabled,
 		&i.TotpEnabled,
 		&i.IsDeleted,
+		&i.Email,
+		&i.IsEmailVerified,
 	)
 	return i, err
 }

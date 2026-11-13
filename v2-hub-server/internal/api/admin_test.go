@@ -51,9 +51,20 @@ func newAPIServer(t *testing.T) (*httptest.Server, *service.RBACService) {
 	// 不接 SMTP：邮件相关接口应整体返回 feature_disabled（Ruling-24）
 	settings := service.NewSettingsService(pool, service.SubscriptionConfig{}, nil)
 	mails := service.NewMailService(pool, sealer, nil, settings, nil)
+	portal, err := service.NewPortalAuthService(pool, service.PortalAuthConfig{
+		SessionIdleTimeout: 2 * time.Hour, SessionMaxAge: 24 * time.Hour, SessionTouchInterval: time.Minute,
+		LoginMaxFailures: 5, LoginWindow: 15 * time.Minute, LoginLockout: 15 * time.Minute, LoginMaxTrackedKeys: 100,
+		LoginLogRetention: 24 * time.Hour,
+	}, sealer, nil)
+	if err != nil {
+		t.Fatalf("NewPortalAuthService: %v", err)
+	}
+	// 本组用例不触碰面板，UserService 不需要 PanelService
+	users := service.NewUserService(pool, sealer, nil, service.UserConfig{Settings: settings}, nil)
+	account := service.NewAccountService(pool, sealer, service.AccountDeps{Settings: settings, Mail: mails, Users: users, Portal: portal}, nil)
 	srv := httptest.NewServer(NewRouter(Deps{
 		Database: pool, PingTimeout: time.Second, Auth: auth, RBAC: rbac,
-		Settings: settings, Mail: mails, Account: service.NewAccountService(pool, sealer, settings, mails, nil),
+		Settings: settings, Mail: mails, Account: account, Users: users, PortalAuth: portal, Portal: users,
 		Cookie: CookieConfig{Secure: false}, TrustedProxies: []netip.Prefix{},
 	}))
 	t.Cleanup(srv.Close)

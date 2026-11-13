@@ -70,6 +70,9 @@ type UserPrincipal struct {
 	Status      string
 	IsDisabled  bool
 	TOTPEnabled bool
+	// Email 为空串表示未绑定。
+	Email         string
+	EmailVerified bool
 }
 
 // PortalLoginResult 是登录成功的结果；Token 只放进 Cookie，不得写日志。
@@ -173,6 +176,25 @@ func (s *PortalAuthService) Login(ctx context.Context, in LoginInput) (*PortalLo
 		s.guard.Reset(ipKey)
 	}
 
+	principal := &UserPrincipal{
+		UserID: user.ID, Username: user.Username, Status: user.Status, IsDisabled: user.IsDisabled, TOTPEnabled: user.TotpSecretEnc != nil,
+		Email: user.Email.String, EmailVerified: user.IsEmailVerified,
+	}
+	var res *PortalLoginResult
+	err = s.inTx(ctx, func(q *sqlcgen.Queries) error {
+		if res, err = s.createSessionTx(ctx, q, principal, in.ClientIP, in.UserAgent); err != nil {
+			return err
+		}
+		return q.InsertUserLoginLog(ctx, sqlcgen.InsertUserLoginLogParams{UserID: user.ID, ClientIp: in.ClientIP, IsSuccess: true})
+	})
+	if err != nil {
+		return nil, err
+	}
+	return res, nil
+}
+
+// createSessionTx 在事务里为 principal 建一条会话并填上会话 id 与 CSRF token；登录与自助注册共用。
+func (s *PortalAuthService) createSessionTx(ctx context.Context, q *sqlcgen.Queries, principal *UserPrincipal, ip *netip.Addr, userAgent string) (*PortalLoginResult, error) {
 	token, err := crypto.RandomToken(sessionTokenBytes)
 	if err != nil {
 		return nil, err
@@ -183,35 +205,32 @@ func (s *PortalAuthService) Login(ctx context.Context, in LoginInput) (*PortalLo
 	}
 	now := s.now()
 	expiresAt := now.Add(s.cfg.SessionMaxAge)
-	principal := &UserPrincipal{
-		UserID: user.ID, Username: user.Username, CSRFToken: csrf, Status: user.Status,
-		IsDisabled: user.IsDisabled, TOTPEnabled: user.TotpSecretEnc != nil,
-	}
-	err = s.inTx(ctx, func(q *sqlcgen.Queries) error {
-		sid, err := q.CreateUserSession(ctx, sqlcgen.CreateUserSessionParams{
-			TokenHash: crypto.SHA256(token),
-			UserID:    user.ID,
-			CsrfToken: csrf,
-			ClientIp:  in.ClientIP,
-			UserAgent: pgtype.Text{String: truncate(in.UserAgent, maxUserAgentLen), Valid: in.UserAgent != ""},
-			ExpiresAt: pgtype.Timestamptz{Time: expiresAt, Valid: true},
-			IdleUntil: pgtype.Timestamptz{Time: now.Add(s.cfg.SessionIdleTimeout), Valid: true},
-		})
-		if err != nil {
-			return fmt.Errorf("create user session: %w", err)
-		}
-		principal.SessionID = sid
-		return q.InsertUserLoginLog(ctx, sqlcgen.InsertUserLoginLogParams{UserID: user.ID, ClientIp: in.ClientIP, IsSuccess: true})
+	sid, err := q.CreateUserSession(ctx, sqlcgen.CreateUserSessionParams{
+		TokenHash: crypto.SHA256(token),
+		UserID:    principal.UserID,
+		CsrfToken: csrf,
+		ClientIp:  ip,
+		UserAgent: pgtype.Text{String: truncate(userAgent, maxUserAgentLen), Valid: userAgent != ""},
+		ExpiresAt: pgtype.Timestamptz{Time: expiresAt, Valid: true},
+		IdleUntil: pgtype.Timestamptz{Time: now.Add(s.cfg.SessionIdleTimeout), Valid: true},
 	})
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("create user session: %w", err)
 	}
+	principal.SessionID, principal.CSRFToken = sid, csrf
 	return &PortalLoginResult{Token: token, ExpiresAt: expiresAt, Principal: principal}, nil
 }
 
 // verifyCredentials 返回 (用户行, 是否通过, 系统错误)。用户名不存在时仍跑一次 argon2，防止按响应时间枚举。
 func (s *PortalAuthService) verifyCredentials(ctx context.Context, username, password string) (*sqlcgen.GetEndUserForLoginRow, bool, error) {
 	row, err := s.q.GetEndUserForLogin(ctx, username)
+	if errors.Is(err, pgx.ErrNoRows) && strings.Contains(username, "@") {
+		// 先按用户名、再按邮箱（docs/03 §5.3 登录）；两条查询的列一致
+		var byEmail sqlcgen.GetEndUserForLoginByEmailRow
+		if byEmail, err = s.q.GetEndUserForLoginByEmail(ctx, strings.ToLower(strings.TrimSpace(username))); err == nil {
+			row = sqlcgen.GetEndUserForLoginRow(byEmail)
+		}
+	}
 	if errors.Is(err, pgx.ErrNoRows) {
 		if _, verr := crypto.VerifyPassword(password, s.dummyHash); verr != nil {
 			return nil, false, fmt.Errorf("verify dummy hash: %w", verr)
@@ -219,7 +238,7 @@ func (s *PortalAuthService) verifyCredentials(ctx context.Context, username, pas
 		return nil, false, nil
 	}
 	if err != nil {
-		return nil, false, fmt.Errorf("get end user by username: %w", err)
+		return nil, false, fmt.Errorf("get end user for login: %w", err)
 	}
 	ok, err := crypto.VerifyPassword(password, row.PasswordHash)
 	if err != nil {
@@ -264,6 +283,7 @@ func (s *PortalAuthService) Authenticate(ctx context.Context, token string) (*Us
 	return &UserPrincipal{
 		UserID: row.UserID, Username: row.Username, SessionID: row.ID, CSRFToken: row.CsrfToken,
 		Status: row.Status, IsDisabled: row.IsDisabled, TOTPEnabled: row.TotpEnabled,
+		Email: row.Email.String, EmailVerified: row.IsEmailVerified,
 	}, nil
 }
 
@@ -288,23 +308,9 @@ func (s *PortalAuthService) ChangeLoginSecret(ctx context.Context, p *UserPrinci
 	if err := validateUserLoginSecret(newSecret); err != nil {
 		return err
 	}
-	guardKey := guardKeyPortalSecret + fmt.Sprint(p.UserID)
-	if s.guard.IsLocked(guardKey) {
-		return newError(CodeRateLimited, msgTooManyLogin)
+	if err := s.confirmSecret(ctx, p, oldSecret); err != nil {
+		return err
 	}
-	current, err := s.q.GetEndUserLoginSecretHash(ctx, p.UserID)
-	if err != nil {
-		return fmt.Errorf("get login secret of user %d: %w", p.UserID, err)
-	}
-	ok, err := crypto.VerifyPassword(oldSecret, current)
-	if err != nil {
-		return fmt.Errorf("verify login secret of user %d: %w", p.UserID, err)
-	}
-	if !ok {
-		s.guard.RecordFailure(guardKey)
-		return newError(CodeInvalidArgument, msgOldSecretIncorrect)
-	}
-	s.guard.Reset(guardKey)
 	hash, err := crypto.HashPassword(newSecret)
 	if err != nil {
 		return fmt.Errorf("hash login secret: %w", err)
@@ -318,6 +324,58 @@ func (s *PortalAuthService) ChangeLoginSecret(ctx context.Context, p *UserPrinci
 		}
 		return writeAudit(ctx, q, portalAudit(p, ActionPortalSecretChange, ip))
 	})
+}
+
+// confirmSecret 校验本人当前口令，用于改口令、换绑邮箱、注销等敏感操作；连续输错按登录频控锁定。
+// 错误：CodeInvalidArgument（口令不对）、CodeRateLimited。
+func (s *PortalAuthService) confirmSecret(ctx context.Context, p *UserPrincipal, secret string) error {
+	guardKey := guardKeyPortalSecret + fmt.Sprint(p.UserID)
+	if s.guard.IsLocked(guardKey) {
+		return newError(CodeRateLimited, msgTooManyLogin)
+	}
+	current, err := s.q.GetEndUserLoginSecretHash(ctx, p.UserID)
+	if err != nil {
+		return fmt.Errorf("get login secret of user %d: %w", p.UserID, err)
+	}
+	ok, err := crypto.VerifyPassword(secret, current)
+	if err != nil {
+		return fmt.Errorf("verify login secret of user %d: %w", p.UserID, err)
+	}
+	if !ok {
+		s.guard.RecordFailure(guardKey)
+		return newError(CodeInvalidArgument, msgOldSecretIncorrect)
+	}
+	s.guard.Reset(guardKey)
+	return nil
+}
+
+// confirmTOTP 在本人已开启两步验证时校验并消耗一个验证码；未开启时直接通过。
+// 错误：CodeTOTPRequired（已开启但没带验证码）、CodeInvalidArgument（验证码错误）、CodeRateLimited。
+func (s *PortalAuthService) confirmTOTP(ctx context.Context, p *UserPrincipal, code string) error {
+	row, err := s.q.GetUserTOTP(ctx, p.UserID)
+	if err != nil {
+		return fmt.Errorf("get totp of user %d: %w", p.UserID, err)
+	}
+	if row.TotpSecretEnc == nil {
+		return nil
+	}
+	if code == "" {
+		return newError(CodeTOTPRequired, msgTOTPRequired)
+	}
+	guardKey := guardKeyPortalTOTP + fmt.Sprint(p.UserID)
+	if s.guard.IsLocked(guardKey) {
+		return newError(CodeRateLimited, msgTooManyLogin)
+	}
+	ok, err := s.consumeTOTP(ctx, p.UserID, row.TotpSecretEnc, row.TotpLastStep, code)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		s.guard.RecordFailure(guardKey)
+		return newError(CodeInvalidArgument, msgTOTPInvalid)
+	}
+	s.guard.Reset(guardKey)
+	return nil
 }
 
 func portalAudit(p *UserPrincipal, action string, ip *netip.Addr) AuditEntry {

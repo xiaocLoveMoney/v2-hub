@@ -53,8 +53,13 @@ const (
 	targetUser              = "user"
 )
 
-// endUserNamePattern：客户后台登录名，允许邮箱形式（hub-api UserCreateInput.username）。
-var endUserNamePattern = regexp.MustCompile(`^[A-Za-z0-9_.@-]{3,64}$`)
+// endUserNamePattern：客户后台登录名（hub-api Username）。自 M4 起不再允许 @，与邮箱登录区分开；存量含 @ 的用户名保留（docs/03 §5.8）。
+var endUserNamePattern = regexp.MustCompile(`^[A-Za-z0-9_.-]{3,64}$`)
+
+const (
+	msgBadUsername   = "用户名须为 3–64 位字母、数字或 _ . -"
+	msgUsernameTaken = "用户名已存在"
+)
 
 // UserConfig 是用户与下发的运行参数。
 type UserConfig struct {
@@ -351,6 +356,11 @@ type User struct {
 	// TOTPEnabled 表示用户已开启两步验证；LastUsedAt 是最近一次产生流量的时间（nil = 从未使用）。
 	TOTPEnabled bool
 	LastUsedAt  *time.Time
+	// Email 为空串表示未绑定；InvitedBy 为 nil 表示没有邀请人（或邀请人已删除）。
+	Email             string
+	EmailVerified     bool
+	InvitedBy         *int64
+	InvitedByUsername string
 }
 
 // UserFilter 是用户列表的筛选条件。
@@ -474,13 +484,87 @@ type UserCreateInput struct {
 	Password string
 	Remark   string
 	PlanID   int64
+	// Email 可空；管理员填的邮箱视为已验证（docs/03 §5.8 邮箱绑定）。
+	Email string
+}
+
+// newUserSpec 是建一个用户所需的全部数据，管理员建号与自助注册共用。
+type newUserSpec struct {
+	Username      string
+	LoginHash     string
+	Remark        string
+	Email         string // 已规范化；空串 = 没有邮箱
+	EmailVerified bool
+	PlanID        int64 // 0 = 不分配套餐
+	InvitedBy     int64 // 0 = 没有邀请人
+	InviteCodeID  int64
+}
+
+// createUserTx 在事务里建用户：生成面板凭据并加密保存，按套餐写入额度。
+// 错误：CodeConflict（用户名或邮箱已被占用）、套餐不存在时的 CodeNotFound。
+func (s *UserService) createUserTx(ctx context.Context, q *sqlcgen.Queries, spec newUserSpec, now time.Time) (int64, error) {
+	code, err := randomEmailCode()
+	if err != nil {
+		return 0, err
+	}
+	cred, err := newClientCredential()
+	if err != nil {
+		return 0, err
+	}
+	if spec.Email != "" {
+		taken, err := q.ExistsEndUserIdentity(ctx, spec.Email)
+		if err != nil {
+			return 0, fmt.Errorf("check email taken: %w", err)
+		}
+		if taken {
+			return 0, newError(CodeConflict, msgEmailTaken)
+		}
+	}
+	id, err := q.CreateUser(ctx, sqlcgen.CreateUserParams{
+		Username: spec.Username, PasswordHash: spec.LoginHash, Remark: spec.Remark, EmailCode: code,
+		Email:           textArg(spec.Email),
+		EmailVerifiedAt: pgtype.Timestamptz{Time: now, Valid: spec.Email != "" && spec.EmailVerified},
+		InvitedBy:       int8Arg(spec.InvitedBy),
+		InviteCodeID:    int8Arg(spec.InviteCodeID),
+	})
+	if err != nil {
+		if isUniqueViolation(err) {
+			return 0, newError(CodeConflict, msgUsernameTaken)
+		}
+		return 0, fmt.Errorf("create user: %w", err)
+	}
+	plain, err := json.Marshal(cred)
+	if err != nil {
+		return 0, fmt.Errorf("encode credential: %w", err)
+	}
+	sealed, err := s.sealer.Seal(plain, credentialAAD(id))
+	if err != nil {
+		return 0, fmt.Errorf("seal credential of user %d: %w", id, err)
+	}
+	if err := q.SetUserCredential(ctx, sqlcgen.SetUserCredentialParams{ID: id, ClientCredEnc: sealed}); err != nil {
+		return 0, fmt.Errorf("save credential of user %d: %w", id, err)
+	}
+	qt := Quota{TrafficReset: TrafficResetNever, TrafficResetDay: 1, LastTrafficResetAt: now}
+	var planID pgtype.Int8
+	if spec.PlanID > 0 {
+		p, err := s.loadPlan(ctx, q, spec.PlanID)
+		if err != nil {
+			return 0, err
+		}
+		qt.ApplyPlan(planQuotaFromRow(p), now)
+		planID = pgtype.Int8{Int64: p.ID, Valid: true}
+	}
+	if err := saveQuota(ctx, q, id, planID, qt, qt.Status(now)); err != nil {
+		return 0, err
+	}
+	return id, nil
 }
 
 // CreateUser 新建用户（U1），可同时分配套餐（U6）；面板凭据在此生成并加密保存。
 func (s *UserService) CreateUser(ctx context.Context, actor *AdminPrincipal, in UserCreateInput, ip *netip.Addr) (*User, error) {
 	in.Username = strings.TrimSpace(in.Username)
 	if !endUserNamePattern.MatchString(in.Username) {
-		return nil, newError(CodeInvalidArgument, "用户名须为 3–64 位字母、数字或 _ . @ -")
+		return nil, newError(CodeInvalidArgument, msgBadUsername)
 	}
 	if err := validateUserLoginSecret(in.Password); err != nil {
 		return nil, err
@@ -488,49 +572,20 @@ func (s *UserService) CreateUser(ctx context.Context, actor *AdminPrincipal, in 
 	if utf8.RuneCountInString(in.Remark) > maxUserRemarkLen {
 		return nil, newError(CodeInvalidArgument, "备注过长")
 	}
+	email := ""
+	if strings.TrimSpace(in.Email) != "" {
+		if email = normalizeEmail(in.Email); email == "" {
+			return nil, newError(CodeInvalidArgument, msgMailBadAddress)
+		}
+	}
 	hash, err := crypto.HashPassword(in.Password)
 	if err != nil {
 		return nil, fmt.Errorf("hash user password: %w", err)
 	}
-	code, err := randomEmailCode()
-	if err != nil {
-		return nil, err
-	}
-	cred, err := newClientCredential()
-	if err != nil {
-		return nil, err
-	}
-	now := s.now()
 	var id int64
 	err = s.inTx(ctx, func(q *sqlcgen.Queries) error {
-		if id, err = q.CreateUser(ctx, sqlcgen.CreateUserParams{Username: in.Username, PasswordHash: hash, Remark: in.Remark, EmailCode: code}); err != nil {
-			if isUniqueViolation(err) {
-				return newError(CodeConflict, "用户名已存在")
-			}
-			return fmt.Errorf("create user: %w", err)
-		}
-		plain, err := json.Marshal(cred)
-		if err != nil {
-			return fmt.Errorf("encode credential: %w", err)
-		}
-		sealed, err := s.sealer.Seal(plain, credentialAAD(id))
-		if err != nil {
-			return fmt.Errorf("seal credential of user %d: %w", id, err)
-		}
-		if err := q.SetUserCredential(ctx, sqlcgen.SetUserCredentialParams{ID: id, ClientCredEnc: sealed}); err != nil {
-			return fmt.Errorf("save credential of user %d: %w", id, err)
-		}
-		qt := Quota{TrafficReset: TrafficResetNever, TrafficResetDay: 1, LastTrafficResetAt: now}
-		var planID pgtype.Int8
-		if in.PlanID > 0 {
-			p, err := s.loadPlan(ctx, q, in.PlanID)
-			if err != nil {
-				return err
-			}
-			qt.ApplyPlan(planQuotaFromRow(p), now)
-			planID = pgtype.Int8{Int64: p.ID, Valid: true}
-		}
-		if err := saveQuota(ctx, q, id, planID, qt, qt.Status(now)); err != nil {
+		spec := newUserSpec{Username: in.Username, LoginHash: hash, Remark: in.Remark, Email: email, EmailVerified: true, PlanID: in.PlanID}
+		if id, err = s.createUserTx(ctx, q, spec, s.now()); err != nil {
 			return err
 		}
 		return writeAudit(ctx, q, AuditEntry{ActorType: ActorAdmin, ActorID: actor.AdminID, Action: ActionUserCreate, TargetType: targetUser,
@@ -579,6 +634,11 @@ func userFromRow(r sqlcgen.ListUsersRow) User {
 		ID: r.ID, Username: r.Username, Remark: r.Remark, PlanName: r.PlanName, Status: r.Status, Quota: q, CreatedAt: r.CreatedAt.Time,
 		Provisions:  ProvisionCounts{Synced: int(r.SyncedCount), Pending: int(r.PendingCount), Failed: int(r.FailedCount)},
 		TOTPEnabled: r.TotpEnabled, LastUsedAt: timePtr(r.LastUsedAt),
+		Email: r.Email.String, EmailVerified: r.IsEmailVerified, InvitedByUsername: r.InvitedByUsername,
+	}
+	if r.InvitedBy.Valid {
+		id := r.InvitedBy.Int64
+		u.InvitedBy = &id
 	}
 	if r.PlanID.Valid {
 		id := r.PlanID.Int64
@@ -646,18 +706,57 @@ func (s *UserService) GetUser(ctx context.Context, id int64) (*User, error) {
 type UserUpdateInput struct {
 	Remark     string
 	IsDisabled bool
+	// Email 为 nil 表示不改；空串清除；其余按邮箱校验并视为已验证（docs/03 §5.8 邮箱绑定）。
+	Email *string
 }
 
-// UpdateUser 修改备注与启停。
+// setUserEmailTx 设置或清除用户邮箱（设置时视为已验证）。邮箱已被别的用户占用返回 CodeConflict；与本人现有邮箱相同则原样保留。
+func setUserEmailTx(ctx context.Context, q *sqlcgen.Queries, id int64, email string, now time.Time) error {
+	if email != "" {
+		cur, err := q.GetEndUserEmail(ctx, id)
+		if err != nil {
+			return fmt.Errorf("get email of user %d: %w", id, err)
+		}
+		if cur.String != email {
+			taken, err := q.ExistsEndUserIdentity(ctx, email)
+			if err != nil {
+				return fmt.Errorf("check email taken: %w", err)
+			}
+			if taken {
+				return newError(CodeConflict, msgEmailTaken)
+			}
+		}
+	}
+	_, err := q.SetUserEmail(ctx, sqlcgen.SetUserEmailParams{
+		ID: id, Email: textArg(email), EmailVerifiedAt: pgtype.Timestamptz{Time: now, Valid: email != ""},
+	})
+	if err != nil {
+		return fmt.Errorf("set email of user %d: %w", id, err)
+	}
+	return nil
+}
+
+// UpdateUser 修改备注、启停与邮箱。
 func (s *UserService) UpdateUser(ctx context.Context, actor *AdminPrincipal, id int64, in UserUpdateInput, ip *netip.Addr) (*User, error) {
 	if utf8.RuneCountInString(in.Remark) > maxUserRemarkLen {
 		return nil, newError(CodeInvalidArgument, "备注过长")
+	}
+	email := ""
+	if in.Email != nil && strings.TrimSpace(*in.Email) != "" {
+		if email = normalizeEmail(*in.Email); email == "" {
+			return nil, newError(CodeInvalidArgument, msgMailBadAddress)
+		}
 	}
 	now := s.now()
 	err := s.inTx(ctx, func(q *sqlcgen.Queries) error {
 		row, err := lockUser(ctx, q, id)
 		if err != nil {
 			return err
+		}
+		if in.Email != nil {
+			if err := setUserEmailTx(ctx, q, id, email, now); err != nil {
+				return err
+			}
 		}
 		qt := quotaFromRow(row)
 		qt.Disabled = in.IsDisabled
@@ -800,6 +899,11 @@ func (s *UserService) ResetUserPassword(ctx context.Context, actor *AdminPrincip
 
 // DeleteUser 把用户标为待删除；对账删掉各面板 client 后再删记录（docs/03 §5.2）。
 func (s *UserService) DeleteUser(ctx context.Context, actor *AdminPrincipal, id int64, ip *netip.Addr) error {
+	return s.deleteUser(ctx, id, AuditEntry{ActorType: ActorAdmin, ActorID: actor.AdminID, Action: ActionUserDelete, TargetType: targetUser, TargetID: fmt.Sprint(id), ClientIP: ip})
+}
+
+// deleteUser 把用户标记为待删除并触发各面板清理（docs/03 §5.2 删除用户）；管理员删除与本人注销共用，audit 由调用方给出。
+func (s *UserService) deleteUser(ctx context.Context, id int64, audit AuditEntry) error {
 	var servers []int64
 	err := s.inTx(ctx, func(q *sqlcgen.Queries) error {
 		var err error
@@ -813,7 +917,10 @@ func (s *UserService) DeleteUser(ctx context.Context, actor *AdminPrincipal, id 
 		if n == 0 {
 			return newError(CodeNotFound, msgUserNotFound)
 		}
-		return writeAudit(ctx, q, AuditEntry{ActorType: ActorAdmin, ActorID: actor.AdminID, Action: ActionUserDelete, TargetType: targetUser, TargetID: fmt.Sprint(id), ClientIP: ip})
+		if err := q.DeleteUserSessionsByUser(ctx, id); err != nil {
+			return fmt.Errorf("revoke sessions of user %d: %w", id, err)
+		}
+		return writeAudit(ctx, q, audit)
 	})
 	if err != nil {
 		return err
