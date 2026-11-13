@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: v2-hub API
-  version: 0.3.0
+  version: 0.4.0
   description: |
     v2-hub 对外接口契约（hub-server 提供，v2-hub-admin-web / v2-hub-user-web 消费）。
     - 管理端接口前缀 /api/admin，客户端接口前缀 /api/user，订阅端点前缀 /sub。
@@ -39,12 +39,20 @@ tags:
     description: 公告、教程与共享账号（content:*），docs/03 §5.9
   - name: admin-tickets
     description: 工单（ticket:*），docs/03 §5.10
+  - name: admin-shop
+    description: 流量包与优惠码（shop:*）；套餐的时长选项与上架随套餐接口（docs/03 §5.12、§5.15）
+  - name: admin-finance
+    description: 充值码、订单、余额流水、充值单、返利与收支统计（finance:*），docs/03 §5.13–§5.16
   - name: user-auth
     description: 终端用户登录、登出、当前会话、口令与两步验证（docs/03 §5.3）
   - name: user-account
     description: 账号自助：邮箱绑定、注销、邀请码（docs/03 §5.8）
   - name: user-portal
     description: 客户后台数据：仪表盘、用量、节点、订阅地址、登录与订阅记录（docs/03 §5.4、§5.5）；身份只取自会话（R8）
+  - name: user-shop
+    description: 商店、下单、钱包与充值（docs/03 §5.12–§5.16）；身份只取自会话（R8）
+  - name: payment
+    description: 支付网关回调（docs/03 §5.15）
   - name: subscription
     description: 订阅端点，供代理客户端直接拉取，凭 token 访问（docs/03 §5.4）
 security:
@@ -1929,6 +1937,472 @@ paths:
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "403": { $ref: "#/components/responses/PermissionDenied" }
         "404": { $ref: "#/components/responses/NotFound" }
+  /api/admin/traffic-packs:
+    get:
+      tags: [admin-shop]
+      operationId: listTrafficPacks
+      summary: 全部流量包，含未上架（shop:read）
+      responses:
+        "200":
+          description: 全部流量包，含未上架
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { type: array, items: { $ref: "#/components/schemas/TrafficPack" } }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+    post:
+      tags: [admin-shop]
+      operationId: createTrafficPack
+      summary: 新建流量包（shop:write）
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TrafficPackInput" }
+      responses:
+        "200":
+          description: 新建流量包
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/TrafficPack" }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /api/admin/traffic-packs/{id}:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    put:
+      tags: [admin-shop]
+      operationId: updateTrafficPack
+      summary: 修改流量包（shop:write）
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TrafficPackInput" }
+      responses:
+        "200":
+          description: 修改流量包
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/TrafficPack" }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+    delete:
+      tags: [admin-shop]
+      operationId: deleteTrafficPack
+      summary: 删除流量包；已有的订单保留快照（shop:write）
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      responses:
+        "200": { $ref: "#/components/responses/Ok" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/admin/coupons:
+    get:
+      tags: [admin-shop]
+      operationId: listCoupons
+      summary: 优惠码分页（shop:read）
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+      responses:
+        "200":
+          description: 优惠码分页
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/CouponPage" }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+    post:
+      tags: [admin-shop]
+      operationId: createCoupon
+      summary: 新建优惠码（shop:write）
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CouponInput" }
+      responses:
+        "200":
+          description: 新建优惠码
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/Coupon" }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /api/admin/coupons/{id}:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    put:
+      tags: [admin-shop]
+      operationId: updateCoupon
+      summary: 修改优惠码（shop:write）
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CouponInput" }
+      responses:
+        "200":
+          description: 修改优惠码
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/Coupon" }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+    delete:
+      tags: [admin-shop]
+      operationId: deleteCoupon
+      summary: 删除优惠码；已被使用过的不可删除，返回 409（shop:write）
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      responses:
+        "200": { $ref: "#/components/responses/Ok" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /api/admin/topup-codes:
+    get:
+      tags: [admin-finance]
+      operationId: listTopupCodes
+      summary: 充值码分页，只显示末 4 位（finance:read）
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+        - { name: status, in: query, schema: { $ref: "#/components/schemas/TopupCodeStatus" } }
+        - { name: batch, in: query, description: 按批次备注精确匹配, schema: { type: string, maxLength: 64 } }
+      responses:
+        "200":
+          description: 充值码分页，只显示末 4 位
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/TopupCodePage" }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+    post:
+      tags: [admin-finance]
+      operationId: createTopupCodes
+      summary: 生成一批充值码，明文只在本次响应里返回（finance:write）
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TopupCodeBatchInput" }
+      responses:
+        "200":
+          description: 生成一批充值码，明文只在本次响应里返回
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/TopupCodeBatch" }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+  /api/admin/topup-codes/{id}:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    put:
+      tags: [admin-finance]
+      operationId: updateTopupCode
+      summary: 停用 / 启用未使用的充值码（finance:write）
+      description: |
+        已使用的码不可修改，返回 409。
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TopupCodeUpdateInput" }
+      responses:
+        "200":
+          description: 停用 / 启用未使用的充值码
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/TopupCode" }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+    delete:
+      tags: [admin-finance]
+      operationId: deleteTopupCode
+      summary: 删除未使用的充值码；已使用的返回 409（finance:write）
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      responses:
+        "200": { $ref: "#/components/responses/Ok" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /api/admin/topup-codes/{id}/code:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    get:
+      tags: [admin-finance]
+      operationId: revealTopupCode
+      summary: 查看一条充值码的明文，记审计（finance:write）
+      responses:
+        "200":
+          description: 查看一条充值码的明文，记审计
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/TopupCodeSecret" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/admin/orders:
+    get:
+      tags: [admin-finance]
+      operationId: listOrders
+      summary: 订单分页，按时间倒序（finance:read）
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+        - { name: userId, in: query, schema: { type: integer, format: int64, minimum: 1 } }
+        - { name: kind, in: query, schema: { $ref: "#/components/schemas/OrderKind" } }
+        - { name: from, in: query, description: 创建时间下限（含）, schema: { type: string, format: date-time } }
+        - { name: to, in: query, description: 创建时间上限（不含）, schema: { type: string, format: date-time } }
+      responses:
+        "200":
+          description: 订单分页，按时间倒序
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/OrderPage" }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+  /api/admin/wallet-ledger:
+    get:
+      tags: [admin-finance]
+      operationId: listWalletLedger
+      summary: 余额流水分页，按时间倒序（finance:read）
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+        - { name: userId, in: query, schema: { type: integer, format: int64, minimum: 1 } }
+        - { name: kind, in: query, schema: { $ref: "#/components/schemas/LedgerKind" } }
+      responses:
+        "200":
+          description: 余额流水分页，按时间倒序
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/LedgerPage" }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+  /api/admin/payments:
+    get:
+      tags: [admin-finance]
+      operationId: listPayments
+      summary: 在线充值单分页（finance:read）
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+        - { name: userId, in: query, schema: { type: integer, format: int64, minimum: 1 } }
+        - { name: status, in: query, schema: { $ref: "#/components/schemas/PaymentStatus" } }
+      responses:
+        "200":
+          description: 在线充值单分页
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/PaymentPage" }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+  /api/admin/rebates:
+    get:
+      tags: [admin-finance]
+      operationId: listRebates
+      summary: 返利记录分页（finance:read）
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+        - { name: inviterId, in: query, schema: { type: integer, format: int64, minimum: 1 } }
+      responses:
+        "200":
+          description: 返利记录分页
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/RebatePage" }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+  /api/admin/finance/stats:
+    get:
+      tags: [admin-finance]
+      operationId: getFinanceStats
+      summary: 按天的充值、消费与返利合计，以及当前余额总和（finance:read）
+      parameters:
+        - { name: days, in: query, description: 最近多少天（按平台时区的自然日）, schema: { type: integer, minimum: 1, maximum: 90, default: 30 } }
+      responses:
+        "200":
+          description: 按天的充值、消费与返利合计，以及当前余额总和
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/FinanceStats" }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+  /api/admin/users/{id}/balance:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    post:
+      tags: [admin-users]
+      operationId: adjustUserBalance
+      summary: 调整用户余额：可正可负，须写备注，记流水与审计（finance:write）
+      description: |
+        调整后余额为负或超过上限返回 409。
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/BalanceAdjustInput" }
+      responses:
+        "200":
+          description: 调整用户余额：可正可负，须写备注，记流水与审计
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/User" }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /api/admin/users/{id}/impersonate:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    post:
+      tags: [admin-users]
+      operationId: impersonateUser
+      summary: 签发切换为该用户身份的一次性票据（impersonate:write，docs/03 §5.17）
+      description: |
+        票据 60 秒内有效、只能用一次；管理端拿到后打开 `{portalUrl}/impersonate#ticket=…`，由客户门户兑换成只读会话。
+        用户已停用或待删除返回 409。
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      responses:
+        "200":
+          description: 签发切换为该用户身份的一次性票据
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/ImpersonateTicket" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
   /api/user/auth/login:
     post:
       tags: [user-auth]
@@ -2679,6 +3153,299 @@ paths:
         "403": { $ref: "#/components/responses/UserForbidden" }
         "409": { $ref: "#/components/responses/Conflict" }
         "429": { $ref: "#/components/responses/RateLimited" }
+  /api/user/auth/impersonate:
+    post:
+      tags: [user-auth]
+      operationId: redeemImpersonateTicket
+      summary: 用管理端签发的票据换取代入会话（只读，30 分钟，Ruling-33）
+      description: |
+        票据无效、已用或过期一律返回 400，不区分原因。
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ImpersonateInput" }
+      responses:
+        "200":
+          description: 用管理端签发的票据换取代入会话
+          headers:
+            Set-Cookie:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/UserSession" }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /api/user/shop:
+    get:
+      tags: [user-shop]
+      operationId: getShop
+      summary: 商店：上架的套餐与时长选项、流量包、当前余额（docs/03 §5.12）
+      description: |
+        商店未开启返回 403 feature_disabled。
+      security: [{ userSession: [] }]
+      responses:
+        "200":
+          description: 商店：上架的套餐与时长选项、流量包、当前余额
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/Shop" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/UserForbidden" }
+  /api/user/shop/quote:
+    post:
+      tags: [user-shop]
+      operationId: quoteOrder
+      summary: 询价：原价、优惠、应付、差额与下单后的到期时间；不落库、不占优惠码次数
+      description: |
+        商品不可买（未上架、试用已用过、没有套餐却买流量包等）返回 409；优惠码无效返回 400。
+      security: [{ userSession: [] }]
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/OrderInput" }
+      responses:
+        "200":
+          description: 询价：原价、优惠、应付、差额与下单后的到期时间；不落库、不占优惠码次数
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/Quote" }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/UserForbidden" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /api/user/orders:
+    get:
+      tags: [user-shop]
+      operationId: listOwnOrders
+      summary: 本人的订单分页，按时间倒序
+      security: [{ userSession: [] }]
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+      responses:
+        "200":
+          description: 本人的订单分页，按时间倒序
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/OrderPage" }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/AccountDisabled" }
+    post:
+      tags: [user-shop]
+      operationId: createOrder
+      summary: 下单并从余额扣款，成功即生效（docs/03 §5.13，Ruling-28）
+      description: |
+        余额不足返回 409 insufficient_balance，data.shortfall 为差额（分）；商品不可买返回 409 conflict。
+      security: [{ userSession: [] }]
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/OrderInput" }
+      responses:
+        "200":
+          description: 下单并从余额扣款，成功即生效
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/Order" }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/UserForbidden" }
+        "409": { $ref: "#/components/responses/OrderConflict" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /api/user/wallet:
+    get:
+      tags: [user-shop]
+      operationId: getWallet
+      summary: 余额、自动续费状态、可用的充值方式与累计返利（docs/03 §5.14）
+      security: [{ userSession: [] }]
+      responses:
+        "200":
+          description: 余额、自动续费状态、可用的充值方式与累计返利
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/Wallet" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/AccountDisabled" }
+  /api/user/wallet/ledger:
+    get:
+      tags: [user-shop]
+      operationId: listOwnLedger
+      summary: 本人的余额流水分页，按时间倒序
+      security: [{ userSession: [] }]
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+      responses:
+        "200":
+          description: 本人的余额流水分页，按时间倒序
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/LedgerPage" }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/AccountDisabled" }
+  /api/user/wallet/redeem:
+    post:
+      tags: [user-shop]
+      operationId: redeemTopupCode
+      summary: 兑换充值码（docs/03 §5.15）
+      description: |
+        码不存在、已用、停用或过期一律返回 400，不区分原因；失败次数过多返回 429。
+      security: [{ userSession: [] }]
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RedeemInput" }
+      responses:
+        "200":
+          description: 兑换充值码
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/RedeemResult" }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/UserForbidden" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /api/user/wallet/auto-renew:
+    put:
+      tags: [user-shop]
+      operationId: setAutoRenew
+      summary: 开 / 关到期自动续费（docs/03 §5.16）
+      description: |
+        没有买过可续费的时长选项、或当前是试用套餐时不能开启，返回 409。
+      security: [{ userSession: [] }]
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AutoRenewInput" }
+      responses:
+        "200":
+          description: 开 / 关到期自动续费
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/Wallet" }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/UserForbidden" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /api/user/wallet/payments:
+    post:
+      tags: [user-shop]
+      operationId: createPayment
+      summary: 发起一笔在线充值，返回跳转地址或二维码内容（docs/03 §5.15）
+      description: |
+        没有配置任何支付网关时返回 403 feature_disabled。
+      security: [{ userSession: [] }]
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PaymentCreateInput" }
+      responses:
+        "200":
+          description: 发起一笔在线充值，返回跳转地址或二维码内容
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/PaymentCreated" }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/UserForbidden" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /api/pay/notify/{gateway}:
+    post:
+      tags: [payment]
+      operationId: paymentNotify
+      summary: 支付网关的异步通知；验签后幂等入账（docs/03 §5.15）
+      description: |
+        请求体与应答格式由各网关决定，这里只约定路径。未配置的网关返回 404；验签失败或金额与充值单不符返回 400。
+        同一笔网关交易重复通知只入账一次，重复通知仍返回成功。
+      security: []
+      parameters:
+        - { name: gateway, in: path, required: true, schema: { type: string, pattern: "^[a-z0-9_-]{1,32}$" } }
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema: { type: object, additionalProperties: true }
+          application/json:
+            schema: { type: object, additionalProperties: true }
+      responses:
+        "200":
+          description: 已受理（内容为网关要求的应答文本）
+          content:
+            text/plain:
+              schema: { type: string }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "404": { $ref: "#/components/responses/NotFound" }
 
   /sub/{token}:
     get:
@@ -2790,6 +3557,19 @@ components:
       content:
         application/json:
           schema: { $ref: "#/components/schemas/Envelope" }
+    OrderConflict:
+      description: insufficient_balance（余额不足，data.shortfall 为差额，单位分）或 conflict（商品当前不可买）
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: "#/components/schemas/Envelope"
+              - type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      shortfall: { type: integer, format: int64 }
     UserForbidden:
       description: account_disabled、feature_disabled（功能未开启）或 permission_denied（CSRF 校验失败）
       content:
@@ -3189,20 +3969,16 @@ components:
     ProvisionStatus:
       type: string
       enum: [pending, synced, failed]
-    PlanInput:
+    PlanBase:
       type: object
       required: [name, trafficLimit, durationDays, nodeGroupIds]
-      description: 配额模型照 3x-ui 的 client（docs/03 §5.2）；自动续期三种方式最多选一种
+      description: 套餐的额度模板与售卖属性（docs/03 §5.2、§5.12）；免费续期自 0.4.0 起只在用户上（Ruling-20）
       properties:
         name: { type: string, minLength: 1, maxLength: 64 }
         trafficLimit: { type: integer, format: int64, minimum: 0, description: 流量额度（字节），0 不限 }
         durationDays: { type: integer, minimum: 0, maximum: 36500, description: 时长（天），0 不限 }
         startOnFirstUse: { type: boolean, default: false, description: 首次使用后才开始计时 }
         limitIp: { type: integer, minimum: 0, maximum: 1000, default: 0 }
-        renewEveryDays: { type: integer, minimum: 0, maximum: 3650, default: 0 }
-        renewMonthDay: { type: integer, minimum: 0, maximum: 31, default: 0 }
-        renewWeekday: { type: integer, minimum: 0, maximum: 7, default: 0, description: 1–7 = 周一至周日 }
-        renewMax: { type: integer, minimum: 0, maximum: 10000, default: 0, description: 0 不限 }
         trafficReset: { $ref: "#/components/schemas/TrafficReset" }
         trafficResetDay: { type: integer, minimum: 1, maximum: 31, default: 1 }
         allowClientChain: { type: boolean, default: false }
@@ -3212,15 +3988,30 @@ components:
           type: array
           maxItems: 500
           items: { type: integer, format: int64 }
+        isOnSale: { type: boolean, default: false, description: 是否在商店上架；没有时长选项的套餐上架了也不显示（0.4.0） }
+        isTrial: { type: boolean, default: false, description: 试用套餐：每个用户终身只能下单一次（0.4.0） }
+        sortOrder: { type: integer, minimum: 0, maximum: 100000, default: 0, description: 商店里的排序，小的在前（0.4.0） }
+        description: { type: string, maxLength: 500, description: 卖点说明，纯文本，一行一条（0.4.0） }
+    PlanInput:
+      allOf:
+        - $ref: "#/components/schemas/PlanBase"
+        - type: object
+          properties:
+            prices:
+              type: array
+              maxItems: 6
+              description: 时长选项，整体替换；天数不得重复；省略 = 不改（新建时为空）（0.4.0）
+              items: { $ref: "#/components/schemas/PlanPriceInput" }
     Plan:
       allOf:
-        - $ref: "#/components/schemas/PlanInput"
+        - $ref: "#/components/schemas/PlanBase"
         - type: object
-          required: [id, userCount, createdAt]
+          required: [id, userCount, createdAt, prices]
           properties:
             id: { type: integer, format: int64 }
             userCount: { type: integer, description: 当前分配了该套餐的用户数 }
             createdAt: { type: string, format: date-time }
+            prices: { type: array, items: { $ref: "#/components/schemas/PlanPrice" }, description: 按天数升序（0.4.0） }
     UserQuotaInput:
       type: object
       required: [trafficLimit, trafficUsed, expiresAt, pendingDays, limitIp, renewEveryDays, renewMonthDay, renewWeekday, renewMax, trafficReset, trafficResetDay]
@@ -3264,6 +4055,8 @@ components:
             isEmailVerified: { type: boolean, description: 0.3.0 }
             invitedBy: { type: [integer, "null"], format: int64, description: 邀请人用户 id（0.3.0） }
             invitedByUsername: { type: string, description: 没有邀请人时为空串（0.3.0） }
+            balance: { type: integer, format: int64, description: 余额（分）（0.4.0） }
+            autoRenew: { type: boolean, description: 是否开了扣余额自动续费（0.4.0） }
             createdAt: { type: string, format: date-time }
     UserCreateInput:
       type: object
@@ -3318,6 +4111,7 @@ components:
             isEmailVerified: { type: boolean, description: 0.3.0 }
         totpEnabled: { type: boolean }
         csrfToken: { type: string }
+        impersonated: { type: boolean, description: 真 = 管理员代入的只读会话，除退出外的写请求都会被拒（0.4.0，Ruling-33） }
     UserSessionEnvelope:
       allOf:
         - $ref: "#/components/schemas/Envelope"
@@ -3341,6 +4135,7 @@ components:
         nodeCount: { type: integer, description: 当前可用节点数 }
         announcement: { oneOf: [{ $ref: "#/components/schemas/Announcement" }, { type: "null" }], description: 最新一条已发布公告（0.3.0） }
         popupAnnouncement: { oneOf: [{ $ref: "#/components/schemas/Announcement" }, { type: "null" }], description: 最新一条标了弹窗的已发布公告（0.3.0） }
+        balance: { type: integer, format: int64, description: 余额（分）（0.4.0） }
     TrafficPoint:
       type: object
       required: [hour, up, down]
@@ -3437,10 +4232,12 @@ components:
         checkinEnabled: { type: boolean }
         ticketEnabled: { type: boolean }
         sharedEnabled: { type: boolean }
+        shopEnabled: { type: boolean, description: 商店与钱包是否开启（0.4.0） }
+        currency: { $ref: "#/components/schemas/Currency" }
     Settings:
       type: object
       description: 全部系统设置（docs/03 §5.6 设置清单），键名去掉点号改驼峰分组
-      required: [site, register, invite, checkin, ticket, shared, mail, subscription, mailEnabled]
+      required: [site, register, invite, checkin, ticket, shared, mail, subscription, shop, rebate, notify, mailEnabled]
       properties:
         mailEnabled: { type: boolean, readOnly: true, description: SMTP 环境变量是否已配置（Ruling-24），不可经接口修改 }
         site:
@@ -3449,6 +4246,7 @@ components:
           properties:
             name: { type: string, minLength: 1, maxLength: 32 }
             timezone: { type: string, minLength: 1, maxLength: 64, description: IANA 时区名 }
+            portalUrl: { type: string, maxLength: 255, description: 客户门户的对外地址（https://…），切换为用户身份时用；空串 = 与管理端同源（0.4.0） }
         register:
           type: object
           required: [mode, emailVerify, emailAllow, emailBlock, planId]
@@ -3487,6 +4285,24 @@ components:
           required: [ratePerMinute]
           properties:
             ratePerMinute: { type: integer, minimum: 1, maximum: 600 }
+        shop:
+          type: object
+          required: [enabled, currency]
+          properties:
+            enabled: { type: boolean }
+            currency: { $ref: "#/components/schemas/Currency" }
+        rebate:
+          type: object
+          required: [percent, mode]
+          properties:
+            percent: { type: integer, minimum: 0, maximum: 100, description: 0 = 关闭返利 }
+            mode: { type: string, enum: [first, always], description: 只返被邀请人的首笔消费 / 每笔都返 }
+        notify:
+          type: object
+          required: [expireDays, trafficPercent]
+          properties:
+            expireDays: { type: integer, minimum: 0, maximum: 30, description: 到期前几天提醒，0 = 不提醒 }
+            trafficPercent: { type: integer, minimum: 0, maximum: 50, description: 剩余流量低于额度的百分之几时提醒，0 = 不提醒 }
         subscription:
           type: object
           required: [baseUrl, title, updateIntervalHours, infoNodes, logRetentionDays]
@@ -3507,6 +4323,9 @@ components:
         ticket: { type: object, additionalProperties: true }
         shared: { type: object, additionalProperties: true }
         mail: { type: object, additionalProperties: true }
+        shop: { type: object, additionalProperties: true }
+        rebate: { type: object, additionalProperties: true }
+        notify: { type: object, additionalProperties: true }
         subscription: { type: object, additionalProperties: true }
     TestMailInput:
       type: object
@@ -3572,6 +4391,18 @@ components:
       type: object
       required: [enabled, code, maxUses, usedCount, invitees]
       properties:
+        rebatePercent: { type: integer, description: 当前返利比例，0 = 未开启（0.4.0） }
+        rebateTotal: { type: integer, format: int64, description: 累计获得的返利（分）（0.4.0） }
+        rebates:
+          type: array
+          description: 最近 100 条返利（0.4.0）
+          items:
+            type: object
+            required: [username, amount, createdAt]
+            properties:
+              username: { type: string, description: 打码后的被邀请人用户名 }
+              amount: { type: integer, format: int64 }
+              createdAt: { type: string, format: date-time }
         enabled: { type: boolean, description: 设置 invite.userEnabled 且本人的码未被停用 }
         code: { type: string, description: 未开启时为空串 }
         maxUses: { type: integer, description: 0 = 不限 }
@@ -3783,3 +4614,368 @@ components:
       properties:
         rewardBytes: { type: integer, format: int64 }
         trafficLimit: { type: integer, format: int64, description: 奖励后的流量额度 }
+    Money:
+      type: integer
+      format: int64
+      minimum: 0
+      maximum: 99999999
+      description: 金额，整数分（docs/03 §5.12）
+    Currency:
+      type: string
+      enum: [CNY, USD, EUR, HKD, JPY]
+      description: 显示币种；只影响前端显示，不做换算
+    PlanPriceInput:
+      type: object
+      required: [durationDays, price]
+      properties:
+        durationDays: { type: integer, minimum: 1, maximum: 3650 }
+        price: { $ref: "#/components/schemas/Money" }
+    PlanPrice:
+      allOf:
+        - $ref: "#/components/schemas/PlanPriceInput"
+        - type: object
+          required: [id]
+          properties:
+            id: { type: integer, format: int64 }
+    TrafficPackInput:
+      type: object
+      required: [name, trafficBytes, price, isOnSale]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 64 }
+        trafficBytes: { type: integer, format: int64, minimum: 1 }
+        price: { $ref: "#/components/schemas/Money" }
+        isOnSale: { type: boolean }
+        sortOrder: { type: integer, minimum: 0, maximum: 100000, default: 0 }
+    TrafficPack:
+      allOf:
+        - $ref: "#/components/schemas/TrafficPackInput"
+        - type: object
+          required: [id, createdAt]
+          properties:
+            id: { type: integer, format: int64 }
+            createdAt: { type: string, format: date-time }
+    CouponKind:
+      type: string
+      enum: [percent, fixed]
+    CouponInput:
+      type: object
+      required: [code, kind, value, allPlans, isDisabled]
+      properties:
+        code: { type: string, pattern: "^[A-Za-z0-9]{4,32}$", description: 存大写，全站唯一 }
+        kind: { $ref: "#/components/schemas/CouponKind" }
+        value: { type: integer, format: int64, minimum: 1, maximum: 99999999, description: "percent：1–100；fixed：分" }
+        allPlans: { type: boolean, description: 真 = 适用于全部套餐；假 = 只适用于 planIds }
+        planIds: { type: array, maxItems: 100, items: { type: integer, format: int64, minimum: 1 } }
+        forTrafficPack: { type: boolean, default: false, description: 是否适用于流量包 }
+        minAmount: { $ref: "#/components/schemas/Money" }
+        maxUses: { type: integer, minimum: 0, maximum: 1000000, default: 0, description: 总次数上限，0 不限 }
+        maxUsesPerUser: { type: integer, minimum: 0, maximum: 1000, default: 1, description: 每人次数上限，0 不限 }
+        startsAt: { type: [string, "null"], format: date-time }
+        endsAt: { type: [string, "null"], format: date-time }
+        isDisabled: { type: boolean }
+        remark: { type: string, maxLength: 255 }
+    Coupon:
+      allOf:
+        - $ref: "#/components/schemas/CouponInput"
+        - type: object
+          required: [id, usedCount, createdAt]
+          properties:
+            id: { type: integer, format: int64 }
+            usedCount: { type: integer }
+            createdAt: { type: string, format: date-time }
+    CouponPage:
+      type: object
+      required: [items, total]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/Coupon" } }
+        total: { type: integer, format: int64 }
+    TopupCodeStatus:
+      type: string
+      enum: [unused, used, disabled, expired]
+    TopupCodeBatchInput:
+      type: object
+      required: [amount, count]
+      properties:
+        amount: { type: integer, format: int64, minimum: 1, maximum: 99999999, description: 面值（分） }
+        count: { type: integer, minimum: 1, maximum: 500 }
+        expiresAt: { type: [string, "null"], format: date-time }
+        batch: { type: string, maxLength: 64, description: 批次备注 }
+    TopupCodeBatch:
+      type: object
+      required: [amount, codes]
+      properties:
+        amount: { type: integer, format: int64 }
+        codes: { type: array, items: { type: string }, description: 充值码明文（16 位）；只在生成时返回这一次（Ruling-31） }
+    TopupCode:
+      type: object
+      required: [id, codeTail, amount, batch, status, expiresAt, isDisabled, usedByUsername, usedAt, createdAt]
+      properties:
+        id: { type: integer, format: int64 }
+        codeTail: { type: string, description: 码的末 4 位 }
+        amount: { type: integer, format: int64 }
+        batch: { type: string }
+        status: { $ref: "#/components/schemas/TopupCodeStatus" }
+        expiresAt: { type: [string, "null"], format: date-time }
+        isDisabled: { type: boolean }
+        usedByUserId: { type: [integer, "null"], format: int64 }
+        usedByUsername: { type: string, description: 未使用时为空串 }
+        usedAt: { type: [string, "null"], format: date-time }
+        createdAt: { type: string, format: date-time }
+    TopupCodePage:
+      type: object
+      required: [items, total]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/TopupCode" } }
+        total: { type: integer, format: int64 }
+    TopupCodeUpdateInput:
+      type: object
+      required: [isDisabled]
+      properties:
+        isDisabled: { type: boolean }
+    TopupCodeSecret:
+      type: object
+      required: [code]
+      properties:
+        code: { type: string, description: 充值码明文，前端默认不显示，点击才取 }
+    OrderKind:
+      type: string
+      enum: [plan, traffic_pack, renew]
+      description: renew = 到期时扣余额自动续费生成的订单
+    Order:
+      type: object
+      required: [id, orderNo, kind, itemName, durationDays, trafficBytes, isTrial, amountOriginal, amountDiscount, amountPaid, couponCode, createdAt]
+      properties:
+        id: { type: integer, format: int64 }
+        orderNo: { type: string }
+        kind: { $ref: "#/components/schemas/OrderKind" }
+        itemName: { type: string, description: 下单时的套餐或流量包名称 }
+        durationDays: { type: integer, description: 套餐的天数；流量包为 0 }
+        trafficBytes: { type: integer, format: int64, description: 套餐的流量额度（0 不限）或流量包的字节数 }
+        isTrial: { type: boolean }
+        amountOriginal: { type: integer, format: int64 }
+        amountDiscount: { type: integer, format: int64 }
+        amountPaid: { type: integer, format: int64 }
+        couponCode: { type: string, description: 没用优惠码为空串 }
+        createdAt: { type: string, format: date-time }
+        userId: { type: [integer, "null"], format: int64, description: 只在管理端返回；用户已删除为 null }
+        username: { type: string, description: 只在管理端返回：下单时的用户名 }
+    OrderPage:
+      type: object
+      required: [items, total]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/Order" } }
+        total: { type: integer, format: int64 }
+    OrderInput:
+      type: object
+      required: [kind]
+      description: kind = plan 时给 planPriceId，kind = traffic_pack 时给 trafficPackId
+      properties:
+        kind: { type: string, enum: [plan, traffic_pack] }
+        planPriceId: { type: integer, format: int64, minimum: 1 }
+        trafficPackId: { type: integer, format: int64, minimum: 1 }
+        couponCode: { type: string, maxLength: 32, description: 省略或空串 = 不用优惠码 }
+    Quote:
+      type: object
+      required: [amountOriginal, amountDiscount, amountPayable, balance, shortfall, isRenewal, expiresAt, trafficLimit, couponCode]
+      properties:
+        amountOriginal: { type: integer, format: int64 }
+        amountDiscount: { type: integer, format: int64 }
+        amountPayable: { type: integer, format: int64 }
+        balance: { type: integer, format: int64 }
+        shortfall: { type: integer, format: int64, description: 还差多少（分）；余额够时为 0 }
+        isRenewal: { type: boolean, description: 买的是当前套餐（续费）；假 = 换购或流量包 }
+        expiresAt: { type: [string, "null"], format: date-time, description: 下单后的到期时间 }
+        trafficLimit: { type: integer, format: int64, description: 下单后的流量额度（字节，0 不限） }
+        couponCode: { type: string, description: 已应用的优惠码，没有为空串 }
+    LedgerKind:
+      type: string
+      enum: [topup_code, topup_online, purchase, renew, rebate, admin_adjust, forfeit]
+    LedgerEntry:
+      type: object
+      required: [id, kind, amount, balanceAfter, remark, createdAt]
+      properties:
+        id: { type: integer, format: int64 }
+        kind: { $ref: "#/components/schemas/LedgerKind" }
+        amount: { type: integer, format: int64, description: 带符号的变动金额（分） }
+        balanceAfter: { type: integer, format: int64 }
+        remark: { type: string }
+        createdAt: { type: string, format: date-time }
+        userId: { type: [integer, "null"], format: int64, description: 只在管理端返回 }
+        username: { type: string, description: 只在管理端返回 }
+        adminUsername: { type: string, description: 只在管理端返回：管理员调整时的操作人，其余为空串 }
+    LedgerPage:
+      type: object
+      required: [items, total]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/LedgerEntry" } }
+        total: { type: integer, format: int64 }
+    BalanceAdjustInput:
+      type: object
+      required: [amount, remark]
+      properties:
+        amount: { type: integer, format: int64, minimum: -9999999999, maximum: 9999999999, description: 带符号的调整金额（分），不能为 0 }
+        remark: { type: string, minLength: 1, maxLength: 255 }
+    PaymentStatus:
+      type: string
+      enum: [pending, paid, expired]
+    Payment:
+      type: object
+      required: [id, tradeNo, gateway, amount, status, paidAt, createdAt]
+      properties:
+        id: { type: integer, format: int64 }
+        tradeNo: { type: string }
+        gateway: { type: string }
+        amount: { type: integer, format: int64 }
+        status: { $ref: "#/components/schemas/PaymentStatus" }
+        paidAt: { type: [string, "null"], format: date-time }
+        createdAt: { type: string, format: date-time }
+        userId: { type: [integer, "null"], format: int64 }
+        username: { type: string }
+    PaymentPage:
+      type: object
+      required: [items, total]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/Payment" } }
+        total: { type: integer, format: int64 }
+    PaymentCreateInput:
+      type: object
+      required: [gateway, amount]
+      properties:
+        gateway: { type: string, pattern: "^[a-z0-9_-]{1,32}$" }
+        amount: { type: integer, format: int64, minimum: 100, maximum: 99999999, description: 充值金额（分），最低 1 元 }
+    PaymentCreated:
+      type: object
+      required: [tradeNo, payUrl, qrContent, expiresAt]
+      properties:
+        tradeNo: { type: string }
+        payUrl: { type: string, description: 跳转支付的地址；该网关不提供时为空串 }
+        qrContent: { type: string, description: 生成二维码用的内容；该网关不提供时为空串 }
+        expiresAt: { type: string, format: date-time }
+    Rebate:
+      type: object
+      required: [id, inviterUsername, inviteeUsername, orderNo, orderAmount, percent, amount, createdAt]
+      properties:
+        id: { type: integer, format: int64 }
+        inviterUsername: { type: string }
+        inviteeUsername: { type: string }
+        orderNo: { type: string }
+        orderAmount: { type: integer, format: int64 }
+        percent: { type: integer }
+        amount: { type: integer, format: int64 }
+        createdAt: { type: string, format: date-time }
+    RebatePage:
+      type: object
+      required: [items, total]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/Rebate" } }
+        total: { type: integer, format: int64 }
+    FinanceStats:
+      type: object
+      required: [days, totals]
+      properties:
+        days:
+          type: array
+          description: 按平台时区的自然日，旧的在前；没有流水的日期也给 0
+          items:
+            type: object
+            required: [date, topup, spend, rebate, orderCount]
+            properties:
+              date: { type: string, format: date }
+              topup: { type: integer, format: int64, description: 充值码与在线充值入账合计 }
+              spend: { type: integer, format: int64, description: 订单实付合计（含自动续费） }
+              rebate: { type: integer, format: int64 }
+              orderCount: { type: integer }
+        totals:
+          type: object
+          required: [balance, topup, spend, rebate]
+          properties:
+            balance: { type: integer, format: int64, description: 当前全部用户余额之和 }
+            topup: { type: integer, format: int64, description: 区间内合计 }
+            spend: { type: integer, format: int64 }
+            rebate: { type: integer, format: int64 }
+    ImpersonateTicket:
+      type: object
+      required: [ticket, expiresAt, portalUrl]
+      properties:
+        ticket: { type: string, description: 一次性票据，60 秒内有效；属于凭据，不写日志 }
+        expiresAt: { type: string, format: date-time }
+        portalUrl: { type: string, description: 设置 site.portalUrl；空串 = 客户门户与管理端同源 }
+    ImpersonateInput:
+      type: object
+      required: [ticket]
+      properties:
+        ticket: { type: string, minLength: 32, maxLength: 128 }
+    ShopPlan:
+      type: object
+      required: [id, name, description, trafficLimit, trafficReset, limitIp, nodeCount, isTrial, isCurrent, canBuy, reason, prices]
+      properties:
+        id: { type: integer, format: int64 }
+        name: { type: string }
+        description: { type: string, description: 卖点说明，纯文本，一行一条 }
+        trafficLimit: { type: integer, format: int64, description: 字节，0 不限 }
+        trafficReset: { $ref: "#/components/schemas/TrafficReset" }
+        limitIp: { type: integer }
+        nodeCount: { type: integer, description: 该套餐当前可用的节点数 }
+        isTrial: { type: boolean }
+        isCurrent: { type: boolean, description: 是不是本人当前的套餐（买它即续费） }
+        canBuy: { type: boolean }
+        reason: { type: string, description: 不能买的原因，可以买时为空串 }
+        prices: { type: array, items: { $ref: "#/components/schemas/PlanPrice" } }
+    ShopTrafficPack:
+      type: object
+      required: [id, name, trafficBytes, price]
+      properties:
+        id: { type: integer, format: int64 }
+        name: { type: string }
+        trafficBytes: { type: integer, format: int64 }
+        price: { $ref: "#/components/schemas/Money" }
+    Shop:
+      type: object
+      required: [balance, plans, trafficPacks, canBuyTrafficPack, trafficPackReason]
+      properties:
+        balance: { type: integer, format: int64 }
+        plans: { type: array, items: { $ref: "#/components/schemas/ShopPlan" } }
+        trafficPacks: { type: array, items: { $ref: "#/components/schemas/ShopTrafficPack" } }
+        canBuyTrafficPack: { type: boolean }
+        trafficPackReason: { type: string, description: 不能买流量包的原因，可以买时为空串 }
+    Wallet:
+      type: object
+      required: [balance, autoRenew, gateways, rebateTotal]
+      properties:
+        balance: { type: integer, format: int64 }
+        autoRenew:
+          type: object
+          required: [enabled, available, reason, planName, durationDays, price]
+          properties:
+            enabled: { type: boolean }
+            available: { type: boolean, description: 现在能不能开启 }
+            reason: { type: string, description: 不能开启的原因，可以开启时为空串 }
+            planName: { type: string, description: 续费的套餐名，没有可续费的选项为空串 }
+            durationDays: { type: integer, description: 每次续费的天数，没有为 0 }
+            price: { type: [integer, "null"], format: int64, description: 该时长选项的当前售价；选项已不存在为 null }
+        gateways:
+          type: array
+          description: 可用的在线充值方式；空 = 没有配置网关，只能用充值码
+          items:
+            type: object
+            required: [code, name]
+            properties:
+              code: { type: string }
+              name: { type: string }
+        rebateTotal: { type: integer, format: int64, description: 累计获得的邀请返利 }
+    AutoRenewInput:
+      type: object
+      required: [enabled]
+      properties:
+        enabled: { type: boolean }
+    RedeemInput:
+      type: object
+      required: [code]
+      properties:
+        code: { type: string, pattern: "^[A-Za-z0-9 -]{16,24}$", description: 16 位充值码，可带分组用的空格或连字符 }
+    RedeemResult:
+      type: object
+      required: [amount, balance]
+      properties:
+        amount: { type: integer, format: int64, description: 入账金额（分） }
+        balance: { type: integer, format: int64, description: 入账后的余额 }
