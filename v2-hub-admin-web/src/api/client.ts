@@ -122,3 +122,8 @@ export function toApiError(error: unknown): ApiError {
   return { code: 'network', message: FALLBACK_MESSAGE }
 }
 export type SubscribeLog = components['schemas']['SubscribeLog']
+export type ChainApply = components['schemas']['ChainApply']
+export type ChainApplyStatus = components['schemas']['ChainApplyStatus']
+export type AdminServerChainRule = components['schemas']['AdminServerChainRule']
+export type ServerChainApplyState = components['schemas']['ServerChainApplyState']
+export type ChainBlockedReason = components['schemas']['ChainBlockedReason']
