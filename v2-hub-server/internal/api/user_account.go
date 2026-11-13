@@ -192,12 +192,26 @@ type inviteInfoVO struct {
 	MaxUses   int         `json:"maxUses"`
 	UsedCount int         `json:"usedCount"`
 	Invitees  []inviteeVO `json:"invitees"`
+	// 0.4.0 起：返利比例（0 = 未开启）、累计返利（分）与最近的返利记录
+	RebatePercent int              `json:"rebatePercent"`
+	RebateTotal   int64            `json:"rebateTotal"`
+	Rebates       []inviteRebateVO `json:"rebates"`
+}
+
+type inviteRebateVO struct {
+	Username  string    `json:"username"`
+	Amount    int64     `json:"amount"`
+	CreatedAt time.Time `json:"createdAt"`
 }
 
 func toInviteInfoVO(info *service.InviteInfo) inviteInfoVO {
 	out := inviteInfoVO{Enabled: info.Enabled, Code: info.Code, MaxUses: info.MaxUses, UsedCount: info.UsedCount, Invitees: make([]inviteeVO, 0, len(info.Invitees))}
 	for _, it := range info.Invitees {
 		out.Invitees = append(out.Invitees, inviteeVO{Username: it.Username, CreatedAt: it.CreatedAt})
+	}
+	out.RebatePercent, out.RebateTotal, out.Rebates = info.RebatePercent, info.RebateTotal, make([]inviteRebateVO, 0, len(info.Rebates))
+	for _, rb := range info.Rebates {
+		out.Rebates = append(out.Rebates, inviteRebateVO{Username: rb.Username, Amount: rb.Amount, CreatedAt: rb.CreatedAt})
 	}
 	return out
 }

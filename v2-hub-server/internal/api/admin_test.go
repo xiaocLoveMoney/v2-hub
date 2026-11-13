@@ -66,7 +66,7 @@ func newAPIServer(t *testing.T) (*httptest.Server, *service.RBACService) {
 		Database: pool, PingTimeout: time.Second, Auth: auth, RBAC: rbac,
 		Settings: settings, Mail: mails, Account: account, Users: users, PortalAuth: portal, Portal: users,
 		Content: service.NewContentService(pool, sealer, settings, mails, nil), Tickets: service.NewTicketService(pool, settings, mails, nil),
-		Wallet: service.NewWalletService(pool, sealer, settings, nil), Shop: service.NewShopService(pool, settings, users, nil),
+		Wallet: service.NewWalletService(pool, sealer, settings, nil), Shop: service.NewShopService(pool, settings, users, mails, nil),
 		Cookie: CookieConfig{Secure: false}, TrustedProxies: []netip.Prefix{},
 	}))
 	t.Cleanup(srv.Close)

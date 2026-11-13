@@ -122,6 +122,17 @@ type InviteInfo struct {
 	MaxUses   int
 	UsedCount int
 	Invitees  []Invitee
+	// 返利（docs/03 §5.16）：RebatePercent 为 0 表示未开启；Rebates 是最近 100 条，被邀请人用户名已打码。
+	RebatePercent int
+	RebateTotal   int64
+	Rebates       []InviteRebate
+}
+
+// InviteRebate 是一条返利记录（用户名已打码）。
+type InviteRebate struct {
+	Username  string
+	Amount    int64
+	CreatedAt time.Time
 }
 
 func maskUsername(name string) string {
@@ -138,7 +149,17 @@ func (s *AccountService) GetInvite(ctx context.Context, p *UserPrincipal) (*Invi
 	if err != nil {
 		return nil, err
 	}
-	info := &InviteInfo{MaxUses: cur.Invite.UserMaxUses, Invitees: []Invitee{}}
+	info := &InviteInfo{MaxUses: cur.Invite.UserMaxUses, Invitees: []Invitee{}, RebatePercent: cur.Rebate.Percent, Rebates: []InviteRebate{}}
+	if info.RebateTotal, err = s.q.SumRebateByInviter(ctx, int8Arg(p.UserID)); err != nil {
+		return nil, fmt.Errorf("sum rebate of user %d: %w", p.UserID, err)
+	}
+	rebates, err := s.q.ListRebatesByInviter(ctx, sqlcgen.ListRebatesByInviterParams{InviterID: int8Arg(p.UserID), Limit: inviteeListLimit})
+	if err != nil {
+		return nil, fmt.Errorf("list rebates of user %d: %w", p.UserID, err)
+	}
+	for _, r := range rebates {
+		info.Rebates = append(info.Rebates, InviteRebate{Username: maskUsername(r.InviteeUsername), Amount: r.Amount, CreatedAt: r.CreatedAt.Time})
+	}
 	rows, err := s.q.ListInvitees(ctx, sqlcgen.ListInviteesParams{InvitedBy: int8Arg(p.UserID), Limit: inviteeListLimit})
 	if err != nil {
 		return nil, fmt.Errorf("list invitees of user %d: %w", p.UserID, err)

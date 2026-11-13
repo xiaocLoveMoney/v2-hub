@@ -23,7 +23,7 @@ type shopFixture struct {
 func newShopFixture(t *testing.T) *shopFixture {
 	t.Helper()
 	wf := newWalletFixture(t)
-	return &shopFixture{walletFixture: wf, shop: NewShopService(wf.pool, wf.settings, wf.users, wf.clock.now)}
+	return &shopFixture{walletFixture: wf, shop: NewShopService(wf.pool, wf.settings, wf.users, wf.mail, wf.clock.now)}
 }
 
 // salePlan 建一个上架的套餐，带 30 天与 90 天两个时长选项，返回套餐与两个选项的 id。
