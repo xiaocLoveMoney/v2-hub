@@ -46,8 +46,8 @@ type Provider interface {
     ListClientTraffic / ListOnlineClients
     ClientShareLinks(ctx, clientRef) ([]string, error)
 }
-// 可选能力，服务端链式需要
-type CoreConfigurator interface { GetCoreConfig / ApplyCoreConfig / RestartCore / TestOutbound }
+// 可选能力，服务端链式需要（Capabilities.CoreConfig 为真时可断言出来，docs/03 §5.19）
+type CoreConfigurator interface { GetCoreTemplate / SetCoreTemplate / RestartCore / CoreState }
 ```
 
 中立模型只收敛公共字段；面板专有配置以“原始 JSON + provider/内核类型标记”携带。
