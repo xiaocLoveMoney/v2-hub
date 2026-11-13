@@ -82,6 +82,8 @@ type Querier interface {
 	GetRoleByID(ctx context.Context, id int64) (GetRoleByIDRow, error)
 	GetServer(ctx context.Context, id int64) (GetServerRow, error)
 	GetServerConn(ctx context.Context, id int64) (GetServerConnRow, error)
+	// 影响分享链接的入站与对外地址摘要；变了就要重新向面板取全部链接（docs/03 §5.4 节点来源）
+	GetServerLinkFingerprint(ctx context.Context, serverID int64) (string, error)
 	// 读写配额前加行锁，避免流量任务与管理员操作互相覆盖
 	GetUserQuota(ctx context.Context, id int64) (GetUserQuotaRow, error)
 	GetUserSessionByTokenHash(ctx context.Context, tokenHash []byte) (GetUserSessionByTokenHashRow, error)
@@ -139,14 +141,18 @@ type Querier interface {
 	SetAdminTOTPPending(ctx context.Context, arg SetAdminTOTPPendingParams) error
 	SetInboundEnabledLocal(ctx context.Context, arg SetInboundEnabledLocalParams) error
 	SetProvisionCounters(ctx context.Context, arg SetProvisionCountersParams) error
+	SetProvisionLinks(ctx context.Context, arg SetProvisionLinksParams) error
+	SetServerOnlineClients(ctx context.Context, arg SetServerOnlineClientsParams) error
 	// T1–T3 的落库：status、last_error 由调用方按转移表算好；is_online 时才刷新版本、GUID、快照与最近在线时间
 	SetServerProbeResult(ctx context.Context, arg SetServerProbeResultParams) error
+	SetServerProvisionsOnline(ctx context.Context, arg SetServerProvisionsOnlineParams) error
 	SetServerSynced(ctx context.Context, id int64) error
 	SetServerToken(ctx context.Context, arg SetServerTokenParams) error
 	SetUserCredential(ctx context.Context, arg SetUserCredentialParams) error
 	SetUserPasswordHash(ctx context.Context, arg SetUserPasswordHashParams) (int64, error)
 	SetUserTOTPPending(ctx context.Context, arg SetUserTOTPPendingParams) error
 	TouchAdminSession(ctx context.Context, arg TouchAdminSessionParams) error
+	TouchUserLastUsed(ctx context.Context, arg TouchUserLastUsedParams) error
 	TouchUserSession(ctx context.Context, arg TouchUserSessionParams) error
 	UpdateAdminDisabled(ctx context.Context, arg UpdateAdminDisabledParams) error
 	UpdateAdminLastLogin(ctx context.Context, id int64) error
@@ -162,7 +168,8 @@ type Querier interface {
 	UpsertEndpoint(ctx context.Context, arg UpsertEndpointParams) (int64, error)
 	// 平台写入面板成功后的落库：摘要即“已确认”状态，清除漂移与缺失标记
 	UpsertInboundFromPlatform(ctx context.Context, arg UpsertInboundFromPlatformParams) (int64, error)
-	UpsertProvision(ctx context.Context, arg UpsertProvisionParams) error
+	// cred_version 只在写面板成功（synced）时推进；失败时保留原值，下次对账继续换凭据
+	UpsertProvision(ctx context.Context, arg UpsertProvisionParams) (int64, error)
 }
 
 var _ Querier = (*Queries)(nil)

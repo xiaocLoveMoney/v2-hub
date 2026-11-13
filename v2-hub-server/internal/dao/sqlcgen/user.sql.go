@@ -212,6 +212,26 @@ func (q *Queries) GetPlan(ctx context.Context, id int64) (GetPlanRow, error) {
 	return i, err
 }
 
+const getServerLinkFingerprint = `-- name: GetServerLinkFingerprint :one
+SELECT md5(coalesce(string_agg(t.k, ';' ORDER BY t.k), ''))::text AS fingerprint
+FROM (
+  SELECT 'i' || i.id::text || ':' || i.synced_hash || ':' || i.is_enabled::text || ':' || i.is_missing::text || ':' ||
+         i.port::text || ':' || coalesce(i.drift_detected_at::text, '') AS k
+  FROM inbound i WHERE i.server_id = $1
+  UNION ALL
+  SELECT 'e' || e.id::text || ':' || e.address || ':' || e.port::text || ':' || e.is_disabled::text || ':' || e.is_missing::text AS k
+  FROM endpoint e JOIN inbound i ON i.id = e.inbound_id WHERE i.server_id = $1
+) t
+`
+
+// 影响分享链接的入站与对外地址摘要；变了就要重新向面板取全部链接（docs/03 §5.4 节点来源）
+func (q *Queries) GetServerLinkFingerprint(ctx context.Context, serverID int64) (string, error) {
+	row := q.db.QueryRow(ctx, getServerLinkFingerprint, serverID)
+	var fingerprint string
+	err := row.Scan(&fingerprint)
+	return fingerprint, err
+}
+
 const getUserQuota = `-- name: GetUserQuota :one
 SELECT id, plan_id, traffic_limit, traffic_used, expires_at, pending_days, limit_ip, renew_every_days, renew_month_day,
        renew_weekday, renew_max, renew_count, traffic_reset, traffic_reset_day, last_traffic_reset_at, is_disabled, status
@@ -414,17 +434,21 @@ func (q *Queries) ListPlans(ctx context.Context) ([]ListPlansRow, error) {
 }
 
 const listServerProvisions = `-- name: ListServerProvisions :many
-SELECT id, user_id, email, status, retry_count, last_up, last_down FROM provision WHERE server_id = $1
+SELECT id, user_id, email, status, retry_count, last_up, last_down, cred_version,
+       (links_enc IS NOT NULL)::boolean AS has_links
+FROM provision WHERE server_id = $1
 `
 
 type ListServerProvisionsRow struct {
-	ID         int64
-	UserID     int64
-	Email      string
-	Status     string
-	RetryCount int32
-	LastUp     int64
-	LastDown   int64
+	ID          int64
+	UserID      int64
+	Email       string
+	Status      string
+	RetryCount  int32
+	LastUp      int64
+	LastDown    int64
+	CredVersion int32
+	HasLinks    bool
 }
 
 func (q *Queries) ListServerProvisions(ctx context.Context, serverID int64) ([]ListServerProvisionsRow, error) {
@@ -444,6 +468,8 @@ func (q *Queries) ListServerProvisions(ctx context.Context, serverID int64) ([]L
 			&i.RetryCount,
 			&i.LastUp,
 			&i.LastDown,
+			&i.CredVersion,
+			&i.HasLinks,
 		); err != nil {
 			return nil, err
 		}
@@ -642,7 +668,7 @@ func (q *Queries) ListUsers(ctx context.Context, arg ListUsersParams) ([]ListUse
 }
 
 const listUsersByIDs = `-- name: ListUsersByIDs :many
-SELECT u.id, u.status, u.limit_ip, u.email_code, u.client_cred_enc, (u.deleted_at IS NOT NULL)::boolean AS is_deleted
+SELECT u.id, u.status, u.limit_ip, u.email_code, u.client_cred_enc, u.cred_version, (u.deleted_at IS NOT NULL)::boolean AS is_deleted
 FROM end_user u
 WHERE u.id = ANY($1::bigint[])
 `
@@ -653,6 +679,7 @@ type ListUsersByIDsRow struct {
 	LimitIp       int32
 	EmailCode     string
 	ClientCredEnc []byte
+	CredVersion   int32
 	IsDeleted     bool
 }
 
@@ -672,6 +699,7 @@ func (q *Queries) ListUsersByIDs(ctx context.Context, ids []int64) ([]ListUsersB
 			&i.LimitIp,
 			&i.EmailCode,
 			&i.ClientCredEnc,
+			&i.CredVersion,
 			&i.IsDeleted,
 		); err != nil {
 			return nil, err
@@ -783,6 +811,50 @@ func (q *Queries) SetProvisionCounters(ctx context.Context, arg SetProvisionCoun
 	return err
 }
 
+const setProvisionLinks = `-- name: SetProvisionLinks :exec
+UPDATE provision SET links_enc = $2, links_synced_at = $3 WHERE id = $1
+`
+
+type SetProvisionLinksParams struct {
+	ID            int64
+	LinksEnc      []byte
+	LinksSyncedAt pgtype.Timestamptz
+}
+
+func (q *Queries) SetProvisionLinks(ctx context.Context, arg SetProvisionLinksParams) error {
+	_, err := q.db.Exec(ctx, setProvisionLinks, arg.ID, arg.LinksEnc, arg.LinksSyncedAt)
+	return err
+}
+
+const setServerOnlineClients = `-- name: SetServerOnlineClients :exec
+UPDATE server SET online_clients = $2 WHERE id = $1 AND online_clients <> $2
+`
+
+type SetServerOnlineClientsParams struct {
+	ID            int64
+	OnlineClients int32
+}
+
+func (q *Queries) SetServerOnlineClients(ctx context.Context, arg SetServerOnlineClientsParams) error {
+	_, err := q.db.Exec(ctx, setServerOnlineClients, arg.ID, arg.OnlineClients)
+	return err
+}
+
+const setServerProvisionsOnline = `-- name: SetServerProvisionsOnline :exec
+UPDATE provision SET is_online = (email = ANY($1::text[]))
+WHERE server_id = $2 AND is_online <> (email = ANY($1::text[]))
+`
+
+type SetServerProvisionsOnlineParams struct {
+	Emails   []string
+	ServerID int64
+}
+
+func (q *Queries) SetServerProvisionsOnline(ctx context.Context, arg SetServerProvisionsOnlineParams) error {
+	_, err := q.db.Exec(ctx, setServerProvisionsOnline, arg.Emails, arg.ServerID)
+	return err
+}
+
 const setUserCredential = `-- name: SetUserCredential :exec
 UPDATE end_user SET client_cred_enc = $2 WHERE id = $1
 `
@@ -812,6 +884,20 @@ func (q *Queries) SetUserPasswordHash(ctx context.Context, arg SetUserPasswordHa
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const touchUserLastUsed = `-- name: TouchUserLastUsed :exec
+UPDATE end_user SET last_used_at = $2 WHERE id = $1
+`
+
+type TouchUserLastUsedParams struct {
+	ID         int64
+	LastUsedAt pgtype.Timestamptz
+}
+
+func (q *Queries) TouchUserLastUsed(ctx context.Context, arg TouchUserLastUsedParams) error {
+	_, err := q.db.Exec(ctx, touchUserLastUsed, arg.ID, arg.LastUsedAt)
+	return err
 }
 
 const updatePlan = `-- name: UpdatePlan :execrows
@@ -880,26 +966,31 @@ func (q *Queries) UpdateUserRemark(ctx context.Context, arg UpdateUserRemarkPara
 	return result.RowsAffected(), nil
 }
 
-const upsertProvision = `-- name: UpsertProvision :exec
-INSERT INTO provision (user_id, server_id, email, status, last_error, retry_count, synced_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
+const upsertProvision = `-- name: UpsertProvision :one
+INSERT INTO provision (user_id, server_id, email, status, last_error, retry_count, synced_at, cred_version)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 ON CONFLICT (user_id, server_id) DO UPDATE
 SET email = EXCLUDED.email, status = EXCLUDED.status, last_error = EXCLUDED.last_error,
-    retry_count = EXCLUDED.retry_count, synced_at = COALESCE(EXCLUDED.synced_at, provision.synced_at), updated_at = now()
+    retry_count = EXCLUDED.retry_count, synced_at = COALESCE(EXCLUDED.synced_at, provision.synced_at),
+    cred_version = CASE WHEN EXCLUDED.status = 'synced' THEN EXCLUDED.cred_version ELSE provision.cred_version END,
+    updated_at = now()
+RETURNING id
 `
 
 type UpsertProvisionParams struct {
-	UserID     int64
-	ServerID   int64
-	Email      string
-	Status     string
-	LastError  string
-	RetryCount int32
-	SyncedAt   pgtype.Timestamptz
+	UserID      int64
+	ServerID    int64
+	Email       string
+	Status      string
+	LastError   string
+	RetryCount  int32
+	SyncedAt    pgtype.Timestamptz
+	CredVersion int32
 }
 
-func (q *Queries) UpsertProvision(ctx context.Context, arg UpsertProvisionParams) error {
-	_, err := q.db.Exec(ctx, upsertProvision,
+// cred_version 只在写面板成功（synced）时推进；失败时保留原值，下次对账继续换凭据
+func (q *Queries) UpsertProvision(ctx context.Context, arg UpsertProvisionParams) (int64, error) {
+	row := q.db.QueryRow(ctx, upsertProvision,
 		arg.UserID,
 		arg.ServerID,
 		arg.Email,
@@ -907,6 +998,9 @@ func (q *Queries) UpsertProvision(ctx context.Context, arg UpsertProvisionParams
 		arg.LastError,
 		arg.RetryCount,
 		arg.SyncedAt,
+		arg.CredVersion,
 	)
-	return err
+	var id int64
+	err := row.Scan(&id)
+	return id, err
 }

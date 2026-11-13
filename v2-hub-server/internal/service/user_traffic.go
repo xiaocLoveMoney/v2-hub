@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"v2-hub-server/internal/dao/sqlcgen"
+	"v2-hub-server/internal/manager/panel"
 )
 
 // counterDelta 求面板计数的增量；读数变小视为面板侧清零，增量取当前读数（docs/03 §5.2 用量）。
@@ -42,6 +43,10 @@ func (s *UserService) CollectServerTraffic(ctx context.Context, serverID int64) 
 	for _, v := range provs {
 		byEmail[v.Email] = v
 	}
+	if err := s.collectOnline(ctx, p, serverID); err != nil {
+		// 在线状态只用于展示，采集失败不影响计量
+		slog.Warn("collect online clients", "server_id", serverID, "err", err)
+	}
 	now := s.now()
 	for _, c := range clients {
 		v, ok := byEmail[c.Email]
@@ -68,11 +73,35 @@ func (s *UserService) CollectServerTraffic(ctx context.Context, serverID int64) 
 			if err := saveQuota(ctx, q, row.ID, row.PlanID, qt, row.Status); err != nil {
 				return err
 			}
+			if err := q.TouchUserLastUsed(ctx, sqlcgen.TouchUserLastUsedParams{ID: row.ID, LastUsedAt: pgtype.Timestamptz{Time: now, Valid: true}}); err != nil {
+				return fmt.Errorf("touch last used of user %d: %w", row.ID, err)
+			}
 			return q.AddUserTraffic(ctx, sqlcgen.AddUserTrafficParams{UserID: row.ID, Hour: pgtype.Timestamptz{Time: hourOf(now), Valid: true}, Up: up, Down: down})
 		})
 		if err != nil {
 			return fmt.Errorf("account traffic of %s on server %d: %w", c.Email, serverID, err)
 		}
+	}
+	return nil
+}
+
+// collectOnline 记录这台面板上在线的 client（docs/03 §5.5）；面板不提供时不动现有记录。
+func (s *UserService) collectOnline(ctx context.Context, p panel.Provider, serverID int64) error {
+	if !p.Capabilities().OnlineClients {
+		return nil
+	}
+	emails, err := p.OnlineClients(ctx)
+	if err != nil {
+		return err
+	}
+	if emails == nil {
+		emails = []string{}
+	}
+	if err := s.q.SetServerProvisionsOnline(ctx, sqlcgen.SetServerProvisionsOnlineParams{ServerID: serverID, Emails: emails}); err != nil {
+		return fmt.Errorf("save online provisions of server %d: %w", serverID, err)
+	}
+	if err := s.q.SetServerOnlineClients(ctx, sqlcgen.SetServerOnlineClientsParams{ID: serverID, OnlineClients: int32(len(emails))}); err != nil {
+		return fmt.Errorf("save online count of server %d: %w", serverID, err)
 	}
 	return nil
 }

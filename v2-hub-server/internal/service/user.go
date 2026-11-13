@@ -10,6 +10,7 @@ import (
 	"net/netip"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -69,6 +70,8 @@ type UserService struct {
 	cfg     UserConfig
 	now     func() time.Time
 	trigger chan struct{}
+	// linkStamps 记每台服务器上次取链接时的入站 / 对外地址摘要（serverID → string）；进程重启后为空，会全量重取一次。
+	linkStamps sync.Map
 }
 
 // NewUserService 创建用户服务；now 为 nil 时用 time.Now，cfg.Location 为空时用本地时区。

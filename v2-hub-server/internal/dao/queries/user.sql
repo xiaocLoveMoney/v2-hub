@@ -113,19 +113,50 @@ WHERE u.deleted_at IS NULL AND i.server_id = $1;
 
 -- name: ListUsersByIDs :many
 -- 对账需要的用户信息：已有下发或期望下发到该服务器的用户（含待删除的）
-SELECT u.id, u.status, u.limit_ip, u.email_code, u.client_cred_enc, (u.deleted_at IS NOT NULL)::boolean AS is_deleted
+SELECT u.id, u.status, u.limit_ip, u.email_code, u.client_cred_enc, u.cred_version, (u.deleted_at IS NOT NULL)::boolean AS is_deleted
 FROM end_user u
 WHERE u.id = ANY(sqlc.arg(ids)::bigint[]);
 
 -- name: ListServerProvisions :many
-SELECT id, user_id, email, status, retry_count, last_up, last_down FROM provision WHERE server_id = $1;
+SELECT id, user_id, email, status, retry_count, last_up, last_down, cred_version,
+       (links_enc IS NOT NULL)::boolean AS has_links
+FROM provision WHERE server_id = $1;
 
--- name: UpsertProvision :exec
-INSERT INTO provision (user_id, server_id, email, status, last_error, retry_count, synced_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
+-- name: UpsertProvision :one
+-- cred_version 只在写面板成功（synced）时推进；失败时保留原值，下次对账继续换凭据
+INSERT INTO provision (user_id, server_id, email, status, last_error, retry_count, synced_at, cred_version)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 ON CONFLICT (user_id, server_id) DO UPDATE
 SET email = EXCLUDED.email, status = EXCLUDED.status, last_error = EXCLUDED.last_error,
-    retry_count = EXCLUDED.retry_count, synced_at = COALESCE(EXCLUDED.synced_at, provision.synced_at), updated_at = now();
+    retry_count = EXCLUDED.retry_count, synced_at = COALESCE(EXCLUDED.synced_at, provision.synced_at),
+    cred_version = CASE WHEN EXCLUDED.status = 'synced' THEN EXCLUDED.cred_version ELSE provision.cred_version END,
+    updated_at = now()
+RETURNING id;
+
+-- name: SetProvisionLinks :exec
+UPDATE provision SET links_enc = $2, links_synced_at = $3 WHERE id = $1;
+
+-- name: GetServerLinkFingerprint :one
+-- 影响分享链接的入站与对外地址摘要；变了就要重新向面板取全部链接（docs/03 §5.4 节点来源）
+SELECT md5(coalesce(string_agg(t.k, ';' ORDER BY t.k), ''))::text AS fingerprint
+FROM (
+  SELECT 'i' || i.id::text || ':' || i.synced_hash || ':' || i.is_enabled::text || ':' || i.is_missing::text || ':' ||
+         i.port::text || ':' || coalesce(i.drift_detected_at::text, '') AS k
+  FROM inbound i WHERE i.server_id = sqlc.arg(server_id)
+  UNION ALL
+  SELECT 'e' || e.id::text || ':' || e.address || ':' || e.port::text || ':' || e.is_disabled::text || ':' || e.is_missing::text AS k
+  FROM endpoint e JOIN inbound i ON i.id = e.inbound_id WHERE i.server_id = sqlc.arg(server_id)
+) t;
+
+-- name: SetServerProvisionsOnline :exec
+UPDATE provision SET is_online = (email = ANY(sqlc.arg(emails)::text[]))
+WHERE server_id = sqlc.arg(server_id) AND is_online <> (email = ANY(sqlc.arg(emails)::text[]));
+
+-- name: SetServerOnlineClients :exec
+UPDATE server SET online_clients = $2 WHERE id = $1 AND online_clients <> $2;
+
+-- name: TouchUserLastUsed :exec
+UPDATE end_user SET last_used_at = $2 WHERE id = $1;
 
 -- name: DeleteProvision :exec
 DELETE FROM provision WHERE user_id = $1 AND server_id = $2;
