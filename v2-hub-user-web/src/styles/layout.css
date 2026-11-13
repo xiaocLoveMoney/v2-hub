@@ -1,0 +1,274 @@
+/* 外壳：250px 白色侧栏 + 115px 主色色带，首行内容压在色带上（docs/06 §4 外壳） */
+.hub-shell {
+  min-height: 100vh;
+}
+
+.hub-sider {
+  position: fixed;
+  inset: 0 auto 0 0;
+  z-index: 30;
+  width: var(--hub-sider-width);
+  overflow-y: auto;
+  background: var(--hub-surface);
+  box-shadow: var(--hub-card-shadow);
+  transition: transform 0.2s;
+}
+
+.hub-brand {
+  display: grid;
+  place-items: center;
+  height: 60px;
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: var(--hub-heading);
+}
+
+.hub-menu {
+  margin: 0;
+  padding: 0 0 24px;
+  list-style: none;
+}
+
+.hub-menu-header {
+  padding: 18px 25px 6px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 1.3px;
+  text-transform: uppercase;
+  color: var(--hub-muted);
+}
+
+.hub-menu-link {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  height: 46px;
+  padding: 0 25px;
+  color: var(--hub-body);
+  font-weight: 500;
+}
+
+.hub-menu-link:hover {
+  color: var(--hub-primary);
+  background: var(--hub-surface-alt);
+}
+
+.hub-menu-link.active {
+  color: var(--hub-primary);
+  font-weight: 600;
+  background: var(--hub-surface-alt);
+  box-shadow: inset 4px 0 0 var(--hub-primary);
+}
+
+.hub-main {
+  position: relative;
+  min-height: 100vh;
+  margin-left: var(--hub-sider-width);
+  padding-bottom: 60px;
+}
+
+.hub-band {
+  position: absolute;
+  inset: 0 0 auto;
+  height: var(--hub-band-height);
+  background: var(--hub-primary);
+}
+
+.hub-topbar {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: var(--hub-topbar-height);
+  padding: 0 var(--hub-gap);
+  color: var(--hub-on-color);
+}
+
+.hub-topbar-toggle {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border: 0;
+  border-radius: var(--hub-radius);
+  background: transparent;
+  color: var(--hub-on-color);
+  cursor: pointer;
+}
+
+.hub-topbar-user {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-weight: 600;
+}
+
+.hub-content {
+  position: relative;
+  padding: 10px var(--hub-gap) 0;
+}
+
+.hub-page-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 62px;
+  margin-bottom: var(--hub-gap);
+  padding: 14px 25px;
+  background: var(--hub-surface);
+  border-radius: var(--hub-radius);
+  box-shadow: var(--hub-card-shadow);
+}
+
+.hub-page-header h1 {
+  font-size: 22px;
+}
+
+.hub-footer {
+  position: absolute;
+  inset: auto 0 0;
+  padding: 18px var(--hub-gap);
+  font-size: 12px;
+  color: var(--hub-muted);
+}
+
+.hub-sider-mask {
+  display: none;
+}
+
+.hub-grid-7-5 {
+  display: grid;
+  grid-template-columns: 7fr 5fr;
+  gap: var(--hub-gap);
+  align-items: start;
+}
+
+.hub-grid-2 {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--hub-gap);
+}
+
+/* 分屏登录页：左 1/3 表单，右 2/3 全高背景（docs/06 §5） */
+.hub-login {
+  display: grid;
+  grid-template-columns: minmax(360px, 1fr) 2fr;
+  min-height: 100vh;
+  background: var(--hub-surface);
+}
+
+.hub-login-form {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 48px;
+}
+
+.hub-login-form h1 {
+  margin-bottom: 6px;
+  font-size: 26px;
+  font-weight: 400;
+}
+
+.hub-login-form h1 strong {
+  font-weight: 800;
+}
+
+.hub-login-art {
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  padding: 48px;
+  overflow: hidden;
+  color: var(--hub-on-color);
+  background:
+    radial-gradient(circle at 20% 20%, rgb(255 255 255 / 18%), transparent 45%),
+    radial-gradient(circle at 80% 30%, var(--hub-info), transparent 55%),
+    linear-gradient(135deg, var(--hub-primary-hover), var(--hub-primary) 55%, var(--hub-primary-glow));
+}
+
+.hub-login-art::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(to top, rgb(0 0 0 / 55%), transparent 55%);
+}
+
+.hub-login-art > * {
+  position: relative;
+  z-index: 1;
+}
+
+.hub-login-art h2 {
+  margin-bottom: 8px;
+  font-size: 40px;
+  font-weight: 800;
+  color: var(--hub-on-color);
+}
+
+@media (width <= 1024px) {
+  .hub-sider {
+    transform: translateX(-100%);
+  }
+
+  .hub-shell.sider-open .hub-sider {
+    transform: none;
+  }
+
+  .hub-shell.sider-open .hub-sider-mask {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 20;
+    border: 0;
+    background: var(--hub-overlay);
+  }
+
+  .hub-main {
+    margin-left: 0;
+  }
+
+  .hub-grid-7-5,
+  .hub-grid-2 {
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
+}
+
+@media (width > 1024px) {
+  .hub-shell.sider-collapsed .hub-sider {
+    transform: translateX(-100%);
+  }
+
+  .hub-shell.sider-collapsed .hub-main {
+    margin-left: 0;
+  }
+}
+
+@media (width <= 768px) {
+  .hub-login {
+    grid-template-columns: 1fr;
+  }
+
+  .hub-login-art {
+    order: -1;
+    min-height: 180px;
+    padding: 24px;
+  }
+
+  .hub-login-art h2 {
+    font-size: 26px;
+  }
+
+  .hub-login-form {
+    padding: 28px 20px;
+  }
+
+  .hub-topbar,
+  .hub-content {
+    padding-inline: 16px;
+  }
+}
