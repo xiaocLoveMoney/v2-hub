@@ -166,6 +166,8 @@ func runServer(args []string) error {
 			Settings:       settings,
 			Mail:           mails,
 			Account:        account,
+			Content:        service.NewContentService(pool, sealer, settings, mails, nil),
+			Tickets:        service.NewTicketService(pool, settings, mails, nil),
 			Cookie:         api.CookieConfig{Secure: secureCookie},
 			TrustedProxies: trusted,
 		}),
