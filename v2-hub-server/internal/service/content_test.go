@@ -7,6 +7,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"v2-hub-server/internal/manager/panel"
 )
 
 type contentFixture struct {
@@ -371,6 +373,68 @@ func TestTicketConversationAndOwnership(t *testing.T) {
 	}
 	if _, err := f.tickets.GetOwn(ctx, alice, d.ID); err != nil {
 		t.Fatalf("existing tickets stay readable when the feature is off: %v", err)
+	}
+}
+
+// 删除用户（docs/03 §5.2）：未关闭的工单当场删除；没有面板 client 的用户当场清除，已关闭的工单随之级联删除。
+func TestDeleteUserRemovesTicketsAndPurgesUnprovisionedUser(t *testing.T) {
+	f := newContentFixture(t)
+	ctx := context.Background()
+	plan := f.plan(t, "basic", PlanQuota{TrafficLimit: gib, DurationDays: 30})
+	alice := f.principal(t, "alice", 0)   // 没有套餐，也就没有面板 client
+	bob := f.principal(t, "bob", plan.ID) // 有套餐，对账后在面板上有 client
+	f.reconcile(t)
+
+	count := func(sql string, id int64) (n int) {
+		t.Helper()
+		if err := f.pool.QueryRow(ctx, sql, id).Scan(&n); err != nil {
+			t.Fatalf("count: %v", err)
+		}
+		return n
+	}
+	const ticketsOf, userRows = `SELECT count(*) FROM ticket WHERE user_id = $1`, `SELECT count(*) FROM end_user WHERE id = $1`
+	for _, p := range []*UserPrincipal{alice, bob} {
+		closed, err := f.tickets.Create(ctx, p, "已解决", "谢谢")
+		if err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+		if _, err := f.tickets.CloseOwn(ctx, p, closed.ID); err != nil {
+			t.Fatalf("CloseOwn: %v", err)
+		}
+		if _, err := f.tickets.Create(ctx, p, "还没解决", "在吗"); err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+	}
+
+	if err := f.users.DeleteUser(ctx, f.actor, alice.UserID, nil); err != nil {
+		t.Fatalf("DeleteUser alice: %v", err)
+	}
+	if n := count(userRows, alice.UserID); n != 0 {
+		t.Fatalf("user without panel clients must be purged at once, rows = %d", n)
+	}
+	if n := count(ticketsOf, alice.UserID); n != 0 {
+		t.Fatalf("tickets of a purged user = %d, want 0", n)
+	}
+
+	// 面板不可达：bob 留在待删除状态，但未关闭的工单已经删掉，只剩已关闭的那张
+	f.fleet.get(fakeBase).FailWith(&panel.Error{Kind: panel.KindUnreachable, Message: "超时"})
+	if err := f.users.DeleteUser(ctx, f.actor, bob.UserID, nil); err != nil {
+		t.Fatalf("DeleteUser bob: %v", err)
+	}
+	if n := count(userRows, bob.UserID); n != 1 {
+		t.Fatalf("user with panel clients must wait for reconcile, rows = %d", n)
+	}
+	if n := count(ticketsOf, bob.UserID); n != 1 {
+		t.Fatalf("tickets of a pending-delete user = %d, want only the closed one", n)
+	}
+	page, err := f.tickets.List(ctx, TicketFilter{}, PageQuery{Page: 1, PageSize: 20})
+	if err != nil || page.Total != 1 {
+		t.Fatalf("admin ticket list = %+v, %v", page, err)
+	}
+	f.fleet.get(fakeBase).FailWith(nil)
+	f.reconcile(t)
+	if n := count(userRows, bob.UserID); n != 0 {
+		t.Fatalf("user must be purged after reconcile, rows = %d", n)
 	}
 }
 
