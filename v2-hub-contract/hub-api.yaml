@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: v2-hub API
-  version: 0.4.0
+  version: 0.4.1
   description: |
     v2-hub 对外接口契约（hub-server 提供，v2-hub-admin-web / v2-hub-user-web 消费）。
     - 管理端接口前缀 /api/admin，客户端接口前缀 /api/user，订阅端点前缀 /sub。
@@ -17,6 +17,7 @@ info:
     0.2.6：M3 客户后台与订阅（docs/03 §5.3–§5.5）——终端用户登录 / 两步验证 / 改口令、仪表盘、用量、节点、订阅地址与重置、
       登录记录、订阅记录、订阅端点 /sub/{token}；管理端新增重置用户订阅、清除用户两步验证、订阅记录；新增错误码 account_disabled。
     0.2.7：管理员建用户、重置用户口令的口令长度放宽为 8–128（docs/03 §5.3，原误用管理员的 12 位下限）；xray 格式的订阅说明改为每节点一份完整配置。
+    0.4.1：M6 客户端链式（docs/03 §5.18）——链式规则与自有落地节点接口；会话信息带套餐的链式开关。
 servers:
   - url: http://127.0.0.1:8080
     description: 本地开发
@@ -51,6 +52,8 @@ tags:
     description: 客户后台数据：仪表盘、用量、节点、订阅地址、登录与订阅记录（docs/03 §5.4、§5.5）；身份只取自会话（R8）
   - name: user-shop
     description: 商店、下单、钱包与充值（docs/03 §5.12–§5.16）；身份只取自会话（R8）
+  - name: user-chain
+    description: 链式代理：链式规则与自有落地节点（docs/03 §5.18）；身份只取自会话（R8）
   - name: payment
     description: 支付网关回调（docs/03 §5.15）
   - name: subscription
@@ -3447,6 +3450,207 @@ paths:
         "400": { $ref: "#/components/responses/InvalidArgument" }
         "404": { $ref: "#/components/responses/NotFound" }
 
+  /api/user/chain:
+    get:
+      tags: [user-chain]
+      operationId: getChainOverview
+      summary: 链式代理总览：开关、上限、规则、自有落地节点与可选节点（docs/03 §5.18）
+      description: |
+        套餐没开链式时照常返回（allowed 为 false，已有规则状态为阻断），页面据此说明原因。
+      security: [{ userSession: [] }]
+      responses:
+        "200":
+          description: 链式代理总览
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/ChainOverview" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/UserForbidden" }
+  /api/user/chain/rules:
+    post:
+      tags: [user-chain]
+      operationId: createChainRule
+      summary: 新建一条链式规则
+      description: |
+        入口与落地（平台节点时）必须是本人当前可用的节点；落地二选一。
+        套餐没开链式、或落地是自有节点而套餐没开自有落地时返回 403 feature_disabled；
+        落地是 hysteria2、入口与落地相同、超过上限返回 400；同一（入口，落地）已有规则返回 409。
+      security: [{ userSession: [] }]
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ChainRuleInput" }
+      responses:
+        "200":
+          description: 新建的规则
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/ChainRule" }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/UserForbidden" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /api/user/chain/rules/{id}:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    put:
+      tags: [user-chain]
+      operationId: updateChainRule
+      summary: 改规则的名称与启用开关；他人的返回 404（R8）
+      description: |
+        入口与落地不能改，要换线路请删除后新建。套餐没开链式时返回 403 feature_disabled。
+      security: [{ userSession: [] }]
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ChainRuleUpdateInput" }
+      responses:
+        "200":
+          description: 改后的规则
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/ChainRule" }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/UserForbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      tags: [user-chain]
+      operationId: deleteChainRule
+      summary: 删除规则；套餐没开链式时也允许；他人的返回 404（R8）
+      security: [{ userSession: [] }]
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      responses:
+        "200":
+          description: 已删除
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Envelope" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/UserForbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/user/chain/custom-nodes:
+    post:
+      tags: [user-chain]
+      operationId: createCustomNode
+      summary: 添加一个自有落地节点
+      description: |
+        链接保存时解析校验，解析不了或协议不支持返回 400；套餐没开自有落地返回 403 feature_disabled；
+        超过上限返回 400；同名返回 409。平台不向该地址发起任何连接（Ruling-38）。
+      security: [{ userSession: [] }]
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CustomNodeInput" }
+      responses:
+        "200":
+          description: 新建的自有落地节点
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/CustomNode" }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/UserForbidden" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /api/user/chain/custom-nodes/{id}:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    put:
+      tags: [user-chain]
+      operationId: updateCustomNode
+      summary: 改自有落地节点的名称或链接；他人的返回 404（R8）
+      security: [{ userSession: [] }]
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CustomNodeUpdateInput" }
+      responses:
+        "200":
+          description: 改后的自有落地节点
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/CustomNode" }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/UserForbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+    delete:
+      tags: [user-chain]
+      operationId: deleteCustomNode
+      summary: 删除自有落地节点，引用它的规则一并删除；他人的返回 404（R8）
+      security: [{ userSession: [] }]
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      responses:
+        "200":
+          description: 已删除
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Envelope" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/UserForbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/user/chain/custom-nodes/{id}/link:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    get:
+      tags: [user-chain]
+      operationId: getCustomNodeLink
+      summary: 取自有落地节点的原链接（凭据）；他人的返回 404（R8）
+      security: [{ userSession: [] }]
+      responses:
+        "200":
+          description: 原链接
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/NodeLink" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/UserForbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
   /sub/{token}:
     get:
       tags: [subscription]
@@ -4112,6 +4316,13 @@ components:
         totpEnabled: { type: boolean }
         csrfToken: { type: string }
         impersonated: { type: boolean, description: 真 = 管理员代入的只读会话，除退出外的写请求都会被拒（0.4.0，Ruling-33） }
+        features:
+          type: object
+          description: 当前套餐开了哪些功能，决定菜单显隐；后端仍做最终校验（0.4.1）
+          required: [clientChain, customNode]
+          properties:
+            clientChain: { type: boolean, description: 可以使用客户端链式 }
+            customNode: { type: boolean, description: 可以添加自有落地节点 }
     UserSessionEnvelope:
       allOf:
         - $ref: "#/components/schemas/Envelope"
@@ -4979,3 +5190,101 @@ components:
       properties:
         amount: { type: integer, format: int64, description: 入账金额（分） }
         balance: { type: integer, format: int64, description: 入账后的余额 }
+    ChainStatus:
+      type: string
+      enum: [ok, blocked]
+      description: ok = 通畅（配置与授权成立，平台不探测连通性，Ruling-38）；blocked = 阻断，不进订阅
+    ChainBlockedReason:
+      type: string
+      enum: ["", plan, entry, exit]
+      description: 阻断原因；plan = 套餐不支持，entry = 入口节点当前不可用，exit = 落地节点当前不可用；通畅时为空串
+    ChainExitKind:
+      type: string
+      enum: [node, custom]
+      description: node = 平台节点，custom = 自有落地节点
+    ChainNodeOption:
+      type: object
+      description: 新建规则时可选的平台节点（本人当前可用）
+      required: [id, name, region, protocol, canBeExit]
+      properties:
+        id: { type: integer, format: int64 }
+        name: { type: string }
+        region: { type: string }
+        protocol: { type: string }
+        canBeExit: { type: boolean, description: 能否作落地；hysteria2 不能 }
+    ChainRule:
+      type: object
+      required: [id, name, displayName, entry, exit, isEnabled, status, blockedReason, createdAt]
+      properties:
+        id: { type: integer, format: int64 }
+        name: { type: string, description: 用户起的名称，没起为空串 }
+        displayName: { type: string, description: 订阅里显示的节点名；没起名称时为“入口名 → 落地名” }
+        entry:
+          type: object
+          required: [nodeId, name]
+          properties:
+            nodeId: { type: integer, format: int64 }
+            name: { type: string }
+        exit:
+          type: object
+          required: [kind, id, name, protocol]
+          properties:
+            kind: { $ref: "#/components/schemas/ChainExitKind" }
+            id: { type: integer, format: int64, description: 平台节点 id 或自有落地节点 id，取决于 kind }
+            name: { type: string }
+            protocol: { type: string }
+        isEnabled: { type: boolean }
+        status: { $ref: "#/components/schemas/ChainStatus" }
+        blockedReason: { $ref: "#/components/schemas/ChainBlockedReason" }
+        createdAt: { type: string, format: date-time }
+    ChainRuleInput:
+      type: object
+      required: [entryNodeId]
+      description: exitNodeId 与 exitCustomNodeId 必须恰好给一个
+      properties:
+        entryNodeId: { type: integer, format: int64, minimum: 1 }
+        exitNodeId: { type: integer, format: int64, minimum: 1 }
+        exitCustomNodeId: { type: integer, format: int64, minimum: 1 }
+        name: { type: string, maxLength: 64, description: 可选；省略或空串 = 用“入口名 → 落地名” }
+        isEnabled: { type: boolean, default: true }
+    ChainRuleUpdateInput:
+      type: object
+      required: [name, isEnabled]
+      properties:
+        name: { type: string, maxLength: 64 }
+        isEnabled: { type: boolean }
+    CustomNode:
+      type: object
+      description: 自有落地节点；原链接属于凭据，不在这里返回
+      required: [id, name, protocol, address, port, ruleCount, createdAt]
+      properties:
+        id: { type: integer, format: int64 }
+        name: { type: string }
+        protocol: { type: string, enum: [vless, vmess, trojan, shadowsocks, socks] }
+        address: { type: string }
+        port: { type: integer, minimum: 1, maximum: 65535 }
+        ruleCount: { type: integer, description: 引用它的规则数；删除前据此提示 }
+        createdAt: { type: string, format: date-time }
+    CustomNodeInput:
+      type: object
+      required: [link]
+      properties:
+        link: { type: string, minLength: 1, maxLength: 2048, description: "分享链接（vless / vmess / trojan / ss）或 socks5://[用户名:口令@]地址:端口" }
+        name: { type: string, maxLength: 64, description: 可选；省略或空串 = 取链接里的名称 }
+    CustomNodeUpdateInput:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 64 }
+        link: { type: string, minLength: 1, maxLength: 2048, description: 省略 = 不改链接 }
+    ChainOverview:
+      type: object
+      required: [allowed, customNodeAllowed, maxRules, maxCustomNodes, rules, customNodes, nodes]
+      properties:
+        allowed: { type: boolean, description: 套餐是否允许客户端链式 }
+        customNodeAllowed: { type: boolean, description: 套餐是否允许自有落地节点 }
+        maxRules: { type: integer }
+        maxCustomNodes: { type: integer }
+        rules: { type: array, items: { $ref: "#/components/schemas/ChainRule" } }
+        customNodes: { type: array, items: { $ref: "#/components/schemas/CustomNode" } }
+        nodes: { type: array, items: { $ref: "#/components/schemas/ChainNodeOption" } }
