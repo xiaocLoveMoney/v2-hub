@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { visibleMenu } from './menu'
-import { chainStatusLabel, isValidChainName } from './pages/chain/labels'
+import { chainStatusLabel, isValidChainName, serverRuleState } from './pages/chain/labels'
 import { TEST_CSRF, mockServer, ok, renderApp } from './test/harness'
 
 const NOW = '2026-11-13T00:00:00Z'
@@ -9,12 +9,12 @@ const site = {
   siteName: '测试站', registerMode: 'invite', emailVerifyRequired: false, mailEnabled: false, checkinEnabled: false, ticketEnabled: false, sharedEnabled: false,
   shopEnabled: false, currency: 'CNY',
 }
-const features = { clientChain: true, customNode: true }
+const features = { clientChain: true, customNode: true, serverChain: false }
 const session = { user: { id: 7, username: 'alice', status: 'active', email: null, isEmailVerified: false }, csrfToken: TEST_CSRF, totpEnabled: false, impersonated: false, features }
 const nodes = [
-  { id: 1, name: '香港 A', region: 'HK', protocol: 'vless', canBeExit: true },
-  { id: 2, name: '美国 B', region: 'US', protocol: 'trojan', canBeExit: true },
-  { id: 3, name: '日本 Hy2', region: 'JP', protocol: 'hysteria2', canBeExit: false },
+  { id: 1, name: '香港 A', region: 'HK', protocol: 'vless', canBeExit: true, canBeServerEntry: true },
+  { id: 2, name: '美国 B', region: 'US', protocol: 'trojan', canBeExit: true, canBeServerEntry: true },
+  { id: 3, name: '日本 Hy2', region: 'JP', protocol: 'hysteria2', canBeExit: false, canBeServerEntry: false },
 ]
 const customNode = { id: 9, name: '自家 VPS', protocol: 'socks', address: '203.0.113.5', port: 1080, ruleCount: 1, createdAt: NOW }
 const okRule = {
@@ -25,7 +25,10 @@ const blockedRule = {
   id: 22, name: '回家', displayName: '回家', entry: { nodeId: 1, name: '香港 A' }, exit: { kind: 'custom', id: 9, name: '自家 VPS', protocol: 'socks' },
   isEnabled: true, status: 'blocked', blockedReason: 'exit', createdAt: NOW,
 }
-const overview = { allowed: true, customNodeAllowed: true, maxRules: 20, maxCustomNodes: 10, rules: [okRule, blockedRule], customNodes: [customNode], nodes }
+const overview = {
+  allowed: true, customNodeAllowed: true, serverAllowed: false, maxRules: 20, maxCustomNodes: 10, maxServerRules: 10,
+  rules: [okRule, blockedRule], customNodes: [customNode], serverRules: [] as unknown[], nodes,
+}
 
 /** 已登录用户进链式代理页会发的请求。 */
 function signedIn(chain: unknown, me: unknown = session) {
@@ -52,7 +55,8 @@ describe('链式代理文案与菜单', () => {
     expect(isValidChainName('a\nb')).toBe(false)
     const labels = (f?: typeof features) => visibleMenu(site as never, f).map((m) => m.label)
     expect(labels(features)).toContain('链式代理')
-    expect(labels({ clientChain: false, customNode: true })).not.toContain('链式代理')
+    expect(labels({ clientChain: false, customNode: true, serverChain: false })).not.toContain('链式代理')
+    expect(labels({ clientChain: false, customNode: false, serverChain: true })).toContain('链式代理')
     expect(labels()).not.toContain('链式代理')
   })
 })
@@ -122,7 +126,7 @@ describe('链式代理页', () => {
   it('查看链接才单独请求；套餐不允许时给横幅并禁用新建与添加，删除仍可用', async () => {
     const link = 'socks5://203.0.113.5:1080'
     const calls = mockServer({
-      ...signedIn({ ...overview, allowed: false, customNodeAllowed: false }, { ...session, features: { clientChain: false, customNode: false } }),
+      ...signedIn({ ...overview, allowed: false, customNodeAllowed: false }, { ...session, features: { clientChain: false, customNode: false, serverChain: false } }),
       'GET /api/user/chain/custom-nodes/9/link': () => ok({ link }),
     })
     renderApp('/chain')
@@ -138,5 +142,72 @@ describe('链式代理页', () => {
     fireEvent.click(screen.getByRole('button', { name: '隐藏' }))
     expect(screen.queryByText(link)).toBeNull()
     expect(screen.getAllByRole('button', { name: '删除' })[0]).toHaveProperty('disabled', false)
+  })
+})
+
+describe('服务端链式（docs/03 §5.19）', () => {
+  const serverRule = {
+    id: 31, entry: { nodeId: 1, name: '香港 A' }, exit: { nodeId: 2, name: '美国 B', protocol: 'trojan' },
+    isEnabled: true, status: 'ok', blockedReason: '', applyStatus: 'applied', createdAt: NOW,
+  }
+  const serverOverview = { ...overview, allowed: false, customNodeAllowed: false, serverAllowed: true, rules: [], customNodes: [], serverRules: [serverRule] }
+  const serverSession = { ...session, features: { clientChain: false, customNode: false, serverChain: true } }
+
+  it('状态文案：阻断优先，其次已停用，最后是下发情况', () => {
+    expect(serverRuleState(serverRule as never).label).toBe('生效')
+    expect(serverRuleState({ ...serverRule, applyStatus: 'pending' } as never).label).toBe('下发中')
+    expect(serverRuleState({ ...serverRule, applyStatus: 'failed' } as never).label).toBe('下发失败')
+    expect(serverRuleState({ ...serverRule, isEnabled: false, applyStatus: '' } as never).label).toBe('已停用')
+    expect(serverRuleState({ ...serverRule, status: 'blocked', blockedReason: 'exit', applyStatus: '' } as never).label).toBe('阻断 · 落地不可用')
+  })
+
+  it('只开服务端链式：菜单可见、客户端区给说明；新建时入口排除已有规则的节点，提交后整体重取', async () => {
+    let loads = 0
+    const calls = mockServer({
+      ...signedIn(serverOverview, serverSession),
+      'GET /api/user/chain': () => {
+        loads += 1
+        return ok(serverOverview)
+      },
+      'POST /api/user/chain/server-rules': () => ok({ ...serverRule, id: 32, entry: { nodeId: 2, name: '美国 B' }, exit: { nodeId: 1, name: '香港 A', protocol: 'vless' }, applyStatus: 'pending' }),
+    })
+    renderApp('/chain')
+    expect(await screen.findByText('生效')).toBeDefined()
+    expect(screen.getByRole('link', { name: /链式代理/ })).toBeDefined()
+    expect(screen.getByText(/当前套餐不支持客户端链式/)).toBeDefined()
+    expect(screen.queryByText(/当前套餐不支持链式代理/)).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: '新建服务端规则' }))
+    const dialog = await screen.findByRole('dialog')
+    const entrySelect = within(dialog).getByLabelText('入口节点') as HTMLSelectElement
+    expect([...entrySelect.options].map((o) => o.textContent)).toEqual(['请选择', '美国 B'])
+    fireEvent.change(entrySelect, { target: { value: '2' } })
+    const exitSelect = within(dialog).getByLabelText('落地节点') as HTMLSelectElement
+    expect([...exitSelect.options].map((o) => o.textContent)).toEqual(['请选择', '香港 A'])
+    fireEvent.change(exitSelect, { target: { value: '1' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: '创建' }))
+    await waitFor(() => expect(calls.some((c) => c.method === 'POST' && c.path === '/api/user/chain/server-rules')).toBe(true))
+    const post = calls.find((c) => c.method === 'POST')
+    expect(post?.csrf).toBe(TEST_CSRF)
+    expect(post?.body).toEqual({ entryNodeId: 2, exitNodeId: 1, isEnabled: true })
+    await waitFor(() => expect(loads).toBe(2))
+  })
+
+  it('有规则在下发中时给说明；停用即时保存；删除前确认', async () => {
+    const pending = { ...serverOverview, serverRules: [{ ...serverRule, applyStatus: 'pending' }] }
+    const calls = mockServer({
+      ...signedIn(pending, serverSession),
+      'PUT /api/user/chain/server-rules/31': () => ok({ ...serverRule, isEnabled: false, applyStatus: '' }),
+      'DELETE /api/user/chain/server-rules/31': () => ok(null),
+    })
+    renderApp('/chain')
+    expect(await screen.findByText(/下发中：同一台服务器两次下发至少间隔 60 秒/)).toBeDefined()
+    const row = screen.getByText('下发中').closest('tr') as HTMLElement
+    fireEvent.click(within(row).getByRole('button', { name: '停用' }))
+    await waitFor(() => expect(calls.find((c) => c.method === 'PUT')?.body).toEqual({ isEnabled: false }))
+    fireEvent.click(within(row).getByRole('button', { name: '删除' }))
+    const dialog = await screen.findByRole('dialog')
+    fireEvent.click(within(dialog).getByRole('button', { name: '删除' }))
+    await waitFor(() => expect(calls.some((c) => c.method === 'DELETE' && c.path === '/api/user/chain/server-rules/31')).toBe(true))
   })
 })

@@ -52,11 +52,11 @@ export const MENU: readonly MenuEntry[] = [
   { path: ROUTES.SUBSCRIBE_LOGS, label: '订阅记录', icon: <History size={ICON_SIZE} />, group: GROUP_USE },
   { path: ROUTES.SHARED_ACCOUNTS, label: '共享账号', icon: <KeyRound size={ICON_SIZE} />, group: GROUP_USE, isVisible: (site) => site.sharedEnabled },
   { path: ROUTES.TICKETS, label: '工单支持', icon: <LifeBuoy size={ICON_SIZE} />, group: GROUP_USE, isVisible: (site) => site.ticketEnabled },
-  { path: ROUTES.CHAIN, label: '链式代理', icon: <GitFork size={ICON_SIZE} />, group: GROUP_USE, isVisible: (_site, features) => features.clientChain },
+  { path: ROUTES.CHAIN, label: '链式代理', icon: <GitFork size={ICON_SIZE} />, group: GROUP_USE, isVisible: (_site, features) => features.clientChain || features.serverChain },
 ]
 
 /** 会话里没有 features 时（旧版后端）按全部关闭处理。 */
-export const NO_FEATURES: UserFeatures = { clientChain: false, customNode: false }
+export const NO_FEATURES: UserFeatures = { clientChain: false, customNode: false, serverChain: false }
 
 /** 按站点设置与套餐功能过滤菜单表，返回新数组。 */
 export function visibleMenu(site: SiteInfo, features: UserFeatures = NO_FEATURES): MenuEntry[] {

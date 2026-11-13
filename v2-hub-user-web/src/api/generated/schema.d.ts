@@ -363,6 +363,64 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/admin/servers/{id}/chain-apply": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        /** 该服务器作为入口的服务端链式下发状态（server:read；docs/03 §5.19，0.4.2） */
+        get: operations["getServerChainApply"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/servers/{id}/chain-apply/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 清零失败次数并立即触发一次下发（server:write；docs/03 §3 C4，0.4.2）
+         * @description 仍受同一服务器两次下发至少间隔 60 秒的约束，所以返回的状态可能还是 pending。写审计。
+         */
+        post: operations["retryServerChainApply"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/server-chain-rules": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 全站服务端链式规则分页，按 id 倒序（server:read；只读，Ruling-41；0.4.2） */
+        get: operations["listServerChainRules"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/admin/servers/{id}/sync": {
         parameters: {
             query?: never;
@@ -2335,6 +2393,51 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/user/chain/server-rules": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 新建一条服务端链式规则（docs/03 §5.19，0.4.2）
+         * @description 入口与落地都必须是本人当前可用的平台节点，入口所在面板须支持改内核配置；落地不能是 hysteria2、不能与入口相同。
+         *     套餐没开服务端链式返回 403 feature_disabled；超过上限或节点不合要求返回 400；同一入口已有服务端规则返回 409。
+         *     规则保存后由后台下发到入口面板，状态见 applyStatus。
+         */
+        post: operations["createServerChainRule"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/user/chain/server-rules/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * 启用或停用服务端规则；他人的返回 404（R8）（0.4.2）
+         * @description 入口与落地不能改，要换线路请删除后新建。套餐没开服务端链式时返回 403 feature_disabled。
+         */
+        put: operations["updateServerChainRule"];
+        post?: never;
+        /** 删除服务端规则；套餐没开时也允许；他人的返回 404（R8）（0.4.2） */
+        delete: operations["deleteServerChainRule"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/sub/{token}": {
         parameters: {
             query?: never;
@@ -2694,6 +2797,11 @@ export interface components {
             allowClientChain: boolean;
             /** @default false */
             allowCustomNode: boolean;
+            /**
+             * @description 服务端链式（0.4.2，Ruling-41）
+             * @default false
+             */
+            allowServerChain: boolean;
             remark?: string;
             nodeGroupIds: number[];
             /**
@@ -2850,6 +2958,8 @@ export interface components {
                 clientChain: boolean;
                 /** @description 可以添加自有落地节点 */
                 customNode: boolean;
+                /** @description 可以使用服务端链式（0.4.2） */
+                serverChain: boolean;
             };
         };
         UserSessionEnvelope: components["schemas"]["Envelope"] & {
@@ -3842,6 +3952,8 @@ export interface components {
             protocol: string;
             /** @description 能否作落地；hysteria2 不能 */
             canBeExit: boolean;
+            /** @description 能否作服务端链式的入口：所在面板支持改内核配置（0.4.2） */
+            canBeServerEntry: boolean;
         };
         ChainRule: {
             /** Format: int64 */
@@ -3918,11 +4030,118 @@ export interface components {
             allowed: boolean;
             /** @description 套餐是否允许自有落地节点 */
             customNodeAllowed: boolean;
+            /** @description 套餐是否允许服务端链式（0.4.2） */
+            serverAllowed: boolean;
             maxRules: number;
             maxCustomNodes: number;
+            /** @description 0.4.2 */
+            maxServerRules: number;
             rules: components["schemas"]["ChainRule"][];
             customNodes: components["schemas"]["CustomNode"][];
+            /** @description 0.4.2 */
+            serverRules: components["schemas"]["ServerChainRule"][];
             nodes: components["schemas"]["ChainNodeOption"][];
+        };
+        /**
+         * @description 服务端规则的下发情况（docs/03 §5.19）；applied = 已在入口面板生效，pending = 下发中，failed = 入口服务器最近一次下发被回滚；规则阻断或停用时为空串
+         * @enum {string}
+         */
+        ServerChainApplyState: "" | "applied" | "pending" | "failed";
+        ServerChainRule: {
+            /** Format: int64 */
+            id: number;
+            entry: {
+                /** Format: int64 */
+                nodeId: number;
+                name: string;
+            };
+            exit: {
+                /** Format: int64 */
+                nodeId: number;
+                name: string;
+                protocol: string;
+            };
+            isEnabled: boolean;
+            status: components["schemas"]["ChainStatus"];
+            blockedReason: components["schemas"]["ChainBlockedReason"];
+            applyStatus: components["schemas"]["ServerChainApplyState"];
+            /** Format: date-time */
+            createdAt: string;
+        };
+        ServerChainRuleInput: {
+            /** Format: int64 */
+            entryNodeId: number;
+            /** Format: int64 */
+            exitNodeId: number;
+            /** @default true */
+            isEnabled: boolean;
+        };
+        ServerChainRuleUpdateInput: {
+            isEnabled: boolean;
+        };
+        /**
+         * @description 入口服务器的下发状态（docs/03 §3 C1–C5）；none = 从未有过服务端规则
+         * @enum {string}
+         */
+        ChainApplyStatus: "none" | "pending" | "applied" | "failed";
+        ChainApply: {
+            /** Format: int64 */
+            serverId: number;
+            /** @description 面板是否支持改内核配置；不支持时不会有服务端规则以它为入口 */
+            isSupported: boolean;
+            status: components["schemas"]["ChainApplyStatus"];
+            /** @description 期望生效的规则数（不阻断、启用且落地凭据已就绪） */
+            ruleCount: number;
+            /** @description 当前面板上生效的规则数 */
+            appliedRuleCount: number;
+            /** @description 同一期望的连续失败次数 */
+            failCount: number;
+            /** @description 失败次数已达上限，停止自动重试，等期望变化或手动重试 */
+            isRetryStopped: boolean;
+            /** @description 脱敏后的最近错误，没有为空串 */
+            lastError: string;
+            /** Format: date-time */
+            lastAttemptAt: string | null;
+            /**
+             * Format: date-time
+             * @description 失败退避到这个时刻
+             */
+            nextAttemptAt: string | null;
+            /** Format: date-time */
+            appliedAt: string | null;
+        };
+        AdminServerChainRule: {
+            /** Format: int64 */
+            id: number;
+            user: {
+                /** Format: int64 */
+                id: number;
+                username: string;
+            };
+            entry: {
+                /** Format: int64 */
+                nodeId: number;
+                name: string;
+                /** Format: int64 */
+                serverId: number;
+                serverName: string;
+            };
+            exit: {
+                /** Format: int64 */
+                nodeId: number;
+                name: string;
+            };
+            isEnabled: boolean;
+            status: components["schemas"]["ChainStatus"];
+            blockedReason: components["schemas"]["ChainBlockedReason"];
+            applyStatus: components["schemas"]["ServerChainApplyState"];
+            /** Format: date-time */
+            createdAt: string;
+        };
+        AdminServerChainRulePage: {
+            items: components["schemas"]["AdminServerChainRule"][];
+            /** Format: int64 */
+            total: number;
         };
     };
     responses: {
@@ -4750,6 +4969,93 @@ export interface operations {
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["PermissionDenied"];
             404: components["responses"]["NotFound"];
+        };
+    };
+    getServerChainApply: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 下发状态 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["ChainApply"];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    retryServerChainApply: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 触发后的下发状态 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["ChainApply"];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    listServerChainRules: {
+        parameters: {
+            query?: {
+                page?: components["parameters"]["Page"];
+                pageSize?: components["parameters"]["PageSize"];
+                userId?: number;
+                /** @description 入口所在服务器 */
+                serverId?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 规则分页 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["AdminServerChainRulePage"];
+                    };
+                };
+            };
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
         };
     };
     syncServer: {
@@ -8493,6 +8799,99 @@ export interface operations {
                     "application/json": components["schemas"]["Envelope"] & {
                         data?: components["schemas"]["NodeLink"];
                     };
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["UserForbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    createServerChainRule: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ServerChainRuleInput"];
+            };
+        };
+        responses: {
+            /** @description 新建的规则 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["ServerChainRule"];
+                    };
+                };
+            };
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["UserForbidden"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    updateServerChainRule: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ServerChainRuleUpdateInput"];
+            };
+        };
+        responses: {
+            /** @description 改后的规则 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["ServerChainRule"];
+                    };
+                };
+            };
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["UserForbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    deleteServerChainRule: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 已删除 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"];
                 };
             };
             401: components["responses"]["Unauthenticated"];

@@ -1,4 +1,4 @@
-import type { ChainBlockedReason, ChainRule } from '../../api/client'
+import type { ChainBlockedReason, ChainRule, ServerChainRule } from '../../api/client'
 
 /** 名称上限，与 hub-api.yaml 的 ChainRuleInput / CustomNodeInput 一致。 */
 export const MAX_CHAIN_NAME_LEN = 64
@@ -35,4 +35,24 @@ export function isValidChainName(name: string): boolean {
   // 按字符计数，与后端按 rune 计数一致
   const length = [...name].length
   return length <= MAX_CHAIN_NAME_LEN && !CONTROL_CHAR_PATTERN.test(name)
+}
+
+type BadgeTone = 'success' | 'danger' | 'warning' | 'info' | 'light'
+
+const SERVER_APPLY_META: Record<Exclude<ServerChainRule['applyStatus'], ''>, { label: string; tone: BadgeTone }> = {
+  applied: { label: '生效', tone: 'success' },
+  pending: { label: '下发中', tone: 'info' },
+  failed: { label: '下发失败', tone: 'danger' },
+}
+
+/** 服务端规则的状态显示（docs/03 §5.19）：阻断（带原因）优先，其次已停用，最后是下发情况。 */
+export function serverRuleState(rule: ServerChainRule): { label: string; tone: BadgeTone } {
+  if (rule.status !== STATUS_OK) {
+    const reason = rule.blockedReason === '' ? '' : ` · ${BLOCKED_REASON_LABELS[rule.blockedReason]}`
+    return { label: `阻断${reason}`, tone: 'danger' }
+  }
+  if (!rule.isEnabled || rule.applyStatus === '') {
+    return { label: '已停用', tone: 'light' }
+  }
+  return SERVER_APPLY_META[rule.applyStatus]
 }

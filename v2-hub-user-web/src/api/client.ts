@@ -41,6 +41,7 @@ export type ChainRule = components['schemas']['ChainRule']
 export type ChainNodeOption = components['schemas']['ChainNodeOption']
 export type ChainBlockedReason = components['schemas']['ChainBlockedReason']
 export type CustomNode = components['schemas']['CustomNode']
+export type ServerChainRule = components['schemas']['ServerChainRule']
 
 /** 分页结果（hub-api.yaml 各分页接口的 data 形状）。 */
 export interface PageData<T> {
