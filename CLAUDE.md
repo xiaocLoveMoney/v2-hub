@@ -34,7 +34,7 @@ cd v2-hub-contract/deploy/it && bash run_all.sh
 - 前端静态文件放 MinIO，Caddy 同域反代 `/api`、`/sub`（Ruling-5、Ruling-6）。
 
 契约（全部在 v2-hub-contract/）：`hub-api.yaml`（server → 前端）、`deploy/init.sql`（server 的表结构）、
-`upstream/3x-ui/openapi-v3.11.0.json`（3x-ui → server 的上游基准）。契约版本用 git tag `vX.Y`，当前 `v0.8`。
+`upstream/3x-ui/openapi-v3.11.0.json`（3x-ui → server 的上游基准）。契约版本用 git tag `vX.Y`，当前 `v0.9`。
 
 ## 跨目录纪律
 
@@ -74,6 +74,9 @@ GitHub 仓库设置见 `docs/github-仓库设置清单.md`。
 - M7 完成（2026-11-14，tag `v0.8`）：服务端链式（Ruling-39 – Ruling-41）：用户自助配置“入口 → 落地”，平台在入口面板 Xray 模板里增删 `hub-r{id}`
   出站与按入站 + 用户匹配的路由；以入口服务器为单位整体对账，加密备份、重启后确认运行、失败回滚与退避；管理端看下发状态与重试；IT-9 通过。
   真实外网流量经落地出网与管理端 M7 页面的浏览器实测未自动化，待人工验证。
-- 下一步是 M8（运营）。
+- M8 完成（2026-11-14，tag `v0.9`）：运营（Ruling-42 – Ruling-45）：管理端总览（按权限出区块）、服务器掉线告警与恢复通知（邮件 + Telegram，
+  Bot token 只走 `HUB_TELEGRAM_BOT_TOKEN`）、运营日报、落地页与公开套餐、客服入口、收支按月与 CSV 导出；用户端中英双语（自写 i18n，`src/i18n/`）；IT-10 通过。
+  真实 Telegram / SMTP 投递、英文界面人工通读与管理端 M8 页面的浏览器实测未自动化，待人工验证。
+- 路线图 M3–M8 已全部完成；后续工作待定。
 - 路线（2026-11-13，Ruling-17 – Ruling-22）：参考 SSPanel-Uim Malio 的功能与界面，自行实现；里程碑为
   M3 订阅与用户端基础 → M4 自助运营 → M5 商店与钱包 → M6 / M7 两种链式 → M8 运营，见 docs/07。
