@@ -1,4 +1,4 @@
-import { useEffect, useId, type ButtonHTMLAttributes, type CSSProperties, type InputHTMLAttributes, type ReactNode, type TextareaHTMLAttributes } from 'react'
+import { useEffect, useId, type ButtonHTMLAttributes, type CSSProperties, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes } from 'react'
 
 /** 设计系统的基础组件（docs/06 §4）。只负责外观与无障碍语义，不含业务逻辑。 */
 
@@ -120,6 +120,29 @@ export function TextAreaField({ label, hint, id, ...rest }: TextAreaFieldProps) 
         {label}
       </label>
       <textarea id={inputId} className="hub-input hub-textarea" {...rest} />
+      {hint !== undefined && <div className="hub-field-hint">{hint}</div>}
+    </div>
+  )
+}
+
+interface SelectFieldProps extends SelectHTMLAttributes<HTMLSelectElement> {
+  label: string
+  hint?: string
+  children: ReactNode
+}
+
+/** 带标签的下拉框；选项由调用方以 option / optgroup 传入。 */
+export function SelectField({ label, hint, id, children, ...rest }: SelectFieldProps) {
+  const autoId = useId()
+  const inputId = id ?? autoId
+  return (
+    <div className="hub-field">
+      <label className="hub-field-label" htmlFor={inputId}>
+        {label}
+      </label>
+      <select id={inputId} className="hub-input" {...rest}>
+        {children}
+      </select>
       {hint !== undefined && <div className="hub-field-hint">{hint}</div>}
     </div>
   )
