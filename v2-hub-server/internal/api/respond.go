@@ -24,6 +24,7 @@ const (
 	queryPage         = "page"
 	queryPageSize     = "pageSize"
 	pathParamID       = "id"
+	subPathPrefix     = "/sub/"
 )
 
 // envelope 是业务接口统一响应信封（hub-api.yaml components.schemas.Envelope）。
@@ -43,6 +44,7 @@ var statusByCode = map[service.Code]int{
 	service.CodeRateLimited:      http.StatusTooManyRequests,
 	service.CodeTOTPRequired:     http.StatusUnauthorized,
 	service.CodeUpstream:         http.StatusBadGateway,
+	service.CodeAccountDisabled:  http.StatusForbidden,
 }
 
 func writeOK(w http.ResponseWriter, data any) {
@@ -58,8 +60,35 @@ func writeError(w http.ResponseWriter, r *http.Request, err error) {
 			return
 		}
 	}
-	slog.Error("request failed", "method", r.Method, "path", r.URL.Path, "err", err)
+	slog.Error("request failed", "method", r.Method, "path", pathForLog(r), "err", err)
 	writeJSON(w, http.StatusInternalServerError, envelope{Code: string(service.CodeInternal), Message: msgInternal})
+}
+
+// plainError 把错误转成订阅端点用的（状态码，纯文本）；非业务错误记日志并返回 500。
+func plainError(r *http.Request, err error) (int, string) {
+	var se *service.Error
+	if errors.As(err, &se) {
+		if status, ok := statusByCode[se.Code]; ok {
+			return status, string(se.Code)
+		}
+	}
+	slog.Error("request failed", "method", r.Method, "path", pathForLog(r), "err", err)
+	return http.StatusInternalServerError, string(service.CodeInternal)
+}
+
+// pathForLog 返回可写进日志的路径：订阅地址里的 token 是凭据，只留前缀。
+func pathForLog(r *http.Request) string {
+	if strings.HasPrefix(r.URL.Path, subPathPrefix) {
+		return subPathPrefix + "***"
+	}
+	return r.URL.Path
+}
+
+// writeBody 写出响应体；状态码已写出，失败只能记录（常见原因是客户端提前断开）。
+func writeBody(w http.ResponseWriter, body []byte) {
+	if _, err := w.Write(body); err != nil {
+		slog.Warn("write response body", "err", err)
+	}
 }
 
 func badRequest(message string) error {

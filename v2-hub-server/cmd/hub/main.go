@@ -103,6 +103,11 @@ func runServer(args []string) error {
 	}
 
 	go job.RunSessionCleanup(ctx, auth, cfg.Auth.SessionCleanupInterval)
+	portalAuth, err := service.NewPortalAuthService(pool, toPortalAuthConfig(cfg), sealer, nil)
+	if err != nil {
+		return err
+	}
+	go job.RunSessionCleanup(ctx, portalAuth, cfg.Auth.SessionCleanupInterval)
 
 	// 面板实现注册表：新增面板类型（如 S-UI）只在这里加一行（Ruling-8）
 	registry := panel.NewRegistry(map[string]panel.Factory{xui.ProviderType: xui.New})
@@ -114,10 +119,15 @@ func runServer(args []string) error {
 	if err != nil {
 		return err
 	}
-	users := service.NewUserService(pool, sealer, panels, service.UserConfig{Location: quotaLoc}, nil)
+	users := service.NewUserService(pool, sealer, panels, service.UserConfig{Location: quotaLoc, Subscription: service.SubscriptionConfig{
+		BaseURL: cfg.Subscription.BaseURL, Title: cfg.Subscription.Title, UpdateIntervalHours: cfg.Subscription.UpdateIntervalHours,
+		InfoNodes: cfg.Subscription.InfoNodes, LogRetention: cfg.Subscription.LogRetention,
+	}}, nil)
 	go job.RunUserSync(ctx, users, job.UserSyncConfig{
 		TrafficInterval: cfg.User.TrafficInterval, ReconcileInterval: cfg.User.ReconcileInterval, Concurrency: cfg.Panel.Concurrency,
 	})
+
+	go job.RunSessionCleanup(ctx, job.PurgeFunc(users.PurgeSubscribeLogs), cfg.Auth.SessionCleanupInterval)
 
 	srv := &http.Server{
 		Addr: cfg.Server.ListenAddr,
@@ -128,6 +138,8 @@ func runServer(args []string) error {
 			RBAC:           service.NewRBACService(pool),
 			Panels:         panels,
 			Users:          users,
+			PortalAuth:     portalAuth,
+			Portal:         users,
 			Cookie:         api.CookieConfig{Secure: secureCookie},
 			TrustedProxies: trusted,
 		}),
@@ -166,6 +178,19 @@ func toAuthConfig(a config.AuthConfig) service.AuthConfig {
 		LoginWindow:          a.LoginWindow,
 		LoginLockout:         a.LoginLockout,
 		LoginMaxTrackedKeys:  a.LoginMaxTrackedKeys,
+	}
+}
+
+func toPortalAuthConfig(c config.Config) service.PortalAuthConfig {
+	return service.PortalAuthConfig{
+		SessionIdleTimeout:   c.Portal.SessionIdleTimeout,
+		SessionMaxAge:        c.Portal.SessionMaxAge,
+		SessionTouchInterval: c.Auth.SessionTouchInterval,
+		LoginMaxFailures:     c.Auth.LoginMaxFailures,
+		LoginWindow:          c.Auth.LoginWindow,
+		LoginLockout:         c.Auth.LoginLockout,
+		LoginMaxTrackedKeys:  c.Auth.LoginMaxTrackedKeys,
+		LoginLogRetention:    c.Portal.LoginLogRetention,
 	}
 }
 

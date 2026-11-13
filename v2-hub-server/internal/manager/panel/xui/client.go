@@ -60,7 +60,7 @@ func New(cfg panel.ConnConfig) (panel.Provider, error) {
 
 // Capabilities 实现 panel.Provider。
 func (c *Client) Capabilities() panel.Capabilities {
-	return panel.Capabilities{CoreType: panel.CoreXray, Endpoints: true, MultiInboundClients: true}
+	return panel.Capabilities{CoreType: panel.CoreXray, Endpoints: true, MultiInboundClients: true, OnlineClients: true}
 }
 
 // call 发起一次 API 调用，校验信封并把 obj 解到 out（out 为 nil 时忽略）。

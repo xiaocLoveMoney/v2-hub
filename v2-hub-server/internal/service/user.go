@@ -10,6 +10,7 @@ import (
 	"net/netip"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -59,6 +60,8 @@ var endUserNamePattern = regexp.MustCompile(`^[A-Za-z0-9_.@-]{3,64}$`)
 type UserConfig struct {
 	// Location 是自动续期与周期重置用的时区（每月几号、每周几、0 点）。
 	Location *time.Location
+	// Subscription 是订阅设置（docs/03 §5.4）。
+	Subscription SubscriptionConfig
 }
 
 // UserService 负责套餐、用户、配额、下发对账与用量（docs/03 §5.2）。面板操作经 PanelService 打开的 Provider（Ruling-8）。
@@ -69,6 +72,9 @@ type UserService struct {
 	cfg     UserConfig
 	now     func() time.Time
 	trigger chan struct{}
+	// linkStamps 记每台服务器上次取链接时的入站 / 对外地址摘要（serverID → string）；进程重启后为空，会全量重取一次。
+	linkStamps sync.Map
+	subGuards  subGuards
 }
 
 // NewUserService 创建用户服务；now 为 nil 时用 time.Now，cfg.Location 为空时用本地时区。
@@ -79,7 +85,16 @@ func NewUserService(pool *pgxpool.Pool, sealer *crypto.Sealer, panels *PanelServ
 	if cfg.Location == nil {
 		cfg.Location = time.Local
 	}
-	return &UserService{store: newStore(pool), sealer: sealer, panels: panels, cfg: cfg, now: now, trigger: make(chan struct{}, 1)}
+	if cfg.Subscription.Title == "" {
+		cfg.Subscription.Title = defaultSubscriptionTitle
+	}
+	if cfg.Subscription.UpdateIntervalHours <= 0 {
+		cfg.Subscription.UpdateIntervalHours = defaultSubscriptionIntervalHours
+	}
+	if cfg.Subscription.LogRetention <= 0 {
+		cfg.Subscription.LogRetention = defaultSubscribeLogRetention
+	}
+	return &UserService{store: newStore(pool), sealer: sealer, panels: panels, cfg: cfg, now: now, trigger: make(chan struct{}, 1), subGuards: newSubGuards(now)}
 }
 
 // ---- 套餐 ----------------------------------------------------------------------
@@ -331,6 +346,9 @@ type User struct {
 	Quota      Quota
 	Provisions ProvisionCounts
 	CreatedAt  time.Time
+	// TOTPEnabled 表示用户已开启两步验证；LastUsedAt 是最近一次产生流量的时间（nil = 从未使用）。
+	TOTPEnabled bool
+	LastUsedAt  *time.Time
 }
 
 // UserFilter 是用户列表的筛选条件。
@@ -456,20 +474,13 @@ type UserCreateInput struct {
 	PlanID   int64
 }
 
-func validateLoginSecret(pw string) error {
-	if n := utf8.RuneCountInString(pw); n < minPasswordLen || n > maxPasswordLen {
-		return newError(CodeInvalidArgument, fmt.Sprintf("口令长度须为 %d–%d 个字符", minPasswordLen, maxPasswordLen))
-	}
-	return nil
-}
-
 // CreateUser 新建用户（U1），可同时分配套餐（U6）；面板凭据在此生成并加密保存。
 func (s *UserService) CreateUser(ctx context.Context, actor *AdminPrincipal, in UserCreateInput, ip *netip.Addr) (*User, error) {
 	in.Username = strings.TrimSpace(in.Username)
 	if !endUserNamePattern.MatchString(in.Username) {
 		return nil, newError(CodeInvalidArgument, "用户名须为 3–64 位字母、数字或 _ . @ -")
 	}
-	if err := validateLoginSecret(in.Password); err != nil {
+	if err := validateUserLoginSecret(in.Password); err != nil {
 		return nil, err
 	}
 	if utf8.RuneCountInString(in.Remark) > maxUserRemarkLen {
@@ -564,7 +575,8 @@ func userFromRow(r sqlcgen.ListUsersRow) User {
 	}
 	u := User{
 		ID: r.ID, Username: r.Username, Remark: r.Remark, PlanName: r.PlanName, Status: r.Status, Quota: q, CreatedAt: r.CreatedAt.Time,
-		Provisions: ProvisionCounts{Synced: int(r.SyncedCount), Pending: int(r.PendingCount), Failed: int(r.FailedCount)},
+		Provisions:  ProvisionCounts{Synced: int(r.SyncedCount), Pending: int(r.PendingCount), Failed: int(r.FailedCount)},
+		TOTPEnabled: r.TotpEnabled, LastUsedAt: timePtr(r.LastUsedAt),
 	}
 	if r.PlanID.Valid {
 		id := r.PlanID.Int64
@@ -761,7 +773,7 @@ func (s *UserService) UpdateQuota(ctx context.Context, actor *AdminPrincipal, id
 
 // ResetUserPassword 重置客户后台登录口令。
 func (s *UserService) ResetUserPassword(ctx context.Context, actor *AdminPrincipal, id int64, pw string, ip *netip.Addr) error {
-	if err := validateLoginSecret(pw); err != nil {
+	if err := validateUserLoginSecret(pw); err != nil {
 		return err
 	}
 	hash, err := crypto.HashPassword(pw)
@@ -775,6 +787,10 @@ func (s *UserService) ResetUserPassword(ctx context.Context, actor *AdminPrincip
 		}
 		if n == 0 {
 			return newError(CodeNotFound, msgUserNotFound)
+		}
+		// 管理员重置口令后该用户全部会话失效（docs/03 §5.3）
+		if err := q.DeleteUserSessionsByUser(ctx, id); err != nil {
+			return fmt.Errorf("revoke sessions of user %d: %w", id, err)
 		}
 		return writeAudit(ctx, q, AuditEntry{ActorType: ActorAdmin, ActorID: actor.AdminID, Action: ActionUserPasswordReset, TargetType: targetUser, TargetID: fmt.Sprint(id), ClientIP: ip})
 	})

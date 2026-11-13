@@ -21,6 +21,8 @@ type Fake struct {
 	inbounds  map[string]panel.Inbound
 	endpoints []panel.Endpoint
 	clients   map[string]*panel.Client
+	creds     map[string][2]string // email → {UUID, Auth}
+	online    map[string]bool
 	nextID    int
 	nextGroup int
 	failWith  error
@@ -34,6 +36,8 @@ func New() *Fake {
 		info:     panel.PanelInfo{Version: "fake-1.0", GUID: "fake-guid", Status: json.RawMessage(`{"cpu":1.5}`)},
 		inbounds: make(map[string]panel.Inbound, 8),
 		clients:  make(map[string]*panel.Client, 8),
+		creds:    make(map[string][2]string, 8),
+		online:   make(map[string]bool, 8),
 		nextID:   1,
 	}
 }
@@ -80,7 +84,7 @@ func (f *Fake) enter(method string) error {
 
 // Capabilities 实现 panel.Provider。
 func (f *Fake) Capabilities() panel.Capabilities {
-	return panel.Capabilities{CoreType: panel.CoreXray, Endpoints: true, MultiInboundClients: true}
+	return panel.Capabilities{OnlineClients: true, CoreType: panel.CoreXray, Endpoints: true, MultiInboundClients: true}
 }
 
 // Probe 实现 panel.Provider。
@@ -410,6 +414,7 @@ func (f *Fake) AddClient(_ context.Context, spec panel.ClientSpec) error {
 		return err
 	}
 	f.clients[spec.Email] = &panel.Client{Email: spec.Email, Enabled: spec.Enabled, LimitIP: spec.LimitIP, InboundRefs: append([]string(nil), spec.InboundRefs...)}
+	f.creds[spec.Email] = [2]string{spec.UUID, spec.Auth}
 	return nil
 }
 
@@ -501,7 +506,99 @@ func (f *Fake) DeleteClient(_ context.Context, email string) error {
 		return err
 	}
 	delete(f.clients, email)
+	delete(f.creds, email)
+	delete(f.online, email)
 	return nil
 }
 
 var _ panel.Provider = (*Fake)(nil)
+
+// FakeHost 是内存面板在没有对外地址时给分享链接用的地址。
+const FakeHost = "fake.panel.test"
+
+// SetClientCredential 实现 panel.Provider。
+func (f *Fake) SetClientCredential(_ context.Context, spec panel.ClientSpec) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.enter("SetClientCredential"); err != nil {
+		return err
+	}
+	c, err := f.client(spec.Email)
+	if err != nil {
+		return err
+	}
+	c.Enabled, c.LimitIP = spec.Enabled, spec.LimitIP
+	f.creds[spec.Email] = [2]string{spec.UUID, spec.Auth}
+	return nil
+}
+
+// ClientLinks 实现 panel.Provider：每个挂载的入站按其对外地址各出一条链接，没有对外地址时用 FakeHost。
+// 只为 vless、trojan 生成链接，其余协议不出链接（与 3x-ui 对无链接形式协议的处理一致）。
+func (f *Fake) ClientLinks(_ context.Context, email string) ([]string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.enter("ClientLinks"); err != nil {
+		return nil, err
+	}
+	c, err := f.client(email)
+	if err != nil {
+		return nil, err
+	}
+	cred := f.creds[email]
+	refs := append([]string(nil), c.InboundRefs...)
+	sort.Strings(refs)
+	links := make([]string, 0, len(refs))
+	for _, ref := range refs {
+		in := f.inbounds[ref]
+		secret := cred[0]
+		if in.Protocol == "trojan" {
+			secret = cred[1]
+		}
+		if in.Protocol != "vless" && in.Protocol != "trojan" {
+			continue
+		}
+		hosts := make([][2]string, 0, 2)
+		for _, ep := range f.endpoints {
+			if ep.InboundRef != ref || ep.Disabled {
+				continue
+			}
+			port := ep.Port
+			if port == 0 {
+				port = in.Port
+			}
+			hosts = append(hosts, [2]string{ep.Address, fmt.Sprint(port)})
+		}
+		if len(hosts) == 0 {
+			hosts = append(hosts, [2]string{FakeHost, fmt.Sprint(in.Port)})
+		}
+		for _, h := range hosts {
+			links = append(links, fmt.Sprintf("%s://%s@%s:%s?type=tcp&security=none#%s-%s", in.Protocol, secret, h[0], h[1], in.Remark, email))
+		}
+	}
+	return links, nil
+}
+
+// SetOnline 设置当前在线的 client（测试用）。
+func (f *Fake) SetOnline(emails ...string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.online = make(map[string]bool, len(emails))
+	for _, e := range emails {
+		f.online[e] = true
+	}
+}
+
+// OnlineClients 实现 panel.Provider，按 email 排序。
+func (f *Fake) OnlineClients(context.Context) ([]string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.enter("OnlineClients"); err != nil {
+		return nil, err
+	}
+	out := make([]string, 0, len(f.online))
+	for e := range f.online {
+		out = append(out, e)
+	}
+	sort.Strings(out)
+	return out, nil
+}
