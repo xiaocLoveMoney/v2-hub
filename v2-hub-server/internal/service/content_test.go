@@ -24,7 +24,7 @@ func newContentFixture(t *testing.T) *contentFixture {
 	return &contentFixture{
 		accountFixture: af,
 		content:        NewContentService(af.pool, testSealer(t), af.settings, af.mail, af.clock.now),
-		tickets:        NewTicketService(af.pool, af.settings, af.mail, af.clock.now),
+		tickets:        NewTicketService(af.pool, af.settings, af.mail, nil, af.clock.now),
 	}
 }
 

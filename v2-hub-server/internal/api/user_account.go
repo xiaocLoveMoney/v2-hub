@@ -30,15 +30,17 @@ type AccountManager interface {
 
 // siteInfoVO 对应 hub-api.yaml SiteInfo。
 type siteInfoVO struct {
-	SiteName            string `json:"siteName"`
-	RegisterMode        string `json:"registerMode"`
-	EmailVerifyRequired bool   `json:"emailVerifyRequired"`
-	MailEnabled         bool   `json:"mailEnabled"`
-	CheckinEnabled      bool   `json:"checkinEnabled"`
-	TicketEnabled       bool   `json:"ticketEnabled"`
-	SharedEnabled       bool   `json:"sharedEnabled"`
-	ShopEnabled         bool   `json:"shopEnabled"`
-	Currency            string `json:"currency"`
+	SiteName            string            `json:"siteName"`
+	RegisterMode        string            `json:"registerMode"`
+	EmailVerifyRequired bool              `json:"emailVerifyRequired"`
+	MailEnabled         bool              `json:"mailEnabled"`
+	CheckinEnabled      bool              `json:"checkinEnabled"`
+	TicketEnabled       bool              `json:"ticketEnabled"`
+	SharedEnabled       bool              `json:"sharedEnabled"`
+	ShopEnabled         bool              `json:"shopEnabled"`
+	Currency            string            `json:"currency"`
+	Landing             landingSettingsVO `json:"landing"`
+	Support             supportSettingsVO `json:"support"`
 }
 
 func (h *handlers) getSiteInfo(w http.ResponseWriter, r *http.Request) {
@@ -51,6 +53,8 @@ func (h *handlers) getSiteInfo(w http.ResponseWriter, r *http.Request) {
 		SiteName: info.SiteName, RegisterMode: info.RegisterMode, EmailVerifyRequired: info.EmailVerifyRequired, MailEnabled: info.MailEnabled,
 		CheckinEnabled: info.CheckinEnabled, TicketEnabled: info.TicketEnabled, SharedEnabled: info.SharedEnabled,
 		ShopEnabled: info.ShopEnabled, Currency: info.Currency,
+		Landing: landingSettingsVO{Enabled: info.Landing.Enabled, Headline: info.Landing.Headline, Intro: info.Landing.Intro},
+		Support: supportSettingsVO{URL: info.Support.URL, Label: info.Support.Label},
 	})
 }
 

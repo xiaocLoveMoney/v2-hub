@@ -43,9 +43,11 @@ WHERE id = $1;
 DELETE FROM server WHERE id = $1;
 
 -- name: SetServerProbeResult :exec
--- T1–T3 的落库：status、last_error 由调用方按转移表算好；is_online 时才刷新版本、GUID、快照与最近在线时间
+-- T1–T3 的落库：status、last_error 由调用方按转移表算好；is_online 时才刷新版本、GUID、快照与最近在线时间。
+-- 不在线起始时间（docs/03 §5.20 掉线告警）：回到 online 清空，离开 online 时记下第一次的时刻
 UPDATE server
 SET status = sqlc.arg(status)::varchar,
+    offline_since = CASE WHEN sqlc.arg(is_online)::bool THEN NULL ELSE coalesce(offline_since, sqlc.arg(probed_at)::timestamptz) END,
     last_error = sqlc.arg(last_error)::varchar,
     last_seen_at = CASE WHEN sqlc.arg(is_online)::bool THEN now() ELSE last_seen_at END,
     panel_version = CASE WHEN sqlc.arg(is_online)::bool THEN sqlc.arg(panel_version)::varchar ELSE panel_version END,

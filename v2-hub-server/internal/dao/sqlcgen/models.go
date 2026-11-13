@@ -258,6 +258,12 @@ type InviteCode struct {
 	CreatedAt   pgtype.Timestamptz
 }
 
+type JobState struct {
+	Key       string
+	Value     string
+	UpdatedAt pgtype.Timestamptz
+}
+
 type MailOutbox struct {
 	ID            int64
 	AadKey        string
@@ -418,6 +424,8 @@ type Server struct {
 	StatusSnapshot []byte
 	OnlineClients  int32
 	LastSyncedAt   pgtype.Timestamptz
+	OfflineSince   pgtype.Timestamptz
+	AlertSentAt    pgtype.Timestamptz
 	CreatedAt      pgtype.Timestamptz
 	UpdatedAt      pgtype.Timestamptz
 }
@@ -472,6 +480,18 @@ type SubscribeLog struct {
 	ClientIp  *netip.Addr
 	UserAgent string
 	CreatedAt pgtype.Timestamptz
+}
+
+type TelegramOutbox struct {
+	ID            int64
+	ChatID        string
+	Text          pgtype.Text
+	Status        string
+	Attempts      int32
+	NextAttemptAt pgtype.Timestamptz
+	LastError     string
+	SentAt        pgtype.Timestamptz
+	CreatedAt     pgtype.Timestamptz
 }
 
 type Ticket struct {

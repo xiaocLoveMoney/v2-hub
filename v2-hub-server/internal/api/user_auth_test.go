@@ -53,7 +53,7 @@ func newPortalAPIServer(t *testing.T) (*httptest.Server, *pgxpool.Pool) {
 	mails := service.NewMailService(pool, sealer, nil, settings, nil)
 	srv := httptest.NewServer(NewRouter(Deps{
 		Database: pool, PingTimeout: time.Second, Auth: auth, RBAC: service.NewRBACService(pool), PortalAuth: portal,
-		Content: service.NewContentService(pool, sealer, settings, mails, nil), Tickets: service.NewTicketService(pool, settings, mails, nil),
+		Content: service.NewContentService(pool, sealer, settings, mails, nil), Tickets: service.NewTicketService(pool, settings, mails, nil, nil),
 		// 本组用例不触碰面板，UserService 不需要 PanelService
 		Portal: service.NewUserService(pool, sealer, nil, service.UserConfig{Subscription: service.SubscriptionConfig{InfoNodes: true}}, nil),
 		Chain:  service.NewChainService(pool, sealer, nil),

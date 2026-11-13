@@ -89,15 +89,16 @@ type TicketService struct {
 	store
 	settings *SettingsService
 	mail     *MailService
+	telegram *TelegramService
 	now      func() time.Time
 }
 
-// NewTicketService 创建工单服务；now 为 nil 时用 time.Now。
-func NewTicketService(pool *pgxpool.Pool, settings *SettingsService, mailSvc *MailService, now func() time.Time) *TicketService {
+// NewTicketService 创建工单服务；telegram 为 nil 表示不发 Telegram 通知（docs/03 §5.20），now 为 nil 时用 time.Now。
+func NewTicketService(pool *pgxpool.Pool, settings *SettingsService, mailSvc *MailService, telegram *TelegramService, now func() time.Time) *TicketService {
 	if now == nil {
 		now = time.Now
 	}
-	return &TicketService{store: newStore(pool), settings: settings, mail: mailSvc, now: now}
+	return &TicketService{store: newStore(pool), settings: settings, mail: mailSvc, telegram: telegram, now: now}
 }
 
 func isTicketStatus(s string) bool {
@@ -207,6 +208,7 @@ func (s *TicketService) notifyAdmins(ctx context.Context, q *sqlcgen.Queries, su
 		return
 	}
 	s.notify(ctx, q, cur.Ticket.NotifyEmail, mailTplTicketNew, subject)
+	s.telegram.Notify(ctx, q, TelegramEventTicket, "【"+cur.Site.Name+"】工单待处理："+subject)
 }
 
 func (s *TicketService) requireEnabled(ctx context.Context) error {

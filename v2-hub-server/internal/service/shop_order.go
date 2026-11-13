@@ -749,3 +749,38 @@ func (s *ShopService) SetAutoRenew(ctx context.Context, p *UserPrincipal, enable
 	})
 	return out, err
 }
+
+// PublicPlans 返回落地页用的在售非试用套餐（docs/03 §5.20 公开套餐）；落地页或商店没开时返回空列表。
+// 只含商品本身的信息，与访问者无关，未登录可读。
+func (s *ShopService) PublicPlans(ctx context.Context) ([]ShopPlan, error) {
+	cur, err := s.settings.Current(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if !cur.Landing.Enabled || !cur.Shop.Enabled {
+		return []ShopPlan{}, nil
+	}
+	plans, err := s.q.ListShopPlans(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list shop plans: %w", err)
+	}
+	prices, err := s.q.ListPlanPricesOnSale(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list plan prices on sale: %w", err)
+	}
+	byPlan := make(map[int64][]PlanPrice, len(plans))
+	for _, pr := range prices {
+		byPlan[pr.PlanID] = append(byPlan[pr.PlanID], PlanPrice{ID: pr.ID, PlanPriceInput: PlanPriceInput{DurationDays: int(pr.DurationDays), Price: pr.Price}})
+	}
+	out := make([]ShopPlan, 0, len(plans))
+	for _, r := range plans {
+		if r.IsTrial {
+			continue
+		}
+		out = append(out, ShopPlan{
+			ID: r.ID, Name: r.Name, Description: r.Description, TrafficLimit: r.TrafficLimit, TrafficReset: r.TrafficReset,
+			LimitIP: int(r.LimitIp), NodeCount: int(r.NodeCount), Prices: byPlan[r.ID],
+		})
+	}
+	return out, nil
+}

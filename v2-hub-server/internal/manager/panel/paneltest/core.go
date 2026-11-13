@@ -22,7 +22,7 @@ type fakeCore struct {
 	extra    map[string]string
 	running  bool
 	// breakOn 非空时，模板里含这个片段就会让重启后的内核处于未运行状态（模拟配置有误）
-	breakOn  string
+	breakOn string
 	// rejectOn 非空时，含这个片段的模板在保存时就被拒绝（模拟 3x-ui 保存前的校验）
 	rejectOn string
 	restarts int

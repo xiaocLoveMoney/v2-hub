@@ -69,12 +69,15 @@ func newAPIServer(t *testing.T) (*httptest.Server, *service.RBACService) {
 	// 空注册表：没有任何面板类型支持改内核配置，服务端链式的下发接口只读数据库
 	panels := service.NewPanelService(pool, sealer, panel.NewRegistry(map[string]panel.Factory{}), service.PanelConfig{RequestTimeout: time.Second}, nil)
 	applier := service.NewChainApplier(pool, sealer, users, panels, service.ChainApplyConfig{}, nil)
+	// 没配 Telegram token：测试消息接口返回 feature_disabled
+	telegramSvc := service.NewTelegramService(pool, nil, settings, nil)
 	srv := httptest.NewServer(NewRouter(Deps{
 		Database: pool, PingTimeout: time.Second, Auth: auth, RBAC: rbac,
 		Settings: settings, Mail: mails, Account: account, Users: users, PortalAuth: portal, Portal: users,
-		Content: service.NewContentService(pool, sealer, settings, mails, nil), Tickets: service.NewTicketService(pool, settings, mails, nil),
-		Wallet: service.NewWalletService(pool, sealer, settings, nil), Shop: shop, Finance: shop, Pay: service.NewPayService(pool, settings, testGateways(t), nil),
-		Chain:  service.NewChainService(pool, sealer, applier), ChainApply: applier,
+		Content: service.NewContentService(pool, sealer, settings, mails, nil), Tickets: service.NewTicketService(pool, settings, mails, nil, nil),
+		Wallet: service.NewWalletService(pool, sealer, settings, nil), Shop: shop, Finance: shop, Pay: service.NewPayService(pool, settings, testGateways(t), nil, nil),
+		Chain: service.NewChainService(pool, sealer, applier), ChainApply: applier,
+		Telegram: telegramSvc, Ops: service.NewOpsService(pool, settings, mails, telegramSvc, nil),
 		Cookie: CookieConfig{Secure: false}, TrustedProxies: []netip.Prefix{},
 	}))
 	t.Cleanup(srv.Close)

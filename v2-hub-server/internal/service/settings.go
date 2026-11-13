@@ -55,7 +55,20 @@ const (
 	maxNotifyExpireDays = 30
 	maxNotifyTrafficPct = 50
 
-	defaultCurrency         = "CNY"
+	defaultCurrency = "CNY"
+
+	// 运营设置（docs/03 §5.20）
+	maxAlertEmails          = 10
+	defaultOfflineMinutes   = 5
+	maxOfflineMinutes       = 60
+	defaultReportDailyHour  = 9
+	maxReportHour           = 23
+	maxLandingHeadlineLen   = 64
+	maxLandingIntroLen      = 2000
+	maxSupportURLLen        = 255
+	maxSupportLabelLen      = 16
+	defaultSupportLabel     = "在线客服"
+	httpsScheme             = "https"
 	defaultNotifyExpireDays = 3
 	defaultNotifyTrafficPct = 10
 
@@ -73,6 +86,9 @@ const (
 	msgSettingBadGroup   = "设置分组必须是对象："
 )
 
+// telegramChatPattern 是 Telegram 会话 id：数字（群组为负数）或 @频道用户名；空串表示不发。
+var telegramChatPattern = regexp.MustCompile(`^(-?[0-9]{1,20}|@[A-Za-z][A-Za-z0-9_]{4,31})?$`)
+
 var domainPattern = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$`)
 
 // Settings 是全部系统设置的当前值，字段与 hub-api.yaml 的 Settings 一一对应。
@@ -88,6 +104,44 @@ type Settings struct {
 	Shop         ShopSettings
 	Rebate       RebateSettings
 	Notify       NotifySettings
+	Alert        AlertSettings
+	Telegram     TelegramSettings
+	Report       ReportSettings
+	Landing      LandingSettings
+	Support      SupportSettings
+}
+
+// AlertSettings 是掉线告警（docs/03 §5.20，Ruling-43）：收件人与连续不在线多少分钟才告警。
+type AlertSettings struct {
+	Emails         []string
+	OfflineMinutes int
+}
+
+// TelegramSettings 是 Telegram 管理员通知（Ruling-42）；token 只走环境变量，不在这里。
+type TelegramSettings struct {
+	ChatID         string
+	NotifyAlerts   bool
+	NotifyTickets  bool
+	NotifyPayments bool
+}
+
+// ReportSettings 是运营日报：是否发、按站点时区几点发。
+type ReportSettings struct {
+	DailyEnabled bool
+	DailyHour    int
+}
+
+// LandingSettings 是落地页：开关、标题（空 = 站点名）与 Markdown 介绍。
+type LandingSettings struct {
+	Enabled  bool
+	Headline string
+	Intro    string
+}
+
+// SupportSettings 是客服入口（Ruling-44）：https 外链与按钮文字；URL 为空不显示。
+type SupportSettings struct {
+	URL   string
+	Label string
 }
 
 // SiteSettings 是站点名、时区与客户门户的对外地址。
@@ -250,6 +304,30 @@ func normalizeEmail(raw string) string {
 		return ""
 	}
 	return v
+}
+
+func validEmailList(v []string) bool {
+	if len(v) > maxAlertEmails {
+		return false
+	}
+	for _, e := range v {
+		if normalizeEmail(e) == "" {
+			return false
+		}
+	}
+	return true
+}
+
+func validSupportURL(v string) bool {
+	if v == "" {
+		return true
+	}
+	u, err := url.Parse(v)
+	return err == nil && len(v) <= maxSupportURLLen && u.Scheme == httpsScheme && u.Host != "" && u.User == nil
+}
+
+func validIntro(v string) bool {
+	return len([]rune(v)) <= maxLandingIntroLen
 }
 
 func lowerAll(v []string) []string {
@@ -430,6 +508,84 @@ var settingDefs = map[string]settingDef{
 			return decodeSetting(raw, nil, func(v bool) { s.Subscription.InfoNodes = v })
 		},
 	},
+	"alert.emails": {
+		get: func(s *Settings) any { return s.Alert.Emails },
+		set: func(s *Settings, raw json.RawMessage) error {
+			return decodeSetting(raw, func(v []string) bool { return validEmailList(lowerAll(v)) }, func(v []string) { s.Alert.Emails = lowerAll(v) })
+		},
+	},
+	"alert.offlineMinutes": {
+		get: func(s *Settings) any { return s.Alert.OfflineMinutes },
+		set: func(s *Settings, raw json.RawMessage) error {
+			return decodeSetting(raw, intBetween(1, maxOfflineMinutes), func(v int) { s.Alert.OfflineMinutes = v })
+		},
+	},
+	"telegram.chatId": {
+		get: func(s *Settings) any { return s.Telegram.ChatID },
+		set: func(s *Settings, raw json.RawMessage) error {
+			return decodeSetting(raw, telegramChatPattern.MatchString, func(v string) { s.Telegram.ChatID = v })
+		},
+	},
+	"telegram.notifyAlerts": {
+		get: func(s *Settings) any { return s.Telegram.NotifyAlerts },
+		set: func(s *Settings, raw json.RawMessage) error {
+			return decodeSetting(raw, nil, func(v bool) { s.Telegram.NotifyAlerts = v })
+		},
+	},
+	"telegram.notifyTickets": {
+		get: func(s *Settings) any { return s.Telegram.NotifyTickets },
+		set: func(s *Settings, raw json.RawMessage) error {
+			return decodeSetting(raw, nil, func(v bool) { s.Telegram.NotifyTickets = v })
+		},
+	},
+	"telegram.notifyPayments": {
+		get: func(s *Settings) any { return s.Telegram.NotifyPayments },
+		set: func(s *Settings, raw json.RawMessage) error {
+			return decodeSetting(raw, nil, func(v bool) { s.Telegram.NotifyPayments = v })
+		},
+	},
+	"report.dailyEnabled": {
+		get: func(s *Settings) any { return s.Report.DailyEnabled },
+		set: func(s *Settings, raw json.RawMessage) error {
+			return decodeSetting(raw, nil, func(v bool) { s.Report.DailyEnabled = v })
+		},
+	},
+	"report.dailyHour": {
+		get: func(s *Settings) any { return s.Report.DailyHour },
+		set: func(s *Settings, raw json.RawMessage) error {
+			return decodeSetting(raw, intBetween(0, maxReportHour), func(v int) { s.Report.DailyHour = v })
+		},
+	},
+	"landing.enabled": {
+		get: func(s *Settings) any { return s.Landing.Enabled },
+		set: func(s *Settings, raw json.RawMessage) error {
+			return decodeSetting(raw, nil, func(v bool) { s.Landing.Enabled = v })
+		},
+	},
+	"landing.headline": {
+		get: func(s *Settings) any { return s.Landing.Headline },
+		set: func(s *Settings, raw json.RawMessage) error {
+			return decodeSetting(raw, textBetween(0, maxLandingHeadlineLen), func(v string) { s.Landing.Headline = v })
+		},
+	},
+	"landing.intro": {
+		get: func(s *Settings) any { return s.Landing.Intro },
+		set: func(s *Settings, raw json.RawMessage) error {
+			return decodeSetting(raw, validIntro, func(v string) { s.Landing.Intro = v })
+		},
+	},
+	"support.url": {
+		get: func(s *Settings) any { return s.Support.URL },
+		set: func(s *Settings, raw json.RawMessage) error {
+			return decodeSetting(raw, validSupportURL, func(v string) { s.Support.URL = v })
+		},
+	},
+	"support.label": {
+		get: func(s *Settings) any { return s.Support.Label },
+		set: func(s *Settings, raw json.RawMessage) error {
+			return decodeSetting(raw, textBetween(1, maxSupportLabelLen), func(v string) { s.Support.Label = v })
+		},
+	},
 	"subscription.logRetentionDays": {
 		get: func(s *Settings) any { return s.Subscription.LogRetentionDays },
 		set: func(s *Settings, raw json.RawMessage) error {
@@ -478,6 +634,10 @@ func defaultSettings(sub SubscriptionConfig) Settings {
 		Shop:     ShopSettings{Currency: defaultCurrency},
 		Rebate:   RebateSettings{Mode: RebateFirst},
 		Notify:   NotifySettings{ExpireDays: defaultNotifyExpireDays, TrafficPercent: defaultNotifyTrafficPct},
+		Alert:    AlertSettings{Emails: []string{}, OfflineMinutes: defaultOfflineMinutes},
+		Telegram: TelegramSettings{NotifyAlerts: true, NotifyTickets: true},
+		Report:   ReportSettings{DailyHour: defaultReportDailyHour},
+		Support:  SupportSettings{Label: defaultSupportLabel},
 		Subscription: SubscriptionSettings{
 			BaseURL: strings.TrimRight(sub.BaseURL, "/"), Title: title, UpdateIntervalHours: interval, InfoNodes: sub.InfoNodes, LogRetentionDays: retention,
 		},
@@ -508,6 +668,7 @@ func (s *SettingsService) load(ctx context.Context, q *sqlcgen.Queries) (Setting
 	cur := s.defaults
 	cur.Register.EmailAllow = slices.Clone(s.defaults.Register.EmailAllow)
 	cur.Register.EmailBlock = slices.Clone(s.defaults.Register.EmailBlock)
+	cur.Alert.Emails = slices.Clone(s.defaults.Alert.Emails)
 	for _, row := range rows {
 		def, ok := settingDefs[row.Key]
 		if !ok {

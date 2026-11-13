@@ -10,7 +10,7 @@ import (
 )
 
 // publicSiteKeys 是 /api/user/site 允许暴露的字段数，多一个都算泄露设置。
-const publicSiteKeys = 9
+const publicSiteKeys = 11
 
 func TestSettingsEndpoints(t *testing.T) {
 	srv, rbac := newAPIServer(t)
@@ -80,7 +80,7 @@ func TestPublicSiteInfoAndEmailCode(t *testing.T) {
 	if site.SiteName == "" || site.RegisterMode != service.RegisterInvite || site.MailEnabled || site.EmailVerifyRequired {
 		t.Fatalf("site info = %+v", site)
 	}
-	// 公开子集之外的设置不出现在响应里（docs/03 §5.6 公开子集：0.4.0 起多了商店开关与显示币种）
+	// 公开子集之外的设置不出现在响应里（docs/03 §5.6 公开子集：0.4.0 起多了商店开关与显示币种，0.4.3 起多了落地页与客服入口）
 	var raw map[string]any
 	if err := json.Unmarshal(got.Data, &raw); err != nil || len(raw) != publicSiteKeys {
 		t.Fatalf("site info keys = %v, %v; want exactly the %d public ones", raw, err, publicSiteKeys)

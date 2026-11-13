@@ -30,6 +30,7 @@ import (
 	"v2-hub-server/internal/manager/panel"
 	"v2-hub-server/internal/manager/panel/xui"
 	"v2-hub-server/internal/manager/pay"
+	"v2-hub-server/internal/manager/telegram"
 	"v2-hub-server/internal/service"
 )
 
@@ -50,6 +51,12 @@ const (
 	envSMTPTLS      = "HUB_SMTP_TLS"
 	// mailOutboxInterval 是发件箱任务的周期。
 	mailOutboxInterval = 5 * time.Second
+	// Telegram 机器人只走环境变量（docs/03 §5.20，Ruling-42）；API 地址可换成联调用的模拟端
+	envTelegramToken   = "HUB_TELEGRAM_BOT_TOKEN"
+	envTelegramAPIBase = "HUB_TELEGRAM_API_BASE"
+	// telegramOutboxInterval 是 Telegram 发件箱任务的周期；opsInterval 是掉线告警与日报的检查周期。
+	telegramOutboxInterval = 10 * time.Second
+	opsInterval            = time.Minute
 
 	cmdAdminCreate  = "admin-create"
 	flagConfig      = "f"
@@ -144,6 +151,15 @@ func runServer(args []string) error {
 	}
 	mails := service.NewMailService(pool, sealer, sender, settings, nil)
 	go job.RunMailOutbox(ctx, mails, mailOutboxInterval)
+	telegramSender, err := telegramSenderFromEnv()
+	if err != nil {
+		return err
+	}
+	telegramSvc := service.NewTelegramService(pool, telegramSender, settings, nil)
+	go job.RunTelegramOutbox(ctx, telegramSvc, telegramOutboxInterval)
+	go job.RunSessionCleanup(ctx, job.PurgeFunc(telegramSvc.PurgeOutbox), cfg.Auth.SessionCleanupInterval)
+	ops := service.NewOpsService(pool, settings, mails, telegramSvc, nil)
+	go job.RunOps(ctx, ops, opsInterval)
 	go job.RunSessionCleanup(ctx, job.PurgeFunc(mails.PurgeOutbox), cfg.Auth.SessionCleanupInterval)
 	users := service.NewUserService(pool, sealer, panels, service.UserConfig{Location: quotaLoc, Subscription: subCfg, Settings: settings}, nil)
 	account := service.NewAccountService(pool, sealer, service.AccountDeps{Settings: settings, Mail: mails, Users: users, Portal: portalAuth}, nil)
@@ -153,7 +169,7 @@ func runServer(args []string) error {
 	if err != nil {
 		return err
 	}
-	payments := service.NewPayService(pool, settings, gateways, nil)
+	payments := service.NewPayService(pool, settings, gateways, telegramSvc, nil)
 	go job.RunSessionCleanup(ctx, job.PurgeFunc(payments.ExpirePayments), cfg.Auth.SessionCleanupInterval)
 	// 用量任务每轮的“推进用户”换成商店的入口：先做到期的扣余额续费，再推进状态，最后发提醒邮件（docs/03 §5.16）
 	go job.RunUserSync(ctx, billingSyncer{UserService: users, shop: shop}, job.UserSyncConfig{
@@ -181,13 +197,15 @@ func runServer(args []string) error {
 			Mail:           mails,
 			Account:        account,
 			Content:        service.NewContentService(pool, sealer, settings, mails, nil),
-			Tickets:        service.NewTicketService(pool, settings, mails, nil),
+			Tickets:        service.NewTicketService(pool, settings, mails, telegramSvc, nil),
 			Wallet:         service.NewWalletService(pool, sealer, settings, nil),
 			Shop:           shop,
 			Finance:        shop,
 			Pay:            payments,
 			Chain:          service.NewChainService(pool, sealer, chainApplier),
 			ChainApply:     chainApplier,
+			Telegram:       telegramSvc,
+			Ops:            ops,
 			Cookie:         api.CookieConfig{Secure: secureCookie},
 			TrustedProxies: trusted,
 		}),
@@ -305,4 +323,17 @@ func runAdminCreate(args []string) error {
 	}
 	slog.Info("super admin created", "id", admin.ID, "username", admin.Username)
 	return nil
+}
+
+// telegramSenderFromEnv 按环境变量创建 Telegram 发送器；没配 token 返回 nil（Telegram 不可用）。
+// 注意返回接口类型的 nil，不能把 nil 的 *telegram.Client 装进接口。
+func telegramSenderFromEnv() (telegram.Sender, error) {
+	client, err := telegram.New(telegram.Config{Token: os.Getenv(envTelegramToken), APIBase: os.Getenv(envTelegramAPIBase)})
+	if err != nil {
+		return nil, fmt.Errorf("init telegram (env %s / %s): %w", envTelegramToken, envTelegramAPIBase, err)
+	}
+	if client == nil {
+		return nil, nil
+	}
+	return client, nil
 }
