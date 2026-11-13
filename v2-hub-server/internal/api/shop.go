@@ -481,14 +481,17 @@ type walletVO struct {
 	RebateTotal int64       `json:"rebateTotal"`
 }
 
-func toWalletVO(wl *service.Wallet) walletVO {
+// toWalletVO 组装钱包总览；gateways 为空表示没有配置在线充值，只能用充值码（Ruling-28）。
+func toWalletVO(wl *service.Wallet, gateways []service.GatewayInfo) walletVO {
 	a := wl.AutoRenew
-	return walletVO{
-		Balance: wl.Balance, RebateTotal: wl.RebateTotal,
+	out := walletVO{
+		Balance: wl.Balance, RebateTotal: wl.RebateTotal, Gateways: make([]gatewayVO, 0, len(gateways)),
 		AutoRenew: autoRenewVO{Enabled: a.Enabled, Available: a.Available, Reason: a.Reason, PlanName: a.PlanName, DurationDays: a.DurationDays, Price: a.Price},
-		// 在线充值的网关随支付接口一起接入；没有配置网关时为空，只能用充值码（Ruling-28）
-		Gateways: []gatewayVO{},
 	}
+	for _, g := range gateways {
+		out.Gateways = append(out.Gateways, gatewayVO{Code: g.Code, Name: g.Name})
+	}
+	return out
 }
 
 func (h *handlers) getWallet(w http.ResponseWriter, r *http.Request, p *service.UserPrincipal) {
@@ -497,7 +500,7 @@ func (h *handlers) getWallet(w http.ResponseWriter, r *http.Request, p *service.
 		writeError(w, r, err)
 		return
 	}
-	writeOK(w, toWalletVO(wl))
+	writeOK(w, toWalletVO(wl, h.pay.Gateways()))
 }
 
 // autoRenewBody 对应 hub-api.yaml AutoRenewInput。
@@ -516,5 +519,5 @@ func (h *handlers) setAutoRenew(w http.ResponseWriter, r *http.Request, p *servi
 		writeError(w, r, err)
 		return
 	}
-	writeOK(w, toWalletVO(wl))
+	writeOK(w, toWalletVO(wl, h.pay.Gateways()))
 }

@@ -14,6 +14,8 @@ import (
 
 	"v2-hub-server/internal/dao/daotest"
 	"v2-hub-server/internal/manager/crypto"
+	"v2-hub-server/internal/manager/pay"
+	"v2-hub-server/internal/manager/pay/paytest"
 	"v2-hub-server/internal/manager/totp"
 	"v2-hub-server/internal/service"
 )
@@ -62,11 +64,12 @@ func newAPIServer(t *testing.T) (*httptest.Server, *service.RBACService) {
 	// 本组用例不触碰面板，UserService 不需要 PanelService
 	users := service.NewUserService(pool, sealer, nil, service.UserConfig{Settings: settings}, nil)
 	account := service.NewAccountService(pool, sealer, service.AccountDeps{Settings: settings, Mail: mails, Users: users, Portal: portal}, nil)
+	shop := service.NewShopService(pool, settings, users, mails, nil)
 	srv := httptest.NewServer(NewRouter(Deps{
 		Database: pool, PingTimeout: time.Second, Auth: auth, RBAC: rbac,
 		Settings: settings, Mail: mails, Account: account, Users: users, PortalAuth: portal, Portal: users,
 		Content: service.NewContentService(pool, sealer, settings, mails, nil), Tickets: service.NewTicketService(pool, settings, mails, nil),
-		Wallet: service.NewWalletService(pool, sealer, settings, nil), Shop: service.NewShopService(pool, settings, users, mails, nil),
+		Wallet: service.NewWalletService(pool, sealer, settings, nil), Shop: shop, Finance: shop, Pay: service.NewPayService(pool, settings, testGateways(t), nil),
 		Cookie: CookieConfig{Secure: false}, TrustedProxies: []netip.Prefix{},
 	}))
 	t.Cleanup(srv.Close)
@@ -279,4 +282,14 @@ func TestClientIP(t *testing.T) {
 			}
 		})
 	}
+}
+
+// testGateways 返回只有内存假网关的注册表，接口测试用它走通在线充值与回调。
+func testGateways(t *testing.T) *pay.Registry {
+	t.Helper()
+	r, err := pay.NewRegistry(&paytest.Fake{})
+	if err != nil {
+		t.Fatalf("NewRegistry: %v", err)
+	}
+	return r
 }
