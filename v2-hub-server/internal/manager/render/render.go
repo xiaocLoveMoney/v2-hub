@@ -63,39 +63,98 @@ func Base64(links []string) []byte {
 	return out
 }
 
-// uniqueNames 返回与 nodes 等长的名称列表：空名补默认名，重名追加序号（完整配置要求名称唯一）。
-func uniqueNames(nodes []ProxyNode) []string {
-	seen := make(map[string]int, len(nodes))
-	out := make([]string, 0, len(nodes))
-	for _, n := range nodes {
-		name := strings.TrimSpace(n.Name)
-		if name == "" {
-			name = fmt.Sprintf("%s-%s", n.Protocol, n.Address)
-		}
-		seen[name]++
-		if c := seen[name]; c > 1 {
-			name = fmt.Sprintf("%s %d", name, c)
-			seen[name]++
-		}
-		out = append(out, name)
+// Chain 是一条两跳链路：落地 Exit 经入口节点拨出（docs/03 §5.18，Ruling-36）。
+type Chain struct {
+	// Name 是链路在客户端里显示的名称；为空时用“入口名 → 落地名”。
+	Name string
+	// Entry 是入口节点在同一次渲染的 nodes 里的下标；越界、指向说明节点或该格式不支持的节点时，这条链路不输出。
+	Entry int
+	// Exit 是落地节点（平台节点或用户的自有落地节点）。
+	Exit ProxyNode
+}
+
+// chainNameSep 连接入口名与落地名，作为没有起名的链路的默认名称。
+const chainNameSep = " → "
+
+// ChainDefaultName 返回没有起名的链路的默认名称：“入口名 → 落地名”。
+func ChainDefaultName(entry, exit string) string {
+	return entry + chainNameSep + exit
+}
+
+// namer 给出不重复的名称：重名的追加序号（完整配置要求名称唯一）。
+type namer map[string]int
+
+func (m namer) unique(name string) string {
+	m[name]++
+	if c := m[name]; c > 1 {
+		name = fmt.Sprintf("%s %d", name, c)
+		m[name]++
+	}
+	return name
+}
+
+// displayName 返回节点的显示名，空名补“协议-地址”。
+func displayName(n ProxyNode) string {
+	if name := strings.TrimSpace(n.Name); name != "" {
+		return name
+	}
+	return fmt.Sprintf("%s-%s", n.Protocol, n.Address)
+}
+
+// resolvedChain 是某个格式下确定要输出的一条链路。
+type resolvedChain struct {
+	name      string
+	entryName string
+	entry     ProxyNode
+	exit      ProxyNode
+}
+
+// selection 是某个格式下要输出的内容：保留的节点及其唯一名称（说明节点与可连通节点的名称分开列出），以及能输出的链路。
+type selection struct {
+	nodes     []ProxyNode
+	names     []string
+	realNames []string
+	chains    []resolvedChain
+}
+
+// chainNames 返回链路的名称列表（进手动选择组，不进自动测速组）。
+func (s selection) chainNames() []string {
+	out := make([]string, 0, len(s.chains))
+	for _, c := range s.chains {
+		out = append(out, c.name)
 	}
 	return out
 }
 
-// filterNodes 返回 keep 认可的节点及其唯一名称，说明节点与可连通节点的名称分开列出。
-func filterNodes(nodes []ProxyNode, keep func(ProxyNode) bool) (kept []ProxyNode, names, realNames []string) {
-	kept = make([]ProxyNode, 0, len(nodes))
-	for _, n := range nodes {
-		if keep(n) {
-			kept = append(kept, n)
-		}
+// selectNodes 按 keep 筛出该格式支持的节点并定好名称；链路只在入口与落地都被 keep 认可、且入口是可连通节点时保留。
+func selectNodes(nodes []ProxyNode, chains []Chain, keep func(ProxyNode) bool) selection {
+	sel := selection{
+		nodes: make([]ProxyNode, 0, len(nodes)), names: make([]string, 0, len(nodes)),
+		realNames: make([]string, 0, len(nodes)), chains: make([]resolvedChain, 0, len(chains)),
 	}
-	names = uniqueNames(kept)
-	realNames = make([]string, 0, len(kept))
-	for i, n := range kept {
+	names := make(namer, len(nodes)+len(chains))
+	nameByIndex := make(map[int]string, len(nodes))
+	for i, n := range nodes {
+		if !keep(n) {
+			continue
+		}
+		name := names.unique(displayName(n))
+		sel.nodes, sel.names = append(sel.nodes, n), append(sel.names, name)
 		if !n.Info {
-			realNames = append(realNames, names[i])
+			sel.realNames = append(sel.realNames, name)
+			nameByIndex[i] = name
 		}
 	}
-	return kept, names, realNames
+	for _, c := range chains {
+		entryName, ok := nameByIndex[c.Entry]
+		if !ok || c.Exit.Info || !keep(c.Exit) {
+			continue
+		}
+		name := strings.TrimSpace(c.Name)
+		if name == "" {
+			name = ChainDefaultName(entryName, displayName(c.Exit))
+		}
+		sel.chains = append(sel.chains, resolvedChain{name: names.unique(name), entryName: entryName, entry: nodes[c.Entry], exit: c.Exit})
+	}
+	return sel
 }

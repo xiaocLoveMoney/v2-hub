@@ -327,12 +327,19 @@ func (s *UserService) RenderSubscription(ctx context.Context, req SubscriptionRe
 
 	cfg := s.subConfig(ctx)
 	var items []subItem
+	var chains []subChain
 	if user.Status == UserStatusActive {
 		if items, err = s.loadSubItems(ctx, user.ID); err != nil {
 			return nil, err
 		}
+		// Base64 表达不了链路（Ruling-36），不必为它读规则
+		if format != render.FormatBase64 {
+			if chains, err = s.loadSubChains(ctx, user.ID, items); err != nil {
+				return nil, err
+			}
+		}
 	}
-	body, contentType, err := renderSubscription(format, s.subInfoTexts(cfg, user), items)
+	body, contentType, err := renderSubscription(format, s.subInfoTexts(cfg, user), items, chains)
 	if err != nil {
 		return nil, err
 	}
@@ -392,7 +399,7 @@ func subHeaders(cfg SubscriptionConfig, u sqlcgen.GetUserBySubTokenHashRow) map[
 	}
 }
 
-func renderSubscription(format string, infoTexts []string, items []subItem) ([]byte, string, error) {
+func renderSubscription(format string, infoTexts []string, items []subItem, chains []subChain) ([]byte, string, error) {
 	if format == render.FormatBase64 {
 		links := make([]string, 0, len(infoTexts)+len(items))
 		for _, t := range infoTexts {
@@ -410,17 +417,93 @@ func renderSubscription(format string, infoTexts []string, items []subItem) ([]b
 	for _, it := range items {
 		nodes = append(nodes, it.node)
 	}
+	// 说明节点排在前面，链路的入口下标要相应后移
+	renderChains := make([]render.Chain, 0, len(chains))
+	for _, c := range chains {
+		renderChains = append(renderChains, render.Chain{Name: c.name, Entry: len(infoTexts) + c.entryItem, Exit: c.exit})
+	}
 	switch format {
 	case render.FormatMihomo:
-		out, err := render.Mihomo(nodes)
+		out, err := render.Mihomo(nodes, renderChains)
 		return out, contentTypeYAML, err
 	case render.FormatSingBox:
-		out, err := render.SingBox(nodes)
+		out, err := render.SingBox(nodes, renderChains)
 		return out, contentTypeJSONU, err
 	default:
-		out, err := render.Xray(nodes)
+		out, err := render.Xray(nodes, renderChains)
 		return out, contentTypeJSONU, err
 	}
+}
+
+// subChain 是一条可输出的链路：entryItem 是入口在 items 里的下标，exit 是落地节点，name 为空表示用默认名。
+type subChain struct {
+	name      string
+	entryItem int
+	exit      render.ProxyNode
+}
+
+// loadSubChains 取用户通畅且启用的链式规则，对到本次要输出的节点上（docs/03 §5.18 订阅输出）。
+// 入口或落地这次没有可输出的链接（如面板还没同步到）的规则跳过；自有落地节点的链接解不开或解析不了时跳过并留痕，
+// 不让一条坏规则拖垮整份订阅。
+func (s *UserService) loadSubChains(ctx context.Context, userID int64, items []subItem) ([]subChain, error) {
+	if len(items) == 0 {
+		return nil, nil
+	}
+	rules, err := listRules(ctx, s.q, userID, 0)
+	if err != nil {
+		return nil, err
+	}
+	itemIndex := make(map[int64]int, len(items))
+	for i, it := range items {
+		itemIndex[it.nodeID] = i
+	}
+	out := make([]subChain, 0, len(rules))
+	var customNodes map[int64]render.ProxyNode
+	for _, r := range rules {
+		entry, hasEntry := itemIndex[r.EntryNodeID]
+		if !r.Enabled || r.Status != ChainOK || !hasEntry {
+			continue
+		}
+		if r.ExitKind == ChainExitNode {
+			if exit, ok := itemIndex[r.ExitID]; ok {
+				out = append(out, subChain{name: r.Name, entryItem: entry, exit: items[exit].node})
+			}
+			continue
+		}
+		if customNodes == nil {
+			if customNodes, err = s.loadCustomNodes(ctx, userID); err != nil {
+				return nil, err
+			}
+		}
+		if exit, ok := customNodes[r.ExitID]; ok {
+			out = append(out, subChain{name: r.Name, entryItem: entry, exit: exit})
+		}
+	}
+	return out, nil
+}
+
+// loadCustomNodes 解密并解析用户全部自有落地节点，按 id 索引；节点名用用户起的名称。
+func (s *UserService) loadCustomNodes(ctx context.Context, userID int64) (map[int64]render.ProxyNode, error) {
+	rows, err := s.q.ListCustomNodeLinks(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("list custom node links of user %d: %w", userID, err)
+	}
+	out := make(map[int64]render.ProxyNode, len(rows))
+	for _, r := range rows {
+		plain, err := s.sealer.Open(r.LinkEnc, customNodeAAD(r.ID))
+		if err != nil {
+			slog.Error("open link of custom node", "custom_node_id", r.ID, "err", err)
+			continue
+		}
+		node, err := render.ParseLink(string(plain))
+		if err != nil {
+			slog.Warn("skip unparsable custom node link", "custom_node_id", r.ID)
+			continue
+		}
+		node.Name = r.Name
+		out[r.ID] = node
+	}
+	return out, nil
 }
 
 // subItem 是一条可输出的节点：nodeID 对应节点目录，link 是改好名称与地址的分享链接，node 是解析后的模型。

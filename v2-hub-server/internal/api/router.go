@@ -65,6 +65,8 @@ type Deps struct {
 	Finance FinanceManager
 	// Pay 提供在线充值单与支付回调（docs/03 §5.15）。
 	Pay PayManager
+	// Chain 提供链式规则与自有落地节点（docs/03 §5.18）。
+	Chain ChainManager
 	// Cookie 是会话 Cookie 属性。
 	Cookie CookieConfig
 	// TrustedProxies 是可采信 X-Forwarded-For 的直连网段（如 Caddy 所在 docker 网络）。
@@ -87,6 +89,7 @@ type handlers struct {
 	shop           ShopManager
 	finance        FinanceManager
 	pay            PayManager
+	chain          ChainManager
 	cookie         CookieConfig
 	trustedProxies []netip.Prefix
 }
@@ -94,7 +97,7 @@ type handlers struct {
 // NewRouter 返回注册好全部路由的 http.Handler。路由与 hub-api.yaml 的 paths 逐条对应。
 func NewRouter(deps Deps) http.Handler {
 	h := &handlers{auth: deps.Auth, rbac: deps.RBAC, panels: deps.Panels, users: deps.Users, portalAuth: deps.PortalAuth, portal: deps.Portal,
-		settings: deps.Settings, mail: deps.Mail, account: deps.Account, content: deps.Content, tickets: deps.Tickets, wallet: deps.Wallet, shop: deps.Shop, finance: deps.Finance, pay: deps.Pay, cookie: deps.Cookie, trustedProxies: deps.TrustedProxies}
+		settings: deps.Settings, mail: deps.Mail, account: deps.Account, content: deps.Content, tickets: deps.Tickets, wallet: deps.Wallet, shop: deps.Shop, finance: deps.Finance, pay: deps.Pay, chain: deps.Chain, cookie: deps.Cookie, trustedProxies: deps.TrustedProxies}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", handleHealthz)
 	mux.HandleFunc("GET /readyz", newReadyzHandler(deps.Database, deps.PingTimeout))
@@ -255,6 +258,14 @@ func NewRouter(deps Deps) http.Handler {
 	mux.HandleFunc("GET /api/user/wallet", h.requireUser(false, h.getWallet))
 	mux.HandleFunc("PUT /api/user/wallet/auto-renew", h.requireUser(false, h.setAutoRenew))
 	mux.HandleFunc("POST /api/user/wallet/payments", h.requireUser(false, h.createPayment))
+	mux.HandleFunc("GET /api/user/chain", h.requireUser(false, h.getChainOverview))
+	mux.HandleFunc("POST /api/user/chain/rules", h.requireUser(false, h.createChainRule))
+	mux.HandleFunc("PUT /api/user/chain/rules/{id}", h.requireUser(false, h.updateChainRule))
+	mux.HandleFunc("DELETE /api/user/chain/rules/{id}", h.requireUser(false, h.deleteChainRule))
+	mux.HandleFunc("POST /api/user/chain/custom-nodes", h.requireUser(false, h.createCustomNode))
+	mux.HandleFunc("PUT /api/user/chain/custom-nodes/{id}", h.requireUser(false, h.updateCustomNode))
+	mux.HandleFunc("DELETE /api/user/chain/custom-nodes/{id}", h.requireUser(false, h.deleteCustomNode))
+	mux.HandleFunc("GET /api/user/chain/custom-nodes/{id}/link", h.requireUser(false, h.getCustomNodeLink))
 	// 支付网关回调：没有会话与 CSRF，真实性靠网关实现验签
 	mux.HandleFunc("POST /api/pay/notify/{gateway}", h.paymentNotify)
 	mux.HandleFunc("GET /api/user/wallet/ledger", h.requireUser(false, h.listOwnLedger))

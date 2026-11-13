@@ -1015,6 +1015,13 @@ func (s *UserService) deleteUser(ctx context.Context, id int64, audit AuditEntry
 		if err := q.DeleteUnclosedTicketsByUser(ctx, id); err != nil {
 			return fmt.Errorf("delete open tickets of user %d: %w", id, err)
 		}
+		// 链式规则与自有落地节点随用户删除（docs/03 §5.18 生命周期）；先删规则，再删它引用的自有节点
+		if err := q.DeleteChainRulesByUser(ctx, id); err != nil {
+			return fmt.Errorf("delete chain rules of user %d: %w", id, err)
+		}
+		if err := q.DeleteCustomNodesByUser(ctx, id); err != nil {
+			return fmt.Errorf("delete custom nodes of user %d: %w", id, err)
+		}
 		// 没有任何面板 client 的用户不会再有对账来收尾，这里当场清除；有 client 的等对账删完后清除
 		if _, err := q.PurgeDeletedUsers(ctx); err != nil {
 			return fmt.Errorf("purge deleted users: %w", err)

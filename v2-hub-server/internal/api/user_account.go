@@ -98,7 +98,7 @@ func (h *handlers) registerUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.SetCookie(w, h.userSessionCookie(res.Token, res.ExpiresAt))
-	writeOK(w, toUserSessionVO(res.Principal))
+	writeOK(w, h.sessionVO(r, res.Principal))
 }
 
 // secretResetRequest 对应 hub-api.yaml PasswordResetInput。
@@ -155,7 +155,7 @@ func (h *handlers) bindEmail(w http.ResponseWriter, r *http.Request, p *service.
 		writeError(w, r, err)
 		return
 	}
-	writeOK(w, toUserSessionVO(p))
+	writeOK(w, h.sessionVO(r, p))
 }
 
 // accountDeleteRequest 对应 hub-api.yaml AccountDeleteInput。

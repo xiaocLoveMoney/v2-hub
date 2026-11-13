@@ -18,7 +18,7 @@ func mihomoSupports(n ProxyNode) bool {
 	default:
 		return false
 	}
-	if n.Protocol == ProtoHysteria2 || n.Protocol == ProtoShadowsocks {
+	if n.Protocol == ProtoHysteria2 || n.Protocol == ProtoShadowsocks || n.Protocol == ProtoSocks {
 		return true
 	}
 	return n.Security != SecReality || n.Protocol == ProtoVLESS || n.Protocol == ProtoTrojan
@@ -89,6 +89,11 @@ func mihomoProxy(n ProxyNode, name string) map[string]any {
 		delete(p, "tls") // trojan 恒为 TLS，Mihomo 不接受该键
 	case ProtoShadowsocks:
 		p["type"], p["cipher"], p["password"] = "ss", n.Method, n.Password
+	case ProtoSocks:
+		p["type"] = "socks5"
+		if n.Username != "" {
+			p["username"], p["password"] = n.Username, n.Password
+		}
 	case ProtoHysteria2:
 		p["type"], p["password"] = "hysteria2", n.Password
 		if n.SNI != "" {
@@ -108,25 +113,32 @@ func mihomoProxy(n ProxyNode, name string) map[string]any {
 
 // Mihomo 渲染可直接运行的 Mihomo（Clash Meta）配置：一个手动选择组、一个自动测速组，
 // 规则只有私有网段直连、中国大陆地址直连、其余走代理（docs/03 §5.4）。
-func Mihomo(nodes []ProxyNode) ([]byte, error) {
-	kept, names, realNames := filterNodes(nodes, mihomoSupports)
-	proxies := make([]map[string]any, 0, len(kept))
-	for i, n := range kept {
-		proxies = append(proxies, mihomoProxy(n, names[i]))
+// 链路是带 dialer-proxy 的落地节点，排在普通节点之后，只进手动选择组（docs/03 §5.18）。
+func Mihomo(nodes []ProxyNode, chains []Chain) ([]byte, error) {
+	sel := selectNodes(nodes, chains, mihomoSupports)
+	proxies := make([]map[string]any, 0, len(sel.nodes)+len(sel.chains))
+	for i, n := range sel.nodes {
+		proxies = append(proxies, mihomoProxy(n, sel.names[i]))
 	}
-	selectable := make([]string, 0, len(names)+1)
+	for _, c := range sel.chains {
+		p := mihomoProxy(c.exit, c.name)
+		p["dialer-proxy"] = c.entryName
+		proxies = append(proxies, p)
+	}
+	selectable := make([]string, 0, len(sel.names)+len(sel.chains)+1)
 	groups := make([]map[string]any, 0, 2)
-	if len(realNames) > 0 {
+	if len(sel.realNames) > 0 {
 		selectable = append(selectable, GroupAuto)
 	}
-	selectable = append(selectable, names...)
+	selectable = append(selectable, sel.names...)
+	selectable = append(selectable, sel.chainNames()...)
 	if len(selectable) == 0 {
 		selectable = append(selectable, mihomoDirect)
 	}
 	groups = append(groups, map[string]any{"name": GroupSelect, "type": "select", "proxies": selectable})
-	if len(realNames) > 0 {
+	if len(sel.realNames) > 0 {
 		groups = append(groups, map[string]any{
-			"name": GroupAuto, "type": "url-test", "url": probeURL, "interval": probeIntervalSec, "proxies": realNames,
+			"name": GroupAuto, "type": "url-test", "url": probeURL, "interval": probeIntervalSec, "proxies": sel.realNames,
 		})
 	}
 	rules := make([]string, 0, len(privateCIDRs)+2)

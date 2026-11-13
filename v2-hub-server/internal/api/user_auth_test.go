@@ -56,6 +56,7 @@ func newPortalAPIServer(t *testing.T) (*httptest.Server, *pgxpool.Pool) {
 		Content: service.NewContentService(pool, sealer, settings, mails, nil), Tickets: service.NewTicketService(pool, settings, mails, nil),
 		// 本组用例不触碰面板，UserService 不需要 PanelService
 		Portal: service.NewUserService(pool, sealer, nil, service.UserConfig{Subscription: service.SubscriptionConfig{InfoNodes: true}}, nil),
+		Chain:  service.NewChainService(pool, sealer),
 		Cookie: CookieConfig{Secure: false}, TrustedProxies: []netip.Prefix{},
 	}))
 	t.Cleanup(srv.Close)
