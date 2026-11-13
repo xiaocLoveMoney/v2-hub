@@ -1,0 +1,46 @@
+/*
+ * 设计变量（docs/06 §4，Ruling-21）。组件与页面只用这些变量，不写字面色值。
+ * 规则取自 Stisla（MIT）：单一主色 + 同色发光阴影、低对比留白、3px 圆角。
+ */
+:root {
+  --hub-primary: #6777ef;
+  --hub-primary-hover: #394eea;
+  --hub-primary-glow: #acb5f6;
+  --hub-primary-light: #e4e6fc;
+  --hub-primary-faint: #f0f1fe;
+
+  --hub-success: #47c363;
+  --hub-success-glow: #a9e8b8;
+  --hub-danger: #fc544b;
+  --hub-danger-glow: #fdb5b1;
+  --hub-warning: #ffa426;
+  --hub-warning-glow: #ffd69e;
+  --hub-info: #3abaf4;
+  --hub-info-glow: #a8e1fb;
+
+  --hub-page-bg: #f4f6f9;
+  --hub-surface: #fff;
+  --hub-surface-alt: #fafbfe;
+  --hub-heading: #34395e;
+  --hub-body: #6c757d;
+  --hub-muted: #98a6ad;
+  --hub-divider: #f1f3f6;
+  --hub-border: #e3eaef;
+  --hub-overlay: rgb(52 57 94 / 45%);
+  --hub-on-color: #fff;
+
+  --hub-radius: 3px;
+  --hub-radius-pill: 30px;
+  --hub-card-shadow: 0 4px 8px rgb(0 0 0 / 3%);
+  --hub-float-shadow: 0 8px 24px rgb(52 57 94 / 14%);
+  --hub-glow: 0 2px 6px;
+
+  --hub-font: 'Nunito Variable', nunito, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', arial, sans-serif;
+  --hub-font-mono: ui-monospace, 'SFMono-Regular', menlo, monospace;
+  --hub-font-size: 14px;
+
+  --hub-sider-width: 250px;
+  --hub-topbar-height: 70px;
+  --hub-band-height: 115px;
+  --hub-gap: 30px;
+}
