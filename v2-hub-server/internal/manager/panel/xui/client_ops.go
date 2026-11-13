@@ -117,3 +117,30 @@ func (c *Client) SetClientsEnabled(ctx context.Context, emails []string, enabled
 func (c *Client) DeleteClient(ctx context.Context, email string) error {
 	return c.call(ctx, http.MethodPost, "/clients/del/"+url.PathEscape(email), nil, nil)
 }
+
+// SetClientCredential 实现 panel.Provider：面板按字段合并，未给出的挂载保持不变。
+func (c *Client) SetClientCredential(ctx context.Context, spec panel.ClientSpec) error {
+	body := map[string]any{
+		keyEmail: spec.Email, "id": spec.UUID, "password": spec.Auth, "auth": spec.Auth,
+		keyLimitIP: spec.LimitIP, keyEnable: spec.Enabled,
+	}
+	return c.call(ctx, http.MethodPost, "/clients/update/"+url.PathEscape(spec.Email), body, nil)
+}
+
+// ClientLinks 实现 panel.Provider。
+func (c *Client) ClientLinks(ctx context.Context, email string) ([]string, error) {
+	var links []string
+	if err := c.call(ctx, http.MethodGet, "/clients/links/"+url.PathEscape(email), nil, &links); err != nil {
+		return nil, err
+	}
+	return links, nil
+}
+
+// OnlineClients 实现 panel.Provider。
+func (c *Client) OnlineClients(ctx context.Context) ([]string, error) {
+	var emails []string
+	if err := c.call(ctx, http.MethodPost, "/clients/onlines", nil, &emails); err != nil {
+		return nil, err
+	}
+	return emails, nil
+}

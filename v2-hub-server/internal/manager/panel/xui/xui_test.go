@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -84,7 +85,19 @@ func (f *fakePanel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case strings.HasPrefix(path, "/clients/update/"):
 		cl := f.clients[strings.TrimPrefix(path, "/clients/update/")]
 		cl["limitIp"], cl["enable"] = body["limitIp"], body["enable"]
+		if id, ok := body["id"]; ok {
+			cl["id"], cl["password"] = id, body["password"]
+		}
 		f.reply(w, true, "", nil)
+	case strings.HasPrefix(path, "/clients/links/"):
+		cl, ok := f.clients[strings.TrimPrefix(path, "/clients/links/")]
+		if !ok {
+			f.reply(w, false, "client not found", nil)
+			return
+		}
+		f.reply(w, true, "", []string{fmt.Sprintf("vless://%v@host.test:443?type=tcp#%v", cl["id"], cl["email"])})
+	case path == "/clients/onlines":
+		f.reply(w, true, "", []string{"u1-abc123"})
 	case strings.HasPrefix(path, "/clients/del/"):
 		email := strings.TrimPrefix(path, "/clients/del/")
 		if _, ok := f.clients[email]; !ok {
@@ -489,6 +502,20 @@ func TestClientOps(t *testing.T) {
 	got := list[0]
 	if got.Enabled || got.LimitIP != 5 || got.Up != 100 || got.Down != 250 || strings.Join(got.InboundRefs, ",") != "2,3" {
 		t.Fatalf("client = %+v", got)
+	}
+	spec.UUID = "22222222-2222-4222-8222-222222222222"
+	if err := c.SetClientCredential(ctx, spec); err != nil {
+		t.Fatalf("SetClientCredential: %v", err)
+	}
+	links, err := c.ClientLinks(ctx, spec.Email)
+	if err != nil || len(links) != 1 || !strings.Contains(links[0], spec.UUID) {
+		t.Fatalf("ClientLinks = %v, %v; want one link carrying the rotated UUID", links, err)
+	}
+	if online, err := c.OnlineClients(ctx); err != nil || len(online) != 1 || online[0] != "u1-abc123" {
+		t.Fatalf("OnlineClients = %v, %v", online, err)
+	}
+	if !c.Capabilities().OnlineClients {
+		t.Fatal("xui should report OnlineClients capability")
 	}
 	if err := c.DeleteClient(ctx, spec.Email); err != nil {
 		t.Fatalf("DeleteClient: %v", err)

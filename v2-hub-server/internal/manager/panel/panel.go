@@ -48,6 +48,8 @@ type Capabilities struct {
 	Endpoints bool
 	// MultiInboundClients 表示一个 client 可挂到多个入站（M2 使用）。
 	MultiInboundClients bool
+	// OnlineClients 表示能列出当前在线的 client（docs/03 §5.5）。
+	OnlineClients bool
 }
 
 // Inbound 是面板上的一个入站（中立模型）。Config 已删除敏感字段与 clients（Ruling-14）。
@@ -154,7 +156,7 @@ type Client struct {
 }
 
 // Provider 是一台面板的操作集合。实现必须并发安全。
-// M1 覆盖探测、入站与对外地址；M2 加入 client 下发与流量。
+// M1 覆盖探测、入站与对外地址；M2 加入 client 下发与流量；M3 加入分享链接、凭据轮换与在线状态。
 type Provider interface {
 	Capabilities() Capabilities
 	Probe(ctx context.Context) (PanelInfo, error)
@@ -187,6 +189,13 @@ type Provider interface {
 	// SetClientsEnabled 批量启停（3x-ui 禁用 client 会重启 Xray，调用方应合并成一批）。
 	SetClientsEnabled(ctx context.Context, emails []string, enabled bool) error
 	DeleteClient(ctx context.Context, email string) error
+	// SetClientCredential 把 client 的连接凭据换成 spec 里的 UUID 与 Auth（重置订阅，docs/03 §5.4）；
+	// 启停与 IP 限制按 spec 一并写入，挂载不变。
+	SetClientCredential(ctx context.Context, spec ClientSpec) error
+	// ClientLinks 返回面板为该 client 生成的分享链接，每个对外地址一条；链接含凭据，不得写日志。
+	ClientLinks(ctx context.Context, email string) ([]string, error)
+	// OnlineClients 返回当前在线的 client email；Capabilities.OnlineClients 为 false 时返回空。
+	OnlineClients(ctx context.Context) ([]string, error)
 }
 
 // ErrorKind 是面板错误的分类，service 层据此决定状态转移（docs/03 T2、T3）与对外错误码。
