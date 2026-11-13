@@ -43,6 +43,7 @@ SELECT COUNT(*) FROM node_group WHERE id = ANY(sqlc.arg(ids)::bigint[]);
 SELECT u.id, u.username, u.remark, u.plan_id, COALESCE(p.name, '')::text AS plan_name, u.traffic_limit, u.traffic_used,
        u.expires_at, u.pending_days, u.limit_ip, u.renew_every_days, u.renew_month_day, u.renew_weekday, u.renew_max,
        u.renew_count, u.traffic_reset, u.traffic_reset_day, u.is_disabled, u.status, u.created_at,
+       (u.totp_secret_enc IS NOT NULL)::boolean AS totp_enabled, u.last_used_at,
        (SELECT COUNT(*) FROM provision v WHERE v.user_id = u.id AND v.status = 'synced')::int AS synced_count,
        (SELECT COUNT(*) FROM provision v WHERE v.user_id = u.id AND v.status = 'pending')::int AS pending_count,
        (SELECT COUNT(*) FROM provision v WHERE v.user_id = u.id AND v.status = 'failed')::int AS failed_count

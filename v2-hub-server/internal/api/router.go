@@ -45,6 +45,8 @@ type Deps struct {
 	Users UserManager
 	// PortalAuth 提供终端用户登录与会话校验（docs/03 §5.3）。
 	PortalAuth PortalAuthenticator
+	// Portal 提供客户后台数据与订阅（docs/03 §5.4、§5.5）。
+	Portal PortalManager
 	// Cookie 是会话 Cookie 属性。
 	Cookie CookieConfig
 	// TrustedProxies 是可采信 X-Forwarded-For 的直连网段（如 Caddy 所在 docker 网络）。
@@ -57,13 +59,14 @@ type handlers struct {
 	panels         PanelManager
 	users          UserManager
 	portalAuth     PortalAuthenticator
+	portal         PortalManager
 	cookie         CookieConfig
 	trustedProxies []netip.Prefix
 }
 
 // NewRouter 返回注册好全部路由的 http.Handler。路由与 hub-api.yaml 的 paths 逐条对应。
 func NewRouter(deps Deps) http.Handler {
-	h := &handlers{auth: deps.Auth, rbac: deps.RBAC, panels: deps.Panels, users: deps.Users, portalAuth: deps.PortalAuth, cookie: deps.Cookie, trustedProxies: deps.TrustedProxies}
+	h := &handlers{auth: deps.Auth, rbac: deps.RBAC, panels: deps.Panels, users: deps.Users, portalAuth: deps.PortalAuth, portal: deps.Portal, cookie: deps.Cookie, trustedProxies: deps.TrustedProxies}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", handleHealthz)
 	mux.HandleFunc("GET /readyz", newReadyzHandler(deps.Database, deps.PingTimeout))
@@ -121,6 +124,8 @@ func NewRouter(deps Deps) http.Handler {
 	mux.HandleFunc("GET /api/admin/users/{id}/provisions", h.requireAdmin(service.PermUserRead, h.listUserProvisions))
 	mux.HandleFunc("POST /api/admin/users/{id}/reconcile", h.requireAdmin(service.PermUserWrite, h.reconcileUser))
 	mux.HandleFunc("DELETE /api/admin/users/{id}/totp", h.requireAdmin(service.PermUserWrite, h.clearUserTOTP))
+	mux.HandleFunc("POST /api/admin/users/{id}/subscription/reset", h.requireAdmin(service.PermUserWrite, h.resetUserSubscription))
+	mux.HandleFunc("GET /api/admin/subscribe-logs", h.requireAdmin(service.PermUserRead, h.listSubscribeLogs))
 	mux.HandleFunc("DELETE /api/admin/endpoints/{id}", h.requireAdmin(service.PermNodeWrite, h.deleteEndpoint))
 	mux.HandleFunc("GET /api/admin/nodes", h.requireAdmin(service.PermNodeRead, h.listNodes))
 	mux.HandleFunc("PUT /api/admin/nodes/{id}", h.requireAdmin(service.PermNodeWrite, h.updateNode))
@@ -138,6 +143,16 @@ func NewRouter(deps Deps) http.Handler {
 	mux.HandleFunc("POST /api/user/auth/totp/enable", h.requireUser(false, h.userTotpEnable))
 	mux.HandleFunc("POST /api/user/auth/totp/disable", h.requireUser(false, h.userTotpDisable))
 	mux.HandleFunc("GET /api/user/login-logs", h.requireUser(false, h.listUserLoginLogs))
+	mux.HandleFunc("GET /api/user/dashboard", h.requireUser(false, h.getUserDashboard))
+	mux.HandleFunc("GET /api/user/traffic", h.requireUser(false, h.listUserTraffic))
+	mux.HandleFunc("GET /api/user/nodes", h.requireUser(false, h.listUserNodes))
+	mux.HandleFunc("GET /api/user/nodes/{id}/link", h.requireUser(false, h.getUserNodeLink))
+	mux.HandleFunc("GET /api/user/subscription", h.requireUser(false, h.getUserSubscription))
+	mux.HandleFunc("POST /api/user/subscription/reset", h.requireUser(false, h.resetOwnSubscription))
+	mux.HandleFunc("GET /api/user/subscribe-logs", h.requireUser(false, h.listOwnSubscribeLogs))
+
+	// 订阅端点：凭 token 访问，供代理客户端直接拉取（docs/03 §5.4）
+	mux.HandleFunc("GET /sub/{token}", h.getSubscription)
 	return withSecurityHeaders(mux)
 }
 

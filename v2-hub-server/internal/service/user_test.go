@@ -40,7 +40,7 @@ func newUserFixture(t *testing.T) *userFixture {
 	if err != nil {
 		t.Fatalf("CreateNodeGroup: %v", err)
 	}
-	users := NewUserService(f.pool, testSealer(t), f.panels, UserConfig{Location: time.UTC}, f.clock.now)
+	users := NewUserService(f.pool, testSealer(t), f.panels, UserConfig{Location: time.UTC, Subscription: SubscriptionConfig{InfoNodes: true}}, f.clock.now)
 	return &userFixture{panelFixture: f, users: users, server: srv, group: g, nodes: nodes.Items}
 }
 

@@ -119,10 +119,15 @@ func runServer(args []string) error {
 	if err != nil {
 		return err
 	}
-	users := service.NewUserService(pool, sealer, panels, service.UserConfig{Location: quotaLoc}, nil)
+	users := service.NewUserService(pool, sealer, panels, service.UserConfig{Location: quotaLoc, Subscription: service.SubscriptionConfig{
+		BaseURL: cfg.Subscription.BaseURL, Title: cfg.Subscription.Title, UpdateIntervalHours: cfg.Subscription.UpdateIntervalHours,
+		InfoNodes: cfg.Subscription.InfoNodes, LogRetention: cfg.Subscription.LogRetention,
+	}}, nil)
 	go job.RunUserSync(ctx, users, job.UserSyncConfig{
 		TrafficInterval: cfg.User.TrafficInterval, ReconcileInterval: cfg.User.ReconcileInterval, Concurrency: cfg.Panel.Concurrency,
 	})
+
+	go job.RunSessionCleanup(ctx, job.PurgeFunc(users.PurgeSubscribeLogs), cfg.Auth.SessionCleanupInterval)
 
 	srv := &http.Server{
 		Addr: cfg.Server.ListenAddr,
@@ -134,6 +139,7 @@ func runServer(args []string) error {
 			Panels:         panels,
 			Users:          users,
 			PortalAuth:     portalAuth,
+			Portal:         users,
 			Cookie:         api.CookieConfig{Secure: secureCookie},
 			TrustedProxies: trusted,
 		}),

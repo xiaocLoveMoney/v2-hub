@@ -7,6 +7,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"time"
 
@@ -42,6 +43,11 @@ const (
 	defaultPortalSessionMaxAge      = 30 * 24 * time.Hour
 	defaultPortalLoginLogRetention  = 90 * 24 * time.Hour
 
+	// 订阅默认值，语义见 docs/03 §5.4
+	defaultSubscriptionTitle         = "v2-hub"
+	defaultSubscriptionIntervalHours = 12
+	defaultSubscribeLogRetention     = 30 * 24 * time.Hour
+
 	defaultUserTrafficInterval   = time.Minute
 	defaultUserReconcileInterval = 5 * time.Minute
 	defaultUserTimeZone          = "Local"
@@ -58,6 +64,20 @@ type Config struct {
 	Panel    PanelConfig    `yaml:"panel"`
 	User     UserConfig     `yaml:"user"`
 	Portal   PortalConfig   `yaml:"portal"`
+	// Subscription 是订阅设置（docs/03 §5.4）；M4 起移入系统设置表。
+	Subscription SubscriptionConfig `yaml:"subscription"`
+}
+
+// SubscriptionConfig 是订阅的系统级设置。
+type SubscriptionConfig struct {
+	// BaseURL 是对外的用户域名根地址（如 https://user.example.com）；为空时用请求自身的地址。
+	BaseURL string `yaml:"baseUrl"`
+	// Title 是客户端里显示的订阅名称。
+	Title               string `yaml:"title"`
+	UpdateIntervalHours int    `yaml:"updateIntervalHours"`
+	// InfoNodes 为 true 时在节点前附“剩余流量”“到期时间”两条说明节点。
+	InfoNodes    bool          `yaml:"infoNodes"`
+	LogRetention time.Duration `yaml:"logRetention"`
 }
 
 // PortalConfig 是终端用户会话参数（docs/03 §5.3）；登录频控、Cookie 的 Secure 与会话顺延节流沿用 auth 段。
@@ -179,6 +199,11 @@ func defaults() Config {
 		SessionIdleTimeout: defaultPortalSessionIdleTimeout,
 		SessionMaxAge:      defaultPortalSessionMaxAge,
 		LoginLogRetention:  defaultPortalLoginLogRetention,
+	}, Subscription: SubscriptionConfig{
+		Title:               defaultSubscriptionTitle,
+		UpdateIntervalHours: defaultSubscriptionIntervalHours,
+		InfoNodes:           true,
+		LogRetention:        defaultSubscribeLogRetention,
 	}}
 }
 
@@ -213,6 +238,16 @@ func (c Config) validate() error {
 	po := c.Portal
 	if po.SessionIdleTimeout <= a.SessionTouchInterval || po.SessionMaxAge < po.SessionIdleTimeout || po.LoginLogRetention <= 0 {
 		return fmt.Errorf("%w: portal session durations out of range", ErrInvalidConfig)
+	}
+	sc := c.Subscription
+	if sc.Title == "" || sc.UpdateIntervalHours <= 0 || sc.LogRetention <= 0 {
+		return fmt.Errorf("%w: subscription title, updateIntervalHours and logRetention must be set", ErrInvalidConfig)
+	}
+	if sc.BaseURL != "" {
+		u, err := url.Parse(sc.BaseURL)
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+			return fmt.Errorf("%w: subscription.baseUrl must be an http(s) URL", ErrInvalidConfig)
+		}
 	}
 	return nil
 }

@@ -60,6 +60,8 @@ var endUserNamePattern = regexp.MustCompile(`^[A-Za-z0-9_.@-]{3,64}$`)
 type UserConfig struct {
 	// Location 是自动续期与周期重置用的时区（每月几号、每周几、0 点）。
 	Location *time.Location
+	// Subscription 是订阅设置（docs/03 §5.4）。
+	Subscription SubscriptionConfig
 }
 
 // UserService 负责套餐、用户、配额、下发对账与用量（docs/03 §5.2）。面板操作经 PanelService 打开的 Provider（Ruling-8）。
@@ -72,6 +74,7 @@ type UserService struct {
 	trigger chan struct{}
 	// linkStamps 记每台服务器上次取链接时的入站 / 对外地址摘要（serverID → string）；进程重启后为空，会全量重取一次。
 	linkStamps sync.Map
+	subGuards  subGuards
 }
 
 // NewUserService 创建用户服务；now 为 nil 时用 time.Now，cfg.Location 为空时用本地时区。
@@ -82,7 +85,16 @@ func NewUserService(pool *pgxpool.Pool, sealer *crypto.Sealer, panels *PanelServ
 	if cfg.Location == nil {
 		cfg.Location = time.Local
 	}
-	return &UserService{store: newStore(pool), sealer: sealer, panels: panels, cfg: cfg, now: now, trigger: make(chan struct{}, 1)}
+	if cfg.Subscription.Title == "" {
+		cfg.Subscription.Title = defaultSubscriptionTitle
+	}
+	if cfg.Subscription.UpdateIntervalHours <= 0 {
+		cfg.Subscription.UpdateIntervalHours = defaultSubscriptionIntervalHours
+	}
+	if cfg.Subscription.LogRetention <= 0 {
+		cfg.Subscription.LogRetention = defaultSubscribeLogRetention
+	}
+	return &UserService{store: newStore(pool), sealer: sealer, panels: panels, cfg: cfg, now: now, trigger: make(chan struct{}, 1), subGuards: newSubGuards(now)}
 }
 
 // ---- 套餐 ----------------------------------------------------------------------
@@ -334,6 +346,9 @@ type User struct {
 	Quota      Quota
 	Provisions ProvisionCounts
 	CreatedAt  time.Time
+	// TOTPEnabled 表示用户已开启两步验证；LastUsedAt 是最近一次产生流量的时间（nil = 从未使用）。
+	TOTPEnabled bool
+	LastUsedAt  *time.Time
 }
 
 // UserFilter 是用户列表的筛选条件。
@@ -560,7 +575,8 @@ func userFromRow(r sqlcgen.ListUsersRow) User {
 	}
 	u := User{
 		ID: r.ID, Username: r.Username, Remark: r.Remark, PlanName: r.PlanName, Status: r.Status, Quota: q, CreatedAt: r.CreatedAt.Time,
-		Provisions: ProvisionCounts{Synced: int(r.SyncedCount), Pending: int(r.PendingCount), Failed: int(r.FailedCount)},
+		Provisions:  ProvisionCounts{Synced: int(r.SyncedCount), Pending: int(r.PendingCount), Failed: int(r.FailedCount)},
+		TOTPEnabled: r.TotpEnabled, LastUsedAt: timePtr(r.LastUsedAt),
 	}
 	if r.PlanID.Valid {
 		id := r.PlanID.Int64

@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/netip"
+	"strconv"
 	"time"
 
 	"v2-hub-server/internal/service"
@@ -34,6 +35,8 @@ type UserManager interface {
 	ListUserProvisions(ctx context.Context, id int64) ([]service.Provision, error)
 	ReconcileUser(ctx context.Context, id int64) error
 	ClearUserTOTP(ctx context.Context, actor *service.AdminPrincipal, id int64, ip *netip.Addr) error
+	ResetUserSubscription(ctx context.Context, actor *service.AdminPrincipal, id int64, ip *netip.Addr) error
+	ListSubscribeLogs(ctx context.Context, userID int64, pq service.PageQuery) (*service.Page[service.SubscribeLogItem], error)
 }
 
 // planBody 对应 hub-api.yaml PlanInput。
@@ -133,13 +136,16 @@ type userVO struct {
 	RenewCount int               `json:"renewCount"`
 	Provisions provisionCountsVO `json:"provisions"`
 	CreatedAt  time.Time         `json:"createdAt"`
+	// 0.2.6 起
+	TOTPEnabled bool       `json:"totpEnabled"`
+	LastUsedAt  *time.Time `json:"lastUsedAt"`
 }
 
 func toUserVO(u service.User) userVO {
 	q := u.Quota
 	return userVO{
 		ID: u.ID, Username: u.Username, Remark: u.Remark, PlanID: u.PlanID, PlanName: u.PlanName, Status: u.Status,
-		IsDisabled: q.Disabled, RenewCount: q.RenewCount, CreatedAt: u.CreatedAt,
+		IsDisabled: q.Disabled, RenewCount: q.RenewCount, CreatedAt: u.CreatedAt, TOTPEnabled: u.TOTPEnabled, LastUsedAt: u.LastUsedAt,
 		Provisions: provisionCountsVO{Synced: u.Provisions.Synced, Pending: u.Provisions.Pending, Failed: u.Provisions.Failed},
 		quotaBody: quotaBody{
 			TrafficLimit: q.TrafficLimit, TrafficUsed: q.TrafficUsed, ExpiresAt: q.ExpiresAt, PendingDays: q.PendingDays, LimitIP: q.LimitIP,
@@ -422,4 +428,64 @@ func (h *handlers) clearUserTOTP(w http.ResponseWriter, r *http.Request, p *serv
 		return
 	}
 	writeOK(w, nil)
+}
+
+func (h *handlers) resetUserSubscription(w http.ResponseWriter, r *http.Request, p *service.AdminPrincipal) {
+	id, err := pathID(r)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	if err := h.users.ResetUserSubscription(r.Context(), p, id, clientIP(r, h.trustedProxies)); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeOK(w, nil)
+}
+
+// subscribeLogVO 对应 hub-api.yaml SubscribeLog。
+type subscribeLogVO struct {
+	ID        int64     `json:"id"`
+	UserID    int64     `json:"userId"`
+	Username  string    `json:"username"`
+	Format    string    `json:"format"`
+	ClientIP  string    `json:"clientIp"`
+	UserAgent string    `json:"userAgent"`
+	CreatedAt time.Time `json:"createdAt"`
+}
+
+type subscribeLogPageVO struct {
+	Items []subscribeLogVO `json:"items"`
+	Total int64            `json:"total"`
+}
+
+func toSubscribeLogPageVO(page *service.Page[service.SubscribeLogItem]) subscribeLogPageVO {
+	items := make([]subscribeLogVO, 0, len(page.Items))
+	for _, l := range page.Items {
+		items = append(items, subscribeLogVO{ID: l.ID, UserID: l.UserID, Username: l.Username, Format: l.Format, ClientIP: l.ClientIP, UserAgent: l.UserAgent, CreatedAt: l.CreatedAt})
+	}
+	return subscribeLogPageVO{Items: items, Total: page.Total}
+}
+
+const queryUserID = "userId"
+
+func (h *handlers) listSubscribeLogs(w http.ResponseWriter, r *http.Request, _ *service.AdminPrincipal) {
+	pq, err := pageQuery(r)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	var userID int64
+	if raw := r.URL.Query().Get(queryUserID); raw != "" {
+		if userID, err = strconv.ParseInt(raw, 10, 64); err != nil || userID < 1 {
+			writeError(w, r, badRequest(msgBadID))
+			return
+		}
+	}
+	page, err := h.users.ListSubscribeLogs(r.Context(), userID, pq)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeOK(w, toSubscribeLogPageVO(page))
 }
