@@ -76,7 +76,13 @@ export function SessionProvider({ children }: SessionProviderProps) {
     }
   }, [apply])
 
-  const value = useMemo<SessionContextValue>(() => ({ status, session, login, logout, refresh }), [status, session, login, logout, refresh])
+  const adopt = useCallback((next: UserSession) => apply(next), [apply])
+  const clear = useCallback(() => apply(null), [apply])
+
+  const value = useMemo<SessionContextValue>(
+    () => ({ status, session, login, logout, refresh, adopt, clear }),
+    [status, session, login, logout, refresh, adopt, clear],
+  )
 
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>
 }

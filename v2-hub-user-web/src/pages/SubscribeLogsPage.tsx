@@ -1,6 +1,6 @@
 import { useCallback, useState } from 'react'
 import { api, type PageData, type SubscribeLog } from '../api/client'
-import { Alert, Badge, Button, Card, Empty, PageHeader } from '../components/ui'
+import { Alert, Badge, Card, Empty, PageHeader, Pager } from '../components/ui'
 import { formatTime } from '../format'
 import { useRemote } from '../hooks/use-remote'
 
@@ -18,8 +18,6 @@ export function SubscribeLogsPage() {
   const [page, setPage] = useState(1)
   const load = useCallback((signal: AbortSignal) => api.GET('/api/user/subscribe-logs', { params: { query: { page, pageSize: PAGE_SIZE } }, signal }), [page])
   const logs = useRemote<PageData<SubscribeLog>>(load)
-  const total = logs.data?.total ?? 0
-  const pageCount = Math.max(Math.ceil(total / PAGE_SIZE), 1)
 
   return (
     <>
@@ -54,19 +52,7 @@ export function SubscribeLogsPage() {
           </table>
         </div>
         {logs.data !== null && logs.data.items.length === 0 && <Empty>还没有订阅记录</Empty>}
-        {total > PAGE_SIZE && (
-          <div className="hub-pagination">
-            <Button variant="outline" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
-              上一页
-            </Button>
-            <span>
-              {page} / {pageCount}
-            </span>
-            <Button variant="outline" disabled={page >= pageCount} onClick={() => setPage((p) => p + 1)}>
-              下一页
-            </Button>
-          </div>
-        )}
+        <Pager page={page} pageSize={PAGE_SIZE} total={logs.data?.total ?? 0} onChange={setPage} />
       </Card>
     </>
   )

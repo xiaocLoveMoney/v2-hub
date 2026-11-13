@@ -9,6 +9,10 @@ export interface SessionContextValue {
   session: UserSession | null
   /** 登录；成功返回 null，失败返回可展示的错误（code 为 totp_required 时需补交验证码再调一次）。 */
   login: (username: string, credential: string, totpCode?: string) => Promise<ApiError | null>
+  /** 直接采用接口返回的新会话（注册成功、换绑邮箱后），省一次 /me。 */
+  adopt: (session: UserSession) => void
+  /** 清掉本地会话而不调登出接口（注销账号后服务端会话已不存在）。 */
+  clear: () => void
   /** 重新拉取 /me（如开启或关闭两步验证后）。 */
   refresh: () => Promise<void>
   logout: () => Promise<void>

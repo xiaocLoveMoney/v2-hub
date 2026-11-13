@@ -838,6 +838,328 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/admin/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 全部系统设置（setting:read） */
+        get: operations["getSettings"];
+        /** 修改系统设置：只改请求里出现的键，任一项不合法则整体不保存（setting:write） */
+        put: operations["updateSettings"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/settings/test-mail": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 向指定地址发一封测试邮件并返回 SMTP 结果（setting:write）
+         * @description 邮件未配置时返回 403 feature_disabled。
+         */
+        post: operations["sendTestMail"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/mail-outbox": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 发件箱记录分页，按时间倒序；不含正文（setting:read） */
+        get: operations["listMailOutbox"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/invite-codes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 邀请码分页（user:read） */
+        get: operations["listInviteCodes"];
+        put?: never;
+        /** 新建管理员邀请码，码由服务端生成（user:write） */
+        post: operations["createInviteCode"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/invite-codes/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /** 修改邀请码的次数、到期、备注与停用（个人码只能停用 / 启用；user:write） */
+        put: operations["updateInviteCode"];
+        post?: never;
+        /** 删除管理员邀请码（个人码不可删，返回 409；user:write） */
+        delete: operations["deleteInviteCode"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/announcements": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 公告分页，含草稿（content:read） */
+        get: operations["listAnnouncements"];
+        put?: never;
+        /** 新建公告（content:write） */
+        post: operations["createAnnouncement"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/announcements/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /** 修改公告（content:write） */
+        put: operations["updateAnnouncement"];
+        post?: never;
+        /** 删除公告（content:write） */
+        delete: operations["deleteAnnouncement"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/announcements/{id}/mail": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 把已发布的公告群发给有已验证邮箱且未停用的用户，每条只能发一次（content:write）
+         * @description 草稿或已群发过返回 409；邮件未配置返回 403 feature_disabled。
+         */
+        post: operations["mailAnnouncement"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/tutorials": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 全部教程，含未发布（content:read） */
+        get: operations["listTutorials"];
+        put?: never;
+        /** 新建教程（content:write） */
+        post: operations["createTutorial"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/tutorials/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /** 修改教程（content:write） */
+        put: operations["updateTutorial"];
+        post?: never;
+        /** 删除教程（content:write） */
+        delete: operations["deleteTutorial"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/shared-accounts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 全部共享账号，不含口令（content:read） */
+        get: operations["listSharedAccounts"];
+        put?: never;
+        /** 新建共享账号（content:write） */
+        post: operations["createSharedAccount"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/shared-accounts/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /** 修改共享账号；credential 省略或为空表示沿用原值（content:write） */
+        put: operations["updateSharedAccount"];
+        post?: never;
+        /** 删除共享账号（content:write） */
+        delete: operations["deleteSharedAccount"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/shared-accounts/{id}/credential": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        /** 读取共享账号口令，记审计（content:write） */
+        get: operations["getSharedAccountCredential"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/tickets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 工单分页，按最近回复倒序（ticket:read） */
+        get: operations["listTickets"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/tickets/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        /** 工单与全部消息（ticket:read） */
+        get: operations["getTicket"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/tickets/{id}/messages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 管理员回复，状态变为 answered（ticket:write） */
+        post: operations["replyTicket"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/tickets/{id}/close": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 关闭工单（ticket:write） */
+        post: operations["closeTicket"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/user/auth/login": {
         parameters: {
             query?: never;
@@ -1092,6 +1414,334 @@ export interface paths {
         get: operations["listOwnSubscribeLogs"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/user/site": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 客户门户未登录即可读的站点信息（docs/03 §5.6 公开子集） */
+        get: operations["getSiteInfo"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/user/auth/email-code": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 发注册或找回口令的邮箱验证码（docs/03 §5.7）
+         * @description 找回口令对不存在的邮箱同样返回成功。邮件未配置、或用途为 register 而注册已关闭时返回 403 feature_disabled。
+         */
+        post: operations["sendEmailCode"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/user/auth/register": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 自助注册，成功后直接登录（docs/03 §5.8）
+         * @description 注册关闭返回 403 feature_disabled；邀请码或邮箱验证码无效返回 400；用户名或邮箱已占用返回 409。
+         */
+        post: operations["registerUser"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/user/auth/password/reset": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 凭邮箱验证码重设口令，该用户全部会话失效；不关闭两步验证（Ruling-23） */
+        post: operations["resetOwnPassword"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/user/account/email-code": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 向新邮箱发换绑验证码 */
+        post: operations["sendBindEmailCode"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/user/account/email": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** 绑定或换绑邮箱：当前口令 + 新邮箱的验证码 */
+        put: operations["bindEmail"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/user/account/delete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 注销账号：当前口令（已开两步验证另须验证码）；按删除用户处理并清除会话 */
+        post: operations["deleteOwnAccount"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/user/invite": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 本人的邀请码与已邀请的人；首次查看时生成个人码 */
+        get: operations["getInvite"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/user/invite/reset": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 重置个人邀请码，旧码作废，已用次数不清零 */
+        post: operations["resetInviteCode"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/user/announcements": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 已发布的公告分页，置顶在前、新的在前 */
+        get: operations["listUserAnnouncements"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/user/tutorials": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 已发布的教程，按平台与排序 */
+        get: operations["listUserTutorials"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/user/shared-accounts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 本人可见的共享账号，不含口令（docs/03 §5.9） */
+        get: operations["listUserSharedAccounts"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/user/shared-accounts/{id}/credential": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        /** 读取一条共享账号的口令，记审计；不可见的条目返回 404 */
+        get: operations["getUserSharedAccountCredential"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/user/tickets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 本人的工单分页，按最近回复倒序 */
+        get: operations["listOwnTickets"];
+        put?: never;
+        /**
+         * 新建工单（docs/03 §5.10）
+         * @description 未关闭的工单已达上限返回 409；工单未开启返回 403 feature_disabled。
+         */
+        post: operations["createTicket"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/user/tickets/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        /** 本人的一张工单与全部消息；他人的返回 404（R8） */
+        get: operations["getOwnTicket"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/user/tickets/{id}/messages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 回复工单，状态变为 open（已关闭的会重新打开） */
+        post: operations["replyOwnTicket"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/user/tickets/{id}/close": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 关闭本人的工单 */
+        post: operations["closeOwnTicket"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/user/checkin": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 签到状态与最近 30 条记录（docs/03 §5.11） */
+        get: operations["getCheckin"];
+        put?: never;
+        /**
+         * 签到：随机奖励流量加到当前额度
+         * @description 今天已签到或不满足条件返回 409；签到未开启返回 403 feature_disabled。
+         */
+        post: operations["checkin"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1526,12 +2176,24 @@ export interface components {
              * @description 最近一次产生流量的时间（0.2.6）
              */
             lastUsedAt?: string | null;
+            /** @description 未绑定为 null（0.3.0） */
+            email?: string | null;
+            /** @description 0.3.0 */
+            isEmailVerified?: boolean;
+            /**
+             * Format: int64
+             * @description 邀请人用户 id（0.3.0）
+             */
+            invitedBy?: number | null;
+            /** @description 没有邀请人时为空串（0.3.0） */
+            invitedByUsername?: string;
             /** Format: date-time */
             createdAt: string;
         };
         UserCreateInput: {
-            username: string;
+            username: components["schemas"]["Username"];
             password: components["schemas"]["UserPassword"];
+            email?: components["schemas"]["Email"];
             remark?: string;
             /**
              * Format: int64
@@ -1542,6 +2204,8 @@ export interface components {
         UserUpdateInput: {
             remark: string;
             isDisabled: boolean;
+            /** @description 省略不改；空串清除；其余按邮箱校验并视为已验证（0.3.0） */
+            email?: string;
         };
         Provision: {
             /** Format: int64 */
@@ -1568,6 +2232,10 @@ export interface components {
                 id: number;
                 username: string;
                 status: components["schemas"]["UserStatus"];
+                /** @description 未绑定为 null（0.3.0） */
+                email?: string | null;
+                /** @description 0.3.0 */
+                isEmailVerified?: boolean;
             };
             totpEnabled: boolean;
             csrfToken: string;
@@ -1603,6 +2271,10 @@ export interface components {
             lastUsedAt: string | null;
             /** @description 当前可用节点数 */
             nodeCount: number;
+            /** @description 最新一条已发布公告（0.3.0） */
+            announcement?: components["schemas"]["Announcement"] | null;
+            /** @description 最新一条标了弹窗的已发布公告（0.3.0） */
+            popupAnnouncement?: components["schemas"]["Announcement"] | null;
         };
         TrafficPoint: {
             /** Format: date-time */
@@ -1667,6 +2339,366 @@ export interface components {
             items: components["schemas"]["SubscribeLog"][];
             /** Format: int64 */
             total: number;
+        };
+        /** Format: email */
+        Email: string;
+        EmailCode: string;
+        /** @description Markdown 源文本；前端渲染不执行原始 HTML（Ruling-25） */
+        Markdown: string;
+        /** @enum {string} */
+        RegisterMode: "open" | "invite" | "closed";
+        SiteInfo: {
+            siteName: string;
+            registerMode: components["schemas"]["RegisterMode"];
+            /** @description 注册是否要先验证邮箱（设置为真且邮件可用） */
+            emailVerifyRequired: boolean;
+            /** @description 邮件是否可用；为假时找回口令与换绑邮箱不可用 */
+            mailEnabled: boolean;
+            checkinEnabled: boolean;
+            ticketEnabled: boolean;
+            sharedEnabled: boolean;
+        };
+        /** @description 全部系统设置（docs/03 §5.6 设置清单），键名去掉点号改驼峰分组 */
+        Settings: {
+            /** @description SMTP 环境变量是否已配置（Ruling-24），不可经接口修改 */
+            readonly mailEnabled: boolean;
+            site: {
+                name: string;
+                /** @description IANA 时区名 */
+                timezone: string;
+            };
+            register: {
+                mode: components["schemas"]["RegisterMode"];
+                emailVerify: boolean;
+                emailAllow: string[];
+                emailBlock: string[];
+                /**
+                 * Format: int64
+                 * @description 0 = 注册不送套餐
+                 */
+                planId: number;
+            };
+            invite: {
+                userEnabled: boolean;
+                userMaxUses: number;
+            };
+            checkin: {
+                enabled: boolean;
+                minMb: number;
+                maxMb: number;
+            };
+            ticket: {
+                enabled: boolean;
+                /** @description 空串 = 不通知 */
+                notifyEmail: string;
+            };
+            shared: {
+                enabled: boolean;
+            };
+            mail: {
+                ratePerMinute: number;
+            };
+            subscription: {
+                /** @description 空串 = 取请求的协议与主机 */
+                baseUrl: string;
+                title: string;
+                updateIntervalHours: number;
+                infoNodes: boolean;
+                logRetentionDays: number;
+            };
+        };
+        /** @description 与 Settings 同形，但各分组与各键都可省略；只改出现的键 */
+        SettingsInput: {
+            site?: {
+                [key: string]: unknown;
+            };
+            register?: {
+                [key: string]: unknown;
+            };
+            invite?: {
+                [key: string]: unknown;
+            };
+            checkin?: {
+                [key: string]: unknown;
+            };
+            ticket?: {
+                [key: string]: unknown;
+            };
+            shared?: {
+                [key: string]: unknown;
+            };
+            mail?: {
+                [key: string]: unknown;
+            };
+            subscription?: {
+                [key: string]: unknown;
+            };
+        };
+        TestMailInput: {
+            to: components["schemas"]["Email"];
+        };
+        /** @enum {string} */
+        MailStatus: "pending" | "sent" | "failed";
+        MailOutboxItem: {
+            /** Format: int64 */
+            id: number;
+            recipient: string;
+            subject: string;
+            status: components["schemas"]["MailStatus"];
+            attempts: number;
+            lastError: string;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            sentAt: string | null;
+        };
+        MailOutboxPage: {
+            items: components["schemas"]["MailOutboxItem"][];
+            /** Format: int64 */
+            total: number;
+        };
+        MailBatchResult: {
+            /** @description 入发件箱的封数 */
+            queued: number;
+        };
+        InviteCodeInput: {
+            /** @description 0 = 不限；个人码忽略本项 */
+            maxUses: number;
+            /** Format: date-time */
+            expiresAt?: string | null;
+            remark?: string;
+            isDisabled: boolean;
+        };
+        InviteCode: {
+            /** Format: int64 */
+            id: number;
+            code: string;
+            /** @enum {string} */
+            kind: "admin" | "user";
+            /** Format: int64 */
+            ownerUserId?: number | null;
+            /** @description 管理员码为空串 */
+            ownerUsername: string;
+            /** @description 个人码为设置 invite.userMaxUses 的当前值 */
+            maxUses: number;
+            usedCount: number;
+            /** Format: date-time */
+            expiresAt: string | null;
+            isDisabled: boolean;
+            remark: string;
+            /** Format: date-time */
+            createdAt: string;
+        };
+        InviteCodePage: {
+            items: components["schemas"]["InviteCode"][];
+            /** Format: int64 */
+            total: number;
+        };
+        InviteInfo: {
+            /** @description 设置 invite.userEnabled 且本人的码未被停用 */
+            enabled: boolean;
+            /** @description 未开启时为空串 */
+            code: string;
+            /** @description 0 = 不限 */
+            maxUses: number;
+            usedCount: number;
+            /** @description 最近 100 个被邀请人 */
+            invitees: {
+                /** @description 打码后的用户名 */
+                username: string;
+                /** Format: date-time */
+                createdAt: string;
+            }[];
+        };
+        EmailCodeInput: {
+            email: components["schemas"]["Email"];
+            /** @enum {string} */
+            purpose: "register" | "reset";
+        };
+        RegisterInput: {
+            username: components["schemas"]["Username"];
+            email: components["schemas"]["Email"];
+            password: components["schemas"]["UserPassword"];
+            inviteCode?: string;
+            emailCode?: components["schemas"]["EmailCode"];
+        };
+        PasswordResetInput: {
+            email: components["schemas"]["Email"];
+            emailCode: components["schemas"]["EmailCode"];
+            newPassword: components["schemas"]["UserPassword"];
+        };
+        BindEmailCodeInput: {
+            email: components["schemas"]["Email"];
+        };
+        BindEmailInput: {
+            currentPassword: string;
+            email: components["schemas"]["Email"];
+            emailCode: components["schemas"]["EmailCode"];
+        };
+        AccountDeleteInput: {
+            currentPassword: string;
+            totpCode?: components["schemas"]["TotpCode"];
+        };
+        AnnouncementInput: {
+            title: string;
+            content: components["schemas"]["Markdown"];
+            isPinned: boolean;
+            isPopup: boolean;
+            /** @description 由假变真时记发布时间；由真变假退回草稿 */
+            isPublished: boolean;
+        };
+        Announcement: {
+            /** Format: int64 */
+            id: number;
+            title: string;
+            content: components["schemas"]["Markdown"];
+            isPinned: boolean;
+            isPopup: boolean;
+            /**
+             * Format: date-time
+             * @description null = 草稿（只在管理端出现）
+             */
+            publishedAt: string | null;
+            /**
+             * Format: date-time
+             * @description 只在管理端返回
+             */
+            mailedAt?: string | null;
+            /**
+             * Format: date-time
+             * @description 只在管理端返回
+             */
+            createdAt?: string;
+        };
+        AnnouncementPage: {
+            items: components["schemas"]["Announcement"][];
+            /** Format: int64 */
+            total: number;
+        };
+        /** @enum {string} */
+        TutorialPlatform: "windows" | "macos" | "android" | "ios" | "linux" | "router";
+        TutorialLink: {
+            label: string;
+            /** @description 只收 https 地址 */
+            url: string;
+        };
+        TutorialInput: {
+            platform: components["schemas"]["TutorialPlatform"];
+            clientName: string;
+            summary?: string;
+            links?: components["schemas"]["TutorialLink"][];
+            content?: components["schemas"]["Markdown"];
+            sortOrder?: number;
+            isPublished: boolean;
+        };
+        Tutorial: {
+            /** Format: int64 */
+            id: number;
+            platform: components["schemas"]["TutorialPlatform"];
+            clientName: string;
+            summary: string;
+            links: components["schemas"]["TutorialLink"][];
+            content: components["schemas"]["Markdown"];
+            sortOrder: number;
+            isPublished: boolean;
+        };
+        SharedAccountInput: {
+            name: string;
+            category: string;
+            account: string;
+            /** @description 新建时必填；修改时省略或空串表示沿用原值 */
+            credential?: string;
+            remark?: string;
+            sortOrder?: number;
+            isPublished: boolean;
+            /** @description 空 = 所有有套餐的用户可见 */
+            planIds?: number[];
+        };
+        SharedAccount: {
+            /** Format: int64 */
+            id: number;
+            name: string;
+            category: string;
+            account: string;
+            remark: string;
+            sortOrder: number;
+            /** @description 只在管理端返回 */
+            isPublished?: boolean;
+            /** @description 只在管理端返回 */
+            planIds?: number[];
+        };
+        SharedCredential: {
+            /** @description 凭据，前端默认不显示，点击才取 */
+            credential: string;
+        };
+        /** @enum {string} */
+        TicketStatus: "open" | "answered" | "closed";
+        Ticket: {
+            /** Format: int64 */
+            id: number;
+            subject: string;
+            status: components["schemas"]["TicketStatus"];
+            /** Format: date-time */
+            lastReplyAt: string;
+            /** Format: date-time */
+            createdAt: string;
+            /**
+             * Format: int64
+             * @description 只在管理端返回
+             */
+            userId?: number;
+            /** @description 只在管理端返回 */
+            username?: string;
+        };
+        TicketPage: {
+            items: components["schemas"]["Ticket"][];
+            /** Format: int64 */
+            total: number;
+        };
+        TicketMessage: {
+            /** Format: int64 */
+            id: number;
+            /** @enum {string} */
+            authorKind: "user" | "admin";
+            /** @description 只在管理端返回：管理员用户名；用户侧一律显示“客服” */
+            authorName?: string;
+            /** @description 纯文本，按原样显示 */
+            content: string;
+            /** Format: date-time */
+            createdAt: string;
+        };
+        TicketDetail: components["schemas"]["Ticket"] & {
+            messages: components["schemas"]["TicketMessage"][];
+        };
+        TicketCreateInput: {
+            subject: string;
+            content: string;
+        };
+        TicketMessageInput: {
+            content: string;
+        };
+        CheckinInfo: {
+            enabled: boolean;
+            canCheckin: boolean;
+            /** @description 不能签到的原因，可以签到时为空串 */
+            reason: string;
+            checkedToday: boolean;
+            /** @description 最近 30 条 */
+            logs: {
+                /** Format: date */
+                date: string;
+                /** Format: int64 */
+                rewardBytes: number;
+            }[];
+        };
+        CheckinResult: {
+            /** Format: int64 */
+            rewardBytes: number;
+            /**
+             * Format: int64
+             * @description 奖励后的流量额度
+             */
+            trafficLimit: number;
         };
     };
     responses: {
@@ -1735,6 +2767,24 @@ export interface components {
         };
         /** @description upstream_unavailable（面板不可达、拒绝 token 或返回异常） */
         UpstreamUnavailable: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Envelope"];
+            };
+        };
+        /** @description feature_disabled（功能未开启：注册关闭、邮件未配置等） */
+        FeatureDisabled: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Envelope"];
+            };
+        };
+        /** @description account_disabled、feature_disabled（功能未开启）或 permission_denied（CSRF 校验失败） */
+        UserForbidden: {
             headers: {
                 [name: string]: unknown;
             };
@@ -3433,6 +4483,733 @@ export interface operations {
             403: components["responses"]["PermissionDenied"];
         };
     };
+    getSettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 全部系统设置 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["Settings"];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+        };
+    };
+    updateSettings: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SettingsInput"];
+            };
+        };
+        responses: {
+            /** @description 修改系统设置：只改请求里出现的键，任一项不合法则整体不保存 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["Settings"];
+                    };
+                };
+            };
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+        };
+    };
+    sendTestMail: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TestMailInput"];
+            };
+        };
+        responses: {
+            200: components["responses"]["Ok"];
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            429: components["responses"]["RateLimited"];
+            502: components["responses"]["UpstreamUnavailable"];
+        };
+    };
+    listMailOutbox: {
+        parameters: {
+            query?: {
+                page?: components["parameters"]["Page"];
+                pageSize?: components["parameters"]["PageSize"];
+                status?: components["schemas"]["MailStatus"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 发件箱记录分页，按时间倒序；不含正文 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["MailOutboxPage"];
+                    };
+                };
+            };
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+        };
+    };
+    listInviteCodes: {
+        parameters: {
+            query?: {
+                page?: components["parameters"]["Page"];
+                pageSize?: components["parameters"]["PageSize"];
+                /** @description 省略为全部 */
+                kind?: "admin" | "user";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 邀请码分页 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["InviteCodePage"];
+                    };
+                };
+            };
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+        };
+    };
+    createInviteCode: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InviteCodeInput"];
+            };
+        };
+        responses: {
+            /** @description 新建管理员邀请码，码由服务端生成 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["InviteCode"];
+                    };
+                };
+            };
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+        };
+    };
+    updateInviteCode: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InviteCodeInput"];
+            };
+        };
+        responses: {
+            /** @description 修改邀请码的次数、到期、备注与停用 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["InviteCode"];
+                    };
+                };
+            };
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    deleteInviteCode: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["Ok"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    listAnnouncements: {
+        parameters: {
+            query?: {
+                page?: components["parameters"]["Page"];
+                pageSize?: components["parameters"]["PageSize"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 公告分页，含草稿 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["AnnouncementPage"];
+                    };
+                };
+            };
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+        };
+    };
+    createAnnouncement: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AnnouncementInput"];
+            };
+        };
+        responses: {
+            /** @description 新建公告 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["Announcement"];
+                    };
+                };
+            };
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+        };
+    };
+    updateAnnouncement: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AnnouncementInput"];
+            };
+        };
+        responses: {
+            /** @description 修改公告 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["Announcement"];
+                    };
+                };
+            };
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    deleteAnnouncement: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["Ok"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    mailAnnouncement: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 把已发布的公告群发给有已验证邮箱且未停用的用户，每条只能发一次 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["MailBatchResult"];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    listTutorials: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 全部教程，含未发布 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["Tutorial"][];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+        };
+    };
+    createTutorial: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TutorialInput"];
+            };
+        };
+        responses: {
+            /** @description 新建教程 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["Tutorial"];
+                    };
+                };
+            };
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+        };
+    };
+    updateTutorial: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TutorialInput"];
+            };
+        };
+        responses: {
+            /** @description 修改教程 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["Tutorial"];
+                    };
+                };
+            };
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    deleteTutorial: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["Ok"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    listSharedAccounts: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 全部共享账号，不含口令 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["SharedAccount"][];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+        };
+    };
+    createSharedAccount: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SharedAccountInput"];
+            };
+        };
+        responses: {
+            /** @description 新建共享账号 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["SharedAccount"];
+                    };
+                };
+            };
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+        };
+    };
+    updateSharedAccount: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SharedAccountInput"];
+            };
+        };
+        responses: {
+            /** @description 修改共享账号；credential 省略或为空表示沿用原值 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["SharedAccount"];
+                    };
+                };
+            };
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    deleteSharedAccount: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["Ok"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    getSharedAccountCredential: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 读取共享账号口令，记审计 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["SharedCredential"];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    listTickets: {
+        parameters: {
+            query?: {
+                page?: components["parameters"]["Page"];
+                pageSize?: components["parameters"]["PageSize"];
+                status?: components["schemas"]["TicketStatus"];
+                userId?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 工单分页，按最近回复倒序 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["TicketPage"];
+                    };
+                };
+            };
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+        };
+    };
+    getTicket: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 工单与全部消息 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["TicketDetail"];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    replyTicket: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TicketMessageInput"];
+            };
+        };
+        responses: {
+            /** @description 管理员回复，状态变为 answered */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["TicketDetail"];
+                    };
+                };
+            };
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    closeTicket: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 关闭工单 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["TicketDetail"];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+        };
+    };
     userLogin: {
         parameters: {
             query?: never;
@@ -3805,6 +5582,533 @@ export interface operations {
             400: components["responses"]["InvalidArgument"];
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["AccountDisabled"];
+        };
+    };
+    getSiteInfo: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 客户门户未登录即可读的站点信息 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["SiteInfo"];
+                    };
+                };
+            };
+        };
+    };
+    sendEmailCode: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EmailCodeInput"];
+            };
+        };
+        responses: {
+            200: components["responses"]["Ok"];
+            400: components["responses"]["InvalidArgument"];
+            403: components["responses"]["FeatureDisabled"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    registerUser: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RegisterInput"];
+            };
+        };
+        responses: {
+            /** @description 自助注册，成功后直接登录 */
+            200: {
+                headers: {
+                    "Set-Cookie"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["UserSession"];
+                    };
+                };
+            };
+            400: components["responses"]["InvalidArgument"];
+            403: components["responses"]["FeatureDisabled"];
+            409: components["responses"]["Conflict"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    resetOwnPassword: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PasswordResetInput"];
+            };
+        };
+        responses: {
+            200: components["responses"]["Ok"];
+            400: components["responses"]["InvalidArgument"];
+            403: components["responses"]["FeatureDisabled"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    sendBindEmailCode: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BindEmailCodeInput"];
+            };
+        };
+        responses: {
+            200: components["responses"]["Ok"];
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["UserForbidden"];
+            409: components["responses"]["Conflict"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    bindEmail: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BindEmailInput"];
+            };
+        };
+        responses: {
+            /** @description 绑定或换绑邮箱：当前口令 + 新邮箱的验证码 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["UserSession"];
+                    };
+                };
+            };
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["UserForbidden"];
+            409: components["responses"]["Conflict"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    deleteOwnAccount: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AccountDeleteInput"];
+            };
+        };
+        responses: {
+            200: components["responses"]["Ok"];
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["AccountDisabled"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    getInvite: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 本人的邀请码与已邀请的人；首次查看时生成个人码 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["InviteInfo"];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["AccountDisabled"];
+        };
+    };
+    resetInviteCode: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 重置个人邀请码，旧码作废，已用次数不清零 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["InviteInfo"];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["UserForbidden"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    listUserAnnouncements: {
+        parameters: {
+            query?: {
+                page?: components["parameters"]["Page"];
+                pageSize?: components["parameters"]["PageSize"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 已发布的公告分页，置顶在前、新的在前 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["AnnouncementPage"];
+                    };
+                };
+            };
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["AccountDisabled"];
+        };
+    };
+    listUserTutorials: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 已发布的教程，按平台与排序 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["Tutorial"][];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["AccountDisabled"];
+        };
+    };
+    listUserSharedAccounts: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 本人可见的共享账号，不含口令 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["SharedAccount"][];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["UserForbidden"];
+        };
+    };
+    getUserSharedAccountCredential: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 读取一条共享账号的口令，记审计；不可见的条目返回 404 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["SharedCredential"];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["UserForbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    listOwnTickets: {
+        parameters: {
+            query?: {
+                page?: components["parameters"]["Page"];
+                pageSize?: components["parameters"]["PageSize"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 本人的工单分页，按最近回复倒序 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["TicketPage"];
+                    };
+                };
+            };
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["AccountDisabled"];
+        };
+    };
+    createTicket: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TicketCreateInput"];
+            };
+        };
+        responses: {
+            /** @description 新建工单 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["TicketDetail"];
+                    };
+                };
+            };
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["UserForbidden"];
+            409: components["responses"]["Conflict"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    getOwnTicket: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 本人的一张工单与全部消息；他人的返回 404 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["TicketDetail"];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["AccountDisabled"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    replyOwnTicket: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TicketMessageInput"];
+            };
+        };
+        responses: {
+            /** @description 回复工单，状态变为 open */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["TicketDetail"];
+                    };
+                };
+            };
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["UserForbidden"];
+            404: components["responses"]["NotFound"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    closeOwnTicket: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 关闭本人的工单 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["TicketDetail"];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["AccountDisabled"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    getCheckin: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 签到状态与最近 30 条记录 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["CheckinInfo"];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["AccountDisabled"];
+        };
+    };
+    checkin: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 签到：随机奖励流量加到当前额度 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["CheckinResult"];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["UserForbidden"];
+            409: components["responses"]["Conflict"];
+            429: components["responses"]["RateLimited"];
         };
     };
     getSubscription: {

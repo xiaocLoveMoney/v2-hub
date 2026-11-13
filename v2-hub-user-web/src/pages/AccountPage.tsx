@@ -6,6 +6,7 @@ import { useToast } from '../components/toast-context'
 import { Alert, Badge, Button, Card, Empty, Field, Modal, PageHeader } from '../components/ui'
 import { formatTime } from '../format'
 import { mutate, useRemote } from '../hooks/use-remote'
+import { DeleteAccountCard, EmailCard } from './AccountEmailCards'
 
 const MIN_CREDENTIAL_LEN = 8
 const MAX_CREDENTIAL_LEN = 128
@@ -212,13 +213,17 @@ function LoginLogsCard() {
   )
 }
 
-/** 我的账号（docs/06 §5）：改口令、两步验证、最近登录。 */
+/** 我的账号（docs/06 §5）：改口令、邮箱、注销账号、两步验证、最近登录。 */
 export function AccountPage() {
   return (
     <>
       <PageHeader title="我的账号" />
       <div className="hub-grid-2">
-        <CredentialCard />
+        <div>
+          <CredentialCard />
+          <EmailCard />
+          <DeleteAccountCard />
+        </div>
         <div>
           <TotpCard />
           <LoginLogsCard />

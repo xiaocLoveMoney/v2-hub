@@ -7,6 +7,9 @@ import { Alert, Card, PageHeader, StatCard } from '../components/ui'
 import { daysLeft, formatBytes, formatDate, formatTime, usedPercent } from '../format'
 import { useRemote } from '../hooks/use-remote'
 import { ROUTES } from '../menu'
+import { useSite } from '../site/site-context'
+import { LatestAnnouncementCard, PopupAnnouncement } from './AnnouncementCards'
+import { CheckinCard } from './CheckinCard'
 import { SubscriptionCard } from './SubscriptionCard'
 
 const TRAFFIC_HOURS = 72
@@ -42,8 +45,9 @@ function expiryStat(d: Dashboard, now: number): { value: string; foot: string } 
   return { value: '不限', foot: d.planName || '未分配套餐' }
 }
 
-/** 仪表盘（docs/06 §5）：四张统计卡 + 7:5 双栏（72 小时用量 / 流量环形图与快速导入）。 */
+/** 仪表盘（docs/06 §5）：四张统计卡 + 7:5 双栏（公告、72 小时用量与快速导入 / 流量环形图与签到）；有弹窗公告时进入即弹。 */
 export function DashboardPage() {
+  const site = useSite()
   const dashboard = useRemote<Dashboard>(loadDashboard)
   const traffic = useRemote<TrafficPoint[]>(loadTraffic)
   // 进入页面时取一次当前时刻，渲染期间保持不变
@@ -102,6 +106,7 @@ export function DashboardPage() {
       </div>
       <div className="hub-grid-7-5">
         <div>
+          {d.announcement !== null && d.announcement !== undefined && <LatestAnnouncementCard announcement={d.announcement} />}
           <Card title={`最近 ${TRAFFIC_HOURS} 小时用量`}>
             {traffic.error !== null && <Alert tone="plain">{traffic.error.message}</Alert>}
             {traffic.data !== null && traffic.data.length === 0 && <div className="hub-empty">这段时间没有用量</div>}
@@ -109,18 +114,24 @@ export function DashboardPage() {
           </Card>
           {hasPlan && <SubscriptionCard />}
         </div>
-        <Card title="流量使用">
-          <Donut
-            centerTitle={d.trafficLimit === 0 ? '已用' : '剩余'}
-            centerValue={d.trafficLimit === 0 ? formatBytes(d.trafficUsed) : formatBytes(left)}
-            segments={[
-              { label: '此前已用', value: usedBefore, color: 'var(--hub-primary-light)' },
-              { label: '今日已用', value: d.trafficToday, color: 'var(--hub-primary-glow)' },
-              ...(d.trafficLimit === 0 ? [] : [{ label: '剩余', value: left, color: 'var(--hub-primary)' }]),
-            ]}
-          />
-        </Card>
+        <div>
+          <Card title="流量使用">
+            <Donut
+              centerTitle={d.trafficLimit === 0 ? '已用' : '剩余'}
+              centerValue={d.trafficLimit === 0 ? formatBytes(d.trafficUsed) : formatBytes(left)}
+              segments={[
+                { label: '此前已用', value: usedBefore, color: 'var(--hub-primary-light)' },
+                { label: '今日已用', value: d.trafficToday, color: 'var(--hub-primary-glow)' },
+                ...(d.trafficLimit === 0 ? [] : [{ label: '剩余', value: left, color: 'var(--hub-primary)' }]),
+              ]}
+            />
+          </Card>
+          {site.checkinEnabled && <CheckinCard onRewarded={dashboard.reload} />}
+        </div>
       </div>
+      {d.popupAnnouncement !== null && d.popupAnnouncement !== undefined && (
+        <PopupAnnouncement key={d.popupAnnouncement.id} announcement={d.popupAnnouncement} />
+      )}
     </>
   )
 }

@@ -1,14 +1,14 @@
 import { useState, type FormEvent } from 'react'
-import { Navigate, useLocation, useNavigate } from 'react-router'
+import { Link, Navigate, useLocation, useNavigate } from 'react-router'
 import { CODE_TOTP_REQUIRED } from '../api/client'
-import { BRAND, LOGIN_SLOGAN } from '../app-config'
 import { useSession } from '../auth/session-context'
 import { Alert, Button, Field } from '../components/ui'
 import { ROUTES } from '../menu'
+import { useSite } from '../site/site-context'
+import { AuthShell } from './auth/AuthShell'
+import { MAX_CREDENTIAL_LEN, MAX_EMAIL_LEN, TOTP_LENGTH, digitsOnly } from './auth/fields'
 
-const TOTP_LENGTH = 6
-const MAX_USERNAME_LEN = 64
-const MAX_CREDENTIAL_LEN = 128
+const REGISTER_CLOSED = 'closed'
 
 interface LocationState {
   from?: string
@@ -20,6 +20,7 @@ interface LocationState {
  */
 export function LoginPage() {
   const { status, login } = useSession()
+  const site = useSite()
   const navigate = useNavigate()
   const location = useLocation()
   const [username, setUsername] = useState('')
@@ -52,62 +53,63 @@ export function LoginPage() {
   }
 
   return (
-    <div className="hub-login">
-      <section className="hub-login-form">
-        <h1>
-          欢迎使用 <strong>{BRAND}</strong>
-        </h1>
-        <p className="hub-muted" style={{ marginBottom: 28 }}>
-          登录后查看订阅、节点与用量
-        </p>
-        {error !== null && <Alert tone="plain">{error}</Alert>}
-        <form onSubmit={(e) => void handleSubmit(e)} noValidate>
-          {!needsTotp && (
-            <>
-              <Field label="用户名" name="username" autoComplete="username" required maxLength={MAX_USERNAME_LEN} value={username} onChange={(e) => setUsername(e.target.value)} />
-              <Field
-                label="密码"
-                name="password"
-                type="password"
-                autoComplete="current-password"
-                required
-                maxLength={MAX_CREDENTIAL_LEN}
-                value={credential}
-                onChange={(e) => setCredential(e.target.value)}
-              />
-            </>
-          )}
-          {needsTotp && (
+    <AuthShell lead="欢迎使用" subtitle="登录后查看订阅、节点与用量">
+      {error !== null && <Alert tone="plain">{error}</Alert>}
+      <form onSubmit={(e) => void handleSubmit(e)} noValidate>
+        {!needsTotp && (
+          <>
             <Field
-              label="两步验证码"
-              name="totp"
-              inputMode="numeric"
-              autoComplete="one-time-code"
-              autoFocus
-              maxLength={TOTP_LENGTH}
-              hint="打开验证器 App，输入 6 位数字"
-              value={totpCode}
-              onChange={(e) => setTotpCode(e.target.value.replace(/\D/g, ''))}
+              label="用户名"
+              name="username"
+              autoComplete="username"
+              required
+              maxLength={MAX_EMAIL_LEN}
+              hint="也可以填已绑定的邮箱"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
             />
-          )}
-          <Button
-            type="submit"
-            variant="primary"
-            isLarge
-            isBlock
-            isBusy={isBusy}
-            disabled={needsTotp ? totpCode.length !== TOTP_LENGTH : username.trim() === '' || credential === ''}
-          >
-            {needsTotp ? '验证并登录' : '登录'}
-          </Button>
-        </form>
-      </section>
-      <section className="hub-login-art" aria-hidden="true">
-        <div>
-          <h2>{BRAND}</h2>
-          <p>{LOGIN_SLOGAN}</p>
-        </div>
-      </section>
-    </div>
+            <Field
+              label="密码"
+              name="password"
+              type="password"
+              autoComplete="current-password"
+              required
+              maxLength={MAX_CREDENTIAL_LEN}
+              value={credential}
+              onChange={(e) => setCredential(e.target.value)}
+            />
+          </>
+        )}
+        {needsTotp && (
+          <Field
+            label="两步验证码"
+            name="totp"
+            inputMode="numeric"
+            autoComplete="one-time-code"
+            autoFocus
+            maxLength={TOTP_LENGTH}
+            hint="打开验证器 App，输入 6 位数字"
+            value={totpCode}
+            onChange={(e) => setTotpCode(digitsOnly(e.target.value))}
+          />
+        )}
+        <Button
+          type="submit"
+          variant="primary"
+          isLarge
+          isBlock
+          isBusy={isBusy}
+          disabled={needsTotp ? totpCode.length !== TOTP_LENGTH : username.trim() === '' || credential === ''}
+        >
+          {needsTotp ? '验证并登录' : '登录'}
+        </Button>
+      </form>
+      {!needsTotp && (
+        <p className="hub-login-links">
+          {site.registerMode !== REGISTER_CLOSED && <Link to={ROUTES.REGISTER}>注册账号</Link>}
+          {site.mailEnabled && <Link to={ROUTES.RESET}>忘记口令</Link>}
+        </p>
+      )}
+    </AuthShell>
   )
 }

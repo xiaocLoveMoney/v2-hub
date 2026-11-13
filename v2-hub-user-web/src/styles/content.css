@@ -1,0 +1,235 @@
+/*
+ * M4 的内容类组件（docs/06 §5）：分屏页的附加行、Markdown 正文、分段 pills、共享账号条目、工单对话流。
+ * 只用 tokens.css 的设计变量，不写字面色值。
+ */
+
+/* ---- 登录 / 注册 / 找回口令 ---- */
+.hub-login-subtitle {
+  margin-bottom: 28px;
+}
+
+.hub-login-links {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 20px;
+  font-size: 13px;
+}
+
+/* 验证码输入框 + 发送按钮：按钮与输入框底边对齐 */
+.hub-code-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.hub-code-row .hub-field {
+  flex: 1;
+  min-width: 0;
+}
+
+.hub-code-row .hub-btn {
+  height: 42px;
+  margin-top: 24px;
+  white-space: nowrap;
+}
+
+/* ---- 表单补充 ---- */
+/* textarea 默认用等宽字体，这里跟输入框保持一致 */
+.hub-textarea {
+  font: inherit;
+  height: auto;
+  min-height: 96px;
+  resize: vertical;
+  line-height: 1.6;
+}
+
+a.hub-btn {
+  text-decoration: none;
+}
+
+.hub-card-text {
+  margin-bottom: 16px;
+}
+
+.hub-row-gap {
+  margin-bottom: 16px;
+}
+
+.hub-plain-list {
+  margin: 16px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.hub-plain-list li {
+  display: flex;
+  justify-content: space-between;
+  padding: 8px 0;
+  border-top: 1px solid var(--hub-divider);
+  font-size: 13px;
+}
+
+/* ---- Markdown 正文（公告、教程） ---- */
+.hub-markdown {
+  overflow-wrap: anywhere;
+  line-height: 1.8;
+}
+
+.hub-markdown > :first-child {
+  margin-top: 0;
+}
+
+.hub-markdown > :last-child {
+  margin-bottom: 0;
+}
+
+.hub-markdown h1,
+.hub-markdown h2,
+.hub-markdown h3,
+.hub-markdown h4 {
+  margin: 18px 0 8px;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--hub-heading);
+}
+
+.hub-markdown p,
+.hub-markdown ul,
+.hub-markdown ol,
+.hub-markdown blockquote,
+.hub-markdown pre {
+  margin: 0 0 12px;
+}
+
+.hub-markdown ul,
+.hub-markdown ol {
+  padding-left: 22px;
+}
+
+.hub-markdown blockquote {
+  padding: 4px 14px;
+  border-left: 3px solid var(--hub-primary-light);
+  color: var(--hub-muted);
+}
+
+.hub-markdown code {
+  padding: 2px 6px;
+  border-radius: var(--hub-radius);
+  background: var(--hub-primary-faint);
+  font-family: var(--hub-font-mono);
+  font-size: 13px;
+}
+
+.hub-markdown pre {
+  padding: 12px 14px;
+  overflow-x: auto;
+  border-radius: var(--hub-radius);
+  background: var(--hub-surface-alt);
+  border: 1px solid var(--hub-border);
+}
+
+.hub-markdown pre code {
+  padding: 0;
+  background: transparent;
+}
+
+.hub-markdown img {
+  max-width: 100%;
+  height: auto;
+}
+
+/* ---- 分段 pills（教程的操作系统切换） ---- */
+.hub-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 24px;
+}
+
+.hub-pill {
+  padding: 8px 20px;
+  border: 0;
+  border-radius: var(--hub-radius-pill);
+  background: var(--hub-surface);
+  color: var(--hub-body);
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: var(--hub-card-shadow);
+}
+
+.hub-pill.is-active {
+  background: var(--hub-primary);
+  color: var(--hub-on-color);
+  box-shadow: var(--hub-glow) var(--hub-primary-glow);
+}
+
+/* ---- 共享账号条目 ---- */
+.hub-shared-item {
+  padding: 14px 0;
+  border-top: 1px solid var(--hub-divider);
+}
+
+.hub-shared-item:first-child {
+  padding-top: 0;
+  border-top: 0;
+}
+
+.hub-shared-name {
+  margin-bottom: 8px;
+  font-weight: 700;
+  color: var(--hub-heading);
+}
+
+.hub-shared-fields {
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr);
+  gap: 8px 12px;
+  align-items: center;
+  margin: 0;
+}
+
+.hub-shared-fields dt {
+  font-size: 12px;
+  color: var(--hub-muted);
+}
+
+.hub-shared-fields dd {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+}
+
+/* ---- 工单对话流 ---- */
+.hub-chat-item {
+  margin-bottom: 14px;
+  padding: 12px 16px;
+  border-radius: var(--hub-radius);
+  background: var(--hub-surface-alt);
+}
+
+.hub-chat-item.is-staff {
+  background: var(--hub-primary-faint);
+  border-left: 3px solid var(--hub-primary);
+}
+
+.hub-chat-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 6px;
+  font-size: 12px;
+  color: var(--hub-muted);
+}
+
+.hub-chat-meta strong {
+  color: var(--hub-heading);
+}
+
+/* 纯文本原样显示：保留换行，长串不撑破卡片 */
+.hub-chat-content {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
