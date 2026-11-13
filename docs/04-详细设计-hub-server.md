@@ -15,7 +15,7 @@ v2-hub-server/
 │   │   ├── panel/               # Provider 接口、Capabilities、中立模型、注册表（M1）
 │   │   ├── panel/xui/           # 3x-ui 实现（M1）
 │   │   ├── render/              # 分享链接解析 → ProxyNode → 各订阅格式（M3）
-│   │   ├── chain/               # 链式代理渲染与服务端配置变更（M4/M5）
+│   │   ├── chain/               # 服务端链式的面板配置变更（M7）；客户端链式的渲染在 render/（M6）
 │   │   └── crypto/              # AES-GCM、argon2id、token 生成（M0）
 │   ├── dao/                     # PostgreSQL 访问（sqlc 生成，参数化）
 │   ├── domain/{entity,dto,vo}/  # 领域模型分层
