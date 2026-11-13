@@ -4,6 +4,7 @@ import { api, type ApiError } from '../../api/client'
 import { useToast } from '../../components/toast-context'
 import { Alert, Button, Field } from '../../components/ui'
 import { mutate } from '../../hooks/use-remote'
+import { useI18n } from '../../i18n/i18n-context'
 import { ROUTES } from '../../menu'
 import { useSite } from '../../site/site-context'
 import { AuthShell } from './AuthShell'
@@ -19,6 +20,7 @@ const sendResetCode = (email: string): Promise<ApiError | null> =>
  */
 export function ResetPage() {
   const site = useSite()
+  const { t } = useI18n()
   const toast = useToast()
   const navigate = useNavigate()
   const [email, setEmail] = useState('')
@@ -30,10 +32,10 @@ export function ResetPage() {
 
   if (!site.mailEnabled) {
     return (
-      <AuthShell lead="找回口令" subtitle="凭绑定的邮箱重设登录口令">
-        <Alert tone="info">本站没有开通邮件，无法自助找回，请联系管理员重置口令。</Alert>
+      <AuthShell lead={t('auth.resetLead')} subtitle={t('auth.resetSubtitle')}>
+        <Alert tone="info">{t('auth.resetNoMail')}</Alert>
         <p className="hub-login-links">
-          <Link to={ROUTES.LOGIN}>返回登录</Link>
+          <Link to={ROUTES.LOGIN}>{t('common.backToLogin')}</Link>
         </p>
       </AuthShell>
     )
@@ -54,52 +56,52 @@ export function ResetPage() {
       setError(err.message)
       return
     }
-    toast.show('口令已重设，请用新口令登录', 'success')
+    toast.show(t('auth.resetDone'), 'success')
     void navigate(ROUTES.LOGIN, { replace: true })
   }
 
   return (
-    <AuthShell lead="找回口令" subtitle="凭绑定的邮箱重设登录口令">
+    <AuthShell lead={t('auth.resetLead')} subtitle={t('auth.resetSubtitle')}>
       {error !== null && <Alert tone="plain">{error}</Alert>}
       <form onSubmit={(e) => void handleSubmit(e)} noValidate>
         <Field
-          label="邮箱"
+          label={t('auth.email')}
           name="email"
           type="email"
           autoComplete="email"
           maxLength={MAX_EMAIL_LEN}
-          hint="注册或绑定时用的邮箱"
+          hint={t('auth.emailResetHint')}
           value={email}
           onChange={(e) => setEmail(e.target.value)}
         />
         <EmailCodeField email={email} value={emailCode} onChange={setEmailCode} send={sendResetCode} />
         <Field
-          label="新密码"
+          label={t('auth.newPassword')}
           name="password"
           type="password"
           autoComplete="new-password"
           maxLength={MAX_CREDENTIAL_LEN}
-          hint={`${MIN_CREDENTIAL_LEN}–${MAX_CREDENTIAL_LEN} 个字符；开启了两步验证的账号登录时仍要验证码`}
-          error={isTooShort ? `至少 ${MIN_CREDENTIAL_LEN} 个字符` : null}
+          hint={t('auth.newPasswordHint', { min: MIN_CREDENTIAL_LEN, max: MAX_CREDENTIAL_LEN })}
+          error={isTooShort ? t('auth.passwordTooShort', { min: MIN_CREDENTIAL_LEN }) : null}
           value={credential}
           onChange={(e) => setCredential(e.target.value)}
         />
         <Field
-          label="再输一次新密码"
+          label={t('auth.newPasswordRepeat')}
           name="repeat"
           type="password"
           autoComplete="new-password"
           maxLength={MAX_CREDENTIAL_LEN}
-          error={isMismatch ? '两次输入不一致' : null}
+          error={isMismatch ? t('auth.passwordMismatch') : null}
           value={repeat}
           onChange={(e) => setRepeat(e.target.value)}
         />
         <Button type="submit" variant="primary" isLarge isBlock isBusy={isBusy} disabled={!canSubmit}>
-          重设口令
+          {t('auth.resetSubmit')}
         </Button>
       </form>
       <p className="hub-login-links">
-        <Link to={ROUTES.LOGIN}>想起来了，去登录</Link>
+        <Link to={ROUTES.LOGIN}>{t('auth.remembered')}</Link>
       </p>
     </AuthShell>
   )

@@ -2,6 +2,7 @@ import { useState, type FormEvent } from 'react'
 import { Link, Navigate, useLocation, useNavigate } from 'react-router'
 import { CODE_TOTP_REQUIRED } from '../api/client'
 import { useSession } from '../auth/session-context'
+import { useI18n } from '../i18n/i18n-context'
 import { Alert, Button, Field } from '../components/ui'
 import { ROUTES } from '../menu'
 import { useSite } from '../site/site-context'
@@ -21,6 +22,7 @@ interface LocationState {
 export function LoginPage() {
   const { status, login } = useSession()
   const site = useSite()
+  const { t } = useI18n()
   const navigate = useNavigate()
   const location = useLocation()
   const [username, setUsername] = useState('')
@@ -53,23 +55,23 @@ export function LoginPage() {
   }
 
   return (
-    <AuthShell lead="欢迎使用" subtitle="登录后查看订阅、节点与用量">
+    <AuthShell lead={t('auth.loginLead')} subtitle={t('auth.loginSubtitle')}>
       {error !== null && <Alert tone="plain">{error}</Alert>}
       <form onSubmit={(e) => void handleSubmit(e)} noValidate>
         {!needsTotp && (
           <>
             <Field
-              label="用户名"
+              label={t('auth.username')}
               name="username"
               autoComplete="username"
               required
               maxLength={MAX_EMAIL_LEN}
-              hint="也可以填已绑定的邮箱"
+              hint={t('auth.usernameLoginHint')}
               value={username}
               onChange={(e) => setUsername(e.target.value)}
             />
             <Field
-              label="密码"
+              label={t('auth.password')}
               name="password"
               type="password"
               autoComplete="current-password"
@@ -82,13 +84,13 @@ export function LoginPage() {
         )}
         {needsTotp && (
           <Field
-            label="两步验证码"
+            label={t('auth.totp')}
             name="totp"
             inputMode="numeric"
             autoComplete="one-time-code"
             autoFocus
             maxLength={TOTP_LENGTH}
-            hint="打开验证器 App，输入 6 位数字"
+            hint={t('auth.totpHint')}
             value={totpCode}
             onChange={(e) => setTotpCode(digitsOnly(e.target.value))}
           />
@@ -101,13 +103,13 @@ export function LoginPage() {
           isBusy={isBusy}
           disabled={needsTotp ? totpCode.length !== TOTP_LENGTH : username.trim() === '' || credential === ''}
         >
-          {needsTotp ? '验证并登录' : '登录'}
+          {t(needsTotp ? 'auth.verifyAndLogin' : 'auth.login')}
         </Button>
       </form>
       {!needsTotp && (
         <p className="hub-login-links">
-          {site.registerMode !== REGISTER_CLOSED && <Link to={ROUTES.REGISTER}>注册账号</Link>}
-          {site.mailEnabled && <Link to={ROUTES.RESET}>忘记口令</Link>}
+          {site.registerMode !== REGISTER_CLOSED && <Link to={ROUTES.REGISTER}>{t('auth.registerAccount')}</Link>}
+          {site.mailEnabled && <Link to={ROUTES.RESET}>{t('auth.forgot')}</Link>}
         </p>
       )}
     </AuthShell>

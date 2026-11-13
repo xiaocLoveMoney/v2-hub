@@ -2,7 +2,7 @@ import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/re
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { visibleMenu } from './menu'
 import { chainStatusLabel, isValidChainName, serverRuleState } from './pages/chain/labels'
-import { TEST_CSRF, mockServer, ok, renderApp } from './test/harness'
+import { TEST_CSRF, mockServer, ok, renderApp, zhT } from './test/harness'
 
 const NOW = '2026-11-13T00:00:00Z'
 const site = {
@@ -53,7 +53,7 @@ describe('链式代理文案与菜单', () => {
     expect(isValidChainName('一'.repeat(64))).toBe(true)
     expect(isValidChainName('一'.repeat(65))).toBe(false)
     expect(isValidChainName('a\nb')).toBe(false)
-    const labels = (f?: typeof features) => visibleMenu(site as never, f).map((m) => m.label)
+    const labels = (f?: typeof features) => visibleMenu(site as never, f).map((m) => zhT(m.labelKey))
     expect(labels(features)).toContain('链式代理')
     expect(labels({ clientChain: false, customNode: true, serverChain: false })).not.toContain('链式代理')
     expect(labels({ clientChain: false, customNode: false, serverChain: true })).toContain('链式代理')

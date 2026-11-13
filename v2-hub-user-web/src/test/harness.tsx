@@ -3,8 +3,15 @@ import { RouterProvider, createMemoryRouter } from 'react-router'
 import { vi } from 'vitest'
 import { SessionProvider } from '../auth/SessionProvider'
 import { ToastProvider } from '../components/ToastProvider'
+import { translate, type Translate } from '../i18n/i18n-context'
+import { I18nProvider } from '../i18n/I18nProvider'
+import type { Locale } from '../i18n/locale'
 import { routes } from '../routes'
 import { SiteProvider } from '../site/SiteProvider'
+
+/** 纯函数标签工具的中文 / 英文翻译函数。 */
+export const zhT: Translate = (key, vars) => translate('zh', key, vars)
+export const enT: Translate = (key, vars) => translate('en', key, vars)
 
 /** 测试里统一使用的 CSRF token，断言写请求是否带头时用。 */
 export const TEST_CSRF = 'csrf-test-token'
@@ -41,16 +48,18 @@ export function mockServer(handlers: Record<string, () => Response>): Recorded[]
   return calls
 }
 
-/** 以整套 Provider（提示、站点信息、会话、路由）渲染应用，从 initialPath 进入。 */
-export function renderApp(initialPath: string) {
+/** 以整套 Provider（语言、提示、站点信息、会话、路由）渲染应用，从 initialPath 进入；界面语言默认中文。 */
+export function renderApp(initialPath: string, locale: Locale = 'zh') {
   const router = createMemoryRouter(routes, { initialEntries: [initialPath] })
   return render(
-    <ToastProvider>
-      <SiteProvider>
-        <SessionProvider>
-          <RouterProvider router={router} />
-        </SessionProvider>
-      </SiteProvider>
-    </ToastProvider>,
+    <I18nProvider initial={locale}>
+      <ToastProvider>
+        <SiteProvider>
+          <SessionProvider>
+            <RouterProvider router={router} />
+          </SessionProvider>
+        </SiteProvider>
+      </ToastProvider>
+    </I18nProvider>,
   )
 }

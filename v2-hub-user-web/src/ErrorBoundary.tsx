@@ -1,4 +1,6 @@
 import { Component, type ErrorInfo, type ReactNode } from 'react'
+import { translate } from './i18n/i18n-context'
+import { initialLocale } from './i18n/locale'
 
 interface ErrorBoundaryProps {
   children: ReactNode
@@ -22,7 +24,8 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
 
   render() {
     if (this.state.hasError) {
-      return <p role="alert">页面出错了，请刷新重试。</p>
+      // 错误边界在语言 Provider 外面，直接按上次选择 / 浏览器语言取词条
+      return <p role="alert">{translate(initialLocale(), 'common.renderFailed')}</p>
     }
     return this.props.children
   }

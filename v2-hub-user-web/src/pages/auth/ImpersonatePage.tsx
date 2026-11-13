@@ -3,6 +3,7 @@ import { Link, useLocation, useNavigate } from 'react-router'
 import { api, toApiError } from '../../api/client'
 import { useSession } from '../../auth/session-context'
 import { Alert } from '../../components/ui'
+import { useI18n } from '../../i18n/i18n-context'
 import { ROUTES } from '../../menu'
 import { AuthShell } from './AuthShell'
 
@@ -23,7 +24,8 @@ export function ImpersonatePage() {
   const location = useLocation()
   // 进入页面时取一次票据；之后地址变化不再重新兑换
   const [ticket] = useState(() => ticketFromHash(location.hash))
-  const [error, setError] = useState<string | null>(ticket === '' ? '链接里没有票据，请回到管理端重新点“切换身份”。' : null)
+  const { t } = useI18n()
+  const [error, setError] = useState<string | null>(() => (ticket === '' ? t('auth.impersonateNoTicket') : null))
 
   useEffect(() => {
     if (ticket === '') {
@@ -55,14 +57,14 @@ export function ImpersonatePage() {
   }, [ticket, adopt, navigate])
 
   return (
-    <AuthShell lead="切换身份" subtitle="正在以用户身份进入客户后台（只读）">
+    <AuthShell lead={t('auth.impersonateLead')} subtitle={t('auth.impersonateSubtitle')}>
       {error === null ? (
-        <div className="hub-empty">正在验证票据…</div>
+        <div className="hub-empty">{t('auth.impersonateVerifying')}</div>
       ) : (
         <>
           <Alert tone="plain">{error}</Alert>
           <p className="hub-login-links">
-            <Link to={ROUTES.LOGIN}>返回登录</Link>
+            <Link to={ROUTES.LOGIN}>{t('common.backToLogin')}</Link>
           </p>
         </>
       )}

@@ -2,7 +2,7 @@ import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/re
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { formatMoney, parseAmountToCents } from './money'
 import { durationLabel, trafficLabel } from './pages/shop/labels'
-import { TEST_CSRF, fail, mockServer, ok, renderApp } from './test/harness'
+import { TEST_CSRF, enT, fail, mockServer, ok, renderApp, zhT } from './test/harness'
 
 const NOW = '2026-11-13T00:00:00Z'
 const GIB = 1024 ** 3
@@ -53,10 +53,13 @@ describe('金额与文案', () => {
     expect(parseAmountToCents('19.9')).toBe(1990)
     expect(parseAmountToCents('0')).toBeNull()
     expect(parseAmountToCents('abc')).toBeNull()
-    expect([30, 90, 365, 45].map(durationLabel)).toEqual(['1 个月', '3 个月', '1 年', '45 天'])
-    expect(trafficLabel(100 * GIB, 'monthly')).toBe('每月 100.00 GB')
-    expect(trafficLabel(GIB, 'never')).toBe('有效期内共 1.00 GB')
-    expect(trafficLabel(0, 'monthly')).toBe('不限流量')
+    expect([30, 90, 365, 45].map((d) => durationLabel(zhT, d))).toEqual(['1 个月', '3 个月', '1 年', '45 天'])
+    expect([30, 90, 365, 730, 1].map((d) => durationLabel(enT, d))).toEqual(['1 month', '3 months', '1 year', '2 years', '1 day'])
+    expect(trafficLabel(zhT, 100 * GIB, 'monthly')).toBe('每月 100.00 GB')
+    expect(trafficLabel(zhT, GIB, 'never')).toBe('有效期内共 1.00 GB')
+    expect(trafficLabel(zhT, 0, 'monthly')).toBe('不限流量')
+    expect(trafficLabel(enT, 100 * GIB, 'monthly')).toBe('100.00 GB per month')
+    expect(formatMoney(990, 'USD', 'en-US')).toBe('$9.90')
   })
 })
 

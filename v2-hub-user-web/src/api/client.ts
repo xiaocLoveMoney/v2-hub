@@ -42,6 +42,7 @@ export type ChainNodeOption = components['schemas']['ChainNodeOption']
 export type ChainBlockedReason = components['schemas']['ChainBlockedReason']
 export type CustomNode = components['schemas']['CustomNode']
 export type ServerChainRule = components['schemas']['ServerChainRule']
+export type PublicPlan = components['schemas']['PublicPlan']
 
 /** 分页结果（hub-api.yaml 各分页接口的 data 形状）。 */
 export interface PageData<T> {
@@ -58,6 +59,8 @@ export interface ApiError {
 const HEADER_CSRF = 'X-CSRF-Token'
 const SAFE_METHODS = new Set(['GET', 'HEAD'])
 const FALLBACK_MESSAGE = '网络异常，请稍后重试'
+/** 前端自己的错误码：请求没到后端或响应不是统一信封。 */
+export const CODE_NETWORK = 'network'
 export const CODE_UNAUTHENTICATED = 'unauthenticated'
 /** 口令正确但需要两步验证码（docs/03 §5.3）。 */
 export const CODE_TOTP_REQUIRED = 'totp_required'
@@ -69,6 +72,14 @@ export const CODE_FEATURE_DISABLED = 'feature_disabled'
 export const CODE_INSUFFICIENT_BALANCE = 'insufficient_balance'
 
 let csrfToken = ''
+
+/** 把接口错误换成当前界面语言的说明；默认原样用后端说明。由语言层在切换语言时替换（docs/06 §5 M8 的做法）。 */
+let translateError: (error: ApiError) => string = (error) => error.message
+
+/** 替换错误说明的翻译函数（I18nProvider 调用）。 */
+export function setErrorTranslator(translator: (error: ApiError) => string) {
+  translateError = translator
+}
 
 /** 登录或刷新会话后由会话层写入；非 GET/HEAD 请求自动带上（docs/03 §5.3）。 */
 export function setCsrfToken(token: string) {
@@ -103,13 +114,13 @@ export const api = createClient<paths>({
 })
 api.use(csrfMiddleware)
 
-/** 把 openapi-fetch 返回的 error 规整为 ApiError。 */
+/** 把 openapi-fetch 返回的 error 规整为 ApiError，message 已按当前界面语言给出。 */
 export function toApiError(error: unknown): ApiError {
   if (typeof error === 'object' && error !== null && 'code' in error && 'message' in error) {
     const { code, message } = error as { code: unknown; message: unknown }
     if (typeof code === 'string' && typeof message === 'string') {
-      return { code, message }
+      return { code, message: translateError({ code, message }) }
     }
   }
-  return { code: 'network', message: FALLBACK_MESSAGE }
+  return { code: CODE_NETWORK, message: translateError({ code: CODE_NETWORK, message: FALLBACK_MESSAGE }) }
 }

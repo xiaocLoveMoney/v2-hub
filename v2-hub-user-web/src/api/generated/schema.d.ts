@@ -143,6 +143,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/admin/dashboard": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 管理端总览（任何已登录管理员；docs/03 §5.20，0.4.3）
+         * @description 缺对应权限码的区块为 null：users、traffic 要 user:read，servers 要 server:read，finance 要 finance:read，tickets 要 ticket:read。
+         */
+        get: operations["getAdminDashboard"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/admin/permissions": {
         parameters: {
             query?: never;
@@ -934,6 +954,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/admin/settings/test-telegram": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 向设置里的 Telegram 会话发一条测试消息并返回结果（setting:write；docs/03 §5.20，0.4.3）
+         * @description token（环境变量 HUB_TELEGRAM_BOT_TOKEN）或会话 id 为空时返回 403 feature_disabled；Bot API 拒绝或不可达返回 502，说明里不含 token。
+         */
+        post: operations["sendTestTelegram"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/admin/mail-outbox": {
         parameters: {
             query?: never;
@@ -1429,8 +1469,28 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** 按天的充值、消费与返利合计，以及当前余额总和（finance:read） */
+        /** 按天或按月的充值、消费与返利合计，以及当前余额总和（finance:read） */
         get: operations["getFinanceStats"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/finance/stats.csv": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 把收支统计导出为 CSV（finance:read；docs/03 §5.20，0.4.3）
+         * @description 参数同 /api/admin/finance/stats。不走响应信封；UTF-8 带 BOM，金额以元为单位、两位小数；记审计。
+         */
+        get: operations["exportFinanceStats"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1753,6 +1813,26 @@ export interface paths {
         };
         /** 客户门户未登录即可读的站点信息（docs/03 §5.6 公开子集） */
         get: operations["getSiteInfo"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/user/site/plans": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 落地页用的在售套餐（未登录可读；docs/03 §5.20，0.4.3）
+         * @description 只在落地页与商店都开启时返回在售的非试用套餐，否则返回空数组；不含任何与访问者有关的字段。
+         */
+        get: operations["getPublicPlans"];
         put?: never;
         post?: never;
         delete?: never;
@@ -3087,11 +3167,56 @@ export interface components {
             /** @description 商店与钱包是否开启（0.4.0） */
             shopEnabled?: boolean;
             currency?: components["schemas"]["Currency"];
+            /** @description 落地页（0.4.3）；enabled 为假时 headline 与 intro 为空串 */
+            landing?: {
+                enabled: boolean;
+                /** @description 空串 = 用站点名 */
+                headline: string;
+                /** @description Markdown，按公告规则渲染（Ruling-25） */
+                intro: string;
+            };
+            /** @description 客服入口（0.4.3，Ruling-44）；url 为空串时不显示 */
+            support?: {
+                url: string;
+                label: string;
+            };
         };
         /** @description 全部系统设置（docs/03 §5.6 设置清单），键名去掉点号改驼峰分组 */
         Settings: {
             /** @description SMTP 环境变量是否已配置（Ruling-24），不可经接口修改 */
             readonly mailEnabled: boolean;
+            /** @description 环境变量 HUB_TELEGRAM_BOT_TOKEN 是否已配置（0.4.3，Ruling-42） */
+            readonly telegramEnabled: boolean;
+            /** @description 掉线告警（0.4.3，docs/03 §5.20） */
+            alert: {
+                emails: string[];
+                offlineMinutes: number;
+            };
+            /** @description Telegram 管理员通知（0.4.3，Ruling-42） */
+            telegram: {
+                /** @description 空串 = 不发 */
+                chatId: string;
+                notifyAlerts: boolean;
+                notifyTickets: boolean;
+                notifyPayments: boolean;
+            };
+            /** @description 运营日报（0.4.3） */
+            report: {
+                dailyEnabled: boolean;
+                dailyHour: number;
+            };
+            /** @description 落地页（0.4.3） */
+            landing: {
+                enabled: boolean;
+                headline: string;
+                intro: string;
+            };
+            /** @description 客服入口（0.4.3，Ruling-44） */
+            support: {
+                /** @description https:// 地址或空串 */
+                url: string;
+                label: string;
+            };
             site: {
                 name: string;
                 /** @description IANA 时区名 */
@@ -3191,6 +3316,21 @@ export interface components {
                 [key: string]: unknown;
             };
             subscription?: {
+                [key: string]: unknown;
+            };
+            alert?: {
+                [key: string]: unknown;
+            };
+            telegram?: {
+                [key: string]: unknown;
+            };
+            report?: {
+                [key: string]: unknown;
+            };
+            landing?: {
+                [key: string]: unknown;
+            };
+            support?: {
                 [key: string]: unknown;
             };
         };
@@ -3792,8 +3932,14 @@ export interface components {
             /** Format: int64 */
             total: number;
         };
+        /**
+         * @default day
+         * @enum {string}
+         */
+        FinanceGranularity: "day" | "month";
         FinanceStats: {
-            /** @description 按平台时区的自然日，旧的在前；没有流水的日期也给 0 */
+            granularity?: components["schemas"]["FinanceGranularity"];
+            /** @description 按平台时区的自然日（按月时为每月 1 日，代表整月），旧的在前；没有流水的日期也给 0 */
             days: {
                 /** Format: date */
                 date: string;
@@ -3861,6 +4007,77 @@ export interface components {
             /** @description 不能买的原因，可以买时为空串 */
             reason: string;
             prices: components["schemas"]["PlanPrice"][];
+        };
+        /** @description 落地页展示的在售套餐（0.4.3）；不含与访问者有关的字段 */
+        PublicPlan: {
+            /** Format: int64 */
+            id: number;
+            name: string;
+            /** @description 卖点说明，纯文本，一行一条 */
+            description: string;
+            /**
+             * Format: int64
+             * @description 字节，0 不限
+             */
+            trafficLimit: number;
+            trafficReset: components["schemas"]["TrafficReset"];
+            limitIp: number;
+            nodeCount: number;
+            prices: components["schemas"]["PlanPrice"][];
+        };
+        /** @description 管理端总览（0.4.3，docs/03 §5.20）；缺权限的区块为 null */
+        AdminDashboard: {
+            users: {
+                total: number;
+                active: number;
+                newToday: number;
+                new7d: number;
+                /** @description 当前在线人数（各面板在线 client 去重到用户） */
+                online: number;
+            } | null;
+            traffic: {
+                /**
+                 * Format: int64
+                 * @description 今日流量（字节）
+                 */
+                today: number;
+                /** @description 近 7 个自然日（含今天），旧的在前 */
+                days: {
+                    /** Format: date */
+                    date: string;
+                    /** Format: int64 */
+                    bytes: number;
+                }[];
+            } | null;
+            servers: {
+                total: number;
+                online: number;
+                nodeCount: number;
+                /** @description 启用中但不在线的服务器 */
+                offline: {
+                    /** Format: int64 */
+                    id: number;
+                    name: string;
+                    /** @enum {string} */
+                    status: "unknown" | "online" | "offline" | "auth_failed";
+                    /** Format: date-time */
+                    offlineSince: string | null;
+                }[];
+            } | null;
+            finance: {
+                /** Format: int64 */
+                todaySpend: number;
+                /** Format: int64 */
+                todayTopup: number;
+                /** Format: int64 */
+                monthSpend: number;
+                /** Format: int64 */
+                monthTopup: number;
+            } | null;
+            tickets: {
+                /** @description 待回复（open）工单数 */
+                open: number;
+            } | null;
         };
         ShopTrafficPack: {
             /** Format: int64 */
@@ -4464,6 +4681,29 @@ export interface operations {
             403: components["responses"]["PermissionDenied"];
             409: components["responses"]["Conflict"];
             429: components["responses"]["RateLimited"];
+        };
+    };
+    getAdminDashboard: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 总览 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["AdminDashboard"];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
         };
     };
     listPermissions: {
@@ -6105,6 +6345,24 @@ export interface operations {
             502: components["responses"]["UpstreamUnavailable"];
         };
     };
+    sendTestTelegram: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["Ok"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            429: components["responses"]["RateLimited"];
+            502: components["responses"]["UpstreamUnavailable"];
+        };
+    };
     listMailOutbox: {
         parameters: {
             query?: {
@@ -7249,8 +7507,12 @@ export interface operations {
     getFinanceStats: {
         parameters: {
             query?: {
-                /** @description 最近多少天（按平台时区的自然日） */
+                /** @description day = 按日，month = 按月（0.4.3） */
+                granularity?: components["schemas"]["FinanceGranularity"];
+                /** @description 按日时最近多少天（按平台时区的自然日；0.4.3 起上限 366） */
                 days?: number;
+                /** @description 按月时最近多少个月（含本月，0.4.3） */
+                months?: number;
             };
             header?: never;
             path?: never;
@@ -7267,6 +7529,35 @@ export interface operations {
                     "application/json": components["schemas"]["Envelope"] & {
                         data?: components["schemas"]["FinanceStats"];
                     };
+                };
+            };
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+        };
+    };
+    exportFinanceStats: {
+        parameters: {
+            query?: {
+                granularity?: components["schemas"]["FinanceGranularity"];
+                days?: number;
+                months?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description CSV 文件 */
+            200: {
+                headers: {
+                    /** @description attachment; filename=finance-<粒度>-<日期>.csv */
+                    "Content-Disposition"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/csv": string;
                 };
             };
             400: components["responses"]["InvalidArgument"];
@@ -7730,6 +8021,28 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["Envelope"] & {
                         data?: components["schemas"]["SiteInfo"];
+                    };
+                };
+            };
+        };
+    };
+    getPublicPlans: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 在售套餐 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["PublicPlan"][];
                     };
                 };
             };

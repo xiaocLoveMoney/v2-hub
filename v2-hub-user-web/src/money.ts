@@ -3,10 +3,11 @@
 const CENTS_PER_UNIT = 100
 const MONEY_FRACTION_DIGITS = 2
 export const DEFAULT_CURRENCY = 'CNY'
+const DEFAULT_TAG = 'zh-CN'
 
-/** 把分格式化成带币种符号的金额；币种只影响显示，不做换算。 */
-export function formatMoney(cents: number, currency: string = DEFAULT_CURRENCY): string {
-  return new Intl.NumberFormat('zh-CN', {
+/** 把分格式化成带币种符号的金额；币种只影响显示，不做换算；tag 是界面语言标签（docs/06 §5 M8 的做法）。 */
+export function formatMoney(cents: number, currency: string = DEFAULT_CURRENCY, tag: string = DEFAULT_TAG): string {
+  return new Intl.NumberFormat(tag, {
     style: 'currency', currency, minimumFractionDigits: MONEY_FRACTION_DIGITS, maximumFractionDigits: MONEY_FRACTION_DIGITS,
   }).format(cents / CENTS_PER_UNIT)
 }
