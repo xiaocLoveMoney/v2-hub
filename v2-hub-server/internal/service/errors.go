@@ -17,6 +17,8 @@ const (
 	CodeTOTPRequired     Code = "totp_required"
 	CodeUpstream         Code = "upstream_unavailable"
 	CodeInternal         Code = "internal"
+	// CodeFeatureDisabled 表示功能未开启（注册关闭、邮件未配置等，docs/03 §5）。
+	CodeFeatureDisabled Code = "feature_disabled"
 )
 
 // Error 是业务错误：Code 决定 HTTP 状态，Message 是可直接展示给用户的中文说明（不含内部细节）。
@@ -45,6 +47,7 @@ var (
 	ErrRateLimited      = &Error{Code: CodeRateLimited}
 	ErrTOTPRequired     = &Error{Code: CodeTOTPRequired}
 	ErrUpstream         = &Error{Code: CodeUpstream}
+	ErrFeatureDisabled  = &Error{Code: CodeFeatureDisabled}
 )
 
 func newError(code Code, message string) *Error {

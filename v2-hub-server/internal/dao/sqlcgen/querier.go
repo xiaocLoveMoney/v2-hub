@@ -16,16 +16,24 @@ type Querier interface {
 	AdvanceAdminTOTPStep(ctx context.Context, arg AdvanceAdminTOTPStepParams) (int64, error)
 	// 原子地推进已用步长；返回 0 行表示该步长已被用过（并发重放）
 	AdvanceUserTOTPStep(ctx context.Context, arg AdvanceUserTOTPStepParams) (int64, error)
+	// 校验失败计一次；达到上限即作废
+	BumpEmailCodeAttempts(ctx context.Context, arg BumpEmailCodeAttemptsParams) error
+	// 领取到期的待发邮件并顺延下次尝试时间（租约），发送在事务外进行；并发的任务实例不会领到同一封
+	ClaimDueMail(ctx context.Context, arg ClaimDueMailParams) ([]ClaimDueMailRow, error)
 	ClearAdminTOTP(ctx context.Context, id int64) (int64, error)
 	ClearNodeGroupItems(ctx context.Context, nodeGroupID int64) error
 	ClearPlanNodeGroups(ctx context.Context, planID int64) error
 	ClearUserTOTP(ctx context.Context, id int64) (int64, error)
+	ConsumeEmailCode(ctx context.Context, arg ConsumeEmailCodeParams) (int64, error)
 	CountAdmins(ctx context.Context) (int64, error)
 	CountAdminsByRole(ctx context.Context, roleID int64) (int64, error)
 	CountAuditLogs(ctx context.Context) (int64, error)
+	CountEmailCodesByEmailSince(ctx context.Context, arg CountEmailCodesByEmailSinceParams) (int64, error)
+	CountEmailCodesByIPSince(ctx context.Context, arg CountEmailCodesByIPSinceParams) (int64, error)
 	// 用于 R5：除 excluded_admin_id 外，仍持有该角色且启用的管理员数。
 	CountEnabledAdminsWithRoleExcluding(ctx context.Context, arg CountEnabledAdminsWithRoleExcludingParams) (int64, error)
 	CountGroupMembershipsByInbound(ctx context.Context, inboundID int64) (int64, error)
+	CountMailOutbox(ctx context.Context, status string) (int64, error)
 	CountNodeGroupsByIDs(ctx context.Context, ids []int64) (int64, error)
 	CountNodes(ctx context.Context, arg CountNodesParams) (int64, error)
 	CountNodesByIDs(ctx context.Context, ids []int64) (int64, error)
@@ -67,6 +75,10 @@ type Querier interface {
 	// 节点与节点组（docs/03 §5.1）-----------------------------------------------
 	// 同一来源（入站 × 对外地址）只生成一个节点；已存在时保留管理员改过的展示属性
 	EnsureNode(ctx context.Context, arg EnsureNodeParams) error
+	// 邮箱是否已被占用：等于某个用户的邮箱，或等于某个（存量、含 @ 的）用户名（docs/03 §5.8 冲突）
+	ExistsEndUserIdentity(ctx context.Context, email string) (bool, error)
+	ExistsPlan(ctx context.Context, id int64) (bool, error)
+	GetActiveEmailCodeForUpdate(ctx context.Context, arg GetActiveEmailCodeForUpdateParams) (GetActiveEmailCodeForUpdateRow, error)
 	GetAdminByID(ctx context.Context, id int64) (GetAdminByIDRow, error)
 	GetAdminByUsername(ctx context.Context, username string) (GetAdminByUsernameRow, error)
 	// 同时取管理员状态：被禁用的管理员会话视为无效（R7）。
@@ -76,6 +88,7 @@ type Querier interface {
 	// 客户后台：终端用户会话、两步验证、登录记录（docs/03 §5.3）。
 	// 待删除的用户不可登录；停用的用户可以登录（docs/03 §5.3）。
 	GetEndUserForLogin(ctx context.Context, username string) (GetEndUserForLoginRow, error)
+	GetEndUserIDByEmail(ctx context.Context, email string) (int64, error)
 	GetEndUserLoginSecretHash(ctx context.Context, id int64) (string, error)
 	GetEndpoint(ctx context.Context, id int64) (GetEndpointRow, error)
 	GetInbound(ctx context.Context, id int64) (GetInboundRow, error)
@@ -96,6 +109,9 @@ type Querier interface {
 	GetUserTOTP(ctx context.Context, id int64) (GetUserTOTPRow, error)
 	InsertAdminRoles(ctx context.Context, arg InsertAdminRolesParams) error
 	InsertAuditLog(ctx context.Context, arg InsertAuditLogParams) error
+	InsertEmailCode(ctx context.Context, arg InsertEmailCodeParams) error
+	// 时间由服务时钟给出（不用库的 now()），与领取时的比较基准一致
+	InsertMailOutbox(ctx context.Context, arg InsertMailOutboxParams) (int64, error)
 	InsertNodeGroupItems(ctx context.Context, arg InsertNodeGroupItemsParams) error
 	InsertPlanNodeGroups(ctx context.Context, arg InsertPlanNodeGroupsParams) error
 	InsertRolePermissions(ctx context.Context, arg InsertRolePermissionsParams) error
@@ -111,6 +127,7 @@ type Querier interface {
 	ListInboundsByIDs(ctx context.Context, ids []int64) ([]ListInboundsByIDsRow, error)
 	// 入站与对外地址缓存（docs/03 §5.1）------------------------------------------
 	ListInboundsByServer(ctx context.Context, serverID int64) ([]ListInboundsByServerRow, error)
+	ListMailOutbox(ctx context.Context, arg ListMailOutboxParams) ([]ListMailOutboxRow, error)
 	ListNodeGroups(ctx context.Context) ([]ListNodeGroupsRow, error)
 	ListNodes(ctx context.Context, arg ListNodesParams) ([]ListNodesRow, error)
 	ListPermissionCodesForAdmin(ctx context.Context, adminID int64) ([]string, error)
@@ -127,6 +144,8 @@ type Querier interface {
 	ListServerProvisions(ctx context.Context, serverID int64) ([]ListServerProvisionsRow, error)
 	// 服务器（docs/03 §2、§3 T1–T4、§5.1）---------------------------------------
 	ListServers(ctx context.Context) ([]ListServersRow, error)
+	// 系统设置、发件箱与邮箱验证码（docs/03 §5.6、§5.7）。
+	ListSettings(ctx context.Context) ([]ListSettingsRow, error)
 	ListSubscribeLogs(ctx context.Context, arg ListSubscribeLogsParams) ([]ListSubscribeLogsRow, error)
 	ListUserLoginLogs(ctx context.Context, arg ListUserLoginLogsParams) ([]ListUserLoginLogsRow, error)
 	// 客户后台节点列表：按节点组分段，状态取平台缓存（docs/03 §5.5）
@@ -145,10 +164,16 @@ type Querier interface {
 	LockSuperAdminRole(ctx context.Context) error
 	MarkEndpointsMissing(ctx context.Context, arg MarkEndpointsMissingParams) (int64, error)
 	MarkInboundsMissing(ctx context.Context, arg MarkInboundsMissingParams) (int64, error)
+	// 放弃重试：清空正文，只留收件人、主题与最后一次错误
+	MarkMailFailed(ctx context.Context, arg MarkMailFailedParams) error
+	// 发送成功后清空正文（docs/03 §5.7 发件箱）
+	MarkMailSent(ctx context.Context, id int64) error
 	MarkUserDeleted(ctx context.Context, id int64) (int64, error)
 	MarkUserProvisionsPending(ctx context.Context, userID int64) error
 	// 待删除且各面板 client 已删完的用户，删除记录（docs/03 §5.2 删除用户）
 	PurgeDeletedUsers(ctx context.Context) (int64, error)
+	PurgeEmailCodes(ctx context.Context, createdAt pgtype.Timestamptz) (int64, error)
+	PurgeMailOutbox(ctx context.Context, createdAt pgtype.Timestamptz) (int64, error)
 	// 删除对外地址拆分了面板上的组：被挪到新组的地址改写组标识，保留原记录与节点（docs/03 §5.1）
 	RepointEndpoint(ctx context.Context, arg RepointEndpointParams) error
 	// 面板把该标识分给了新入站：仍挂着它的未缺失记录对应的旧入站已被删，标记缺失（docs/03 §5.1 面板标识复用）
@@ -158,6 +183,7 @@ type Querier interface {
 	SaveUserQuota(ctx context.Context, arg SaveUserQuotaParams) error
 	SetAdminTOTPPending(ctx context.Context, arg SetAdminTOTPPendingParams) error
 	SetInboundEnabledLocal(ctx context.Context, arg SetInboundEnabledLocalParams) error
+	SetMailRetry(ctx context.Context, arg SetMailRetryParams) error
 	SetProvisionCounters(ctx context.Context, arg SetProvisionCountersParams) error
 	SetProvisionLinks(ctx context.Context, arg SetProvisionLinksParams) error
 	SetServerOnlineClients(ctx context.Context, arg SetServerOnlineClientsParams) error
@@ -171,6 +197,8 @@ type Querier interface {
 	// 只在还没有 token 时写入，避免并发请求互相覆盖
 	SetUserSubToken(ctx context.Context, arg SetUserSubTokenParams) (int64, error)
 	SetUserTOTPPending(ctx context.Context, arg SetUserTOTPPendingParams) error
+	// 同一邮箱同一用途只有最新一条有效
+	SupersedeEmailCodes(ctx context.Context, arg SupersedeEmailCodesParams) error
 	TouchAdminSession(ctx context.Context, arg TouchAdminSessionParams) error
 	TouchUserLastUsed(ctx context.Context, arg TouchUserLastUsedParams) error
 	TouchUserSession(ctx context.Context, arg TouchUserSessionParams) error
@@ -190,6 +218,7 @@ type Querier interface {
 	UpsertInboundFromPlatform(ctx context.Context, arg UpsertInboundFromPlatformParams) (int64, error)
 	// cred_version 只在写面板成功（synced）时推进；失败时保留原值，下次对账继续换凭据
 	UpsertProvision(ctx context.Context, arg UpsertProvisionParams) (int64, error)
+	UpsertSetting(ctx context.Context, arg UpsertSettingParams) error
 }
 
 var _ Querier = (*Queries)(nil)

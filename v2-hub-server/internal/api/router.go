@@ -47,6 +47,12 @@ type Deps struct {
 	PortalAuth PortalAuthenticator
 	// Portal 提供客户后台数据与订阅（docs/03 §5.4、§5.5）。
 	Portal PortalManager
+	// Settings 提供系统设置（docs/03 §5.6）。
+	Settings SettingsManager
+	// Mail 提供发件箱查询与测试邮件（docs/03 §5.7）。
+	Mail MailManager
+	// Account 提供站点信息、邮箱验证码与账号自助（docs/03 §5.6–§5.8）。
+	Account AccountManager
 	// Cookie 是会话 Cookie 属性。
 	Cookie CookieConfig
 	// TrustedProxies 是可采信 X-Forwarded-For 的直连网段（如 Caddy 所在 docker 网络）。
@@ -60,13 +66,17 @@ type handlers struct {
 	users          UserManager
 	portalAuth     PortalAuthenticator
 	portal         PortalManager
+	settings       SettingsManager
+	mail           MailManager
+	account        AccountManager
 	cookie         CookieConfig
 	trustedProxies []netip.Prefix
 }
 
 // NewRouter 返回注册好全部路由的 http.Handler。路由与 hub-api.yaml 的 paths 逐条对应。
 func NewRouter(deps Deps) http.Handler {
-	h := &handlers{auth: deps.Auth, rbac: deps.RBAC, panels: deps.Panels, users: deps.Users, portalAuth: deps.PortalAuth, portal: deps.Portal, cookie: deps.Cookie, trustedProxies: deps.TrustedProxies}
+	h := &handlers{auth: deps.Auth, rbac: deps.RBAC, panels: deps.Panels, users: deps.Users, portalAuth: deps.PortalAuth, portal: deps.Portal,
+		settings: deps.Settings, mail: deps.Mail, account: deps.Account, cookie: deps.Cookie, trustedProxies: deps.TrustedProxies}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", handleHealthz)
 	mux.HandleFunc("GET /readyz", newReadyzHandler(deps.Database, deps.PingTimeout))
@@ -133,6 +143,15 @@ func NewRouter(deps Deps) http.Handler {
 	mux.HandleFunc("POST /api/admin/node-groups", h.requireAdmin(service.PermNodeWrite, h.createNodeGroup))
 	mux.HandleFunc("PUT /api/admin/node-groups/{id}", h.requireAdmin(service.PermNodeWrite, h.updateNodeGroup))
 	mux.HandleFunc("DELETE /api/admin/node-groups/{id}", h.requireAdmin(service.PermNodeWrite, h.deleteNodeGroup))
+
+	mux.HandleFunc("GET /api/admin/settings", h.requireAdmin(service.PermSettingRead, h.getSettings))
+	mux.HandleFunc("PUT /api/admin/settings", h.requireAdmin(service.PermSettingWrite, h.updateSettings))
+	mux.HandleFunc("POST /api/admin/settings/test-mail", h.requireAdmin(service.PermSettingWrite, h.sendTestMail))
+	mux.HandleFunc("GET /api/admin/mail-outbox", h.requireAdmin(service.PermSettingRead, h.listMailOutbox))
+
+	// 未登录可用：站点信息与邮箱验证码（docs/03 §5.6 公开子集、§5.7）
+	mux.HandleFunc("GET /api/user/site", h.getSiteInfo)
+	mux.HandleFunc("POST /api/user/auth/email-code", h.sendEmailCode)
 
 	// 客户后台（docs/03 §5.3–§5.5）：身份只取自会话（R8）。auth/me 与登出允许停用的账号访问。
 	mux.HandleFunc("POST /api/user/auth/login", h.userLogin)

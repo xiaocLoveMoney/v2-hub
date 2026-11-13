@@ -15,7 +15,9 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -24,6 +26,7 @@ import (
 	"v2-hub-server/internal/dao"
 	"v2-hub-server/internal/job"
 	"v2-hub-server/internal/manager/crypto"
+	"v2-hub-server/internal/manager/mail"
 	"v2-hub-server/internal/manager/panel"
 	"v2-hub-server/internal/manager/panel/xui"
 	"v2-hub-server/internal/service"
@@ -37,9 +40,19 @@ const (
 	envEncryptionKey = "HUB_ENCRYPTION_KEY"
 	// envInsecureDevCookie=1 时关闭会话 Cookie 的 Secure 属性，只供本机 HTTP 开发与联调。
 	envInsecureDevCookie = "HUB_INSECURE_DEV_COOKIE"
-	cmdAdminCreate       = "admin-create"
-	flagConfig           = "f"
-	flagConfigUsage      = "config file path"
+	// SMTP 配置只从环境变量读（Ruling-24）；主机或发件人为空即邮件不可用。
+	envSMTPHost     = "HUB_SMTP_HOST"
+	envSMTPPort     = "HUB_SMTP_PORT"
+	envSMTPUsername = "HUB_SMTP_USERNAME"
+	envSMTPSecret   = "HUB_SMTP_PASSWORD"
+	envSMTPFrom     = "HUB_SMTP_FROM"
+	envSMTPTLS      = "HUB_SMTP_TLS"
+	// mailOutboxInterval 是发件箱任务的周期。
+	mailOutboxInterval = 5 * time.Second
+
+	cmdAdminCreate  = "admin-create"
+	flagConfig      = "f"
+	flagConfigUsage = "config file path"
 )
 
 func main() {
@@ -119,10 +132,20 @@ func runServer(args []string) error {
 	if err != nil {
 		return err
 	}
-	users := service.NewUserService(pool, sealer, panels, service.UserConfig{Location: quotaLoc, Subscription: service.SubscriptionConfig{
+	subCfg := service.SubscriptionConfig{
 		BaseURL: cfg.Subscription.BaseURL, Title: cfg.Subscription.Title, UpdateIntervalHours: cfg.Subscription.UpdateIntervalHours,
 		InfoNodes: cfg.Subscription.InfoNodes, LogRetention: cfg.Subscription.LogRetention,
-	}}, nil)
+	}
+	settings := service.NewSettingsService(pool, subCfg, nil)
+	sender, err := smtpSenderFromEnv()
+	if err != nil {
+		return err
+	}
+	mails := service.NewMailService(pool, sealer, sender, settings, nil)
+	go job.RunMailOutbox(ctx, mails, mailOutboxInterval)
+	go job.RunSessionCleanup(ctx, job.PurgeFunc(mails.PurgeOutbox), cfg.Auth.SessionCleanupInterval)
+	account := service.NewAccountService(pool, sealer, settings, mails, nil)
+	users := service.NewUserService(pool, sealer, panels, service.UserConfig{Location: quotaLoc, Subscription: subCfg, Settings: settings}, nil)
 	go job.RunUserSync(ctx, users, job.UserSyncConfig{
 		TrafficInterval: cfg.User.TrafficInterval, ReconcileInterval: cfg.User.ReconcileInterval, Concurrency: cfg.Panel.Concurrency,
 	})
@@ -140,6 +163,9 @@ func runServer(args []string) error {
 			Users:          users,
 			PortalAuth:     portalAuth,
 			Portal:         users,
+			Settings:       settings,
+			Mail:           mails,
+			Account:        account,
 			Cookie:         api.CookieConfig{Secure: secureCookie},
 			TrustedProxies: trusted,
 		}),
@@ -167,6 +193,30 @@ func runServer(args []string) error {
 	defer cancel()
 	slog.Info("hub-server shutting down")
 	return srv.Shutdown(shutdownCtx)
+}
+
+// smtpSenderFromEnv 按环境变量创建 SMTP 发送器；未配置时返回 nil（邮件不可用），配置不合法时报错让进程启动失败。
+func smtpSenderFromEnv() (mail.Sender, error) {
+	cfg := mail.Config{
+		Host: os.Getenv(envSMTPHost), Username: os.Getenv(envSMTPUsername), Secret: os.Getenv(envSMTPSecret),
+		From: os.Getenv(envSMTPFrom), TLS: os.Getenv(envSMTPTLS),
+	}
+	if raw := os.Getenv(envSMTPPort); raw != "" {
+		port, err := strconv.Atoi(raw)
+		if err != nil {
+			return nil, fmt.Errorf("parse %s: %w", envSMTPPort, err)
+		}
+		cfg.Port = port
+	}
+	sender, err := mail.NewSMTPSender(cfg)
+	if errors.Is(err, mail.ErrDisabled) {
+		slog.Warn("mail is not configured; email-dependent features are disabled", "hint", envSMTPHost+" / "+envSMTPFrom)
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("init smtp (env %s*): %w", "HUB_SMTP_", err)
+	}
+	return sender, nil
 }
 
 func toAuthConfig(a config.AuthConfig) service.AuthConfig {
