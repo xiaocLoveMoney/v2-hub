@@ -1,9 +1,11 @@
 import { Alert, App, Button, DatePicker, Descriptions, Drawer, Form, Input, InputNumber, Modal, Select, Space, Switch, Table, Tag, Typography } from 'antd'
 import dayjs, { type Dayjs } from 'dayjs'
 import { useCallback, useState } from 'react'
-import { api, csrfHeader, type ApiError, type EndUser, type Plan, type Provision } from '../../api/client'
+import { api, csrfHeader, type EndUser, type Plan, type Provision } from '../../api/client'
+import { ErrorAlert } from '../../components/ErrorAlert'
 import { useOpenGeneration } from '../../hooks/use-open-generation'
 import { mutate, useRemote } from '../../hooks/use-remote'
+import { useSubmit } from '../../hooks/use-submit'
 import { TABLE_SCROLL, formatTime } from '../system/format'
 import { RenewResetFields, type RenewResetForm } from './quota-fields'
 import { bytesToGb, describeRenew, describeReset, formatBytes, gbToBytes, renewFieldsOf, renewModeOf, renewValueOf } from './quota'
@@ -14,42 +16,22 @@ const MAX_CREDENTIAL_LEN = 128
 const MAX_REMARK_LEN = 255
 const MAX_LIMIT_IP = 1000
 const MAX_PENDING_DAYS = 36500
-const USERNAME_PATTERN = /^[A-Za-z0-9_.@-]{3,64}$/
+// 新用户名不含 @，好与邮箱登录区分（docs/03 §5.8）
+const USERNAME_PATTERN = /^[A-Za-z0-9_.-]{3,64}$/
+const MAX_EMAIL_LEN = 254
+const emailRules = [{ type: 'email' as const, max: MAX_EMAIL_LEN, message: '邮箱格式不对' }]
 
 const credentialRules = [
   { required: true, message: '请输入口令' },
   { min: MIN_CREDENTIAL_LEN, max: MAX_CREDENTIAL_LEN, message: `口令长度须为 ${MIN_CREDENTIAL_LEN}–${MAX_CREDENTIAL_LEN} 个字符` },
 ]
 
-function ErrorAlert({ error }: { error: ApiError | null }) {
-  return error === null ? null : <Alert type="error" title={error.message} showIcon className="page-alert" />
-}
-
-/** 一次写操作：成功提示并回调，失败把错误留在弹窗里。 */
-function useSubmit(okText: string, onSaved: () => void) {
-  const { message } = App.useApp()
-  const [error, setError] = useState<ApiError | null>(null)
-  const [isBusy, setIsBusy] = useState(false)
-  const run = async (action: () => Promise<{ error?: unknown }>) => {
-    setIsBusy(true)
-    setError(null)
-    const err = await mutate(action)
-    setIsBusy(false)
-    if (err !== null) {
-      setError(err)
-      return
-    }
-    void message.success(okText)
-    onSaved()
-  }
-  return { error, isBusy, run }
-}
-
 // ---- 新建 -------------------------------------------------------------------------
 
 interface CreateForm {
   username: string
   credential: string
+  email?: string
   remark: string
   planId?: number
 }
@@ -75,13 +57,16 @@ function CreateUserForm({ plans, onSaved }: { plans: Plan[]; onSaved: () => void
   const { error, isBusy, run } = useSubmit('已创建用户，正在下发到各面板', onSaved)
   const submit = (v: CreateForm) => {
     const pw = v.credential
-    return run(() => api.POST('/api/admin/users', { params: csrfHeader(), body: { username: v.username, password: pw, remark: v.remark ?? '', planId: v.planId } }))
+    return run(() => api.POST('/api/admin/users', { params: csrfHeader(), body: { username: v.username, password: pw, email: v.email || undefined, remark: v.remark ?? '', planId: v.planId } }))
   }
   return (
     <>
       <ErrorAlert error={error} />
       <Form<CreateForm> layout="vertical" onFinish={(v) => void submit(v)}>
-        <Form.Item name="username" label="用户名" extra="登录客户后台用，可用邮箱" rules={[{ required: true, pattern: USERNAME_PATTERN, message: '3–64 位字母、数字或 _ . @ -' }]}>
+        <Form.Item name="username" label="用户名" extra="登录客户后台用" rules={[{ required: true, pattern: USERNAME_PATTERN, message: '3–64 位字母、数字或 _ . -' }]}>
+          <Input autoComplete="off" />
+        </Form.Item>
+        <Form.Item name="email" label="邮箱" extra="可选；填了即视为已验证，可用来登录与找回口令" rules={emailRules}>
           <Input autoComplete="off" />
         </Form.Item>
         <Form.Item name="credential" label="初始口令" rules={credentialRules}>
@@ -121,12 +106,21 @@ export function EditUserModal({ user, onClose, onSaved }: UserModalProps) {
 
 function EditUserForm({ user, onSaved }: { user: EndUser; onSaved: () => void }) {
   const { error, isBusy, run } = useSubmit('已保存', onSaved)
-  const submit = (v: { remark: string; isDisabled: boolean }) =>
-    run(() => api.PUT('/api/admin/users/{id}', { params: { ...csrfHeader(), path: { id: user.id } }, body: { remark: v.remark ?? '', isDisabled: v.isDisabled } }))
+  const currentEmail = user.email ?? ''
+  const submit = (v: { remark: string; isDisabled: boolean; email?: string }) => {
+    // 邮箱没改就不带，免得把“未验证”的邮箱顺手标成已验证
+    const email = (v.email ?? '') === currentEmail ? undefined : (v.email ?? '')
+    return run(() =>
+      api.PUT('/api/admin/users/{id}', { params: { ...csrfHeader(), path: { id: user.id } }, body: { remark: v.remark ?? '', isDisabled: v.isDisabled, email } }),
+    )
+  }
   return (
     <>
       <ErrorAlert error={error} />
-      <Form layout="vertical" initialValues={{ remark: user.remark, isDisabled: user.isDisabled }} onFinish={(v) => void submit(v)}>
+      <Form layout="vertical" initialValues={{ remark: user.remark, isDisabled: user.isDisabled, email: currentEmail }} onFinish={(v) => void submit(v)}>
+        <Form.Item name="email" label="邮箱" extra="清空即解绑；改成新地址即视为已验证" rules={emailRules}>
+          <Input autoComplete="off" />
+        </Form.Item>
         <Form.Item name="remark" label="备注" rules={[{ max: MAX_REMARK_LEN }]}>
           <Input autoComplete="off" />
         </Form.Item>
