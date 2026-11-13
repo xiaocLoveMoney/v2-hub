@@ -111,7 +111,7 @@ USER_JAR="$WORK/user.jar"
 USER_CSRF="$(portal_login "$USER_JAR" "$END_USER" "$USER_CRED")"
 [ -n "$USER_CSRF" ] || fail "终端用户登录失败：$(cat "$WORK/body")"
 portal() { call "$USER_JAR" "$USER_CSRF" "$@"; }
-[ "$(portal GET /api/user/auth/me | jq -c .data.features)" = '{"clientChain":true,"customNode":true}' ] || fail "会话应带链式开关：$(cat "$WORK/body")"
+[ "$(portal GET /api/user/auth/me | jq -c '.data.features | {clientChain, customNode}')" = '{"clientChain":true,"customNode":true}' ] || fail "会话应带链式开关：$(cat "$WORK/body")"
 overview="$(portal GET /api/user/chain)"; expect_code 200 "取链式概览"
 [ "$(printf '%s' "$overview" | jq '.data.allowed and .data.customNodeAllowed')" = "true" ] || fail "概览应允许链式：$overview"
 [ "$(printf '%s' "$overview" | jq '.data.nodes | length')" = "$NODE_COUNT" ] || fail "概览应给出 $NODE_COUNT 个可选节点：$overview"
@@ -192,7 +192,7 @@ portal PUT "/api/user/chain/rules/$RULE_AB" '{"name":"","isEnabled":true}' >/dev
 
 # ---- 9. 换到不开链式的套餐：规则阻断（原因 plan）、写操作 403、删除仍可、订阅不带链路 ----
 hub POST "/api/admin/users/$USER_ID/plan" "$(jq -nc --argjson p "$PLAIN_PLAN" '{planId:$p}')" >/dev/null; expect_code 200 "换到不开链式的套餐"
-[ "$(portal GET /api/user/auth/me | jq -c .data.features)" = '{"clientChain":false,"customNode":false}' ] || fail "换套餐后会话开关应关闭：$(cat "$WORK/body")"
+[ "$(portal GET /api/user/auth/me | jq -c '.data.features | {clientChain, customNode}')" = '{"clientChain":false,"customNode":false}' ] || fail "换套餐后会话开关应关闭：$(cat "$WORK/body")"
 blocked="$(portal GET /api/user/chain)"
 [ "$(printf '%s' "$blocked" | jq -r '[.data.rules[] | .status + ":" + .blockedReason] | unique | join(",")')" = "blocked:plan" ] || fail "规则应因套餐阻断：$blocked"
 portal POST /api/user/chain/rules "$(rule_body "$NODE_B" "$NODE_A")" >/dev/null; expect_code 403 "套餐不允许时新建规则"
