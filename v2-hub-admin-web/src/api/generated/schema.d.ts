@@ -1160,6 +1160,272 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/admin/traffic-packs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 全部流量包，含未上架（shop:read） */
+        get: operations["listTrafficPacks"];
+        put?: never;
+        /** 新建流量包（shop:write） */
+        post: operations["createTrafficPack"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/traffic-packs/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /** 修改流量包（shop:write） */
+        put: operations["updateTrafficPack"];
+        post?: never;
+        /** 删除流量包；已有的订单保留快照（shop:write） */
+        delete: operations["deleteTrafficPack"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/coupons": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 优惠码分页（shop:read） */
+        get: operations["listCoupons"];
+        put?: never;
+        /** 新建优惠码（shop:write） */
+        post: operations["createCoupon"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/coupons/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /** 修改优惠码（shop:write） */
+        put: operations["updateCoupon"];
+        post?: never;
+        /** 删除优惠码；已被使用过的不可删除，返回 409（shop:write） */
+        delete: operations["deleteCoupon"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/topup-codes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 充值码分页，只显示末 4 位（finance:read） */
+        get: operations["listTopupCodes"];
+        put?: never;
+        /** 生成一批充值码，明文只在本次响应里返回（finance:write） */
+        post: operations["createTopupCodes"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/topup-codes/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * 停用 / 启用未使用的充值码（finance:write）
+         * @description 已使用的码不可修改，返回 409。
+         */
+        put: operations["updateTopupCode"];
+        post?: never;
+        /** 删除未使用的充值码；已使用的返回 409（finance:write） */
+        delete: operations["deleteTopupCode"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/topup-codes/{id}/code": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        /** 查看一条充值码的明文，记审计（finance:write） */
+        get: operations["revealTopupCode"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/orders": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 订单分页，按时间倒序（finance:read） */
+        get: operations["listOrders"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/wallet-ledger": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 余额流水分页，按时间倒序（finance:read） */
+        get: operations["listWalletLedger"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/payments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 在线充值单分页（finance:read） */
+        get: operations["listPayments"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/rebates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 返利记录分页（finance:read） */
+        get: operations["listRebates"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/finance/stats": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 按天的充值、消费与返利合计，以及当前余额总和（finance:read） */
+        get: operations["getFinanceStats"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/users/{id}/balance": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 调整用户余额：可正可负，须写备注，记流水与审计（finance:write）
+         * @description 调整后余额为负或超过上限返回 409。
+         */
+        post: operations["adjustUserBalance"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/users/{id}/impersonate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 签发切换为该用户身份的一次性票据（impersonate:write，docs/03 §5.17）
+         * @description 票据 60 秒内有效、只能用一次；管理端拿到后打开 `{portalUrl}/impersonate#ticket=…`，由客户门户兑换成只读会话。
+         *     用户已停用或待删除返回 409。
+         */
+        post: operations["impersonateUser"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/user/auth/login": {
         parameters: {
             query?: never;
@@ -1748,6 +2014,202 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/user/auth/impersonate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 用管理端签发的票据换取代入会话（只读，30 分钟，Ruling-33）
+         * @description 票据无效、已用或过期一律返回 400，不区分原因。
+         */
+        post: operations["redeemImpersonateTicket"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/user/shop": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 商店：上架的套餐与时长选项、流量包、当前余额（docs/03 §5.12）
+         * @description 商店未开启返回 403 feature_disabled。
+         */
+        get: operations["getShop"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/user/shop/quote": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 询价：原价、优惠、应付、差额与下单后的到期时间；不落库、不占优惠码次数
+         * @description 商品不可买（未上架、试用已用过、没有套餐却买流量包等）返回 409；优惠码无效返回 400。
+         */
+        post: operations["quoteOrder"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/user/orders": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 本人的订单分页，按时间倒序 */
+        get: operations["listOwnOrders"];
+        put?: never;
+        /**
+         * 下单并从余额扣款，成功即生效（docs/03 §5.13，Ruling-28）
+         * @description 余额不足返回 409 insufficient_balance，data.shortfall 为差额（分）；商品不可买返回 409 conflict。
+         */
+        post: operations["createOrder"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/user/wallet": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 余额、自动续费状态、可用的充值方式与累计返利（docs/03 §5.14） */
+        get: operations["getWallet"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/user/wallet/ledger": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 本人的余额流水分页，按时间倒序 */
+        get: operations["listOwnLedger"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/user/wallet/redeem": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 兑换充值码（docs/03 §5.15）
+         * @description 码不存在、已用、停用或过期一律返回 400，不区分原因；失败次数过多返回 429。
+         */
+        post: operations["redeemTopupCode"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/user/wallet/auto-renew": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * 开 / 关到期自动续费（docs/03 §5.16）
+         * @description 没有买过可续费的时长选项、或当前是试用套餐时不能开启，返回 409。
+         */
+        put: operations["setAutoRenew"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/user/wallet/payments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 发起一笔在线充值，返回跳转地址或二维码内容（docs/03 §5.15）
+         * @description 没有配置任何支付网关时返回 403 feature_disabled。
+         */
+        post: operations["createPayment"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/pay/notify/{gateway}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 支付网关的异步通知；验签后幂等入账（docs/03 §5.15）
+         * @description 请求体与应答格式由各网关决定，这里只约定路径。未配置的网关返回 404；验签失败或金额与充值单不符返回 400。
+         *     同一笔网关交易重复通知只入账一次，重复通知仍返回成功。
+         */
+        post: operations["paymentNotify"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/sub/{token}": {
         parameters: {
             query?: never;
@@ -2083,8 +2545,8 @@ export interface components {
         UserStatus: "active" | "limited" | "expired" | "disabled";
         /** @enum {string} */
         ProvisionStatus: "pending" | "synced" | "failed";
-        /** @description 配额模型照 3x-ui 的 client（docs/03 §5.2）；自动续期三种方式最多选一种 */
-        PlanInput: {
+        /** @description 套餐的额度模板与售卖属性（docs/03 §5.2、§5.12）；免费续期自 0.4.0 起只在用户上（Ruling-20） */
+        PlanBase: {
             name: string;
             /**
              * Format: int64
@@ -2100,20 +2562,6 @@ export interface components {
             startOnFirstUse: boolean;
             /** @default 0 */
             limitIp: number;
-            /** @default 0 */
-            renewEveryDays: number;
-            /** @default 0 */
-            renewMonthDay: number;
-            /**
-             * @description 1–7 = 周一至周日
-             * @default 0
-             */
-            renewWeekday: number;
-            /**
-             * @description 0 不限
-             * @default 0
-             */
-            renewMax: number;
             trafficReset?: components["schemas"]["TrafficReset"];
             /** @default 1 */
             trafficResetDay: number;
@@ -2123,14 +2571,37 @@ export interface components {
             allowCustomNode: boolean;
             remark?: string;
             nodeGroupIds: number[];
+            /**
+             * @description 是否在商店上架；没有时长选项的套餐上架了也不显示（0.4.0）
+             * @default false
+             */
+            isOnSale: boolean;
+            /**
+             * @description 试用套餐：每个用户终身只能下单一次（0.4.0）
+             * @default false
+             */
+            isTrial: boolean;
+            /**
+             * @description 商店里的排序，小的在前（0.4.0）
+             * @default 0
+             */
+            sortOrder: number;
+            /** @description 卖点说明，纯文本，一行一条（0.4.0） */
+            description?: string;
         };
-        Plan: components["schemas"]["PlanInput"] & {
+        PlanInput: components["schemas"]["PlanBase"] & {
+            /** @description 时长选项，整体替换；天数不得重复；省略 = 不改（新建时为空）（0.4.0） */
+            prices?: components["schemas"]["PlanPriceInput"][];
+        };
+        Plan: components["schemas"]["PlanBase"] & {
             /** Format: int64 */
             id: number;
             /** @description 当前分配了该套餐的用户数 */
             userCount: number;
             /** Format: date-time */
             createdAt: string;
+            /** @description 按天数升序（0.4.0） */
+            prices: components["schemas"]["PlanPrice"][];
         };
         UserQuotaInput: {
             /** Format: int64 */
@@ -2187,6 +2658,13 @@ export interface components {
             invitedBy?: number | null;
             /** @description 没有邀请人时为空串（0.3.0） */
             invitedByUsername?: string;
+            /**
+             * Format: int64
+             * @description 余额（分）（0.4.0）
+             */
+            balance?: number;
+            /** @description 是否开了扣余额自动续费（0.4.0） */
+            autoRenew?: boolean;
             /** Format: date-time */
             createdAt: string;
         };
@@ -2239,6 +2717,8 @@ export interface components {
             };
             totpEnabled: boolean;
             csrfToken: string;
+            /** @description 真 = 管理员代入的只读会话，除退出外的写请求都会被拒（0.4.0，Ruling-33） */
+            impersonated?: boolean;
         };
         UserSessionEnvelope: components["schemas"]["Envelope"] & {
             data?: components["schemas"]["UserSession"];
@@ -2275,6 +2755,11 @@ export interface components {
             announcement?: components["schemas"]["Announcement"] | null;
             /** @description 最新一条标了弹窗的已发布公告（0.3.0） */
             popupAnnouncement?: components["schemas"]["Announcement"] | null;
+            /**
+             * Format: int64
+             * @description 余额（分）（0.4.0）
+             */
+            balance?: number;
         };
         TrafficPoint: {
             /** Format: date-time */
@@ -2357,6 +2842,9 @@ export interface components {
             checkinEnabled: boolean;
             ticketEnabled: boolean;
             sharedEnabled: boolean;
+            /** @description 商店与钱包是否开启（0.4.0） */
+            shopEnabled?: boolean;
+            currency?: components["schemas"]["Currency"];
         };
         /** @description 全部系统设置（docs/03 §5.6 设置清单），键名去掉点号改驼峰分组 */
         Settings: {
@@ -2366,6 +2854,8 @@ export interface components {
                 name: string;
                 /** @description IANA 时区名 */
                 timezone: string;
+                /** @description 客户门户的对外地址（https://…），切换为用户身份时用；空串 = 与管理端同源（0.4.0） */
+                portalUrl?: string;
             };
             register: {
                 mode: components["schemas"]["RegisterMode"];
@@ -2398,6 +2888,25 @@ export interface components {
             mail: {
                 ratePerMinute: number;
             };
+            shop: {
+                enabled: boolean;
+                currency: components["schemas"]["Currency"];
+            };
+            rebate: {
+                /** @description 0 = 关闭返利 */
+                percent: number;
+                /**
+                 * @description 只返被邀请人的首笔消费 / 每笔都返
+                 * @enum {string}
+                 */
+                mode: "first" | "always";
+            };
+            notify: {
+                /** @description 到期前几天提醒，0 = 不提醒 */
+                expireDays: number;
+                /** @description 剩余流量低于额度的百分之几时提醒，0 = 不提醒 */
+                trafficPercent: number;
+            };
             subscription: {
                 /** @description 空串 = 取请求的协议与主机 */
                 baseUrl: string;
@@ -2428,6 +2937,15 @@ export interface components {
                 [key: string]: unknown;
             };
             mail?: {
+                [key: string]: unknown;
+            };
+            shop?: {
+                [key: string]: unknown;
+            };
+            rebate?: {
+                [key: string]: unknown;
+            };
+            notify?: {
                 [key: string]: unknown;
             };
             subscription?: {
@@ -2495,6 +3013,22 @@ export interface components {
             total: number;
         };
         InviteInfo: {
+            /** @description 当前返利比例，0 = 未开启（0.4.0） */
+            rebatePercent?: number;
+            /**
+             * Format: int64
+             * @description 累计获得的返利（分）（0.4.0）
+             */
+            rebateTotal?: number;
+            /** @description 最近 100 条返利（0.4.0） */
+            rebates?: {
+                /** @description 打码后的被邀请人用户名 */
+                username: string;
+                /** Format: int64 */
+                amount: number;
+                /** Format: date-time */
+                createdAt: string;
+            }[];
             /** @description 设置 invite.userEnabled 且本人的码未被停用 */
             enabled: boolean;
             /** @description 未开启时为空串 */
@@ -2700,6 +3234,458 @@ export interface components {
              */
             trafficLimit: number;
         };
+        /**
+         * Format: int64
+         * @description 金额，整数分（docs/03 §5.12）
+         */
+        Money: number;
+        /**
+         * @description 显示币种；只影响前端显示，不做换算
+         * @enum {string}
+         */
+        Currency: "CNY" | "USD" | "EUR" | "HKD" | "JPY";
+        PlanPriceInput: {
+            durationDays: number;
+            price: components["schemas"]["Money"];
+        };
+        PlanPrice: components["schemas"]["PlanPriceInput"] & {
+            /** Format: int64 */
+            id: number;
+        };
+        TrafficPackInput: {
+            name: string;
+            /** Format: int64 */
+            trafficBytes: number;
+            price: components["schemas"]["Money"];
+            isOnSale: boolean;
+            /** @default 0 */
+            sortOrder: number;
+        };
+        TrafficPack: components["schemas"]["TrafficPackInput"] & {
+            /** Format: int64 */
+            id: number;
+            /** Format: date-time */
+            createdAt: string;
+        };
+        /** @enum {string} */
+        CouponKind: "percent" | "fixed";
+        CouponInput: {
+            /** @description 存大写，全站唯一 */
+            code: string;
+            kind: components["schemas"]["CouponKind"];
+            /**
+             * Format: int64
+             * @description percent：1–100；fixed：分
+             */
+            value: number;
+            /** @description 真 = 适用于全部套餐；假 = 只适用于 planIds */
+            allPlans: boolean;
+            planIds?: number[];
+            /**
+             * @description 是否适用于流量包
+             * @default false
+             */
+            forTrafficPack: boolean;
+            minAmount?: components["schemas"]["Money"];
+            /**
+             * @description 总次数上限，0 不限
+             * @default 0
+             */
+            maxUses: number;
+            /**
+             * @description 每人次数上限，0 不限
+             * @default 1
+             */
+            maxUsesPerUser: number;
+            /** Format: date-time */
+            startsAt?: string | null;
+            /** Format: date-time */
+            endsAt?: string | null;
+            isDisabled: boolean;
+            remark?: string;
+        };
+        Coupon: components["schemas"]["CouponInput"] & {
+            /** Format: int64 */
+            id: number;
+            usedCount: number;
+            /** Format: date-time */
+            createdAt: string;
+        };
+        CouponPage: {
+            items: components["schemas"]["Coupon"][];
+            /** Format: int64 */
+            total: number;
+        };
+        /** @enum {string} */
+        TopupCodeStatus: "unused" | "used" | "disabled" | "expired";
+        TopupCodeBatchInput: {
+            /**
+             * Format: int64
+             * @description 面值（分）
+             */
+            amount: number;
+            count: number;
+            /** Format: date-time */
+            expiresAt?: string | null;
+            /** @description 批次备注 */
+            batch?: string;
+        };
+        TopupCodeBatch: {
+            /** Format: int64 */
+            amount: number;
+            /** @description 充值码明文（16 位）；只在生成时返回这一次（Ruling-31） */
+            codes: string[];
+        };
+        TopupCode: {
+            /** Format: int64 */
+            id: number;
+            /** @description 码的末 4 位 */
+            codeTail: string;
+            /** Format: int64 */
+            amount: number;
+            batch: string;
+            status: components["schemas"]["TopupCodeStatus"];
+            /** Format: date-time */
+            expiresAt: string | null;
+            isDisabled: boolean;
+            /** Format: int64 */
+            usedByUserId?: number | null;
+            /** @description 未使用时为空串 */
+            usedByUsername: string;
+            /** Format: date-time */
+            usedAt: string | null;
+            /** Format: date-time */
+            createdAt: string;
+        };
+        TopupCodePage: {
+            items: components["schemas"]["TopupCode"][];
+            /** Format: int64 */
+            total: number;
+        };
+        TopupCodeUpdateInput: {
+            isDisabled: boolean;
+        };
+        TopupCodeSecret: {
+            /** @description 充值码明文，前端默认不显示，点击才取 */
+            code: string;
+        };
+        /**
+         * @description renew = 到期时扣余额自动续费生成的订单
+         * @enum {string}
+         */
+        OrderKind: "plan" | "traffic_pack" | "renew";
+        Order: {
+            /** Format: int64 */
+            id: number;
+            orderNo: string;
+            kind: components["schemas"]["OrderKind"];
+            /** @description 下单时的套餐或流量包名称 */
+            itemName: string;
+            /** @description 套餐的天数；流量包为 0 */
+            durationDays: number;
+            /**
+             * Format: int64
+             * @description 套餐的流量额度（0 不限）或流量包的字节数
+             */
+            trafficBytes: number;
+            isTrial: boolean;
+            /** Format: int64 */
+            amountOriginal: number;
+            /** Format: int64 */
+            amountDiscount: number;
+            /** Format: int64 */
+            amountPaid: number;
+            /** @description 没用优惠码为空串 */
+            couponCode: string;
+            /** Format: date-time */
+            createdAt: string;
+            /**
+             * Format: int64
+             * @description 只在管理端返回；用户已删除为 null
+             */
+            userId?: number | null;
+            /** @description 只在管理端返回：下单时的用户名 */
+            username?: string;
+        };
+        OrderPage: {
+            items: components["schemas"]["Order"][];
+            /** Format: int64 */
+            total: number;
+        };
+        /** @description kind = plan 时给 planPriceId，kind = traffic_pack 时给 trafficPackId */
+        OrderInput: {
+            /** @enum {string} */
+            kind: "plan" | "traffic_pack";
+            /** Format: int64 */
+            planPriceId?: number;
+            /** Format: int64 */
+            trafficPackId?: number;
+            /** @description 省略或空串 = 不用优惠码 */
+            couponCode?: string;
+        };
+        Quote: {
+            /** Format: int64 */
+            amountOriginal: number;
+            /** Format: int64 */
+            amountDiscount: number;
+            /** Format: int64 */
+            amountPayable: number;
+            /** Format: int64 */
+            balance: number;
+            /**
+             * Format: int64
+             * @description 还差多少（分）；余额够时为 0
+             */
+            shortfall: number;
+            /** @description 买的是当前套餐（续费）；假 = 换购或流量包 */
+            isRenewal: boolean;
+            /**
+             * Format: date-time
+             * @description 下单后的到期时间
+             */
+            expiresAt: string | null;
+            /**
+             * Format: int64
+             * @description 下单后的流量额度（字节，0 不限）
+             */
+            trafficLimit: number;
+            /** @description 已应用的优惠码，没有为空串 */
+            couponCode: string;
+        };
+        /** @enum {string} */
+        LedgerKind: "topup_code" | "topup_online" | "purchase" | "renew" | "rebate" | "admin_adjust" | "forfeit";
+        LedgerEntry: {
+            /** Format: int64 */
+            id: number;
+            kind: components["schemas"]["LedgerKind"];
+            /**
+             * Format: int64
+             * @description 带符号的变动金额（分）
+             */
+            amount: number;
+            /** Format: int64 */
+            balanceAfter: number;
+            remark: string;
+            /** Format: date-time */
+            createdAt: string;
+            /**
+             * Format: int64
+             * @description 只在管理端返回
+             */
+            userId?: number | null;
+            /** @description 只在管理端返回 */
+            username?: string;
+            /** @description 只在管理端返回：管理员调整时的操作人，其余为空串 */
+            adminUsername?: string;
+        };
+        LedgerPage: {
+            items: components["schemas"]["LedgerEntry"][];
+            /** Format: int64 */
+            total: number;
+        };
+        BalanceAdjustInput: {
+            /**
+             * Format: int64
+             * @description 带符号的调整金额（分），不能为 0
+             */
+            amount: number;
+            remark: string;
+        };
+        /** @enum {string} */
+        PaymentStatus: "pending" | "paid" | "expired";
+        Payment: {
+            /** Format: int64 */
+            id: number;
+            tradeNo: string;
+            gateway: string;
+            /** Format: int64 */
+            amount: number;
+            status: components["schemas"]["PaymentStatus"];
+            /** Format: date-time */
+            paidAt: string | null;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: int64 */
+            userId?: number | null;
+            username?: string;
+        };
+        PaymentPage: {
+            items: components["schemas"]["Payment"][];
+            /** Format: int64 */
+            total: number;
+        };
+        PaymentCreateInput: {
+            gateway: string;
+            /**
+             * Format: int64
+             * @description 充值金额（分），最低 1 元
+             */
+            amount: number;
+        };
+        PaymentCreated: {
+            tradeNo: string;
+            /** @description 跳转支付的地址；该网关不提供时为空串 */
+            payUrl: string;
+            /** @description 生成二维码用的内容；该网关不提供时为空串 */
+            qrContent: string;
+            /** Format: date-time */
+            expiresAt: string;
+        };
+        Rebate: {
+            /** Format: int64 */
+            id: number;
+            inviterUsername: string;
+            inviteeUsername: string;
+            orderNo: string;
+            /** Format: int64 */
+            orderAmount: number;
+            percent: number;
+            /** Format: int64 */
+            amount: number;
+            /** Format: date-time */
+            createdAt: string;
+        };
+        RebatePage: {
+            items: components["schemas"]["Rebate"][];
+            /** Format: int64 */
+            total: number;
+        };
+        FinanceStats: {
+            /** @description 按平台时区的自然日，旧的在前；没有流水的日期也给 0 */
+            days: {
+                /** Format: date */
+                date: string;
+                /**
+                 * Format: int64
+                 * @description 充值码与在线充值入账合计
+                 */
+                topup: number;
+                /**
+                 * Format: int64
+                 * @description 订单实付合计（含自动续费）
+                 */
+                spend: number;
+                /** Format: int64 */
+                rebate: number;
+                orderCount: number;
+            }[];
+            totals: {
+                /**
+                 * Format: int64
+                 * @description 当前全部用户余额之和
+                 */
+                balance: number;
+                /**
+                 * Format: int64
+                 * @description 区间内合计
+                 */
+                topup: number;
+                /** Format: int64 */
+                spend: number;
+                /** Format: int64 */
+                rebate: number;
+            };
+        };
+        ImpersonateTicket: {
+            /** @description 一次性票据，60 秒内有效；属于凭据，不写日志 */
+            ticket: string;
+            /** Format: date-time */
+            expiresAt: string;
+            /** @description 设置 site.portalUrl；空串 = 客户门户与管理端同源 */
+            portalUrl: string;
+        };
+        ImpersonateInput: {
+            ticket: string;
+        };
+        ShopPlan: {
+            /** Format: int64 */
+            id: number;
+            name: string;
+            /** @description 卖点说明，纯文本，一行一条 */
+            description: string;
+            /**
+             * Format: int64
+             * @description 字节，0 不限
+             */
+            trafficLimit: number;
+            trafficReset: components["schemas"]["TrafficReset"];
+            limitIp: number;
+            /** @description 该套餐当前可用的节点数 */
+            nodeCount: number;
+            isTrial: boolean;
+            /** @description 是不是本人当前的套餐（买它即续费） */
+            isCurrent: boolean;
+            canBuy: boolean;
+            /** @description 不能买的原因，可以买时为空串 */
+            reason: string;
+            prices: components["schemas"]["PlanPrice"][];
+        };
+        ShopTrafficPack: {
+            /** Format: int64 */
+            id: number;
+            name: string;
+            /** Format: int64 */
+            trafficBytes: number;
+            price: components["schemas"]["Money"];
+        };
+        Shop: {
+            /** Format: int64 */
+            balance: number;
+            plans: components["schemas"]["ShopPlan"][];
+            trafficPacks: components["schemas"]["ShopTrafficPack"][];
+            canBuyTrafficPack: boolean;
+            /** @description 不能买流量包的原因，可以买时为空串 */
+            trafficPackReason: string;
+        };
+        Wallet: {
+            /** Format: int64 */
+            balance: number;
+            autoRenew: {
+                enabled: boolean;
+                /** @description 现在能不能开启 */
+                available: boolean;
+                /** @description 不能开启的原因，可以开启时为空串 */
+                reason: string;
+                /** @description 续费的套餐名，没有可续费的选项为空串 */
+                planName: string;
+                /** @description 每次续费的天数，没有为 0 */
+                durationDays: number;
+                /**
+                 * Format: int64
+                 * @description 该时长选项的当前售价；选项已不存在为 null
+                 */
+                price: number | null;
+            };
+            /** @description 可用的在线充值方式；空 = 没有配置网关，只能用充值码 */
+            gateways: {
+                code: string;
+                name: string;
+            }[];
+            /**
+             * Format: int64
+             * @description 累计获得的邀请返利
+             */
+            rebateTotal: number;
+        };
+        AutoRenewInput: {
+            enabled: boolean;
+        };
+        RedeemInput: {
+            /** @description 16 位充值码，可带分组用的空格或连字符 */
+            code: string;
+        };
+        RedeemResult: {
+            /**
+             * Format: int64
+             * @description 入账金额（分）
+             */
+            amount: number;
+            /**
+             * Format: int64
+             * @description 入账后的余额
+             */
+            balance: number;
+        };
     };
     responses: {
         /** @description 成功（data 为空） */
@@ -2781,6 +3767,20 @@ export interface components {
             };
             content: {
                 "application/json": components["schemas"]["Envelope"];
+            };
+        };
+        /** @description insufficient_balance（余额不足，data.shortfall 为差额，单位分）或 conflict（商品当前不可买） */
+        OrderConflict: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Envelope"] & {
+                    data?: {
+                        /** Format: int64 */
+                        shortfall?: number;
+                    };
+                };
             };
         };
         /** @description account_disabled、feature_disabled（功能未开启）或 permission_denied（CSRF 校验失败） */
@@ -5210,6 +6210,591 @@ export interface operations {
             404: components["responses"]["NotFound"];
         };
     };
+    listTrafficPacks: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 全部流量包，含未上架 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["TrafficPack"][];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+        };
+    };
+    createTrafficPack: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TrafficPackInput"];
+            };
+        };
+        responses: {
+            /** @description 新建流量包 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["TrafficPack"];
+                    };
+                };
+            };
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    updateTrafficPack: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TrafficPackInput"];
+            };
+        };
+        responses: {
+            /** @description 修改流量包 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["TrafficPack"];
+                    };
+                };
+            };
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    deleteTrafficPack: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["Ok"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    listCoupons: {
+        parameters: {
+            query?: {
+                page?: components["parameters"]["Page"];
+                pageSize?: components["parameters"]["PageSize"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 优惠码分页 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["CouponPage"];
+                    };
+                };
+            };
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+        };
+    };
+    createCoupon: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CouponInput"];
+            };
+        };
+        responses: {
+            /** @description 新建优惠码 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["Coupon"];
+                    };
+                };
+            };
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    updateCoupon: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CouponInput"];
+            };
+        };
+        responses: {
+            /** @description 修改优惠码 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["Coupon"];
+                    };
+                };
+            };
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    deleteCoupon: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["Ok"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    listTopupCodes: {
+        parameters: {
+            query?: {
+                page?: components["parameters"]["Page"];
+                pageSize?: components["parameters"]["PageSize"];
+                status?: components["schemas"]["TopupCodeStatus"];
+                /** @description 按批次备注精确匹配 */
+                batch?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 充值码分页，只显示末 4 位 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["TopupCodePage"];
+                    };
+                };
+            };
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+        };
+    };
+    createTopupCodes: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TopupCodeBatchInput"];
+            };
+        };
+        responses: {
+            /** @description 生成一批充值码，明文只在本次响应里返回 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["TopupCodeBatch"];
+                    };
+                };
+            };
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+        };
+    };
+    updateTopupCode: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TopupCodeUpdateInput"];
+            };
+        };
+        responses: {
+            /** @description 停用 / 启用未使用的充值码 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["TopupCode"];
+                    };
+                };
+            };
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    deleteTopupCode: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["Ok"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    revealTopupCode: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 查看一条充值码的明文，记审计 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["TopupCodeSecret"];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    listOrders: {
+        parameters: {
+            query?: {
+                page?: components["parameters"]["Page"];
+                pageSize?: components["parameters"]["PageSize"];
+                userId?: number;
+                kind?: components["schemas"]["OrderKind"];
+                /** @description 创建时间下限（含） */
+                from?: string;
+                /** @description 创建时间上限（不含） */
+                to?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 订单分页，按时间倒序 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["OrderPage"];
+                    };
+                };
+            };
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+        };
+    };
+    listWalletLedger: {
+        parameters: {
+            query?: {
+                page?: components["parameters"]["Page"];
+                pageSize?: components["parameters"]["PageSize"];
+                userId?: number;
+                kind?: components["schemas"]["LedgerKind"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 余额流水分页，按时间倒序 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["LedgerPage"];
+                    };
+                };
+            };
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+        };
+    };
+    listPayments: {
+        parameters: {
+            query?: {
+                page?: components["parameters"]["Page"];
+                pageSize?: components["parameters"]["PageSize"];
+                userId?: number;
+                status?: components["schemas"]["PaymentStatus"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 在线充值单分页 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["PaymentPage"];
+                    };
+                };
+            };
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+        };
+    };
+    listRebates: {
+        parameters: {
+            query?: {
+                page?: components["parameters"]["Page"];
+                pageSize?: components["parameters"]["PageSize"];
+                inviterId?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 返利记录分页 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["RebatePage"];
+                    };
+                };
+            };
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+        };
+    };
+    getFinanceStats: {
+        parameters: {
+            query?: {
+                /** @description 最近多少天（按平台时区的自然日） */
+                days?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 按天的充值、消费与返利合计，以及当前余额总和 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["FinanceStats"];
+                    };
+                };
+            };
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+        };
+    };
+    adjustUserBalance: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BalanceAdjustInput"];
+            };
+        };
+        responses: {
+            /** @description 调整用户余额：可正可负，须写备注，记流水与审计 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["User"];
+                    };
+                };
+            };
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    impersonateUser: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 签发切换为该用户身份的一次性票据 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["ImpersonateTicket"];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
     userLogin: {
         parameters: {
             query?: never;
@@ -6109,6 +7694,334 @@ export interface operations {
             403: components["responses"]["UserForbidden"];
             409: components["responses"]["Conflict"];
             429: components["responses"]["RateLimited"];
+        };
+    };
+    redeemImpersonateTicket: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ImpersonateInput"];
+            };
+        };
+        responses: {
+            /** @description 用管理端签发的票据换取代入会话 */
+            200: {
+                headers: {
+                    "Set-Cookie"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["UserSession"];
+                    };
+                };
+            };
+            400: components["responses"]["InvalidArgument"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    getShop: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 商店：上架的套餐与时长选项、流量包、当前余额 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["Shop"];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["UserForbidden"];
+        };
+    };
+    quoteOrder: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OrderInput"];
+            };
+        };
+        responses: {
+            /** @description 询价：原价、优惠、应付、差额与下单后的到期时间；不落库、不占优惠码次数 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["Quote"];
+                    };
+                };
+            };
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["UserForbidden"];
+            409: components["responses"]["Conflict"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    listOwnOrders: {
+        parameters: {
+            query?: {
+                page?: components["parameters"]["Page"];
+                pageSize?: components["parameters"]["PageSize"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 本人的订单分页，按时间倒序 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["OrderPage"];
+                    };
+                };
+            };
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["AccountDisabled"];
+        };
+    };
+    createOrder: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OrderInput"];
+            };
+        };
+        responses: {
+            /** @description 下单并从余额扣款，成功即生效 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["Order"];
+                    };
+                };
+            };
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["UserForbidden"];
+            409: components["responses"]["OrderConflict"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    getWallet: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 余额、自动续费状态、可用的充值方式与累计返利 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["Wallet"];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["AccountDisabled"];
+        };
+    };
+    listOwnLedger: {
+        parameters: {
+            query?: {
+                page?: components["parameters"]["Page"];
+                pageSize?: components["parameters"]["PageSize"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 本人的余额流水分页，按时间倒序 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["LedgerPage"];
+                    };
+                };
+            };
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["AccountDisabled"];
+        };
+    };
+    redeemTopupCode: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RedeemInput"];
+            };
+        };
+        responses: {
+            /** @description 兑换充值码 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["RedeemResult"];
+                    };
+                };
+            };
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["UserForbidden"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    setAutoRenew: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AutoRenewInput"];
+            };
+        };
+        responses: {
+            /** @description 开 / 关到期自动续费 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["Wallet"];
+                    };
+                };
+            };
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["UserForbidden"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    createPayment: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PaymentCreateInput"];
+            };
+        };
+        responses: {
+            /** @description 发起一笔在线充值，返回跳转地址或二维码内容 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["PaymentCreated"];
+                    };
+                };
+            };
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["UserForbidden"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    paymentNotify: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                gateway: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/x-www-form-urlencoded": {
+                    [key: string]: unknown;
+                };
+                "application/json": {
+                    [key: string]: unknown;
+                };
+            };
+        };
+        responses: {
+            /** @description 已受理（内容为网关要求的应答文本） */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/plain": string;
+                };
+            };
+            400: components["responses"]["InvalidArgument"];
+            404: components["responses"]["NotFound"];
         };
     };
     getSubscription: {
