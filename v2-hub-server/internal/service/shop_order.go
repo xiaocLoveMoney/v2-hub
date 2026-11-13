@@ -390,7 +390,8 @@ func (s *ShopService) QuoteOrder(ctx context.Context, p *UserPrincipal, in Order
 // CreateOrder 下单并从余额扣款，成功即生效（docs/03 §5.13 原子性）。
 // 错误：CodeFeatureDisabled、CodeInvalidArgument、CodeConflict（商品不可买）、CodeInsufficientBalance（Data 带差额）、CodeRateLimited。
 func (s *ShopService) CreateOrder(ctx context.Context, p *UserPrincipal, in OrderInput, ip *netip.Addr) (*Order, error) {
-	if _, err := requireShop(ctx, s.settings); err != nil {
+	cur, err := requireShop(ctx, s.settings)
+	if err != nil {
 		return nil, err
 	}
 	if err := takeRate(s.orderRate, fmt.Sprint(guardKeyOrder, p.UserID)); err != nil {
@@ -409,7 +410,7 @@ func (s *ShopService) CreateOrder(ctx context.Context, p *UserPrincipal, in Orde
 		}
 		err = s.inTx(ctx, func(q *sqlcgen.Queries) error {
 			var err error
-			order, err = s.placeOrder(ctx, q, p, in, orderNo, ip, now)
+			order, err = s.placeOrder(ctx, q, cur, p, in, orderNo, ip, now)
 			return err
 		})
 		if violatedConstraint(err) == constraintOrderNo {
@@ -425,8 +426,8 @@ func (s *ShopService) CreateOrder(ctx context.Context, p *UserPrincipal, in Orde
 	return nil, fmt.Errorf("create order for user %d: order no kept colliding", p.UserID)
 }
 
-// placeOrder 在事务里完成一笔下单：算价 → 写订单 → 扣余额记流水 → 应用套餐或流量包 → 记优惠码使用 → 审计。
-func (s *ShopService) placeOrder(ctx context.Context, q *sqlcgen.Queries, p *UserPrincipal, in OrderInput, orderNo string, ip *netip.Addr, now time.Time) (*Order, error) {
+// placeOrder 在事务里完成一笔下单：算价 → 写订单 → 扣余额记流水 → 应用套餐或流量包 → 记优惠码使用 → 记返利 → 审计。
+func (s *ShopService) placeOrder(ctx context.Context, q *sqlcgen.Queries, cur Settings, p *UserPrincipal, in OrderInput, orderNo string, ip *netip.Addr, now time.Time) (*Order, error) {
 	o, err := s.price(ctx, q, p.UserID, in, now)
 	if err != nil {
 		return nil, err
@@ -466,6 +467,11 @@ func (s *ShopService) placeOrder(ctx context.Context, q *sqlcgen.Queries, p *Use
 		}
 		if err := q.BumpCouponUse(ctx, o.couponID); err != nil {
 			return nil, fmt.Errorf("bump coupon %d: %w", o.couponID, err)
+		}
+	}
+	if !o.trial {
+		if err := s.recordRebate(ctx, q, cur, p.UserID, orderID, o.payable(), now); err != nil {
+			return nil, err
 		}
 	}
 	err = writeAudit(ctx, q, AuditEntry{ActorType: ActorUser, ActorID: p.UserID, Action: ActionPortalOrder, TargetType: targetOrder, TargetID: fmt.Sprint(orderID),

@@ -146,7 +146,9 @@ func runServer(args []string) error {
 	go job.RunSessionCleanup(ctx, job.PurgeFunc(mails.PurgeOutbox), cfg.Auth.SessionCleanupInterval)
 	users := service.NewUserService(pool, sealer, panels, service.UserConfig{Location: quotaLoc, Subscription: subCfg, Settings: settings}, nil)
 	account := service.NewAccountService(pool, sealer, service.AccountDeps{Settings: settings, Mail: mails, Users: users, Portal: portalAuth}, nil)
-	go job.RunUserSync(ctx, users, job.UserSyncConfig{
+	shop := service.NewShopService(pool, settings, users, mails, nil)
+	// 用量任务每轮的“推进用户”换成商店的入口：先做到期的扣余额续费，再推进状态，最后发提醒邮件（docs/03 §5.16）
+	go job.RunUserSync(ctx, billingSyncer{UserService: users, shop: shop}, job.UserSyncConfig{
 		TrafficInterval: cfg.User.TrafficInterval, ReconcileInterval: cfg.User.ReconcileInterval, Concurrency: cfg.Panel.Concurrency,
 	})
 
@@ -169,7 +171,7 @@ func runServer(args []string) error {
 			Content:        service.NewContentService(pool, sealer, settings, mails, nil),
 			Tickets:        service.NewTicketService(pool, settings, mails, nil),
 			Wallet:         service.NewWalletService(pool, sealer, settings, nil),
-			Shop:           service.NewShopService(pool, settings, users, nil),
+			Shop:           shop,
 			Cookie:         api.CookieConfig{Secure: secureCookie},
 			TrustedProxies: trusted,
 		}),
@@ -246,6 +248,17 @@ func toPortalAuthConfig(c config.Config) service.PortalAuthConfig {
 		LoginMaxTrackedKeys:  c.Auth.LoginMaxTrackedKeys,
 		LoginLogRetention:    c.Portal.LoginLogRetention,
 	}
+}
+
+// billingSyncer 把用量任务里的“推进用户”交给 ShopService，其余能力仍由 UserService 提供。
+type billingSyncer struct {
+	*service.UserService
+	shop *service.ShopService
+}
+
+// AdvanceUsers 见 service.ShopService.AdvanceUsers。
+func (b billingSyncer) AdvanceUsers(ctx context.Context) (int, error) {
+	return b.shop.AdvanceUsers(ctx)
 }
 
 func runAdminCreate(args []string) error {

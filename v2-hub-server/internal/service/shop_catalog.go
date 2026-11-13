@@ -75,14 +75,15 @@ type ShopService struct {
 	store
 	settings    *SettingsService
 	users       *UserService
+	mail        *MailService
 	now         func() time.Time
 	orderRate   *ratelimit.FailureGuard
 	quoteRate   *ratelimit.FailureGuard
 	couponFails *ratelimit.FailureGuard
 }
 
-// NewShopService 创建商店服务；users 用来在下单后触发对账。now 为 nil 时用 time.Now。
-func NewShopService(pool *pgxpool.Pool, settings *SettingsService, users *UserService, now func() time.Time) *ShopService {
+// NewShopService 创建商店服务；users 用来在下单后触发对账，mails 用来发续费与提醒邮件（为 nil 或未配置 SMTP 时不发）。now 为 nil 时用 time.Now。
+func NewShopService(pool *pgxpool.Pool, settings *SettingsService, users *UserService, mails *MailService, now func() time.Time) *ShopService {
 	if now == nil {
 		now = time.Now
 	}
@@ -90,7 +91,7 @@ func NewShopService(pool *pgxpool.Pool, settings *SettingsService, users *UserSe
 		return ratelimit.NewFailureGuard(ratelimit.FailureGuardConfig{MaxFailures: limit, Window: window, Lockout: window, MaxKeys: shopGuardMaxKeys}, now)
 	}
 	return &ShopService{
-		store: newStore(pool), settings: settings, users: users, now: now,
+		store: newStore(pool), settings: settings, users: users, mail: mails, now: now,
 		orderRate: mk(ordersPerMinute, shopRateWindow), quoteRate: mk(quotesPerMinute, shopRateWindow), couponFails: mk(couponFailsPerHour, couponGuardWindow),
 	}
 }
