@@ -34,7 +34,7 @@ cd v2-hub-contract/deploy/it && bash run_all.sh
 - 前端静态文件放 MinIO，Caddy 同域反代 `/api`、`/sub`（Ruling-5、Ruling-6）。
 
 契约（全部在 v2-hub-contract/）：`hub-api.yaml`（server → 前端）、`deploy/init.sql`（server 的表结构）、
-`upstream/3x-ui/openapi-v3.11.0.json`（3x-ui → server 的上游基准）。契约版本用 git tag `vX.Y`，当前 `v0.7`。
+`upstream/3x-ui/openapi-v3.11.0.json`（3x-ui → server 的上游基准）。契约版本用 git tag `vX.Y`，当前 `v0.8`。
 
 ## 跨目录纪律
 
@@ -71,6 +71,9 @@ GitHub 仓库设置见 `docs/github-仓库设置清单.md`。
 - M6 完成（2026-11-13，tag `v0.7`）：客户端链式（Ruling-36 – Ruling-38）：链式规则（入口 → 落地，通畅 / 阻断按套餐与节点可用性计算）、
   自有落地节点（分享链接或 SOCKS5，加密存储，只能作落地）；Mihomo / sing-box / Xray JSON 订阅带两跳链路，Base64 不带；用户端链式代理页；IT-8 通过。
   真实流量经落地出网（出口 IP）未自动化，待人工验证。
-- 下一步是 M7（服务端链式），之后 M8（运营）。
+- M7 完成（2026-11-14，tag `v0.8`）：服务端链式（Ruling-39 – Ruling-41）：用户自助配置“入口 → 落地”，平台在入口面板 Xray 模板里增删 `hub-r{id}`
+  出站与按入站 + 用户匹配的路由；以入口服务器为单位整体对账，加密备份、重启后确认运行、失败回滚与退避；管理端看下发状态与重试；IT-9 通过。
+  真实外网流量经落地出网与管理端 M7 页面的浏览器实测未自动化，待人工验证。
+- 下一步是 M8（运营）。
 - 路线（2026-11-13，Ruling-17 – Ruling-22）：参考 SSPanel-Uim Malio 的功能与界面，自行实现；里程碑为
   M3 订阅与用户端基础 → M4 自助运营 → M5 商店与钱包 → M6 / M7 两种链式 → M8 运营，见 docs/07。
