@@ -903,6 +903,7 @@ func (s *UserService) DeleteUser(ctx context.Context, actor *AdminPrincipal, id 
 }
 
 // deleteUser 把用户标记为待删除并触发各面板清理（docs/03 §5.2 删除用户）；管理员删除与本人注销共用，audit 由调用方给出。
+// 未关闭的工单当场删除；没有面板 client 的用户当场清除平台记录。
 func (s *UserService) deleteUser(ctx context.Context, id int64, audit AuditEntry) error {
 	var servers []int64
 	err := s.inTx(ctx, func(q *sqlcgen.Queries) error {
@@ -919,6 +920,13 @@ func (s *UserService) deleteUser(ctx context.Context, id int64, audit AuditEntry
 		}
 		if err := q.DeleteUserSessionsByUser(ctx, id); err != nil {
 			return fmt.Errorf("revoke sessions of user %d: %w", id, err)
+		}
+		if err := q.DeleteUnclosedTicketsByUser(ctx, id); err != nil {
+			return fmt.Errorf("delete open tickets of user %d: %w", id, err)
+		}
+		// 没有任何面板 client 的用户不会再有对账来收尾，这里当场清除；有 client 的等对账删完后清除
+		if _, err := q.PurgeDeletedUsers(ctx); err != nil {
+			return fmt.Errorf("purge deleted users: %w", err)
 		}
 		return writeAudit(ctx, q, audit)
 	})

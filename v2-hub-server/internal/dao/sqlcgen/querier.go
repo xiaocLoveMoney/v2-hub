@@ -86,6 +86,8 @@ type Querier interface {
 	DeleteServer(ctx context.Context, id int64) (int64, error)
 	DeleteSharedAccount(ctx context.Context, id int64) (int64, error)
 	DeleteTutorial(ctx context.Context, id int64) (int64, error)
+	// 删除用户时当场删掉未关闭的工单（docs/03 §5.2 删除用户）；已关闭的随用户记录级联删除
+	DeleteUnclosedTicketsByUser(ctx context.Context, userID int64) error
 	DeleteUserSessionByID(ctx context.Context, id int64) error
 	DeleteUserSessionsByUser(ctx context.Context, userID int64) error
 	// 待定密钥已由调用方校验并重新加密为正式密钥后传入

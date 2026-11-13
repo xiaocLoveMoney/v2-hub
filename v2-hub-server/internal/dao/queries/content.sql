@@ -141,6 +141,10 @@ RETURNING id;
 -- name: InsertTicketMessage :exec
 INSERT INTO ticket_message (ticket_id, author_kind, admin_id, content, created_at) VALUES ($1, $2, $3, $4, $5);
 
+-- name: DeleteUnclosedTicketsByUser :exec
+-- 删除用户时当场删掉未关闭的工单（docs/03 §5.2 删除用户）；已关闭的随用户记录级联删除
+DELETE FROM ticket WHERE user_id = $1 AND status <> 'closed';
+
 -- name: CountOpenTicketsByUser :one
 SELECT count(*) FROM ticket WHERE user_id = $1 AND status <> 'closed';
 

@@ -267,6 +267,16 @@ func (q *Queries) DeleteTutorial(ctx context.Context, id int64) (int64, error) {
 	return result.RowsAffected(), nil
 }
 
+const deleteUnclosedTicketsByUser = `-- name: DeleteUnclosedTicketsByUser :exec
+DELETE FROM ticket WHERE user_id = $1 AND status <> 'closed'
+`
+
+// 删除用户时当场删掉未关闭的工单（docs/03 §5.2 删除用户）；已关闭的随用户记录级联删除
+func (q *Queries) DeleteUnclosedTicketsByUser(ctx context.Context, userID int64) error {
+	_, err := q.db.Exec(ctx, deleteUnclosedTicketsByUser, userID)
+	return err
+}
+
 const existsCheckin = `-- name: ExistsCheckin :one
 SELECT EXISTS (SELECT 1 FROM checkin_log WHERE user_id = $1 AND checkin_date = $2)
 `
