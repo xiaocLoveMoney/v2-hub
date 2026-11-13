@@ -28,6 +28,7 @@ run_case IT-4 it4_users.sh
 run_case IT-5 it5_subscription.sh
 run_case IT-6 it6_self_service.sh
 run_case IT-7 it7_shop.sh
+run_case IT-8 it8_client_chain.sh
 # 新用例登记在这里，并在 docs/08-联调与测试方案.md 用例库加一行
 
 echo
