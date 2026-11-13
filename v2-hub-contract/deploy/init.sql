@@ -186,6 +186,7 @@ CREATE TABLE plan (
     traffic_reset_day  INTEGER      NOT NULL DEFAULT 1,       -- 按月重置的日期（1–31）
     allow_client_chain BOOLEAN      NOT NULL DEFAULT FALSE,   -- 功能开关：客户端链式（M6）
     allow_custom_node  BOOLEAN      NOT NULL DEFAULT FALSE,   -- 功能开关：自有落地节点（M6）
+    allow_server_chain BOOLEAN      NOT NULL DEFAULT FALSE,   -- 功能开关：服务端链式（M7）
     remark             VARCHAR(255) NOT NULL DEFAULT '',
     is_on_sale         BOOLEAN      NOT NULL DEFAULT FALSE,   -- 是否在商店上架（docs/03 §5.12）
     is_trial           BOOLEAN      NOT NULL DEFAULT FALSE,   -- 试用套餐：每个用户终身只能下单一次
@@ -673,7 +674,7 @@ CREATE TABLE custom_node (
 );
 
 -- 链式规则（docs/03 §5.18，Ruling-36）：入口节点 → 落地（平台节点或自有落地节点，恰好一个）。
--- kind = client 只在订阅里表达（M6）；server 留给服务端链式（M7）。状态是计算值，不落库。
+-- kind = client 只在订阅里表达（M6）；server 是服务端链式（M7，落地只能是平台节点，同一入口每人一条）。状态是计算值，不落库。
 -- 平台节点或自有落地节点被删除时规则随之删除；每个用户的条数上限由服务端校验。
 CREATE TABLE chain_rule (
     id             BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -689,11 +690,31 @@ CREATE TABLE chain_rule (
     CONSTRAINT ck_chain_rule_kind CHECK (kind IN ('client', 'server')),
     CONSTRAINT ck_chain_rule_exit CHECK (num_nonnulls(exit_node_id, exit_custom_id) = 1),
     CONSTRAINT ck_chain_rule_distinct CHECK (exit_node_id IS NULL OR exit_node_id <> entry_node_id),
-    CONSTRAINT uk_chain_rule_route UNIQUE NULLS NOT DISTINCT (user_id, kind, entry_node_id, exit_node_id, exit_custom_id)
+    CONSTRAINT uk_chain_rule_route UNIQUE NULLS NOT DISTINCT (user_id, kind, entry_node_id, exit_node_id, exit_custom_id),
+    CONSTRAINT ck_chain_rule_server_exit CHECK (kind = 'client' OR exit_node_id IS NOT NULL)
 );
 CREATE INDEX idx_chain_rule_entry_node ON chain_rule (entry_node_id);
 CREATE INDEX idx_chain_rule_exit_node ON chain_rule (exit_node_id) WHERE exit_node_id IS NOT NULL;
 CREATE INDEX idx_chain_rule_exit_custom ON chain_rule (exit_custom_id) WHERE exit_custom_id IS NOT NULL;
+CREATE UNIQUE INDEX uk_chain_rule_server_entry ON chain_rule (user_id, entry_node_id) WHERE kind = 'server';
+
+-- 链路下发记录（docs/03 §5.19，Ruling-40）：每台入口服务器一行，记录面板上平台条目的下发状态。
+-- desired_hash 是期望平台条目的 SHA-256；fail_count 只对同一 desired_hash 累计，期望变化即清零；
+-- backup_enc 是最近一次写入前的整份 Xray 模板，AES-256-GCM 加密，关联数据 chain_apply:<server_id>:backup。
+CREATE TABLE chain_apply (
+    server_id        BIGINT      PRIMARY KEY REFERENCES server (id) ON DELETE CASCADE,
+    status           VARCHAR(16) NOT NULL DEFAULT 'pending',
+    desired_hash     VARCHAR(64) NOT NULL DEFAULT '',
+    applied_rule_ids BIGINT[]    NOT NULL DEFAULT '{}',   -- 当前面板上生效的服务端规则 id
+    fail_count       INTEGER     NOT NULL DEFAULT 0,
+    last_error       TEXT        NOT NULL DEFAULT '',     -- 脱敏后的最近错误
+    last_attempt_at  TIMESTAMPTZ,
+    next_attempt_at  TIMESTAMPTZ,                         -- 失败退避到这个时刻；空 = 不限
+    applied_at       TIMESTAMPTZ,
+    backup_enc       BYTEA,
+    updated_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT ck_chain_apply_status CHECK (status IN ('pending', 'applied', 'failed'))
+);
 
 -- 种子数据 ---------------------------------------------------------------------
 -- 内置角色 super_admin 隐式拥有全部权限码（docs/03 §4），不写 role_permission。
