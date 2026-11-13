@@ -24,10 +24,12 @@ type Querier interface {
 	ClearAdminTOTP(ctx context.Context, id int64) (int64, error)
 	ClearNodeGroupItems(ctx context.Context, nodeGroupID int64) error
 	ClearPlanNodeGroups(ctx context.Context, planID int64) error
+	ClearSharedAccountPlans(ctx context.Context, sharedAccountID int64) error
 	ClearUserTOTP(ctx context.Context, id int64) (int64, error)
 	ConsumeEmailCode(ctx context.Context, arg ConsumeEmailCodeParams) (int64, error)
 	CountAdmins(ctx context.Context) (int64, error)
 	CountAdminsByRole(ctx context.Context, roleID int64) (int64, error)
+	CountAnnouncements(ctx context.Context) (int64, error)
 	CountAuditLogs(ctx context.Context) (int64, error)
 	CountEmailCodesByEmailSince(ctx context.Context, arg CountEmailCodesByEmailSinceParams) (int64, error)
 	CountEmailCodesByIPSince(ctx context.Context, arg CountEmailCodesByIPSinceParams) (int64, error)
@@ -39,23 +41,35 @@ type Querier interface {
 	CountNodeGroupsByIDs(ctx context.Context, ids []int64) (int64, error)
 	CountNodes(ctx context.Context, arg CountNodesParams) (int64, error)
 	CountNodesByIDs(ctx context.Context, ids []int64) (int64, error)
+	CountOpenTicketsByUser(ctx context.Context, userID int64) (int64, error)
 	CountPermissionsByCodes(ctx context.Context, codes []string) (int64, error)
+	CountPlansByIDs(ctx context.Context, ids []int64) (int64, error)
+	CountPublishedAnnouncements(ctx context.Context) (int64, error)
 	CountSubscribeLogs(ctx context.Context, userID pgtype.Int8) (int64, error)
+	CountTickets(ctx context.Context, arg CountTicketsParams) (int64, error)
+	CountTicketsCreatedSince(ctx context.Context, arg CountTicketsCreatedSinceParams) (int64, error)
+	CountUserTicketMessagesSince(ctx context.Context, arg CountUserTicketMessagesSinceParams) (int64, error)
 	CountUsers(ctx context.Context, arg CountUsersParams) (int64, error)
 	CreateAdmin(ctx context.Context, arg CreateAdminParams) (CreateAdminRow, error)
 	CreateAdminInviteCode(ctx context.Context, arg CreateAdminInviteCodeParams) (int64, error)
 	CreateAdminSession(ctx context.Context, arg CreateAdminSessionParams) error
+	CreateAnnouncement(ctx context.Context, arg CreateAnnouncementParams) (int64, error)
 	CreateNodeGroup(ctx context.Context, arg CreateNodeGroupParams) (int64, error)
 	CreatePlan(ctx context.Context, arg CreatePlanParams) (int64, error)
 	CreateRole(ctx context.Context, arg CreateRoleParams) (int64, error)
 	// token 密文依赖 id 作关联数据，先写占位，同一事务内再 SetServerToken
 	CreateServer(ctx context.Context, arg CreateServerParams) (int64, error)
+	CreateSharedAccount(ctx context.Context, arg CreateSharedAccountParams) (int64, error)
+	// ---- 工单 ----
+	CreateTicket(ctx context.Context, arg CreateTicketParams) (int64, error)
+	CreateTutorial(ctx context.Context, arg CreateTutorialParams) (int64, error)
 	CreateUser(ctx context.Context, arg CreateUserParams) (int64, error)
 	CreateUserSession(ctx context.Context, arg CreateUserSessionParams) (int64, error)
 	DeleteAdminRoles(ctx context.Context, adminID int64) error
 	DeleteAdminSessionByID(ctx context.Context, id int64) error
 	DeleteAdminSessionByTokenHash(ctx context.Context, tokenHash []byte) error
 	DeleteAdminSessionsByAdmin(ctx context.Context, adminID int64) error
+	DeleteAnnouncement(ctx context.Context, id int64) (int64, error)
 	DeleteEndpoint(ctx context.Context, id int64) error
 	DeleteExpiredAdminSessions(ctx context.Context, expiresAt pgtype.Timestamptz) (int64, error)
 	DeleteExpiredUserSessions(ctx context.Context, expiresAt pgtype.Timestamptz) (int64, error)
@@ -70,6 +84,8 @@ type Querier interface {
 	DeleteRole(ctx context.Context, id int64) error
 	DeleteRolePermissions(ctx context.Context, roleID int64) error
 	DeleteServer(ctx context.Context, id int64) (int64, error)
+	DeleteSharedAccount(ctx context.Context, id int64) (int64, error)
+	DeleteTutorial(ctx context.Context, id int64) (int64, error)
 	DeleteUserSessionByID(ctx context.Context, id int64) error
 	DeleteUserSessionsByUser(ctx context.Context, userID int64) error
 	// 待定密钥已由调用方校验并重新加密为正式密钥后传入
@@ -81,6 +97,7 @@ type Querier interface {
 	EnsureNode(ctx context.Context, arg EnsureNodeParams) error
 	// 首次查看时生成个人码；已有（或随机码撞了别人的）时什么都不做，由调用方重读
 	EnsureUserInviteCode(ctx context.Context, arg EnsureUserInviteCodeParams) error
+	ExistsCheckin(ctx context.Context, arg ExistsCheckinParams) (bool, error)
 	// 邮箱是否已被占用：等于某个用户的邮箱，或等于某个（存量、含 @ 的）用户名（docs/03 §5.8 冲突）
 	ExistsEndUserIdentity(ctx context.Context, email string) (bool, error)
 	ExistsPlan(ctx context.Context, id int64) (bool, error)
@@ -91,6 +108,7 @@ type Querier interface {
 	GetAdminSessionByTokenHash(ctx context.Context, tokenHash []byte) (GetAdminSessionByTokenHashRow, error)
 	// 两步验证（docs/03 §4.3）---------------------------------------------------
 	GetAdminTOTP(ctx context.Context, id int64) (GetAdminTOTPRow, error)
+	GetAnnouncementForUpdate(ctx context.Context, id int64) (GetAnnouncementForUpdateRow, error)
 	GetEndUserEmail(ctx context.Context, id int64) (pgtype.Text, error)
 	// 客户后台：终端用户会话、两步验证、登录记录（docs/03 §5.3）。
 	// 待删除的用户不可登录；停用的用户可以登录（docs/03 §5.3）。
@@ -112,28 +130,47 @@ type Querier interface {
 	GetServerConn(ctx context.Context, id int64) (GetServerConnRow, error)
 	// 影响分享链接的入站与对外地址摘要；变了就要重新向面板取全部链接（docs/03 §5.4 节点来源）
 	GetServerLinkFingerprint(ctx context.Context, serverID int64) (string, error)
+	GetSharedAccountCredential(ctx context.Context, id int64) ([]byte, error)
+	GetTicketForUpdate(ctx context.Context, id int64) (GetTicketForUpdateRow, error)
 	// 订阅与客户后台数据（docs/03 §5.4、§5.5）。
 	GetUserBySubTokenHash(ctx context.Context, subTokenHash []byte) (GetUserBySubTokenHashRow, error)
+	// 判断能否签到要用的字段；状态由调用方按当前时间现算，不取库里可能滞后的 status 列
+	GetUserCheckinState(ctx context.Context, id int64) (GetUserCheckinStateRow, error)
 	GetUserDashboard(ctx context.Context, arg GetUserDashboardParams) (GetUserDashboardRow, error)
 	GetUserInviteCode(ctx context.Context, ownerUserID pgtype.Int8) (GetUserInviteCodeRow, error)
+	// 只给已验证邮箱且未停用的用户发提醒；没有时返回空串
+	GetUserNotifyEmail(ctx context.Context, id int64) (string, error)
+	GetUserPlanStatus(ctx context.Context, id int64) (GetUserPlanStatusRow, error)
 	// 读写配额前加行锁，避免流量任务与管理员操作互相覆盖
 	GetUserQuota(ctx context.Context, id int64) (GetUserQuotaRow, error)
 	GetUserSessionByTokenHash(ctx context.Context, tokenHash []byte) (GetUserSessionByTokenHashRow, error)
 	GetUserSubToken(ctx context.Context, id int64) ([]byte, error)
 	GetUserTOTP(ctx context.Context, id int64) (GetUserTOTPRow, error)
+	// 与 ListVisibleSharedAccounts 同样的可见性条件，防止凭 id 读到不可见的条目
+	GetVisibleSharedAccountCredential(ctx context.Context, arg GetVisibleSharedAccountCredentialParams) ([]byte, error)
 	InsertAdminRoles(ctx context.Context, arg InsertAdminRolesParams) error
 	InsertAuditLog(ctx context.Context, arg InsertAuditLogParams) error
+	// ---- 签到 ----
+	// 唯一约束 (user_id, checkin_date) 保证每人每天一次（Ruling-26）；并发提交只有一条插入成功
+	InsertCheckin(ctx context.Context, arg InsertCheckinParams) (int64, error)
 	InsertEmailCode(ctx context.Context, arg InsertEmailCodeParams) error
 	// 时间由服务时钟给出（不用库的 now()），与领取时的比较基准一致
 	InsertMailOutbox(ctx context.Context, arg InsertMailOutboxParams) (int64, error)
 	InsertNodeGroupItems(ctx context.Context, arg InsertNodeGroupItemsParams) error
 	InsertPlanNodeGroups(ctx context.Context, arg InsertPlanNodeGroupsParams) error
 	InsertRolePermissions(ctx context.Context, arg InsertRolePermissionsParams) error
+	InsertSharedAccountPlans(ctx context.Context, arg InsertSharedAccountPlansParams) error
 	InsertSubscribeLog(ctx context.Context, arg InsertSubscribeLogParams) error
+	InsertTicketMessage(ctx context.Context, arg InsertTicketMessageParams) error
 	InsertUserLoginLog(ctx context.Context, arg InsertUserLoginLogParams) error
 	ListActiveUserIDs(ctx context.Context) ([]int64, error)
 	ListAdmins(ctx context.Context, arg ListAdminsParams) ([]ListAdminsRow, error)
+	// 公告、教程、共享账号、工单与签到（docs/03 §5.9–§5.11）。
+	// ---- 公告 ----
+	// 管理端：含草稿，新的在前
+	ListAnnouncements(ctx context.Context, arg ListAnnouncementsParams) ([]ListAnnouncementsRow, error)
 	ListAuditLogs(ctx context.Context, arg ListAuditLogsParams) ([]AuditLog, error)
+	ListCheckins(ctx context.Context, arg ListCheckinsParams) ([]ListCheckinsRow, error)
 	// 期望状态：每个（用户, 服务器）上应挂的入站。来源 = 套餐节点组里启用的节点，入站未缺失、服务器未停用（docs/03 §5.2 授权）
 	ListDesiredClients(ctx context.Context, serverID int64) ([]ListDesiredClientsRow, error)
 	ListEnabledServerIDs(ctx context.Context) ([]int64, error)
@@ -144,12 +181,16 @@ type Querier interface {
 	ListInviteCodes(ctx context.Context, arg ListInviteCodesParams) ([]ListInviteCodesRow, error)
 	ListInvitees(ctx context.Context, arg ListInviteesParams) ([]ListInviteesRow, error)
 	ListMailOutbox(ctx context.Context, arg ListMailOutboxParams) ([]ListMailOutboxRow, error)
+	// 群发对象：有已验证邮箱且未停用的用户（docs/03 §5.9 公告群发）
+	ListMailableUserEmails(ctx context.Context) ([]string, error)
 	ListNodeGroups(ctx context.Context) ([]ListNodeGroupsRow, error)
 	ListNodes(ctx context.Context, arg ListNodesParams) ([]ListNodesRow, error)
 	ListPermissionCodesForAdmin(ctx context.Context, adminID int64) ([]string, error)
 	ListPermissions(ctx context.Context) ([]ListPermissionsRow, error)
 	// 套餐、用户、下发与用量（docs/03 §5.2）-------------------------------------------
 	ListPlans(ctx context.Context) ([]ListPlansRow, error)
+	// 用户端：只有已发布的，置顶在前、新的在前；only_popup 为真时只取标了弹窗的
+	ListPublishedAnnouncements(ctx context.Context, arg ListPublishedAnnouncementsParams) ([]ListPublishedAnnouncementsRow, error)
 	ListRoleCodesByAdminIDs(ctx context.Context, adminIds []int64) ([]ListRoleCodesByAdminIDsRow, error)
 	ListRoleCodesForAdmin(ctx context.Context, adminID int64) ([]string, error)
 	ListRolePermissionCodes(ctx context.Context) ([]ListRolePermissionCodesRow, error)
@@ -162,7 +203,15 @@ type Querier interface {
 	ListServers(ctx context.Context) ([]ListServersRow, error)
 	// 系统设置、发件箱与邮箱验证码（docs/03 §5.6、§5.7）。
 	ListSettings(ctx context.Context) ([]ListSettingsRow, error)
+	// ---- 共享账号 ----
+	// 管理端：全部条目与各自限定的套餐，不含口令
+	ListSharedAccounts(ctx context.Context, id int64) ([]ListSharedAccountsRow, error)
 	ListSubscribeLogs(ctx context.Context, arg ListSubscribeLogsParams) ([]ListSubscribeLogsRow, error)
+	ListTicketMessages(ctx context.Context, ticketID int64) ([]ListTicketMessagesRow, error)
+	ListTickets(ctx context.Context, arg ListTicketsParams) ([]ListTicketsRow, error)
+	// ---- 教程 ----
+	// only_published 为真时只取已发布的（用户端）
+	ListTutorials(ctx context.Context, arg ListTutorialsParams) ([]ListTutorialsRow, error)
 	ListUserLoginLogs(ctx context.Context, arg ListUserLoginLogsParams) ([]ListUserLoginLogsRow, error)
 	// 客户后台节点列表：按节点组分段，状态取平台缓存（docs/03 §5.5）
 	ListUserNodeGroups(ctx context.Context, id int64) ([]ListUserNodeGroupsRow, error)
@@ -176,8 +225,11 @@ type Querier interface {
 	ListUsers(ctx context.Context, arg ListUsersParams) ([]ListUsersRow, error)
 	// 对账需要的用户信息：已有下发或期望下发到该服务器的用户（含待删除的）
 	ListUsersByIDs(ctx context.Context, ids []int64) ([]ListUsersByIDsRow, error)
+	// 用户端：已发布，且没有限定套餐或限定里包含该用户的套餐
+	ListVisibleSharedAccounts(ctx context.Context, planID int64) ([]ListVisibleSharedAccountsRow, error)
 	// R5 的并发保护：改动可能影响 super_admin 数量的事务先锁住该角色行，串行化判断。
 	LockSuperAdminRole(ctx context.Context) error
+	MarkAnnouncementMailed(ctx context.Context, arg MarkAnnouncementMailedParams) error
 	MarkEndpointsMissing(ctx context.Context, arg MarkEndpointsMissingParams) (int64, error)
 	MarkInboundsMissing(ctx context.Context, arg MarkInboundsMissingParams) (int64, error)
 	// 放弃重试：清空正文，只留收件人、主题与最后一次错误
@@ -212,6 +264,9 @@ type Querier interface {
 	SetServerProvisionsOnline(ctx context.Context, arg SetServerProvisionsOnlineParams) error
 	SetServerSynced(ctx context.Context, id int64) error
 	SetServerToken(ctx context.Context, arg SetServerTokenParams) error
+	SetSharedAccountCredential(ctx context.Context, arg SetSharedAccountCredentialParams) error
+	// touch_reply 为真时把最近回复时间推到 now（有新消息）；关闭时记关闭时间，重新打开时清掉
+	SetTicketStatus(ctx context.Context, arg SetTicketStatusParams) error
 	SetUserCredential(ctx context.Context, arg SetUserCredentialParams) error
 	SetUserEmail(ctx context.Context, arg SetUserEmailParams) (int64, error)
 	SetUserPasswordHash(ctx context.Context, arg SetUserPasswordHashParams) (int64, error)
@@ -227,6 +282,7 @@ type Querier interface {
 	UpdateAdminInviteCode(ctx context.Context, arg UpdateAdminInviteCodeParams) error
 	UpdateAdminLastLogin(ctx context.Context, id int64) error
 	UpdateAdminPasswordHash(ctx context.Context, arg UpdateAdminPasswordHashParams) (int64, error)
+	UpdateAnnouncement(ctx context.Context, arg UpdateAnnouncementParams) error
 	// 同步时以面板为准刷新缓存；drift_detected_at 由调用方按漂移规则给出（保留已有标记）。缺失是终态，不刷新
 	UpdateInboundFromSync(ctx context.Context, arg UpdateInboundFromSyncParams) error
 	UpdateNode(ctx context.Context, arg UpdateNodeParams) (int64, error)
@@ -234,6 +290,8 @@ type Querier interface {
 	UpdatePlan(ctx context.Context, arg UpdatePlanParams) (int64, error)
 	UpdateRoleName(ctx context.Context, arg UpdateRoleNameParams) error
 	UpdateServer(ctx context.Context, arg UpdateServerParams) (int64, error)
+	UpdateSharedAccount(ctx context.Context, arg UpdateSharedAccountParams) (int64, error)
+	UpdateTutorial(ctx context.Context, arg UpdateTutorialParams) (int64, error)
 	UpdateUserRemark(ctx context.Context, arg UpdateUserRemarkParams) (int64, error)
 	UpsertEndpoint(ctx context.Context, arg UpsertEndpointParams) (int64, error)
 	// 平台写入面板成功后的落库：摘要即“已确认”状态，清除漂移与缺失标记

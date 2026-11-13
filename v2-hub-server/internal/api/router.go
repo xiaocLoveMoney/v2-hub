@@ -53,6 +53,10 @@ type Deps struct {
 	Mail MailManager
 	// Account 提供站点信息、邮箱验证码与账号自助（docs/03 §5.6–§5.8）。
 	Account AccountManager
+	// Content 提供公告、教程与共享账号（docs/03 §5.9）。
+	Content ContentManager
+	// Tickets 提供工单（docs/03 §5.10）。
+	Tickets TicketManager
 	// Cookie 是会话 Cookie 属性。
 	Cookie CookieConfig
 	// TrustedProxies 是可采信 X-Forwarded-For 的直连网段（如 Caddy 所在 docker 网络）。
@@ -69,6 +73,8 @@ type handlers struct {
 	settings       SettingsManager
 	mail           MailManager
 	account        AccountManager
+	content        ContentManager
+	tickets        TicketManager
 	cookie         CookieConfig
 	trustedProxies []netip.Prefix
 }
@@ -76,7 +82,7 @@ type handlers struct {
 // NewRouter 返回注册好全部路由的 http.Handler。路由与 hub-api.yaml 的 paths 逐条对应。
 func NewRouter(deps Deps) http.Handler {
 	h := &handlers{auth: deps.Auth, rbac: deps.RBAC, panels: deps.Panels, users: deps.Users, portalAuth: deps.PortalAuth, portal: deps.Portal,
-		settings: deps.Settings, mail: deps.Mail, account: deps.Account, cookie: deps.Cookie, trustedProxies: deps.TrustedProxies}
+		settings: deps.Settings, mail: deps.Mail, account: deps.Account, content: deps.Content, tickets: deps.Tickets, cookie: deps.Cookie, trustedProxies: deps.TrustedProxies}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", handleHealthz)
 	mux.HandleFunc("GET /readyz", newReadyzHandler(deps.Database, deps.PingTimeout))
@@ -149,6 +155,25 @@ func NewRouter(deps Deps) http.Handler {
 	mux.HandleFunc("POST /api/admin/settings/test-mail", h.requireAdmin(service.PermSettingWrite, h.sendTestMail))
 	mux.HandleFunc("GET /api/admin/mail-outbox", h.requireAdmin(service.PermSettingRead, h.listMailOutbox))
 
+	mux.HandleFunc("GET /api/admin/announcements", h.requireAdmin(service.PermContentRead, h.listAnnouncements))
+	mux.HandleFunc("POST /api/admin/announcements", h.requireAdmin(service.PermContentWrite, h.createAnnouncement))
+	mux.HandleFunc("PUT /api/admin/announcements/{id}", h.requireAdmin(service.PermContentWrite, h.updateAnnouncement))
+	mux.HandleFunc("DELETE /api/admin/announcements/{id}", h.requireAdmin(service.PermContentWrite, h.deleteAnnouncement))
+	mux.HandleFunc("POST /api/admin/announcements/{id}/mail", h.requireAdmin(service.PermContentWrite, h.mailAnnouncement))
+	mux.HandleFunc("GET /api/admin/tutorials", h.requireAdmin(service.PermContentRead, h.listTutorials))
+	mux.HandleFunc("POST /api/admin/tutorials", h.requireAdmin(service.PermContentWrite, h.createTutorial))
+	mux.HandleFunc("PUT /api/admin/tutorials/{id}", h.requireAdmin(service.PermContentWrite, h.updateTutorial))
+	mux.HandleFunc("DELETE /api/admin/tutorials/{id}", h.requireAdmin(service.PermContentWrite, h.deleteTutorial))
+	mux.HandleFunc("GET /api/admin/shared-accounts", h.requireAdmin(service.PermContentRead, h.listSharedAccounts))
+	mux.HandleFunc("POST /api/admin/shared-accounts", h.requireAdmin(service.PermContentWrite, h.createSharedAccount))
+	mux.HandleFunc("PUT /api/admin/shared-accounts/{id}", h.requireAdmin(service.PermContentWrite, h.updateSharedAccount))
+	mux.HandleFunc("DELETE /api/admin/shared-accounts/{id}", h.requireAdmin(service.PermContentWrite, h.deleteSharedAccount))
+	mux.HandleFunc("GET /api/admin/shared-accounts/{id}/credential", h.requireAdmin(service.PermContentWrite, h.getSharedAccountCredential))
+	mux.HandleFunc("GET /api/admin/tickets", h.requireAdmin(service.PermTicketRead, h.listTickets))
+	mux.HandleFunc("GET /api/admin/tickets/{id}", h.requireAdmin(service.PermTicketRead, h.getTicket))
+	mux.HandleFunc("POST /api/admin/tickets/{id}/messages", h.requireAdmin(service.PermTicketWrite, h.replyTicket))
+	mux.HandleFunc("POST /api/admin/tickets/{id}/close", h.requireAdmin(service.PermTicketWrite, h.closeTicket))
+
 	// 未登录可用：站点信息与邮箱验证码（docs/03 §5.6 公开子集、§5.7）
 	mux.HandleFunc("GET /api/user/site", h.getSiteInfo)
 	mux.HandleFunc("POST /api/user/auth/email-code", h.sendEmailCode)
@@ -176,6 +201,19 @@ func NewRouter(deps Deps) http.Handler {
 	mux.HandleFunc("GET /api/user/subscription", h.requireUser(false, h.getUserSubscription))
 	mux.HandleFunc("POST /api/user/subscription/reset", h.requireUser(false, h.resetOwnSubscription))
 	mux.HandleFunc("GET /api/user/subscribe-logs", h.requireUser(false, h.listOwnSubscribeLogs))
+
+	// 公告、教程、共享账号、工单、签到（docs/03 §5.9–§5.11）
+	mux.HandleFunc("GET /api/user/announcements", h.requireUser(false, h.listUserAnnouncements))
+	mux.HandleFunc("GET /api/user/tutorials", h.requireUser(false, h.listUserTutorials))
+	mux.HandleFunc("GET /api/user/shared-accounts", h.requireUser(false, h.listUserSharedAccounts))
+	mux.HandleFunc("GET /api/user/shared-accounts/{id}/credential", h.requireUser(false, h.getUserSharedAccountCredential))
+	mux.HandleFunc("GET /api/user/tickets", h.requireUser(false, h.listOwnTickets))
+	mux.HandleFunc("POST /api/user/tickets", h.requireUser(false, h.createTicket))
+	mux.HandleFunc("GET /api/user/tickets/{id}", h.requireUser(false, h.getOwnTicket))
+	mux.HandleFunc("POST /api/user/tickets/{id}/messages", h.requireUser(false, h.replyOwnTicket))
+	mux.HandleFunc("POST /api/user/tickets/{id}/close", h.requireUser(false, h.closeOwnTicket))
+	mux.HandleFunc("GET /api/user/checkin", h.requireUser(false, h.getCheckin))
+	mux.HandleFunc("POST /api/user/checkin", h.requireUser(false, h.checkin))
 
 	// 账号自助（docs/03 §5.8）
 	mux.HandleFunc("POST /api/user/account/email-code", h.requireUser(false, h.sendBindEmailCode))

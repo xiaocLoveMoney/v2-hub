@@ -30,6 +30,8 @@ const (
 // PortalManager 是 Web 层需要的客户后台与订阅能力（由 service.UserService 实现）。
 type PortalManager interface {
 	GetDashboard(ctx context.Context, p *service.UserPrincipal) (*service.Dashboard, error)
+	GetCheckin(ctx context.Context, p *service.UserPrincipal) (*service.CheckinInfo, error)
+	Checkin(ctx context.Context, p *service.UserPrincipal) (*service.CheckinResult, error)
 	ListTraffic(ctx context.Context, p *service.UserPrincipal, hours int) ([]service.TrafficPoint, error)
 	ListPortalNodes(ctx context.Context, p *service.UserPrincipal) ([]service.PortalNodeGroup, error)
 	GetNodeLink(ctx context.Context, p *service.UserPrincipal, nodeID int64) (string, error)
@@ -65,6 +67,9 @@ type dashboardVO struct {
 	OnlineDevices *int       `json:"onlineDevices"`
 	LastUsedAt    *time.Time `json:"lastUsedAt"`
 	NodeCount     int        `json:"nodeCount"`
+	// 0.3.0 起：最新一条公告与最新一条弹窗公告，没有为 null
+	Announcement      *announcementVO `json:"announcement"`
+	PopupAnnouncement *announcementVO `json:"popupAnnouncement"`
 }
 
 func (h *handlers) getUserDashboard(w http.ResponseWriter, r *http.Request, p *service.UserPrincipal) {
@@ -73,8 +78,14 @@ func (h *handlers) getUserDashboard(w http.ResponseWriter, r *http.Request, p *s
 		writeError(w, r, err)
 		return
 	}
+	latest, popup, err := h.content.Highlights(r.Context())
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
 	online := d.OnlineDevices
 	writeOK(w, dashboardVO{
+		Announcement: optionalAnnouncementVO(latest), PopupAnnouncement: optionalAnnouncementVO(popup),
 		Status: d.Status, PlanName: d.PlanName, TrafficLimit: d.TrafficLimit, TrafficUsed: d.TrafficUsed, TrafficToday: d.TrafficToday,
 		ExpiresAt: d.ExpiresAt, PendingDays: d.PendingDays, LimitIP: d.LimitIP, OnlineDevices: &online, LastUsedAt: d.LastUsedAt, NodeCount: d.NodeCount,
 	})
