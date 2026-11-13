@@ -64,6 +64,10 @@ body {
   min-width: 200px;
 }
 
+.usage-bar {
+  min-width: 140px;
+}
+
 .full-width {
   width: 100%;
 }

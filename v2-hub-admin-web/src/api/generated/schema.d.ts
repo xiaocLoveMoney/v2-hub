@@ -611,6 +611,178 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/admin/plans": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 全部套餐（plan:read） */
+        get: operations["listPlans"];
+        put?: never;
+        /** 新建套餐（plan:write） */
+        post: operations["createPlan"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/plans/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /** 修改套餐（不影响已分配的用户，docs/03 §5.2；plan:write） */
+        put: operations["updatePlan"];
+        post?: never;
+        /** 删除套餐（用户保留已拷贝的额度与到期，所属套餐置空；plan:write） */
+        delete: operations["deletePlan"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/users": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 用户分页（user:read） */
+        get: operations["listUsers"];
+        put?: never;
+        /** 新建用户，可同时分配套餐（docs/03 U1；user:write） */
+        post: operations["createUser"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/users/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        /** 用户详情（user:read） */
+        get: operations["getUser"];
+        /** 修改备注、停用 / 启用（docs/03 U8；user:write） */
+        put: operations["updateUser"];
+        post?: never;
+        /** 删除用户：先删各面板 client，面板不可达时记为待删除（docs/03 §5.2；user:write） */
+        delete: operations["deleteUser"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/users/{id}/plan": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 分配或续费套餐：到期顺延、已用清零（docs/03 U6；user:write） */
+        post: operations["assignUserPlan"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/users/{id}/quota": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /** 直接改用户的已用、额度、到期、IP 限制、自动续期与周期重置（整体替换，记审计；docs/03 U7；user:write） */
+        put: operations["updateUserQuota"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/users/{id}/password": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /** 重置用户的客户后台登录口令（user:write） */
+        put: operations["resetUserPassword"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/users/{id}/provisions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        /** 用户在各面板上的下发状态（user:read） */
+        get: operations["listUserProvisions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/users/{id}/reconcile": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 立即对账该用户涉及的全部面板（手动重试；user:write） */
+        post: operations["reconcileUser"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -918,6 +1090,129 @@ export interface components {
             name: string;
             remark?: string;
             nodeIds: number[];
+        };
+        /** @enum {string} */
+        TrafficReset: "never" | "hourly" | "daily" | "weekly" | "monthly";
+        /** @enum {string} */
+        UserStatus: "active" | "limited" | "expired" | "disabled";
+        /** @enum {string} */
+        ProvisionStatus: "pending" | "synced" | "failed";
+        /** @description 配额模型照 3x-ui 的 client（docs/03 §5.2）；自动续期三种方式最多选一种 */
+        PlanInput: {
+            name: string;
+            /**
+             * Format: int64
+             * @description 流量额度（字节），0 不限
+             */
+            trafficLimit: number;
+            /** @description 时长（天），0 不限 */
+            durationDays: number;
+            /**
+             * @description 首次使用后才开始计时
+             * @default false
+             */
+            startOnFirstUse: boolean;
+            /** @default 0 */
+            limitIp: number;
+            /** @default 0 */
+            renewEveryDays: number;
+            /** @default 0 */
+            renewMonthDay: number;
+            /**
+             * @description 1–7 = 周一至周日
+             * @default 0
+             */
+            renewWeekday: number;
+            /**
+             * @description 0 不限
+             * @default 0
+             */
+            renewMax: number;
+            trafficReset?: components["schemas"]["TrafficReset"];
+            /** @default 1 */
+            trafficResetDay: number;
+            /** @default false */
+            allowClientChain: boolean;
+            /** @default false */
+            allowCustomNode: boolean;
+            remark?: string;
+            nodeGroupIds: number[];
+        };
+        Plan: components["schemas"]["PlanInput"] & {
+            /** Format: int64 */
+            id: number;
+            /** @description 当前分配了该套餐的用户数 */
+            userCount: number;
+            /** Format: date-time */
+            createdAt: string;
+        };
+        UserQuotaInput: {
+            /** Format: int64 */
+            trafficLimit: number;
+            /** Format: int64 */
+            trafficUsed: number;
+            /**
+             * Format: date-time
+             * @description null 表示不过期（或等待首次使用）
+             */
+            expiresAt: string | null;
+            /** @description >0 且 expiresAt 为 null：首次使用后起算的天数 */
+            pendingDays: number;
+            limitIp: number;
+            renewEveryDays: number;
+            renewMonthDay: number;
+            renewWeekday: number;
+            renewMax: number;
+            trafficReset: components["schemas"]["TrafficReset"];
+            trafficResetDay: number;
+        };
+        User: components["schemas"]["UserQuotaInput"] & {
+            /** Format: int64 */
+            id: number;
+            username: string;
+            remark: string;
+            /** Format: int64 */
+            planId: number | null;
+            planName: string;
+            status: components["schemas"]["UserStatus"];
+            isDisabled: boolean;
+            renewCount: number;
+            /** @description 各面板下发状态计数 */
+            provisions: {
+                synced: number;
+                pending: number;
+                failed: number;
+            };
+            /** Format: date-time */
+            createdAt: string;
+        };
+        UserCreateInput: {
+            username: string;
+            password: components["schemas"]["Password"];
+            remark?: string;
+            /**
+             * Format: int64
+             * @description 省略则不分配套餐（无可用节点）
+             */
+            planId?: number;
+        };
+        UserUpdateInput: {
+            remark: string;
+            isDisabled: boolean;
+        };
+        Provision: {
+            /** Format: int64 */
+            serverId: number;
+            serverName: string;
+            /** @description 面板上的 client email */
+            email: string;
+            status: components["schemas"]["ProvisionStatus"];
+            lastError: string;
+            retryCount: number;
+            /** Format: date-time */
+            syncedAt: string | null;
+            /** Format: date-time */
+            updatedAt: string;
         };
     };
     responses: {
@@ -2187,6 +2482,409 @@ export interface operations {
         };
     };
     deleteNodeGroup: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["Ok"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    listPlans: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 套餐列表 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["Plan"][];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+        };
+    };
+    createPlan: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PlanInput"];
+            };
+        };
+        responses: {
+            /** @description 新建的套餐 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["Plan"];
+                    };
+                };
+            };
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    updatePlan: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PlanInput"];
+            };
+        };
+        responses: {
+            /** @description 修改后的套餐 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["Plan"];
+                    };
+                };
+            };
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    deletePlan: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["Ok"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    listUsers: {
+        parameters: {
+            query?: {
+                page?: components["parameters"]["Page"];
+                pageSize?: components["parameters"]["PageSize"];
+                /** @description 按用户名或备注模糊匹配 */
+                keyword?: string;
+                status?: components["schemas"]["UserStatus"];
+                planId?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 用户分页 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: {
+                            items: components["schemas"]["User"][];
+                            /** Format: int64 */
+                            total: number;
+                        };
+                    };
+                };
+            };
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+        };
+    };
+    createUser: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UserCreateInput"];
+            };
+        };
+        responses: {
+            /** @description 新建的用户 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["User"];
+                    };
+                };
+            };
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    getUser: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 用户 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["User"];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    updateUser: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UserUpdateInput"];
+            };
+        };
+        responses: {
+            /** @description 修改后的用户 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["User"];
+                    };
+                };
+            };
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    deleteUser: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["Ok"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    assignUserPlan: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** Format: int64 */
+                    planId: number;
+                };
+            };
+        };
+        responses: {
+            /** @description 续费后的用户 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["User"];
+                    };
+                };
+            };
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    updateUserQuota: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UserQuotaInput"];
+            };
+        };
+        responses: {
+            /** @description 修改后的用户 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["User"];
+                    };
+                };
+            };
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    resetUserPassword: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    password: components["schemas"]["Password"];
+                };
+            };
+        };
+        responses: {
+            200: components["responses"]["Ok"];
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    listUserProvisions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 下发状态 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["Provision"][];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    reconcileUser: {
         parameters: {
             query?: never;
             header: {

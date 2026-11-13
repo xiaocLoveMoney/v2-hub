@@ -51,6 +51,7 @@ export function EndpointModal({ serverId, inbounds, isOpen, onClose, onSaved }: 
         <Form.Item name="inboundIds" label="入站" rules={[{ required: true, message: '至少选一个入站' }]}>
           <Select
             mode="multiple"
+            optionFilterProp="label"
             options={inbounds.filter((i) => !i.isMissing).map((i) => ({ value: i.id, label: `${i.remark}（${i.protocol}:${i.port}）` }))}
           />
         </Form.Item>

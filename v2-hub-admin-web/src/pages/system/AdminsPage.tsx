@@ -194,7 +194,7 @@ export function AdminsPage() {
             <Input.Password autoComplete="new-password" />
           </Form.Item>
           <Form.Item name="roles" label="角色">
-            <Select mode="multiple" options={roleOptions} />
+            <Select mode="multiple" optionFilterProp="label" options={roleOptions} />
           </Form.Item>
           <Button type="primary" htmlType="submit" block>
             创建
@@ -206,7 +206,7 @@ export function AdminsPage() {
         {formError !== null && <Alert type="error" title={formError.message} showIcon className="page-alert" />}
         <Form<EditForm> layout="vertical" onFinish={handleEdit} initialValues={{ roles: editing?.roles ?? [], isDisabled: editing?.isDisabled ?? false }}>
           <Form.Item name="roles" label="角色">
-            <Select mode="multiple" options={roleOptions} />
+            <Select mode="multiple" optionFilterProp="label" options={roleOptions} />
           </Form.Item>
           <Form.Item name="isDisabled" label="禁用账号（禁用后其会话立即失效）" valuePropName="checked">
             <Switch />
