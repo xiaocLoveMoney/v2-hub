@@ -66,9 +66,14 @@ func (c *Client) CreateEndpoints(ctx context.Context, spec panel.EndpointSpec) e
 		}
 		ids = append(ids, id)
 	}
+	// 3x-ui 要求 Host 组有备注（空备注返回 request body failed validation），平台侧备注可选，缺省用第一个地址
+	remark := spec.Remark
+	if remark == "" && len(spec.Addresses) > 0 {
+		remark = spec.Addresses[0]
+	}
 	body := map[string]any{
 		keyInboundIDs: ids,
-		"remark":      spec.Remark,
+		"remark":      remark,
 		keyHosts:      spec.Addresses,
 		"port":        spec.Port,
 		"security":    hostSecuritySame,
