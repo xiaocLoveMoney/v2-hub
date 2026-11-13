@@ -13,6 +13,18 @@ export type SubscriptionFormat = components['schemas']['SubscriptionFormat']
 export type LoginLog = components['schemas']['LoginLog']
 export type SubscribeLog = components['schemas']['SubscribeLog']
 export type TotpSetup = components['schemas']['TotpSetup']
+export type SiteInfo = components['schemas']['SiteInfo']
+export type RegisterInput = components['schemas']['RegisterInput']
+export type InviteInfo = components['schemas']['InviteInfo']
+export type Announcement = components['schemas']['Announcement']
+export type Tutorial = components['schemas']['Tutorial']
+export type TutorialPlatform = components['schemas']['TutorialPlatform']
+export type SharedAccount = components['schemas']['SharedAccount']
+export type Ticket = components['schemas']['Ticket']
+export type TicketDetail = components['schemas']['TicketDetail']
+export type TicketMessage = components['schemas']['TicketMessage']
+export type TicketStatus = components['schemas']['TicketStatus']
+export type CheckinInfo = components['schemas']['CheckinInfo']
 
 /** 分页结果（hub-api.yaml 各分页接口的 data 形状）。 */
 export interface PageData<T> {
@@ -34,6 +46,8 @@ export const CODE_UNAUTHENTICATED = 'unauthenticated'
 export const CODE_TOTP_REQUIRED = 'totp_required'
 /** 账号已停用，只能查看本人信息与退出（docs/03 §5.3）。 */
 export const CODE_ACCOUNT_DISABLED = 'account_disabled'
+/** 该功能未开启（注册关闭、签到 / 工单未开、邮件未配置等；docs/03 §4 错误码）。 */
+export const CODE_FEATURE_DISABLED = 'feature_disabled'
 
 let csrfToken = ''
 

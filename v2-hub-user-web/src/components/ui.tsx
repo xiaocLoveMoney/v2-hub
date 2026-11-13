@@ -1,4 +1,4 @@
-import { useEffect, useId, type ButtonHTMLAttributes, type CSSProperties, type InputHTMLAttributes, type ReactNode } from 'react'
+import { useEffect, useId, type ButtonHTMLAttributes, type CSSProperties, type InputHTMLAttributes, type ReactNode, type TextareaHTMLAttributes } from 'react'
 
 /** 设计系统的基础组件（docs/06 §4）。只负责外观与无障碍语义，不含业务逻辑。 */
 
@@ -101,6 +101,54 @@ export function Field({ label, error, hint, id, ...rest }: FieldProps) {
       <input id={inputId} className="hub-input" aria-invalid={hasError} {...rest} />
       {hasError && <div className="hub-field-error">{error}</div>}
       {!hasError && hint !== undefined && <div className="hub-field-hint">{hint}</div>}
+    </div>
+  )
+}
+
+interface TextAreaFieldProps extends TextareaHTMLAttributes<HTMLTextAreaElement> {
+  label: string
+  hint?: string
+}
+
+/** 带标签的多行输入框。 */
+export function TextAreaField({ label, hint, id, ...rest }: TextAreaFieldProps) {
+  const autoId = useId()
+  const inputId = id ?? autoId
+  return (
+    <div className="hub-field">
+      <label className="hub-field-label" htmlFor={inputId}>
+        {label}
+      </label>
+      <textarea id={inputId} className="hub-input hub-textarea" {...rest} />
+      {hint !== undefined && <div className="hub-field-hint">{hint}</div>}
+    </div>
+  )
+}
+
+interface PagerProps {
+  page: number
+  pageSize: number
+  total: number
+  onChange: (page: number) => void
+}
+
+/** 上一页 / 下一页；只有一页时不渲染。 */
+export function Pager({ page, pageSize, total, onChange }: PagerProps) {
+  if (total <= pageSize) {
+    return null
+  }
+  const pageCount = Math.max(Math.ceil(total / pageSize), 1)
+  return (
+    <div className="hub-pagination">
+      <Button variant="outline" disabled={page <= 1} onClick={() => onChange(page - 1)}>
+        上一页
+      </Button>
+      <span>
+        {page} / {pageCount}
+      </span>
+      <Button variant="outline" disabled={page >= pageCount} onClick={() => onChange(page + 1)}>
+        下一页
+      </Button>
     </div>
   )
 }

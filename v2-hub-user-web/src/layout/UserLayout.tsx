@@ -1,10 +1,11 @@
 import { LogOut, Menu as MenuIcon } from 'lucide-react'
 import { Fragment, useState } from 'react'
 import { NavLink, Navigate, Outlet, useLocation, useNavigate } from 'react-router'
-import { APP_TITLE, BRAND } from '../app-config'
+import { APP_TITLE } from '../app-config'
 import { useSession } from '../auth/session-context'
 import { Alert, Button } from '../components/ui'
-import { MENU, ROUTES, type MenuEntry } from '../menu'
+import { ROUTES, visibleMenu, type MenuEntry } from '../menu'
+import { useSite } from '../site/site-context'
 
 const STATUS_DISABLED = 'disabled'
 
@@ -28,6 +29,7 @@ function groupMenu(entries: readonly MenuEntry[]): { title: string | undefined; 
  */
 export function UserLayout() {
   const { status, session, logout } = useSession()
+  const site = useSite()
   const location = useLocation()
   const navigate = useNavigate()
   // 小屏：侧栏默认收起、点按钮滑出；大屏：默认展开、点按钮收起。两种状态分开记
@@ -55,10 +57,10 @@ export function UserLayout() {
   return (
     <div className={shellClass}>
       <aside className="hub-sider">
-        <div className="hub-brand">{BRAND}</div>
+        <div className="hub-brand">{site.siteName}</div>
         <nav aria-label="主菜单">
           <ul className="hub-menu">
-            {groupMenu(MENU).map((g) => (
+            {groupMenu(visibleMenu(site)).map((g) => (
               <Fragment key={g.title ?? 'top'}>
                 {g.title !== undefined && <li className="hub-menu-header">{g.title}</li>}
                 {g.items.map((entry) => (
