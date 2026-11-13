@@ -56,6 +56,8 @@ export type Payment = components['schemas']['Payment']
 export type PaymentStatus = components['schemas']['PaymentStatus']
 export type Rebate = components['schemas']['Rebate']
 export type FinanceStats = components['schemas']['FinanceStats']
+export type FinanceGranularity = components['schemas']['FinanceGranularity']
+export type AdminDashboard = components['schemas']['AdminDashboard']
 
 /** 分页结果（hub-api.yaml 各分页接口的 data 形状）。 */
 export interface PageData<T> {

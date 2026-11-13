@@ -1,19 +1,8 @@
-import { Button, Result, Typography } from 'antd'
+import { Button, Result } from 'antd'
 import type { ReactNode } from 'react'
 import { useNavigate } from 'react-router'
 import { useSession } from '../auth/session-context'
 import { ROUTES } from '../menu'
-
-/** 总览（管理门户首页）；大盘指标在 M6 接入。 */
-export function DashboardPage() {
-  const { session } = useSession()
-  return (
-    <>
-      <Typography.Title level={3}>总览</Typography.Title>
-      <Typography.Paragraph>欢迎，{session?.admin.username}。服务器、节点与用户指标会在后续里程碑接入。</Typography.Paragraph>
-    </>
-  )
-}
 
 interface ComingSoonProps {
   title: string

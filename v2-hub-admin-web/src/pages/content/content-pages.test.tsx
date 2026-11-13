@@ -205,9 +205,15 @@ describe('SettingsPage', () => {
     shared: { enabled: false },
     mail: { ratePerMinute: 30 },
     subscription: { baseUrl: '', title: 'v2-hub', updateIntervalHours: 12, infoNodes: true, logRetentionDays: 30 },
+    telegramEnabled: false,
+    alert: { emails: [], offlineMinutes: 5 },
+    telegram: { chatId: '', notifyAlerts: true, notifyTickets: true, notifyPayments: false },
+    report: { dailyEnabled: false, dailyHour: 9 },
+    landing: { enabled: false, headline: '', intro: '' },
+    support: { url: '', label: '在线客服' },
   }
 
-  it('整张表单一起保存，不带只读的 mailEnabled；邮件未配置时测试邮件不可用', async () => {
+  it('整张表单一起保存，不带只读的 mailEnabled 与 telegramEnabled；未配置时测试邮件与 Telegram 测试不可用', async () => {
     const calls = mockServer({
       'GET /api/admin/settings': () => ok(settings),
       'PUT /api/admin/settings': () => ok(settings),
@@ -216,12 +222,19 @@ describe('SettingsPage', () => {
     fireEvent.change(await screen.findByLabelText('站点名称'), { target: { value: '新站名' } })
     expect(screen.getByText('未配置')).toBeDefined()
     expect(screen.getByLabelText('收件邮箱')).toHaveProperty('disabled', true)
+    expect(screen.getByText('未配置 token')).toBeDefined()
+    expect(screen.getByRole('button', { name: '发送到已保存的会话' })).toHaveProperty('disabled', true)
+    // 客服链接只收 https
+    fireEvent.change(screen.getByLabelText('客服链接'), { target: { value: 'http://chat.example.com' } })
+    fireEvent.click(screen.getByRole('button', { name: /保存全部设置/ }))
+    expect(await screen.findByText('只接受 https:// 开头的地址')).toBeDefined()
+    fireEvent.change(screen.getByLabelText('客服链接'), { target: { value: '' } })
 
     fireEvent.click(screen.getByRole('button', { name: /保存全部设置/ }))
     await waitFor(() => expect(calls.some((c) => c.method === 'PUT')).toBe(true))
     const put = calls.find((c) => c.method === 'PUT')
     expect(put?.csrf).toBe(TEST_CSRF)
-    const { mailEnabled: _readOnly, ...editable } = settings
+    const { mailEnabled: _readOnly, telegramEnabled: _readOnlyToo, ...editable } = settings
     expect(put?.body).toEqual({ ...editable, site: { ...settings.site, name: '新站名' } })
   })
 

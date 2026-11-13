@@ -5,6 +5,7 @@ import { ErrorAlert } from '../../components/ErrorAlert'
 import { useRemote } from '../../hooks/use-remote'
 import { useSubmit } from '../../hooks/use-submit'
 import { PERMISSIONS } from '../../menu'
+import { OpsSettingsCards, TestTelegramCard } from './OpsSettingsCards'
 
 // 取值范围与 hub-api.yaml 的 Settings 一致（docs/03 §5.6 设置清单）
 const MAX_SITE_NAME_LEN = 32
@@ -43,8 +44,8 @@ const REGISTER_MODE_OPTIONS: { value: RegisterMode; label: string }[] = [
   { value: 'closed', label: '关闭注册' },
 ]
 
-/** 表单值：与 Settings 同形，去掉只读的 mailEnabled。 */
-type SettingsForm = Omit<Settings, 'mailEnabled'>
+/** 表单值：与 Settings 同形，去掉只读的 mailEnabled、telegramEnabled。 */
+type SettingsForm = Omit<Settings, 'mailEnabled' | 'telegramEnabled'>
 
 const loadSettings = (signal: AbortSignal) => api.GET('/api/admin/settings', { signal })
 const loadPlans = (signal: AbortSignal) => api.GET('/api/admin/plans', { signal })
@@ -89,7 +90,7 @@ interface SettingsFormBodyProps {
 
 function SettingsFormBody({ settings, canWrite, canReadPlans, onSaved }: SettingsFormBodyProps) {
   const { error, isBusy, run } = useSubmit('已保存', onSaved)
-  const { mailEnabled, ...initialValues } = settings
+  const { mailEnabled, telegramEnabled, ...initialValues } = settings
   const submit = (v: SettingsForm) => run(() => api.PUT('/api/admin/settings', { params: csrfHeader(), body: v }))
 
   return (
@@ -255,6 +256,8 @@ function SettingsFormBody({ settings, canWrite, canReadPlans, onSaved }: Setting
           </Form.Item>
         </Card>
 
+        <OpsSettingsCards isTelegramEnabled={telegramEnabled} />
+
         {canWrite && (
           <Button type="primary" htmlType="submit" loading={isBusy}>
             保存全部设置
@@ -262,6 +265,7 @@ function SettingsFormBody({ settings, canWrite, canReadPlans, onSaved }: Setting
         )}
       </Form>
       {canWrite && <TestMailCard isMailEnabled={mailEnabled} />}
+      {canWrite && <TestTelegramCard isTelegramEnabled={telegramEnabled} />}
     </>
   )
 }
