@@ -73,6 +73,13 @@ type UserPrincipal struct {
 	// Email 为空串表示未绑定。
 	Email         string
 	EmailVerified bool
+	// ImpersonatorAdminID 非 0 表示这是管理员切换为该用户身份的只读会话（docs/03 §5.17）。
+	ImpersonatorAdminID int64
+}
+
+// Impersonated 表示当前是管理员代入的只读会话：除退出外的写请求一律拒绝（Ruling-33）。
+func (p *UserPrincipal) Impersonated() bool {
+	return p.ImpersonatorAdminID != 0
 }
 
 // PortalLoginResult 是登录成功的结果；Token 只放进 Cookie，不得写日志。
@@ -92,11 +99,13 @@ type LoginLogItem struct {
 // PortalAuthService 负责终端用户登录、会话校验、改口令与两步验证。
 type PortalAuthService struct {
 	store
-	cfg       PortalAuthConfig
-	sealer    *crypto.Sealer
-	guard     *ratelimit.FailureGuard
-	now       func() time.Time
-	dummyHash string
+	cfg    PortalAuthConfig
+	sealer *crypto.Sealer
+	guard  *ratelimit.FailureGuard
+	// ticketGuard 给兑换代入票据的失败按 IP 计数，防止穷举票据。
+	ticketGuard *ratelimit.FailureGuard
+	now         func() time.Time
+	dummyHash   string
 }
 
 // NewPortalAuthService 创建服务；now 为 nil 时用 time.Now。
@@ -114,7 +123,10 @@ func NewPortalAuthService(pool *pgxpool.Pool, cfg PortalAuthConfig, sealer *cryp
 		Lockout:     cfg.LoginLockout,
 		MaxKeys:     cfg.LoginMaxTrackedKeys,
 	}, now)
-	return &PortalAuthService{store: newStore(pool), cfg: cfg, sealer: sealer, guard: guard, now: now, dummyHash: dummy}, nil
+	ticketGuard := ratelimit.NewFailureGuard(ratelimit.FailureGuardConfig{
+		MaxFailures: impersonateFailsPerHour, Window: time.Hour, Lockout: time.Hour, MaxKeys: cfg.LoginMaxTrackedKeys,
+	}, now)
+	return &PortalAuthService{store: newStore(pool), cfg: cfg, sealer: sealer, guard: guard, ticketGuard: ticketGuard, now: now, dummyHash: dummy}, nil
 }
 
 func userTOTPAAD(userID int64, pending bool) []byte {
@@ -195,6 +207,11 @@ func (s *PortalAuthService) Login(ctx context.Context, in LoginInput) (*PortalLo
 
 // createSessionTx 在事务里为 principal 建一条会话并填上会话 id 与 CSRF token；登录与自助注册共用。
 func (s *PortalAuthService) createSessionTx(ctx context.Context, q *sqlcgen.Queries, principal *UserPrincipal, ip *netip.Addr, userAgent string) (*PortalLoginResult, error) {
+	return s.newSession(ctx, q, principal, ip, userAgent, s.cfg.SessionMaxAge, s.cfg.SessionIdleTimeout)
+}
+
+// newSession 建一条会话：maxAge 是绝对有效期，idle 是空闲有效期。principal.ImpersonatorAdminID 非 0 时记为代入会话。
+func (s *PortalAuthService) newSession(ctx context.Context, q *sqlcgen.Queries, principal *UserPrincipal, ip *netip.Addr, userAgent string, maxAge, idle time.Duration) (*PortalLoginResult, error) {
 	token, err := crypto.RandomToken(sessionTokenBytes)
 	if err != nil {
 		return nil, err
@@ -204,15 +221,16 @@ func (s *PortalAuthService) createSessionTx(ctx context.Context, q *sqlcgen.Quer
 		return nil, err
 	}
 	now := s.now()
-	expiresAt := now.Add(s.cfg.SessionMaxAge)
+	expiresAt := now.Add(maxAge)
 	sid, err := q.CreateUserSession(ctx, sqlcgen.CreateUserSessionParams{
-		TokenHash: crypto.SHA256(token),
-		UserID:    principal.UserID,
-		CsrfToken: csrf,
-		ClientIp:  ip,
-		UserAgent: pgtype.Text{String: truncate(userAgent, maxUserAgentLen), Valid: userAgent != ""},
-		ExpiresAt: pgtype.Timestamptz{Time: expiresAt, Valid: true},
-		IdleUntil: pgtype.Timestamptz{Time: now.Add(s.cfg.SessionIdleTimeout), Valid: true},
+		TokenHash:           crypto.SHA256(token),
+		UserID:              principal.UserID,
+		CsrfToken:           csrf,
+		ClientIp:            ip,
+		UserAgent:           pgtype.Text{String: truncate(userAgent, maxUserAgentLen), Valid: userAgent != ""},
+		ExpiresAt:           pgtype.Timestamptz{Time: expiresAt, Valid: true},
+		IdleUntil:           pgtype.Timestamptz{Time: now.Add(idle), Valid: true},
+		ImpersonatorAdminID: pgtype.Int8{Int64: principal.ImpersonatorAdminID, Valid: principal.ImpersonatorAdminID != 0},
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create user session: %w", err)
@@ -283,7 +301,7 @@ func (s *PortalAuthService) Authenticate(ctx context.Context, token string) (*Us
 	return &UserPrincipal{
 		UserID: row.UserID, Username: row.Username, SessionID: row.ID, CSRFToken: row.CsrfToken,
 		Status: row.Status, IsDisabled: row.IsDisabled, TOTPEnabled: row.TotpEnabled,
-		Email: row.Email.String, EmailVerified: row.IsEmailVerified,
+		Email: row.Email.String, EmailVerified: row.IsEmailVerified, ImpersonatorAdminID: row.ImpersonatorAdminID.Int64,
 	}, nil
 }
 
@@ -295,12 +313,18 @@ func (p *UserPrincipal) RequireEnabled() error {
 	return nil
 }
 
-// Logout 删除当前会话。
+// Logout 删除当前会话；代入会话结束时另记一条审计（docs/03 §5.17）。
 func (s *PortalAuthService) Logout(ctx context.Context, p *UserPrincipal) error {
-	if err := s.q.DeleteUserSessionByID(ctx, p.SessionID); err != nil {
-		return fmt.Errorf("delete user session %d: %w", p.SessionID, err)
-	}
-	return nil
+	return s.inTx(ctx, func(q *sqlcgen.Queries) error {
+		if err := q.DeleteUserSessionByID(ctx, p.SessionID); err != nil {
+			return fmt.Errorf("delete user session %d: %w", p.SessionID, err)
+		}
+		if !p.Impersonated() {
+			return nil
+		}
+		return writeAudit(ctx, q, AuditEntry{ActorType: ActorAdmin, ActorID: p.ImpersonatorAdminID, Action: ActionImpersonateEnd, TargetType: targetUser,
+			TargetID: fmt.Sprint(p.UserID), Detail: map[string]any{"username": p.Username}})
+	})
 }
 
 // ChangeLoginSecret 本人改口令：须提交旧口令，成功后其余会话全部失效。
@@ -527,6 +551,9 @@ func (s *PortalAuthService) PurgeExpiredSessions(ctx context.Context) (int64, er
 	cutoff := pgtype.Timestamptz{Time: now.Add(-s.cfg.LoginLogRetention), Valid: true}
 	if _, err := s.q.DeleteOldUserLoginLogs(ctx, cutoff); err != nil {
 		return n, fmt.Errorf("delete old user login logs: %w", err)
+	}
+	if _, err := s.q.DeleteStaleImpersonateTickets(ctx, pgtype.Timestamptz{Time: now, Valid: true}); err != nil {
+		return n, fmt.Errorf("delete stale impersonate tickets: %w", err)
 	}
 	return n, nil
 }

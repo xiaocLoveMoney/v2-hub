@@ -147,6 +147,7 @@ func NewRouter(deps Deps) http.Handler {
 	mux.HandleFunc("POST /api/admin/users/{id}/reconcile", h.requireAdmin(service.PermUserWrite, h.reconcileUser))
 	mux.HandleFunc("DELETE /api/admin/users/{id}/totp", h.requireAdmin(service.PermUserWrite, h.clearUserTOTP))
 	mux.HandleFunc("POST /api/admin/users/{id}/balance", h.requireAdmin(service.PermFinanceWrite, h.adjustUserBalance))
+	mux.HandleFunc("POST /api/admin/users/{id}/impersonate", h.requireAdmin(service.PermImpersonateWrite, h.impersonateUser))
 
 	mux.HandleFunc("GET /api/admin/traffic-packs", h.requireAdmin(service.PermShopRead, h.listTrafficPacks))
 	mux.HandleFunc("POST /api/admin/traffic-packs", h.requireAdmin(service.PermShopWrite, h.createTrafficPack))
@@ -210,7 +211,8 @@ func NewRouter(deps Deps) http.Handler {
 
 	// 客户后台（docs/03 §5.3–§5.5）：身份只取自会话（R8）。auth/me 与登出允许停用的账号访问。
 	mux.HandleFunc("POST /api/user/auth/login", h.userLogin)
-	mux.HandleFunc("POST /api/user/auth/logout", h.requireUser(true, h.userLogout))
+	mux.HandleFunc("POST /api/user/auth/impersonate", h.redeemImpersonateTicket)
+	mux.HandleFunc("POST "+userLogoutPath, h.requireUser(true, h.userLogout))
 	mux.HandleFunc("GET /api/user/auth/me", h.requireUser(true, h.userMe))
 	mux.HandleFunc("PUT /api/user/auth/password", h.requireUser(false, h.userChangeSecret))
 	mux.HandleFunc("POST /api/user/auth/totp/setup", h.requireUser(false, h.userTotpSetup))

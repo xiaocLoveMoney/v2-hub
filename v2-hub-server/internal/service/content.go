@@ -795,6 +795,10 @@ func (s *ContentService) RevealVisibleSharedAccount(ctx context.Context, p *User
 		return "", fmt.Errorf("get credential of shared account %d: %w", id, err)
 	}
 	audit := AuditEntry{ActorType: ActorUser, ActorID: p.UserID, Action: ActionPortalSharedReveal, TargetType: targetShared, TargetID: fmt.Sprint(id), ClientIP: ip}
+	if p.Impersonated() {
+		// 代入会话下看口令的是管理员本人，审计记实际操作的人（docs/03 §5.17 可见范围）
+		audit.ActorType, audit.ActorID, audit.Detail = ActorAdmin, p.ImpersonatorAdminID, map[string]any{"asUserId": p.UserID}
+	}
 	if err := writeAudit(ctx, s.q, audit); err != nil {
 		return "", err
 	}

@@ -100,6 +100,7 @@ type Querier interface {
 	DeleteRolePermissions(ctx context.Context, roleID int64) error
 	DeleteServer(ctx context.Context, id int64) (int64, error)
 	DeleteSharedAccount(ctx context.Context, id int64) (int64, error)
+	DeleteStaleImpersonateTickets(ctx context.Context, expiresAt pgtype.Timestamptz) (int64, error)
 	DeleteTopupCode(ctx context.Context, id int64) error
 	DeleteTrafficPack(ctx context.Context, id int64) (int64, error)
 	DeleteTutorial(ctx context.Context, id int64) (int64, error)
@@ -141,6 +142,8 @@ type Querier interface {
 	GetEndUserIDByEmail(ctx context.Context, email string) (int64, error)
 	GetEndUserLoginSecretHash(ctx context.Context, id int64) (string, error)
 	GetEndpoint(ctx context.Context, id int64) (GetEndpointRow, error)
+	// 兑换时锁住票据行，一张票只能换一次会话
+	GetImpersonateTicketForUpdate(ctx context.Context, ticketHash []byte) (GetImpersonateTicketForUpdateRow, error)
 	GetInbound(ctx context.Context, id int64) (GetInboundRow, error)
 	// 注册、邀请码与账号自助（docs/03 §5.8）。
 	// 注册时锁住邀请码行，计数与上限的判断在同一事务内完成（并发注册不超发）
@@ -166,6 +169,8 @@ type Querier interface {
 	// 判断能否签到要用的字段；状态由调用方按当前时间现算，不取库里可能滞后的 status 列
 	GetUserCheckinState(ctx context.Context, id int64) (GetUserCheckinStateRow, error)
 	GetUserDashboard(ctx context.Context, arg GetUserDashboardParams) (GetUserDashboardRow, error)
+	// 切换为用户身份（docs/03 §5.17）-----------------------------------------------------
+	GetUserForImpersonate(ctx context.Context, id int64) (GetUserForImpersonateRow, error)
 	GetUserInviteCode(ctx context.Context, ownerUserID pgtype.Int8) (GetUserInviteCodeRow, error)
 	// 被邀请人的用户名与邀请人；邀请人已删除时没有行
 	GetUserInviter(ctx context.Context, id int64) (GetUserInviterRow, error)
@@ -192,6 +197,7 @@ type Querier interface {
 	InsertCouponPlans(ctx context.Context, arg InsertCouponPlansParams) error
 	InsertCouponUsage(ctx context.Context, arg InsertCouponUsageParams) error
 	InsertEmailCode(ctx context.Context, arg InsertEmailCodeParams) error
+	InsertImpersonateTicket(ctx context.Context, arg InsertImpersonateTicketParams) error
 	InsertLedger(ctx context.Context, arg InsertLedgerParams) (int64, error)
 	// 时间由服务时钟给出（不用库的 now()），与领取时的比较基准一致
 	InsertMailOutbox(ctx context.Context, arg InsertMailOutboxParams) (int64, error)
@@ -296,6 +302,7 @@ type Querier interface {
 	LockUserBalance(ctx context.Context, id int64) (LockUserBalanceRow, error)
 	MarkAnnouncementMailed(ctx context.Context, arg MarkAnnouncementMailedParams) error
 	MarkEndpointsMissing(ctx context.Context, arg MarkEndpointsMissingParams) (int64, error)
+	MarkImpersonateTicketUsed(ctx context.Context, arg MarkImpersonateTicketUsedParams) error
 	MarkInboundsMissing(ctx context.Context, arg MarkInboundsMissingParams) (int64, error)
 	// 放弃重试：清空正文，只留收件人、主题与最后一次错误
 	MarkMailFailed(ctx context.Context, arg MarkMailFailedParams) error
