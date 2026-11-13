@@ -1,4 +1,4 @@
-import { BookOpen, Gift, History, KeyRound, LayoutDashboard, LifeBuoy, Megaphone, Server, UserRound } from 'lucide-react'
+import { BookOpen, Gift, History, KeyRound, LayoutDashboard, LifeBuoy, Megaphone, Server, ShoppingBag, UserRound, Wallet } from 'lucide-react'
 import type { ReactNode } from 'react'
 import type { SiteInfo } from './api/client'
 
@@ -7,7 +7,10 @@ export const ROUTES = {
   LOGIN: '/login',
   REGISTER: '/register',
   RESET: '/reset',
+  IMPERSONATE: '/impersonate',
   DASHBOARD: '/',
+  SHOP: '/shop',
+  WALLET: '/wallet',
   ANNOUNCEMENTS: '/announcements',
   NODES: '/nodes',
   ACCOUNT: '/account',
@@ -35,11 +38,13 @@ export interface MenuEntry {
 const GROUP_MINE = '我的'
 const GROUP_USE = '使用'
 
-/** 左侧菜单表（docs/06 §5）：增减菜单只改这张表；商店、钱包等随 M5 加入。 */
+/** 左侧菜单表（docs/06 §5）：增减菜单只改这张表；链式代理随 M6 / M7 加入。 */
 export const MENU: readonly MenuEntry[] = [
   { path: ROUTES.DASHBOARD, label: '仪表盘', icon: <LayoutDashboard size={ICON_SIZE} /> },
+  { path: ROUTES.SHOP, label: '商店', icon: <ShoppingBag size={ICON_SIZE} />, isVisible: (site) => site.shopEnabled === true },
   { path: ROUTES.ANNOUNCEMENTS, label: '公告', icon: <Megaphone size={ICON_SIZE} /> },
   { path: ROUTES.ACCOUNT, label: '我的账号', icon: <UserRound size={ICON_SIZE} />, group: GROUP_MINE },
+  { path: ROUTES.WALLET, label: '我的钱包', icon: <Wallet size={ICON_SIZE} />, group: GROUP_MINE, isVisible: (site) => site.shopEnabled === true },
   { path: ROUTES.INVITE, label: '邀请注册', icon: <Gift size={ICON_SIZE} />, group: GROUP_MINE },
   { path: ROUTES.NODES, label: '节点列表', icon: <Server size={ICON_SIZE} />, group: GROUP_USE },
   { path: ROUTES.TUTORIALS, label: '下载和使用', icon: <BookOpen size={ICON_SIZE} />, group: GROUP_USE },

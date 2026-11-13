@@ -25,6 +25,16 @@ export type TicketDetail = components['schemas']['TicketDetail']
 export type TicketMessage = components['schemas']['TicketMessage']
 export type TicketStatus = components['schemas']['TicketStatus']
 export type CheckinInfo = components['schemas']['CheckinInfo']
+export type Shop = components['schemas']['Shop']
+export type ShopPlan = components['schemas']['ShopPlan']
+export type ShopTrafficPack = components['schemas']['ShopTrafficPack']
+export type PlanPrice = components['schemas']['PlanPrice']
+export type OrderInput = components['schemas']['OrderInput']
+export type Quote = components['schemas']['Quote']
+export type Order = components['schemas']['Order']
+export type Wallet = components['schemas']['Wallet']
+export type LedgerEntry = components['schemas']['LedgerEntry']
+export type LedgerKind = components['schemas']['LedgerKind']
 
 /** 分页结果（hub-api.yaml 各分页接口的 data 形状）。 */
 export interface PageData<T> {
@@ -48,6 +58,8 @@ export const CODE_TOTP_REQUIRED = 'totp_required'
 export const CODE_ACCOUNT_DISABLED = 'account_disabled'
 /** 该功能未开启（注册关闭、签到 / 工单未开、邮件未配置等；docs/03 §4 错误码）。 */
 export const CODE_FEATURE_DISABLED = 'feature_disabled'
+/** 余额不足以支付本次下单；data.shortfall 是差额（分）（docs/03 §5.13）。 */
+export const CODE_INSUFFICIENT_BALANCE = 'insufficient_balance'
 
 let csrfToken = ''
 

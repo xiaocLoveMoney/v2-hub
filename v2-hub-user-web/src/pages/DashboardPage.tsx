@@ -1,4 +1,4 @@
-import { CalendarClock, Gauge, MonitorSmartphone, Server } from 'lucide-react'
+import { CalendarClock, Gauge, MonitorSmartphone, Server, Wallet } from 'lucide-react'
 import { useState } from 'react'
 import { Link } from 'react-router'
 import { api, type Dashboard, type TrafficPoint } from '../api/client'
@@ -7,7 +7,8 @@ import { Alert, Card, PageHeader, StatCard } from '../components/ui'
 import { daysLeft, formatBytes, formatDate, formatTime, usedPercent } from '../format'
 import { useRemote } from '../hooks/use-remote'
 import { ROUTES } from '../menu'
-import { useSite } from '../site/site-context'
+import { formatMoney } from '../money'
+import { useCurrency, useSite } from '../site/site-context'
 import { LatestAnnouncementCard, PopupAnnouncement } from './AnnouncementCards'
 import { CheckinCard } from './CheckinCard'
 import { SubscriptionCard } from './SubscriptionCard'
@@ -48,6 +49,7 @@ function expiryStat(d: Dashboard, now: number): { value: string; foot: string } 
 /** 仪表盘（docs/06 §5）：四张统计卡 + 7:5 双栏（公告、72 小时用量与快速导入 / 流量环形图与签到）；有弹窗公告时进入即弹。 */
 export function DashboardPage() {
   const site = useSite()
+  const currency = useCurrency()
   const dashboard = useRemote<Dashboard>(loadDashboard)
   const traffic = useRemote<TrafficPoint[]>(loadTraffic)
   // 进入页面时取一次当前时刻，渲染期间保持不变
@@ -77,7 +79,13 @@ export function DashboardPage() {
       <StatusBanner d={d} />
       {!hasPlan && (
         <Card title="👋 还没有可用套餐">
-          <p>账号已创建，但还没有分配套餐，暂时没有可用节点。请联系管理员开通，开通后回到这里导入订阅即可使用。</p>
+          {site.shopEnabled === true ? (
+            <p>
+              账号已创建，但还没有套餐，暂时没有可用节点。到 <Link to={ROUTES.SHOP}>商店</Link> 选一个套餐，购买后回到这里导入订阅即可使用。
+            </p>
+          ) : (
+            <p>账号已创建，但还没有分配套餐，暂时没有可用节点。请联系管理员开通，开通后回到这里导入订阅即可使用。</p>
+          )}
         </Card>
       )}
       <div className="hub-stat-grid">
@@ -96,13 +104,27 @@ export function DashboardPage() {
           value={d.onlineDevices === null || d.onlineDevices === undefined ? '—' : `${d.onlineDevices}${d.limitIp > 0 ? ` / ${d.limitIp}` : ''}`}
           foot={`上次使用 ${formatTime(d.lastUsedAt)}`}
         />
-        <StatCard
-          icon={<Server size={ICON_SIZE} />}
-          tone="info"
-          label="可用节点"
-          value={`${d.nodeCount} 个`}
-          foot={<Link to={ROUTES.NODES}>查看节点列表 →</Link>}
-        />
+        {site.shopEnabled === true ? (
+          <StatCard
+            icon={<Wallet size={ICON_SIZE} />}
+            tone="info"
+            label="余额"
+            value={formatMoney(d.balance ?? 0, currency)}
+            foot={
+              <>
+                <Link to={ROUTES.WALLET}>充值</Link> · <Link to={ROUTES.NODES}>{d.nodeCount} 个可用节点 →</Link>
+              </>
+            }
+          />
+        ) : (
+          <StatCard
+            icon={<Server size={ICON_SIZE} />}
+            tone="info"
+            label="可用节点"
+            value={`${d.nodeCount} 个`}
+            foot={<Link to={ROUTES.NODES}>查看节点列表 →</Link>}
+          />
+        )}
       </div>
       <div className="hub-grid-7-5">
         <div>
