@@ -41,6 +41,8 @@ type Deps struct {
 	RBAC AdminManager
 	// Panels 提供服务器、入站、节点管理（docs/03 §5.1）。
 	Panels PanelManager
+	// Users 提供套餐、用户与下发管理（docs/03 §5.2）。
+	Users UserManager
 	// Cookie 是会话 Cookie 属性。
 	Cookie CookieConfig
 	// TrustedProxies 是可采信 X-Forwarded-For 的直连网段（如 Caddy 所在 docker 网络）。
@@ -51,13 +53,14 @@ type handlers struct {
 	auth           AdminAuthenticator
 	rbac           AdminManager
 	panels         PanelManager
+	users          UserManager
 	cookie         CookieConfig
 	trustedProxies []netip.Prefix
 }
 
 // NewRouter 返回注册好全部路由的 http.Handler。路由与 hub-api.yaml 的 paths 逐条对应。
 func NewRouter(deps Deps) http.Handler {
-	h := &handlers{auth: deps.Auth, rbac: deps.RBAC, panels: deps.Panels, cookie: deps.Cookie, trustedProxies: deps.TrustedProxies}
+	h := &handlers{auth: deps.Auth, rbac: deps.RBAC, panels: deps.Panels, users: deps.Users, cookie: deps.Cookie, trustedProxies: deps.TrustedProxies}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", handleHealthz)
 	mux.HandleFunc("GET /readyz", newReadyzHandler(deps.Database, deps.PingTimeout))
@@ -99,6 +102,21 @@ func NewRouter(deps Deps) http.Handler {
 	mux.HandleFunc("POST /api/admin/inbounds/{id}/drift/ack", h.requireAdmin(service.PermNodeWrite, h.ackInboundDrift))
 	mux.HandleFunc("GET /api/admin/inbounds/{id}/panel-config", h.requireAdmin(service.PermNodeWrite, h.getInboundPanelConfig))
 	mux.HandleFunc("POST /api/admin/servers/{id}/keys", h.requireAdmin(service.PermNodeWrite, h.generatePanelKeys))
+
+	mux.HandleFunc("GET /api/admin/plans", h.requireAdmin(service.PermPlanRead, h.listPlans))
+	mux.HandleFunc("POST /api/admin/plans", h.requireAdmin(service.PermPlanWrite, h.createPlan))
+	mux.HandleFunc("PUT /api/admin/plans/{id}", h.requireAdmin(service.PermPlanWrite, h.updatePlan))
+	mux.HandleFunc("DELETE /api/admin/plans/{id}", h.requireAdmin(service.PermPlanWrite, h.deletePlan))
+	mux.HandleFunc("GET /api/admin/users", h.requireAdmin(service.PermUserRead, h.listUsers))
+	mux.HandleFunc("POST /api/admin/users", h.requireAdmin(service.PermUserWrite, h.createUser))
+	mux.HandleFunc("GET /api/admin/users/{id}", h.requireAdmin(service.PermUserRead, h.getUser))
+	mux.HandleFunc("PUT /api/admin/users/{id}", h.requireAdmin(service.PermUserWrite, h.updateUser))
+	mux.HandleFunc("DELETE /api/admin/users/{id}", h.requireAdmin(service.PermUserWrite, h.deleteUser))
+	mux.HandleFunc("POST /api/admin/users/{id}/plan", h.requireAdmin(service.PermUserWrite, h.assignUserPlan))
+	mux.HandleFunc("PUT /api/admin/users/{id}/quota", h.requireAdmin(service.PermUserWrite, h.updateUserQuota))
+	mux.HandleFunc("PUT /api/admin/users/{id}/password", h.requireAdmin(service.PermUserWrite, h.resetUserPassword))
+	mux.HandleFunc("GET /api/admin/users/{id}/provisions", h.requireAdmin(service.PermUserRead, h.listUserProvisions))
+	mux.HandleFunc("POST /api/admin/users/{id}/reconcile", h.requireAdmin(service.PermUserWrite, h.reconcileUser))
 	mux.HandleFunc("DELETE /api/admin/endpoints/{id}", h.requireAdmin(service.PermNodeWrite, h.deleteEndpoint))
 	mux.HandleFunc("GET /api/admin/nodes", h.requireAdmin(service.PermNodeRead, h.listNodes))
 	mux.HandleFunc("PUT /api/admin/nodes/{id}", h.requireAdmin(service.PermNodeWrite, h.updateNode))

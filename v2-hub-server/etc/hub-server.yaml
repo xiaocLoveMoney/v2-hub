@@ -27,3 +27,8 @@ panel:
   syncInterval: 5m
   requestTimeout: 15s
   concurrency: 8
+# 用量采集、对账兜底与配额时区，语义见 docs/03 §5.2
+user:
+  trafficInterval: 1m
+  reconcileInterval: 5m
+  timeZone: Local

@@ -52,6 +52,34 @@ type AuditLog struct {
 	CreatedAt  pgtype.Timestamptz
 }
 
+type EndUser struct {
+	ID                 int64
+	Username           string
+	PasswordHash       string
+	Remark             string
+	PlanID             pgtype.Int8
+	TrafficLimit       int64
+	TrafficUsed        int64
+	ExpiresAt          pgtype.Timestamptz
+	PendingDays        int32
+	LimitIp            int32
+	RenewEveryDays     int32
+	RenewMonthDay      int32
+	RenewWeekday       int32
+	RenewMax           int32
+	RenewCount         int32
+	TrafficReset       string
+	TrafficResetDay    int32
+	LastTrafficResetAt pgtype.Timestamptz
+	IsDisabled         bool
+	Status             string
+	EmailCode          string
+	ClientCredEnc      []byte
+	DeletedAt          pgtype.Timestamptz
+	CreatedAt          pgtype.Timestamptz
+	UpdatedAt          pgtype.Timestamptz
+}
+
 type Endpoint struct {
 	ID             int64
 	InboundID      int64
@@ -120,6 +148,45 @@ type Permission struct {
 	CreatedAt pgtype.Timestamptz
 }
 
+type Plan struct {
+	ID               int64
+	Name             string
+	TrafficLimit     int64
+	DurationDays     int32
+	StartOnFirstUse  bool
+	LimitIp          int32
+	RenewEveryDays   int32
+	RenewMonthDay    int32
+	RenewWeekday     int32
+	RenewMax         int32
+	TrafficReset     string
+	TrafficResetDay  int32
+	AllowClientChain bool
+	AllowCustomNode  bool
+	Remark           string
+	CreatedAt        pgtype.Timestamptz
+	UpdatedAt        pgtype.Timestamptz
+}
+
+type PlanNodeGroup struct {
+	PlanID      int64
+	NodeGroupID int64
+}
+
+type Provision struct {
+	ID         int64
+	UserID     int64
+	ServerID   int64
+	Email      string
+	Status     string
+	LastError  string
+	RetryCount int32
+	LastUp     int64
+	LastDown   int64
+	SyncedAt   pgtype.Timestamptz
+	UpdatedAt  pgtype.Timestamptz
+}
+
 type Role struct {
 	ID        int64
 	Code      string
@@ -154,4 +221,11 @@ type Server struct {
 	LastSyncedAt   pgtype.Timestamptz
 	CreatedAt      pgtype.Timestamptz
 	UpdatedAt      pgtype.Timestamptz
+}
+
+type UserTrafficHourly struct {
+	UserID int64
+	Hour   pgtype.Timestamptz
+	Up     int64
+	Down   int64
 }

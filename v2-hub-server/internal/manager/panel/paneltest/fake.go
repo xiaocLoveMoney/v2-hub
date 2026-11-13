@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"sort"
 	"strconv"
 	"sync"
@@ -19,6 +20,7 @@ type Fake struct {
 	info      panel.PanelInfo
 	inbounds  map[string]panel.Inbound
 	endpoints []panel.Endpoint
+	clients   map[string]*panel.Client
 	nextID    int
 	nextGroup int
 	failWith  error
@@ -31,6 +33,7 @@ func New() *Fake {
 	return &Fake{
 		info:     panel.PanelInfo{Version: "fake-1.0", GUID: "fake-guid", Status: json.RawMessage(`{"cpu":1.5}`)},
 		inbounds: make(map[string]panel.Inbound, 8),
+		clients:  make(map[string]*panel.Client, 8),
 		nextID:   1,
 	}
 }
@@ -332,6 +335,173 @@ func (f *Fake) SetNextRef(n int) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.nextID = n
+}
+
+// AddTraffic 模拟用户产生流量：给面板上该 client 的累计计数加上 up / down。
+func (f *Fake) AddTraffic(email string, up, down int64) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if c, ok := f.clients[email]; ok {
+		c.Up += up
+		c.Down += down
+	}
+}
+
+// ResetTraffic 模拟面板侧把 client 的流量计数清零。
+func (f *Fake) ResetTraffic(email string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if c, ok := f.clients[email]; ok {
+		c.Up, c.Down = 0, 0
+	}
+}
+
+// ClientSnapshot 返回面板上某个 client 的副本，便于断言；不存在时 ok 为 false。
+func (f *Fake) ClientSnapshot(email string) (panel.Client, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	c, ok := f.clients[email]
+	if !ok {
+		return panel.Client{}, false
+	}
+	out := *c
+	out.InboundRefs = append([]string(nil), c.InboundRefs...)
+	sort.Strings(out.InboundRefs)
+	return out, true
+}
+
+// ListClients 实现 panel.Provider，按 email 排序。
+func (f *Fake) ListClients(context.Context) ([]panel.Client, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.enter("ListClients"); err != nil {
+		return nil, err
+	}
+	out := make([]panel.Client, 0, len(f.clients))
+	for _, c := range f.clients {
+		cp := *c
+		cp.InboundRefs = append([]string(nil), c.InboundRefs...)
+		out = append(out, cp)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Email < out[j].Email })
+	return out, nil
+}
+
+func (f *Fake) checkRefs(refs []string) error {
+	for _, ref := range refs {
+		if _, ok := f.inbounds[ref]; !ok {
+			return &panel.Error{Kind: panel.KindRejected, Message: "入站不存在：" + ref}
+		}
+	}
+	return nil
+}
+
+// AddClient 实现 panel.Provider。
+func (f *Fake) AddClient(_ context.Context, spec panel.ClientSpec) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.enter("AddClient"); err != nil {
+		return err
+	}
+	if _, ok := f.clients[spec.Email]; ok {
+		return &panel.Error{Kind: panel.KindRejected, Message: "client 已存在"}
+	}
+	if err := f.checkRefs(spec.InboundRefs); err != nil {
+		return err
+	}
+	f.clients[spec.Email] = &panel.Client{Email: spec.Email, Enabled: spec.Enabled, LimitIP: spec.LimitIP, InboundRefs: append([]string(nil), spec.InboundRefs...)}
+	return nil
+}
+
+func (f *Fake) client(email string) (*panel.Client, error) {
+	c, ok := f.clients[email]
+	if !ok {
+		return nil, &panel.Error{Kind: panel.KindRejected, Message: "client 不存在"}
+	}
+	return c, nil
+}
+
+// UpdateClient 实现 panel.Provider。
+func (f *Fake) UpdateClient(_ context.Context, spec panel.ClientSpec) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.enter("UpdateClient"); err != nil {
+		return err
+	}
+	c, err := f.client(spec.Email)
+	if err != nil {
+		return err
+	}
+	c.Enabled, c.LimitIP = spec.Enabled, spec.LimitIP
+	return nil
+}
+
+// AttachClient 实现 panel.Provider。
+func (f *Fake) AttachClient(_ context.Context, email string, refs []string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.enter("AttachClient"); err != nil {
+		return err
+	}
+	c, err := f.client(email)
+	if err != nil {
+		return err
+	}
+	if err := f.checkRefs(refs); err != nil {
+		return err
+	}
+	for _, r := range refs {
+		if !slices.Contains(c.InboundRefs, r) {
+			c.InboundRefs = append(c.InboundRefs, r)
+		}
+	}
+	return nil
+}
+
+// DetachClient 实现 panel.Provider。
+func (f *Fake) DetachClient(_ context.Context, email string, refs []string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.enter("DetachClient"); err != nil {
+		return err
+	}
+	c, err := f.client(email)
+	if err != nil {
+		return err
+	}
+	c.InboundRefs = slices.DeleteFunc(c.InboundRefs, func(r string) bool { return slices.Contains(refs, r) })
+	return nil
+}
+
+// SetClientsEnabled 实现 panel.Provider。
+func (f *Fake) SetClientsEnabled(_ context.Context, emails []string, enabled bool) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.enter("SetClientsEnabled"); err != nil {
+		return err
+	}
+	for _, e := range emails {
+		c, err := f.client(e)
+		if err != nil {
+			return err
+		}
+		c.Enabled = enabled
+	}
+	return nil
+}
+
+// DeleteClient 实现 panel.Provider。
+func (f *Fake) DeleteClient(_ context.Context, email string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.enter("DeleteClient"); err != nil {
+		return err
+	}
+	if _, err := f.client(email); err != nil {
+		return err
+	}
+	delete(f.clients, email)
+	return nil
 }
 
 var _ panel.Provider = (*Fake)(nil)

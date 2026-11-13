@@ -110,6 +110,14 @@ func runServer(args []string) error {
 	go job.RunPanelPolling(ctx, panels, job.PanelPollConfig{
 		ProbeInterval: cfg.Panel.ProbeInterval, SyncInterval: cfg.Panel.SyncInterval, Concurrency: cfg.Panel.Concurrency,
 	})
+	quotaLoc, err := cfg.User.Location()
+	if err != nil {
+		return err
+	}
+	users := service.NewUserService(pool, sealer, panels, service.UserConfig{Location: quotaLoc}, nil)
+	go job.RunUserSync(ctx, users, job.UserSyncConfig{
+		TrafficInterval: cfg.User.TrafficInterval, ReconcileInterval: cfg.User.ReconcileInterval, Concurrency: cfg.Panel.Concurrency,
+	})
 
 	srv := &http.Server{
 		Addr: cfg.Server.ListenAddr,
@@ -119,6 +127,7 @@ func runServer(args []string) error {
 			Auth:           auth,
 			RBAC:           service.NewRBACService(pool),
 			Panels:         panels,
+			Users:          users,
 			Cookie:         api.CookieConfig{Secure: secureCookie},
 			TrustedProxies: trusted,
 		}),

@@ -36,6 +36,10 @@ const (
 	defaultPanelSyncInterval   = 5 * time.Minute
 	defaultPanelRequestTimeout = 15 * time.Second
 	defaultPanelConcurrency    = 8
+
+	defaultUserTrafficInterval   = time.Minute
+	defaultUserReconcileInterval = 5 * time.Minute
+	defaultUserTimeZone          = "Local"
 )
 
 // ErrInvalidConfig 表示配置内容不合法。
@@ -47,6 +51,24 @@ type Config struct {
 	Database DatabaseConfig `yaml:"database"`
 	Auth     AuthConfig     `yaml:"auth"`
 	Panel    PanelConfig    `yaml:"panel"`
+	User     UserConfig     `yaml:"user"`
+}
+
+// UserConfig 是用量采集、对账兜底与配额时区参数（docs/03 §5.2）。
+type UserConfig struct {
+	TrafficInterval   time.Duration `yaml:"trafficInterval"`
+	ReconcileInterval time.Duration `yaml:"reconcileInterval"`
+	// TimeZone 是自动续期与周期重置用的 IANA 时区名，Local 表示服务器本地时区。
+	TimeZone string `yaml:"timeZone"`
+}
+
+// Location 解析 TimeZone。
+func (u UserConfig) Location() (*time.Location, error) {
+	loc, err := time.LoadLocation(u.TimeZone)
+	if err != nil {
+		return nil, fmt.Errorf("%w: user.timeZone %q: %v", ErrInvalidConfig, u.TimeZone, err)
+	}
+	return loc, nil
 }
 
 // PanelConfig 是面板探测、同步与请求参数（docs/03 §5.1）。
@@ -135,6 +157,10 @@ func defaults() Config {
 		SyncInterval:   defaultPanelSyncInterval,
 		RequestTimeout: defaultPanelRequestTimeout,
 		Concurrency:    defaultPanelConcurrency,
+	}, User: UserConfig{
+		TrafficInterval:   defaultUserTrafficInterval,
+		ReconcileInterval: defaultUserReconcileInterval,
+		TimeZone:          defaultUserTimeZone,
 	}}
 }
 
@@ -159,6 +185,12 @@ func (c Config) validate() error {
 	pc := c.Panel
 	if pc.ProbeInterval <= 0 || pc.SyncInterval <= 0 || pc.RequestTimeout <= 0 || pc.Concurrency <= 0 {
 		return fmt.Errorf("%w: panel intervals, timeout and concurrency must be positive", ErrInvalidConfig)
+	}
+	if c.User.TrafficInterval <= 0 || c.User.ReconcileInterval <= 0 {
+		return fmt.Errorf("%w: user intervals must be positive", ErrInvalidConfig)
+	}
+	if _, err := c.User.Location(); err != nil {
+		return err
 	}
 	return nil
 }
