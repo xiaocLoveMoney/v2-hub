@@ -68,7 +68,7 @@ const FALLBACK_MESSAGE = '网络异常，请稍后重试'
 /** 前端自己的错误码：请求没到后端或响应不是统一信封。 */
 export const CODE_NETWORK = 'network'
 export const CODE_UNAUTHENTICATED = 'unauthenticated'
-/** 口令正确但需要两步验证码（docs/03 §5.3）。 */
+/** 密码正确但需要两步验证码（docs/03 §5.3）。 */
 export const CODE_TOTP_REQUIRED = 'totp_required'
 /** 账号已停用，只能查看本人信息与退出（docs/03 §5.3）。 */
 export const CODE_ACCOUNT_DISABLED = 'account_disabled'

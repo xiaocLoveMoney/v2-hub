@@ -20,7 +20,7 @@ function digitsOnly(v: string): string {
   return v.replace(/\D/g, '')
 }
 
-/** 改口令：须提交旧口令，成功后其它设备上的登录会失效（docs/03 §5.3）。 */
+/** 改密码：须提交旧密码，成功后其它设备上的登录会失效（docs/03 §5.3）。 */
 function CredentialCard() {
   const { t } = useI18n()
   const toast = useToast()
@@ -217,7 +217,7 @@ function LoginLogsCard() {
   )
 }
 
-/** 我的账号（docs/06 §5）：改口令、邮箱、注销账号、两步验证、最近登录。 */
+/** 我的账号（docs/06 §5）：改密码、邮箱、注销账号、两步验证、最近登录。 */
 export function AccountPage() {
   const { t } = useI18n()
   return (

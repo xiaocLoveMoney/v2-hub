@@ -176,7 +176,7 @@ describe('我的出口：添加与编辑弹窗', () => {
     typeInto(dialog, '出口链接', 'trojan://pw-1@t.example.com:8443?type=grpc&serviceName=svc&security=tls&sni=t.example.com#特洛伊')
     fireEvent.click(within(dialog).getByRole('button', { name: '表单' }))
     expect((within(dialog).getByLabelText('协议') as HTMLSelectElement).value).toBe('trojan')
-    expect((within(dialog).getByLabelText('口令') as HTMLInputElement).value).toBe('pw-1')
+    expect((within(dialog).getByLabelText('密码') as HTMLInputElement).value).toBe('pw-1')
     expect((within(dialog).getByLabelText('serviceName') as HTMLInputElement).value).toBe('svc')
     expect((within(dialog).getByLabelText('名称（可选）') as HTMLInputElement).value).toBe('特洛伊')
 
@@ -241,7 +241,7 @@ describe('我的出口：HTTP 代理与延迟测试', () => {
   const withNodes = (list: unknown[]) => ({ ...signedIn(), 'GET /api/user/chain': () => ok({ ...overview, nodes: list }) })
   const TEST_PATH = `${EXITS_PATH}/9/test`
 
-  it('添加 HTTPS 代理：选协议后只剩地址、端口、用户名、口令、SNI 与允许不安全', async () => {
+  it('添加 HTTPS 代理：选协议后只剩地址、端口、用户名、密码、SNI 与允许不安全', async () => {
     const calls = mockServer({ ...signedIn(), [`POST ${EXITS_PATH}`]: () => ok({ ...ownExit, id: 10, protocol: 'http' }) })
     const card = await openExitsCard()
     fireEvent.click(within(card).getByRole('button', { name: '添加' }))
@@ -251,9 +251,9 @@ describe('我的出口：HTTP 代理与延迟测试', () => {
     expect(within(dialog).queryByLabelText('传输')).toBeNull()
     typeInto(dialog, '地址', 'proxy.example.com')
     typeInto(dialog, '端口', '8443')
-    typeInto(dialog, '口令（可选）', 'pw')
+    typeInto(dialog, '密码（可选）', 'pw')
     fireEvent.click(within(dialog).getByRole('button', { name: '保存' }))
-    // 只填口令不填用户名：标出用户名
+    // 只填密码不填用户名：标出用户名
     expect(within(dialog).getAllByText('必填')).toHaveLength(1)
     typeInto(dialog, '用户名（可选）', 'bob')
     typeInto(dialog, 'SNI', 'front.example.com')

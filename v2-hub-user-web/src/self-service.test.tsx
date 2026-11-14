@@ -5,7 +5,7 @@ import { TEST_CSRF, fail, mockServer, ok, renderApp } from './test/harness'
 const NOW = '2026-11-13T00:00:00Z'
 const GIB = 1024 ** 3
 const MIB = 1024 ** 2
-/** 表单里输入的口令（仅测试用）。 */
+/** 表单里输入的密码（仅测试用）。 */
 const typed = 'correct-horse-battery'
 const POPUP_KEY = 'hub.popup.dismissed'
 
@@ -93,12 +93,12 @@ describe('注册', () => {
     renderApp('/login')
     await screen.findByLabelText('用户名')
     expect(screen.queryByText('注册账号')).toBeNull()
-    expect(screen.queryByText('忘记口令')).toBeNull()
+    expect(screen.queryByText('忘记密码')).toBeNull()
   })
 })
 
-describe('找回口令', () => {
-  it('邮件可用时发 reset 验证码并提交新口令，成功后回登录页', async () => {
+describe('找回密码', () => {
+  it('邮件可用时发 reset 验证码并提交新密码，成功后回登录页', async () => {
     const calls = mockServer({
       'GET /api/user/site': () => ok({ ...site, mailEnabled: true }),
       'GET /api/user/auth/me': anonymous,
@@ -106,7 +106,7 @@ describe('找回口令', () => {
       'POST /api/user/auth/password/reset': () => ok(null),
     })
     renderApp('/login')
-    fireEvent.click(await screen.findByText('忘记口令'))
+    fireEvent.click(await screen.findByText('忘记密码'))
     fireEvent.change(await screen.findByLabelText('邮箱'), { target: { value: 'alice@example.com' } })
     fireEvent.click(screen.getByRole('button', { name: '发送验证码' }))
     await waitFor(() => expect(calls.some((c) => c.path === '/api/user/auth/email-code')).toBe(true))
@@ -115,7 +115,7 @@ describe('找回口令', () => {
     fireEvent.change(screen.getByLabelText('邮箱验证码'), { target: { value: '12x3456' } })
     fireEvent.change(screen.getByLabelText('新密码'), { target: { value: typed } })
     fireEvent.change(screen.getByLabelText('再输一次新密码'), { target: { value: typed } })
-    fireEvent.click(screen.getByRole('button', { name: '重设口令' }))
+    fireEvent.click(screen.getByRole('button', { name: '重设密码' }))
     await waitFor(() => expect(calls.some((c) => c.path === '/api/user/auth/password/reset')).toBe(true))
     expect(calls.find((c) => c.path === '/api/user/auth/password/reset')?.body).toEqual({ email: 'alice@example.com', emailCode: '123456', newPassword: typed })
     expect(await screen.findByRole('button', { name: '登录' })).toBeDefined()
@@ -236,8 +236,8 @@ describe('邀请、教程与共享账号', () => {
     expect(screen.queryByText('Win 客户端')).toBeNull()
   })
 
-  it('共享账号的口令点“显示”才请求', async () => {
-    /** 后端返回的共享口令（仅测试用）。 */
+  it('共享账号的密码点“显示”才请求', async () => {
+    /** 后端返回的共享密码（仅测试用）。 */
     const revealed = 'shared-value-for-test'
     const calls = mockServer({
       ...signedIn,
@@ -304,7 +304,7 @@ describe('工单', () => {
 })
 
 describe('我的账号', () => {
-  it('注销账号须输入当前口令，成功后回到登录页', async () => {
+  it('注销账号须输入当前密码，成功后回到登录页', async () => {
     const calls = mockServer({
       ...signedIn,
       'GET /api/user/site': () => ok(site),
@@ -317,7 +317,7 @@ describe('我的账号', () => {
     const dialog = screen.getByRole('dialog')
     const confirm = within(dialog).getByRole('button', { name: '永久注销' }) as HTMLButtonElement
     expect(confirm.disabled).toBe(true)
-    fireEvent.change(within(dialog).getByLabelText('当前口令'), { target: { value: typed } })
+    fireEvent.change(within(dialog).getByLabelText('当前密码'), { target: { value: typed } })
     fireEvent.click(confirm)
     await waitFor(() => expect(calls.some((c) => c.path === '/api/user/account/delete')).toBe(true))
     const post = calls.find((c) => c.path === '/api/user/account/delete')
@@ -326,7 +326,7 @@ describe('我的账号', () => {
     expect(await screen.findByRole('button', { name: '登录' })).toBeDefined()
   })
 
-  it('邮件可用时换绑邮箱：发码到新邮箱，带当前口令与验证码提交', async () => {
+  it('邮件可用时换绑邮箱：发码到新邮箱，带当前密码与验证码提交', async () => {
     const bound = { ...session, user: { ...session.user, email: 'new@example.com', isEmailVerified: true } }
     const calls = mockServer({
       ...signedIn,
@@ -342,7 +342,7 @@ describe('我的账号', () => {
     expect(calls.find((c) => c.path === '/api/user/account/email-code')?.body).toEqual({ email: 'new@example.com' })
 
     fireEvent.change(screen.getByLabelText('邮箱验证码'), { target: { value: '654321' } })
-    fireEvent.change(screen.getByLabelText('当前口令（确认是本人）'), { target: { value: typed } })
+    fireEvent.change(screen.getByLabelText('当前密码（确认是本人）'), { target: { value: typed } })
     fireEvent.click(screen.getByRole('button', { name: '绑定' }))
     await waitFor(() => expect(calls.some((c) => c.method === 'PUT')).toBe(true))
     expect(calls.find((c) => c.method === 'PUT')?.body).toEqual({ currentPassword: typed, email: 'new@example.com', emailCode: '654321' })

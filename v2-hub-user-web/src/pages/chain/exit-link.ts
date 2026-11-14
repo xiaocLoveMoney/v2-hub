@@ -90,7 +90,7 @@ export interface ExitFields {
   cipher: string
   /** shadowsocks 的加密方式。 */
   method: string
-  /** trojan / shadowsocks / socks / http / https 的口令。 */
+  /** trojan / shadowsocks / socks / http / https 的密码。 */
   passphrase: string
   /** socks / http / https 的用户名。 */
   username: string
@@ -147,7 +147,7 @@ export function hasStream(protocol: ExitProtocol): boolean {
   return protocol === 'vless' || protocol === 'vmess' || protocol === 'trojan'
 }
 
-/** 这个协议是不是“地址 + 可选的用户名口令”形状的代理（socks、http、https）。 */
+/** 这个协议是不是“地址 + 可选的用户名密码”形状的代理（socks、http、https）。 */
 export function isPlainProxy(protocol: ExitProtocol): boolean {
   return protocol === 'socks' || protocol === 'http' || protocol === 'https'
 }
@@ -208,7 +208,7 @@ export function exitFieldProblems(fields: ExitFields): ReadonlySet<ExitFieldKey>
   if (needsPassphrase && fields.passphrase === '') {
     problems.add('passphrase')
   }
-  // 代理只填口令不填用户名没有意义：内核只在有用户名时才带认证
+  // 代理只填密码不填用户名没有意义：内核只在有用户名时才带认证
   if (isPlainProxy(fields.protocol) && fields.passphrase !== '' && fields.username === '') {
     problems.add('username')
   }
@@ -368,7 +368,7 @@ export function buildExitLink(input: ExitFields, name: string): string {
     case 'socks':
     case 'http':
     case 'https': {
-      // 有用户名时总是带上“:口令”（口令可空）：socks 只有用户名的形状会被后端当成 Base64 去解
+      // 有用户名时总是带上“:密码”（密码可空）：socks 只有用户名的形状会被后端当成 Base64 去解
       const credential =
         fields.username === '' ? '' : `${encodeURIComponent(fields.username)}${CREDENTIAL_SEPARATOR}${encodeURIComponent(fields.passphrase)}@`
       return `${scheme}://${credential}${authority}${proxyQuery(fields)}${fragment}`
@@ -521,7 +521,7 @@ function parseVMess(payload: string): ParsedExitLink | null {
   return { fields, name: textOf(v.ps) }
 }
 
-/** 取出 shadowsocks 链接里的“加密方式:口令”与“地址:端口”两段；旧形状是整体 Base64。 */
+/** 取出 shadowsocks 链接里的“加密方式:密码”与“地址:端口”两段；旧形状是整体 Base64。 */
 function splitShadowsocks(body: string): { credential: string; hostPort: string } | null {
   const at = body.lastIndexOf('@')
   if (at < 0) {
@@ -537,7 +537,7 @@ function splitShadowsocks(body: string): { credential: string; hostPort: string 
   return credential === null ? null : { credential, hostPort: body.slice(at + 1) }
 }
 
-/** shadowsocks：SIP002（凭据是 Base64 或明文的“加密方式:口令”），也接受整体 Base64 的旧形状。 */
+/** shadowsocks：SIP002（凭据是 Base64 或明文的“加密方式:密码”），也接受整体 Base64 的旧形状。 */
 function parseShadowsocks(rest: string): ParsedExitLink | null {
   const [beforeFragment, rawName = ''] = rest.split('#')
   const name = safeDecode(rawName)
@@ -570,7 +570,7 @@ function splitProxyRest(rest: string): { userinfo: string | null; target: { addr
 }
 
 /**
- * 代理地址：socks5:// http:// https://[用户名:口令@]地址:端口。socks 另接受 socks://Base64(用户名:口令)@地址:端口；
+ * 代理地址：socks5:// http:// https://[用户名:密码@]地址:端口。socks 另接受 socks://Base64(用户名:密码)@地址:端口；
  * http / https 接受只有用户名的写法。不用 URL 解析：浏览器会把 http 的 80、https 的 443 端口吞掉。
  */
 function parseProxy(rest: string, protocol: 'socks' | 'http' | 'https'): ParsedExitLink | null {

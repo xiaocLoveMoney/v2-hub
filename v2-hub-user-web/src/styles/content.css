@@ -3,7 +3,7 @@
  * 只用 tokens.css 的设计变量，不写字面色值。
  */
 
-/* ---- 登录 / 注册 / 找回口令 ---- */
+/* ---- 登录 / 注册 / 找回密码 ---- */
 .hub-login-subtitle {
   margin-bottom: 28px;
 }
