@@ -91,7 +91,7 @@ CREATE TABLE server (
     api_token_enc   BYTEA        NOT NULL,                 -- AES-256-GCM，关联数据 server:<id>:token
     tls_mode        VARCHAR(8)   NOT NULL DEFAULT 'verify',-- verify / pin / skip
     cert_pin_sha256 VARCHAR(128),                          -- tls_mode=pin 时的叶子证书 SHA-256（Base64）
-    region          VARCHAR(64)  NOT NULL DEFAULT '',
+    region          VARCHAR(2)   NOT NULL DEFAULT '',      -- 位置：ISO 3166-1 两位国家码，空串为未知（Ruling-65）
     remark          VARCHAR(255) NOT NULL DEFAULT '',
     is_disabled     BOOLEAN      NOT NULL DEFAULT FALSE,
     status          VARCHAR(16)  NOT NULL DEFAULT 'unknown', -- unknown / online / offline / auth_failed
@@ -106,8 +106,19 @@ CREATE TABLE server (
     alert_sent_at   TIMESTAMPTZ,                           -- 这次掉线已发告警的时刻；未发为空
     created_at      TIMESTAMPTZ  NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ  NOT NULL DEFAULT now(),
-    CONSTRAINT uk_server_name UNIQUE (name)
+    CONSTRAINT uk_server_name UNIQUE (name),
+    CONSTRAINT ck_server_region CHECK (region ~ '^([A-Z]{2})?$')
 );
+
+-- 服务器负载采样：健康探测成功时按 5 分钟对齐记一条，同一时段只留最后一次，保留 7 天（docs/03 §5.1，Ruling-65）
+CREATE TABLE server_metric (
+    server_id      BIGINT           NOT NULL REFERENCES server (id) ON DELETE CASCADE,
+    bucket_at      TIMESTAMPTZ      NOT NULL,          -- 5 分钟时段的起点
+    cpu            DOUBLE PRECISION,                   -- CPU 占用百分比；面板没报为空
+    online_clients INTEGER          NOT NULL DEFAULT 0,
+    PRIMARY KEY (server_id, bucket_at)
+);
+CREATE INDEX idx_server_metric_bucket_at ON server_metric (bucket_at);
 
 CREATE TABLE inbound (
     id                BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -152,7 +163,6 @@ CREATE TABLE node (
     inbound_id   BIGINT       NOT NULL REFERENCES inbound (id) ON DELETE CASCADE,
     endpoint_id  BIGINT       REFERENCES endpoint (id) ON DELETE CASCADE, -- NULL = 直连节点
     display_name VARCHAR(128) NOT NULL,
-    region       VARCHAR(64)  NOT NULL DEFAULT '',
     tags         TEXT[]       NOT NULL DEFAULT '{}',
     sort_order   INTEGER      NOT NULL DEFAULT 0,
     is_enabled   BOOLEAN      NOT NULL DEFAULT TRUE,

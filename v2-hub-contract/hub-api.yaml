@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: v2-hub API
-  version: 0.9.0
+  version: 0.10.0
   description: |
     v2-hub 对外接口契约（hub-server 提供，v2-hub-admin-web / v2-hub-user-web 消费）。
     - 管理端接口前缀 /api/admin，客户端接口前缀 /api/user，订阅端点前缀 /sub。
@@ -1127,6 +1127,32 @@ paths:
                         additionalProperties: true
                         description: x25519 → {privateKey, publicKey}；mldsa65 → {seed, verify}；vlessenc → {auths:[{label, decryption, encryption}]}
         "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "502": { $ref: "#/components/responses/UpstreamUnavailable" }
+  /api/admin/servers/{id}/locate:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    post:
+      tags: [admin-panel]
+      operationId: locateServer
+      summary: 扫描服务器位置（Ruling-65，server:write；0.10.0）
+      description: 经面板读服务器自报的公网 IP，再查 IP 库得出国家码；只返回结果、不保存（管理员在表单里保存才生效）。面板没报公网 IP、IP 不是公网地址、IP 库查不到或扫描已关闭返回 409；面板连不上返回 502。不记审计。
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      responses:
+        "200":
+          description: 扫描结果
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/ServerLocation" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "403": { $ref: "#/components/responses/PermissionDenied" }
         "404": { $ref: "#/components/responses/NotFound" }
@@ -3005,6 +3031,35 @@ paths:
                       data: { type: array, items: { $ref: "#/components/schemas/UserNodeGroup" } }
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "403": { $ref: "#/components/responses/AccountDisabled" }
+  /api/user/nodes/{id}/metrics:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    get:
+      tags: [user-portal]
+      operationId: getUserNodeMetrics
+      summary: 该节点所在服务器的在线人数与负载趋势（Ruling-65；0.10.0）
+      description: 近 24 小时为 5 分钟采样原值，近 7 天按小时平均；服务器不在线的时段没有点。节点不在本人节点列表里返回 404。
+      security: [{ userSession: [] }]
+      parameters:
+        - name: range
+          in: query
+          required: false
+          schema: { $ref: "#/components/schemas/MetricRange" }
+      responses:
+        "200":
+          description: 趋势点，按时间升序
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/NodeMetrics" }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/AccountDisabled" }
+        "404": { $ref: "#/components/responses/NotFound" }
   /api/user/nodes/{id}/link:
     parameters:
       - $ref: "#/components/parameters/IdPath"
@@ -4490,9 +4545,39 @@ components:
           required: [name]
           properties:
             name: { type: string, minLength: 1, maxLength: 64 }
-            region: { type: string, maxLength: 64 }
+            region: { $ref: "#/components/schemas/CountryCode" }
             remark: { type: string, maxLength: 255 }
             isDisabled: { type: boolean }
+    CountryCode:
+      type: string
+      pattern: "^([A-Z]{2})?$"
+      maxLength: 2
+      description: ISO 3166-1 两位国家码（大写），空串表示未知（Ruling-65）
+    ServerLocation:
+      type: object
+      required: [region, publicIp]
+      properties:
+        region: { $ref: "#/components/schemas/CountryCode" }
+        publicIp: { type: string, description: 面板报出的公网 IP }
+    MetricRange:
+      type: string
+      enum: [24h, 7d]
+      default: 24h
+    NodeMetrics:
+      type: object
+      required: [range, points]
+      properties:
+        range: { $ref: "#/components/schemas/MetricRange" }
+        points:
+          type: array
+          items: { $ref: "#/components/schemas/NodeMetricPoint" }
+    NodeMetricPoint:
+      type: object
+      required: [at, onlineClients, load]
+      properties:
+        at: { type: string, format: date-time, description: 时段起点（5 分钟或 1 小时对齐） }
+        onlineClients: { type: integer, description: 所在服务器的在线 client 数 }
+        load: { type: [number, "null"], description: CPU 占用百分比，未知为 null }
     PanelInfo:
       type: object
       required: [version, guid]
@@ -4513,7 +4598,7 @@ components:
         baseUrl: { type: string }
         tlsMode: { $ref: "#/components/schemas/TlsMode" }
         certPinSha256: { type: [string, "null"] }
-        region: { type: string }
+        region: { type: string, description: 服务器位置，ISO 两位国家码，空串为未知（Ruling-65） }
         remark: { type: string }
         isDisabled: { type: boolean }
         status: { type: string, enum: [unknown, online, offline, auth_failed] }
@@ -4648,7 +4733,7 @@ components:
         address: { type: string, description: 直连节点为面板主机名，Host 节点为对外地址 }
         port: { type: integer }
         displayName: { type: string }
-        region: { type: string }
+        region: { type: string, description: 所在服务器的位置（只读，跟随服务器，Ruling-65） }
         tags:
           type: array
           items: { type: string }
@@ -4660,10 +4745,9 @@ components:
           items: { type: integer, format: int64 }
     NodeInput:
       type: object
-      required: [displayName, region, tags, sortOrder, isEnabled]
+      required: [displayName, tags, sortOrder, isEnabled]
       properties:
         displayName: { type: string, minLength: 1, maxLength: 128 }
-        region: { type: string, maxLength: 64 }
         tags:
           type: array
           maxItems: 16
@@ -4888,7 +4972,7 @@ components:
       properties:
         id: { type: integer, format: int64 }
         name: { type: string }
-        region: { type: string }
+        region: { type: string, description: 所在服务器的位置（ISO 两位国家码，空串为未知；Ruling-65） }
         protocol: { type: string }
         isServerOnline: { type: boolean }
         serverLoad: { type: [number, "null"], description: 所在服务器的 CPU 占用百分比，未知为 null }
@@ -5919,7 +6003,7 @@ components:
       properties:
         id: { type: integer, format: int64 }
         name: { type: string }
-        region: { type: string }
+        region: { type: string, description: 所在服务器的位置（ISO 两位国家码，空串为未知；Ruling-65） }
         protocol: { type: string }
         canBeExit: { type: boolean, description: 能否作落地；hysteria2 不能 }
         canBeServerEntry: { type: boolean, description: 能否作服务端链式的起飞节点：所在面板支持改内核配置 }
