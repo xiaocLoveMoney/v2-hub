@@ -4,6 +4,7 @@ import { Alert, Badge, Card, Empty, PageHeader, Pager } from '../components/ui'
 import { formatTime } from '../format'
 import { useRemote } from '../hooks/use-remote'
 import { useI18n, type MessageKey } from '../i18n/i18n-context'
+import { ConnectionPasswordCard } from './ConnectionPasswordCard'
 
 const PAGE_SIZE = 20
 
@@ -24,6 +25,7 @@ export function SubscribeLogsPage() {
   return (
     <>
       <PageHeader title={t('menu.subscribeLogs')} />
+      <ConnectionPasswordCard />
       <Card>
         {logs.error !== null && <Alert tone="plain">{logs.error.message}</Alert>}
         <p className="hub-field-hint" style={{ marginTop: 0, marginBottom: 14 }}>
