@@ -4,7 +4,7 @@ import { useCallback, useState, type CSSProperties } from 'react'
 import { api, csrfHeader, type SubscriptionInfo } from '../api/client'
 import { BRAND } from '../app-config'
 import { useToast } from '../components/toast-context'
-import { Alert, Button, Card, Confirm, Modal } from '../components/ui'
+import { Alert, Button, Card, Confirm, Loading, Modal } from '../components/ui'
 import { useCopy } from '../hooks/use-copy'
 import { mutate, useRemote } from '../hooks/use-remote'
 import { useI18n } from '../i18n/i18n-context'
@@ -69,7 +69,7 @@ export function SubscriptionCard() {
   if (info === null) {
     return (
       <Card title={t('sub.title')}>
-        <div className="hub-empty">{t('common.loading')}</div>
+        <Loading isInline />
       </Card>
     )
   }

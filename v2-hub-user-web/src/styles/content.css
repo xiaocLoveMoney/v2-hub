@@ -555,6 +555,7 @@ a.hub-btn {
 /* 展开的选项面板压在后面的字段上面；选项多时面板内滚动，不把弹窗撑高 */
 .hub-multi-panel {
   position: absolute;
+  animation: hub-drop-in 0.16s ease-out both;
   z-index: 5;
   left: 0;
   right: 0;

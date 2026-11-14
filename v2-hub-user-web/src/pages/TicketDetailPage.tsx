@@ -2,7 +2,7 @@ import { useCallback, useState } from 'react'
 import { Link, useParams } from 'react-router'
 import { api, csrfHeader, type TicketDetail, type TicketMessage } from '../api/client'
 import { useToast } from '../components/toast-context'
-import { Alert, Button, Card, Confirm, PageHeader, TextAreaField } from '../components/ui'
+import { Alert, Button, Card, Confirm, Loading, PageHeader, TextAreaField } from '../components/ui'
 import { formatTime } from '../format'
 import { mutate, useRemote } from '../hooks/use-remote'
 import { ROUTES } from '../menu'
@@ -79,7 +79,7 @@ function TicketConversation({ ticketId }: { ticketId: number }) {
     return (
       <>
         <PageHeader title={t('tickets.title')} extra={<Link to={ROUTES.TICKETS}>{t('tickets.backToList')}</Link>} />
-        {ticket.error === null ? <div className="hub-empty">{t('common.loading')}</div> : <Alert tone="plain">{ticket.error.message}</Alert>}
+        {ticket.error === null ? <Loading isInline /> : <Alert tone="plain">{ticket.error.message}</Alert>}
       </>
     )
   }

@@ -3,7 +3,7 @@ import { QRCodeSVG } from 'qrcode.react'
 import { useState } from 'react'
 import { api, toApiError, type UserNode, type UserNodeGroup } from '../api/client'
 import { useSession } from '../auth/session-context'
-import { Alert, Badge, Button, Card, Empty, Modal, PageHeader } from '../components/ui'
+import { Alert, Badge, Button, Card, Empty, Loading, Modal, PageHeader } from '../components/ui'
 import { regionFlag } from '../format'
 import { useCopy } from '../hooks/use-copy'
 import { useRemote } from '../hooks/use-remote'
@@ -95,7 +95,7 @@ export function NodesPage() {
       ))}
       <Modal title={detail?.node.name ?? ''} isOpen={detail !== null} onClose={() => setDetail(null)}>
         {detail?.error !== null && detail?.error !== undefined && <Alert tone="plain">{detail.error}</Alert>}
-        {detail !== null && detail.link === null && detail.error === null && <div className="hub-empty">{t('common.loading')}</div>}
+        {detail !== null && detail.link === null && detail.error === null && <Loading isInline />}
         {detail !== null && detail.link !== null && (
           <>
             <div style={{ display: 'grid', placeItems: 'center', marginBottom: 16 }}>

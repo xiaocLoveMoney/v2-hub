@@ -11,7 +11,7 @@
   overflow-y: auto;
   background: var(--hub-surface);
   box-shadow: var(--hub-card-shadow);
-  transition: transform 0.2s;
+  transition: transform 0.3s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .hub-brand {
@@ -67,6 +67,7 @@
   min-height: 100vh;
   margin-left: var(--hub-sider-width);
   padding-bottom: 60px;
+  transition: margin-left 0.3s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .hub-band {
@@ -355,6 +356,7 @@
     z-index: 20;
     border: 0;
     background: var(--hub-overlay);
+    animation: hub-fade-in 0.25s ease-out both;
   }
 
   .hub-main {

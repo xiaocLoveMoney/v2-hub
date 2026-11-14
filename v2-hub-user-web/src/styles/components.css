@@ -345,6 +345,10 @@
   border-top: 1px solid var(--hub-divider);
 }
 
+.hub-modal-mask.is-leaving {
+  pointer-events: none;
+}
+
 .hub-toasts {
   position: fixed;
   top: 20px;
@@ -370,6 +374,97 @@
 
 .hub-toast-success {
   background: var(--hub-success);
+}
+
+/* ---- 加载态 ---- */
+.hub-spinner {
+  display: inline-block;
+  flex: none;
+  width: 22px;
+  height: 22px;
+  border: 2px solid var(--hub-primary-light);
+  border-top-color: var(--hub-primary);
+  border-radius: 50%;
+  animation: hub-spin 0.7s linear infinite;
+}
+
+.hub-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  min-height: 240px;
+  color: var(--hub-muted);
+  font-weight: 600;
+  animation: hub-fade-in 0.3s ease-out both;
+}
+
+.hub-loading-inline {
+  flex-direction: row;
+  min-height: 0;
+  padding: 24px 0;
+  gap: 10px;
+}
+
+.hub-loading-inline .hub-spinner {
+  width: 16px;
+  height: 16px;
+}
+
+/* 忙碌中的按钮前面加一个小转圈；文字不变，无障碍名称不受影响 */
+.hub-btn[aria-busy='true']::before {
+  content: '';
+  width: 12px;
+  height: 12px;
+  border: 2px solid currentcolor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: hub-spin 0.7s linear infinite;
+}
+
+/* 顶部请求进度条（NProgress 生成的 #nprogress 节点；不引入它自带的样式，改用设计变量） */
+#nprogress {
+  pointer-events: none;
+}
+
+#nprogress .bar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 70;
+  width: 100%;
+  height: 3px;
+  background: var(--hub-primary);
+}
+
+#nprogress .peg {
+  position: absolute;
+  right: 0;
+  display: block;
+  width: 100px;
+  height: 100%;
+  box-shadow: 0 0 10px var(--hub-primary), 0 0 5px var(--hub-primary-glow);
+  transform: rotate(3deg) translate(0, -4px);
+}
+
+@keyframes hub-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes hub-fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes hub-drop-in {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
 }
 
 /* ---- 图表 ---- */
@@ -467,5 +562,24 @@
   .hub-card-body,
   .hub-card-header {
     padding-inline: 16px;
+  }
+}
+
+/* 系统要求减少动态效果时：关掉装饰性的进场动画，转圈放慢但保留（它表达“正在进行”） */
+@media (prefers-reduced-motion: reduce) {
+  .hub-loading,
+  .hub-multi-panel,
+  .hub-shell.sider-open .hub-sider-mask {
+    animation: none;
+  }
+
+  .hub-spinner,
+  .hub-btn[aria-busy='true']::before {
+    animation-duration: 1.6s;
+  }
+
+  .hub-sider,
+  .hub-main {
+    transition: none;
   }
 }

@@ -3,7 +3,7 @@ import { useCallback, useState, type FormEvent } from 'react'
 import { Link } from 'react-router'
 import { api, csrfHeader, toApiError, type LedgerEntry, type Order, type PageData, type Wallet } from '../../api/client'
 import { useToast } from '../../components/toast-context'
-import { Alert, Badge, Button, Card, Empty, Field, Modal, PageHeader, Pager } from '../../components/ui'
+import { Alert, Badge, Button, Card, Empty, Field, Loading, Modal, PageHeader, Pager } from '../../components/ui'
 import { formatBytes, formatTime } from '../../format'
 import { mutate, useRemote } from '../../hooks/use-remote'
 import { useI18n } from '../../i18n/i18n-context'
@@ -280,7 +280,7 @@ export function WalletPage() {
     )
   }
   if (data === null) {
-    return <div className="hub-empty">{t('common.loading')}</div>
+    return <Loading />
   }
   const isShopOpen = site.shopEnabled === true
   return (
