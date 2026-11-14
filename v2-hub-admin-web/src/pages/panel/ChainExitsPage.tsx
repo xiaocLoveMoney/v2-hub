@@ -1,7 +1,7 @@
 import { PlusOutlined } from '@ant-design/icons'
 import { App, Button, Input, InputNumber, Modal, Popconfirm, Select, Space, Tag, Typography, type TableProps } from 'antd'
 import { useCallback, useState } from 'react'
-import { api, csrfHeader, toApiError, type AdminChainExit, type ChainExitOwner, type NodeGroup, type Server } from '../../api/client'
+import { api, csrfHeader, toApiError, type AdminChainExit, type ChainExitAssignMode, type ChainExitOwner, type NodeGroup, type Server } from '../../api/client'
 import { useSession } from '../../auth/session-context'
 import { ErrorAlert } from '../../components/ErrorAlert'
 import { PagedTable } from '../../components/PagedTable'
@@ -13,6 +13,7 @@ import { ChainExitTestButton } from './ChainExitTestButton'
 
 const MAX_KEYWORD_LEN = 64
 const OWNER_PLATFORM: ChainExitOwner = 'platform'
+const ASSIGN_USER: ChainExitAssignMode = 'user'
 const NO_ROUTES = 0
 
 const OWNER_OPTIONS: { value: ChainExitOwner; label: string }[] = [
@@ -27,7 +28,7 @@ const loadNoServers = () => Promise.resolve({ data: { data: [] as Server[] } })
 
 /**
  * 链式出口（node:read 查看，node:write 增改删、停用与查看链接；docs/03 §5.21，Ruling-50）。
- * 平台出口由管理员添加，挂到节点组后授权给用户；用户出口是用户自己添加的，这里只能停用 / 启用与删除，不能查看或修改它的链接。
+ * 平台出口由管理员添加，按节点组或指定用户授权（Ruling-64）；用户出口是用户自己添加的，这里只能停用 / 启用与删除，不能查看或修改它的链接。
  */
 export function ChainExitsPage() {
   const { can } = useSession()
@@ -73,7 +74,7 @@ export function ChainExitsPage() {
     { title: '名称', dataIndex: 'name' },
     { title: '协议', dataIndex: 'protocol' },
     { title: '地址', key: 'address', render: (_: unknown, e: AdminChainExit) => <span className="mono">{`${e.address}:${e.port}`}</span> },
-    { title: '节点组', key: 'groups', render: (_: unknown, e: AdminChainExit) => <GroupsCell exit={e} /> },
+    { title: '分配', key: 'assign', render: (_: unknown, e: AdminChainExit) => <AssignCell exit={e} /> },
     { title: '可用于', key: 'usage', render: (_: unknown, e: AdminChainExit) => <UsageCell exit={e} /> },
     { title: '被引用', dataIndex: 'routeCount', render: (n: number) => `${n} 条规则` },
     { title: '状态', dataIndex: 'isEnabled', render: (isEnabled: boolean) => (isEnabled ? <Tag color="green">启用</Tag> : <Tag>已停用</Tag>) },
@@ -100,7 +101,7 @@ export function ChainExitsPage() {
         )}
       </Space>
       <Typography.Paragraph type="secondary">
-        出口只用作链式规则的落地。平台出口挂到节点组后，套餐绑了该节点组的用户才能用；用户出口由用户自己添加，这里可以停用或删除，但不能查看它的链接。
+        出口只用作链式规则的落地。平台出口可按节点组分配（套餐绑了该节点组的用户能用），也可指定给某些用户；用户出口由用户自己添加，这里可以停用或删除，但不能查看它的链接。
       </Typography.Paragraph>
       <ErrorAlert error={groups.error ?? servers.error} />
       <PagedTable<AdminChainExit>
@@ -156,9 +157,23 @@ function isPlatformExit(e: AdminChainExit): boolean {
   return e.owner === OWNER_PLATFORM
 }
 
-function GroupsCell({ exit }: { exit: AdminChainExit }) {
+function AssignCell({ exit }: { exit: AdminChainExit }) {
   if (!isPlatformExit(exit)) {
     return <>—</>
+  }
+  if (exit.assignMode === ASSIGN_USER) {
+    if (exit.users.length === 0) {
+      return <Typography.Text type="warning">未指定用户，没有用户能用</Typography.Text>
+    }
+    return (
+      <>
+        {exit.users.map((u) => (
+          <Tag key={u.id} color="blue">
+            {u.username}
+          </Tag>
+        ))}
+      </>
+    )
   }
   if (exit.nodeGroups.length === 0) {
     return <Typography.Text type="warning">未挂节点组，没有用户能用</Typography.Text>

@@ -483,7 +483,7 @@ describe('链式出口', () => {
   const LINK = `${LINK_BASE}?type=tcp&security=tls#tokyo`
   const platform = {
     id: 9, owner: 'platform', user: null, name: '东京出口', protocol: 'vless', address: 'exit.example.net', port: 443, remark: '',
-    isEnabled: true, allowServer: true, allowClient: false, nodeGroups: [{ id: 2, name: 'basic' }], routeCount: 0,
+    isEnabled: true, allowServer: true, allowClient: false, assignMode: 'group', nodeGroups: [{ id: 2, name: 'basic' }], users: [], routeCount: 0,
     createdAt: '2026-11-14T00:00:00Z', updatedAt: '2026-11-14T00:00:00Z',
   }
   const own = {
@@ -611,7 +611,9 @@ describe('链式出口', () => {
     await waitFor(() => {
       const call = calls.find((c) => c.method === 'POST' && c.path === '/api/admin/chain-exits')
       expect(call?.csrf).toBe(CSRF)
-      expect(call?.body).toEqual({ name: '大阪出口', link: LINK, remark: '', isEnabled: true, allowServer: true, allowClient: false, nodeGroupIds: [] })
+      expect(call?.body).toEqual({
+        name: '大阪出口', link: LINK, remark: '', isEnabled: true, allowServer: true, allowClient: false, assignMode: 'group', nodeGroupIds: [], userIds: [],
+      })
     })
 
     const platformRow = screen.getByText('东京出口').closest('tr')
@@ -622,8 +624,37 @@ describe('链式出口', () => {
     fireEvent.click(await screen.findByRole('button', { name: '保 存' }))
     await waitFor(() => {
       const call = calls.find((c) => c.method === 'PUT' && c.path === '/api/admin/chain-exits/9')
-      expect(call?.body).toEqual({ name: '东京出口', remark: '', isEnabled: true, allowServer: true, allowClient: false, nodeGroupIds: [2] })
+      expect(call?.body).toEqual({
+        name: '东京出口', remark: '', isEnabled: true, allowServer: true, allowClient: false, assignMode: 'group', nodeGroupIds: [2], userIds: [],
+      })
     })
+  })
+
+  it('平台出口可改为指定用户：按用户名搜索后多选，只提交用户名单', async () => {
+    const assigned = { ...platform, assignMode: 'user', nodeGroups: [], users: [{ id: 7, username: 'alice' }] }
+    const calls = mockServer({
+      ...handlers(),
+      'GET /api/admin/users': () => ok({ items: [{ id: 7, username: 'alice' }, { id: 8, username: 'bob' }], total: 2 }),
+      'PUT /api/admin/chain-exits/9': () => ok(assigned),
+    })
+    renderWith(<ChainExitsPage />)
+    const platformRow = (await screen.findByText('东京出口')).closest('tr')
+    if (platformRow === null) {
+      throw new Error('row not rendered')
+    }
+    fireEvent.click(within(platformRow).getByRole('button', { name: '编 辑' }))
+    const dialog = await screen.findByRole('dialog')
+    fireEvent.click(within(dialog).getByText('指定用户'))
+    const picker = await within(dialog).findByRole('combobox', { name: '指定用户' })
+    fireEvent.mouseDown(picker)
+    fireEvent.change(picker, { target: { value: 'ali' } })
+    fireEvent.click(await screen.findByTitle('alice', undefined, { timeout: 3000 }))
+    fireEvent.click(within(dialog).getByRole('button', { name: '保 存' }))
+    await waitFor(() => {
+      const call = calls.find((c) => c.method === 'PUT' && c.path === '/api/admin/chain-exits/9')
+      expect(call?.body).toMatchObject({ assignMode: 'user', nodeGroupIds: [], userIds: [7] })
+    })
+    expect(calls.some((c) => c.path === '/api/admin/users')).toBe(true)
   })
 
   it('新建平台出口默认是表单：缺项点创建才标出，填好后提交拼出的链接；链接可转回表单', async () => {
