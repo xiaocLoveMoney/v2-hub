@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: v2-hub API
-  version: 0.5.0
+  version: 0.6.0
   description: |
     v2-hub 对外接口契约（hub-server 提供，v2-hub-admin-web / v2-hub-user-web 消费）。
     - 管理端接口前缀 /api/admin，客户端接口前缀 /api/user，订阅端点前缀 /sub。
@@ -844,6 +844,41 @@ paths:
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "403": { $ref: "#/components/responses/PermissionDenied" }
         "404": { $ref: "#/components/responses/NotFound" }
+  /api/admin/chain-exits/{id}/test:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    post:
+      tags: [admin-panel]
+      operationId: testChainExitAsAdmin
+      summary: 从一台服务器测试出口的延迟（node:write；0.6.0）
+      description: |
+        由指定服务器的面板去连出口并返回结果，hub-server 自己不连出口（Ruling-52）。平台出口与用户出口都可测；
+        用户出口先过服务端链式的地址限制（docs/03 §5.19），不过返回 400。不改任何状态，不记审计。
+        同一台服务器同时只跑一个测试，占用中返回 409。
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AdminChainExitTestInput" }
+      responses:
+        "200":
+          description: 测试结果（连不上也是 200，ok 为 false）
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/AdminChainExitTestResult" }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "502": { $ref: "#/components/responses/UpstreamUnavailable" }
   /api/admin/servers/{id}/sync:
     parameters:
       - $ref: "#/components/parameters/IdPath"
@@ -1087,6 +1122,30 @@ paths:
                         additionalProperties: true
                         description: x25519 → {privateKey, publicKey}；mldsa65 → {seed, verify}；vlessenc → {auths:[{label, decryption, encryption}]}
         "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "502": { $ref: "#/components/responses/UpstreamUnavailable" }
+  /api/admin/servers/{id}/web-cert:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    get:
+      tags: [admin-panel]
+      operationId: getServerWebCert
+      summary: 取该服务器面板自己的网页证书路径，供新建入站的 TLS 证书预填（Ruling-53，node:write；0.6.0）
+      description: 只返回面板所在机器上的文件路径，不返回证书内容；面板没配证书时两个字段都是空串。面板类型不支持时返回 409。
+      responses:
+        "200":
+          description: 证书与私钥的文件路径
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/ServerWebCert" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "403": { $ref: "#/components/responses/PermissionDenied" }
         "404": { $ref: "#/components/responses/NotFound" }
@@ -3981,6 +4040,43 @@ paths:
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "403": { $ref: "#/components/responses/UserForbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
+  /api/user/chain/exits/{id}/test:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    post:
+      tags: [user-chain]
+      operationId: testChainExit
+      summary: 从我可用的一个节点所在服务器测试我的出口的延迟（0.6.0）
+      description: |
+        由起点节点所在服务器的面板去连出口并返回结果（Ruling-52）。只能测自己的出口，他人的与平台出口返回 404（R8）；
+        起点必须是本人可用、面板支持测试的节点，否则 400。出口先过服务端链式的地址限制（公网地址等，docs/03 §5.19），不过返回 400。
+        每用户频控，超出返回 429；同一台服务器同时只跑一个测试，占用中返回 409。不返回面板的错误原文。
+      security: [{ userSession: [] }]
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ChainExitTestInput" }
+      responses:
+        "200":
+          description: 测试结果（连不上也是 200，ok 为 false）
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/ChainExitTestResult" }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/UserForbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "502": { $ref: "#/components/responses/UpstreamUnavailable" }
   /sub/{token}:
     get:
       tags: [subscription]
@@ -5789,11 +5885,50 @@ components:
         isEnabled: { type: boolean, description: false = 已被管理员停用，引用它的规则阻断 }
         routeCount: { type: integer, description: 引用它的规则数；删除前据此提示 }
         createdAt: { type: string, format: date-time }
+    ChainExitTestMode:
+      type: string
+      enum: [tcp, http, real]
+      description: tcp = 只做 TCP 连接；http = 经出口发一次 HTTP 请求，报热连接的往返时间；real = 真实延迟，含建立隧道在内的整次请求耗时（Ruling-52）
+    ChainExitTestInput:
+      type: object
+      required: [nodeId, mode]
+      properties:
+        nodeId: { type: integer, format: int64, description: 起点节点（本人可用），由它所在服务器的面板发起测试 }
+        mode: { $ref: "#/components/schemas/ChainExitTestMode" }
+    ChainExitTestResult:
+      type: object
+      required: [ok, mode, delayMs, httpStatus, egressIp, egressRegion]
+      properties:
+        ok: { type: boolean, description: 是否连通 }
+        mode: { $ref: "#/components/schemas/ChainExitTestMode" }
+        delayMs: { type: integer, format: int64, description: 延迟，毫秒；不通时为 0 }
+        httpStatus: { type: integer, description: http / real 方式下测试请求的 HTTP 状态码；没有则为 0 }
+        egressIp: { type: string, description: http 方式下探到的出口 IP；没有则为空串 }
+        egressRegion: { type: string, description: 出口 IP 的国家或地区代码；没有则为空串 }
+    AdminChainExitTestInput:
+      type: object
+      required: [serverId, mode]
+      properties:
+        serverId: { type: integer, format: int64, description: 发起测试的服务器 }
+        mode: { $ref: "#/components/schemas/ChainExitTestMode" }
+    AdminChainExitTestResult:
+      allOf:
+        - $ref: "#/components/schemas/ChainExitTestResult"
+        - type: object
+          required: [error]
+          properties:
+            error: { type: string, description: 面板返回的错误原文（已截断）；连通时为空串 }
+    ServerWebCert:
+      type: object
+      required: [certFile, keyFile]
+      properties:
+        certFile: { type: string, description: 证书文件在面板所在机器上的路径；没配为空串 }
+        keyFile: { type: string, description: 私钥文件在面板所在机器上的路径；没配为空串 }
     ChainExitInput:
       type: object
       required: [link]
       properties:
-        link: { type: string, minLength: 1, maxLength: 2048, description: "分享链接（vless / vmess / trojan / ss）或 socks5://[用户名:口令@]地址:端口" }
+        link: { type: string, minLength: 1, maxLength: 2048, description: "分享链接（vless / vmess / trojan / ss），或代理地址 socks5:// http:// https://[用户名:口令@]地址:端口（http / https 自 0.6.0）" }
         name: { type: string, maxLength: 64, description: 可选；省略或空串 = 取链接里的名称 }
     ChainExitUpdateInput:
       type: object
@@ -5921,7 +6056,7 @@ components:
       required: [name, link, allowServer, allowClient, nodeGroupIds]
       properties:
         name: { type: string, minLength: 1, maxLength: 64 }
-        link: { type: string, minLength: 1, maxLength: 2048, description: "分享链接（vless / vmess / trojan / ss）或 socks5://[用户名:口令@]地址:端口" }
+        link: { type: string, minLength: 1, maxLength: 2048, description: "分享链接（vless / vmess / trojan / ss），或代理地址 socks5:// http:// https://[用户名:口令@]地址:端口（http / https 自 0.6.0）" }
         remark: { type: string, maxLength: 255, default: "" }
         isEnabled: { type: boolean, default: true }
         allowServer: { type: boolean }
