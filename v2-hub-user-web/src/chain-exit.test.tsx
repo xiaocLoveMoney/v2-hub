@@ -8,7 +8,7 @@ const EXITS_PATH = '/api/user/chain/exits'
 const TEST_ID = '11111111-2222-3333-4444-555555555555'
 const TEST_PUBLIC_KEY = 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'
 const site = {
-  siteName: '测试站', registerMode: 'invite', emailVerifyRequired: false, mailEnabled: false, checkinEnabled: false, ticketEnabled: false, sharedEnabled: false,
+  siteName: '测试站', menuOrder: [], registerMode: 'invite', emailVerifyRequired: false, mailEnabled: false, checkinEnabled: false, ticketEnabled: false, sharedEnabled: false,
   shopEnabled: false, currency: 'CNY',
 }
 const features = { clientChain: true, customNode: true, serverChain: true }
