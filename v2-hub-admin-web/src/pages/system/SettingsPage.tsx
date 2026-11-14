@@ -7,6 +7,7 @@ import { useRemote } from '../../hooks/use-remote'
 import { useSubmit } from '../../hooks/use-submit'
 import { PERMISSIONS } from '../../menu'
 import { OpsSettingsCards, TestTelegramCard } from './OpsSettingsCards'
+import { SubPathFields } from './SubPathFields'
 
 // 取值范围与 hub-api.yaml 的 Settings 一致（docs/03 §5.6 设置清单）
 const MAX_SITE_NAME_LEN = 32
@@ -234,6 +235,7 @@ function SettingsFormBody({ settings, canWrite, canReadPlans, onSaved }: Setting
           <Form.Item name={['subscription', 'logRetentionDays']} label="订阅记录保留天数" rules={required}>
             <InputNumber min={1} max={MAX_LOG_RETENTION_DAYS} precision={0} className="full-width" />
           </Form.Item>
+          <SubPathFields subscription={settings.subscription} canWrite={canWrite} />
         </Card>
 
         <Card
