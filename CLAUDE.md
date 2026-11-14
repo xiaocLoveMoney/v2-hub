@@ -34,7 +34,7 @@ cd v2-hub-contract/deploy/it && bash run_all.sh
 - 前端静态文件放 MinIO，Caddy 同域反代 `/api`、`/sub`（Ruling-5、Ruling-6）。
 
 契约（全部在 v2-hub-contract/）：`hub-api.yaml`（server → 前端）、`deploy/init.sql`（server 的表结构）、
-`upstream/3x-ui/openapi-v3.11.0.json`（3x-ui → server 的上游基准）。契约版本用 git tag `vX.Y`，当前 `v0.10`。
+`upstream/3x-ui/openapi-v3.11.0.json`（3x-ui → server 的上游基准）。契约版本用 git tag `vX.Y`，当前 `v0.11`。
 
 ## 跨目录纪律
 
@@ -81,6 +81,9 @@ GitHub 仓库设置见 `docs/github-仓库设置清单.md`。
   客户端每个组合都进订阅；落地可选平台节点、平台出口（管理员添加，挂节点组授权）或用户出口；用户出口可用于服务端链式，
   配套防护：只许公网地址并固定 IP、字段白名单、防环、每用户写操作频控、下发失败隔离；管理端可管理全部出口；IT-11 通过。
   真实流量的出口 IP、两端 M9 页面登录后的浏览器实测未自动化，待人工验证。
-- 路线图 M3–M8 与 M9（链式改造）已完成；后续工作待定。
+- M10 完成（2026-11-14，tag `v0.11`）：出口补全与入站预填（Ruling-51 – Ruling-53）：出口支持 HTTP / HTTPS 代理；出口延迟测试（TCP、HTTP、真实延迟），
+  手动发起、由起飞面板执行，用户出口先过服务端链式的地址限制，按用户频控、按服务器互斥；出口弹窗改为“表单 / 分享链接”两种填法；
+  新建入站预填路径、Host、SNI、证书路径与 REALITY 目标；IT-12 通过。真实代理出口上连通的测试结果、两端 M10 页面登录后的浏览器实测待人工验证。
+- 路线图 M3–M8、M9（链式改造）与 M10（出口补全与入站预填）已完成；后续工作待定。
 - 路线（2026-11-13，Ruling-17 – Ruling-22）：参考 SSPanel-Uim Malio 的功能与界面，自行实现；里程碑为
   M3 订阅与用户端基础 → M4 自助运营 → M5 商店与钱包 → M6 / M7 两种链式 → M8 运营，见 docs/07。
