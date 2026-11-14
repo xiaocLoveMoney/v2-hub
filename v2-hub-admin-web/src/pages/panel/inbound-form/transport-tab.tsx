@@ -1,6 +1,28 @@
-import { Alert, Collapse, Form, Select } from 'antd'
+import { Alert, Button, Collapse, Form, Select } from 'antd'
 import { KeyValueField, NumberField, SelectField, SwitchField, TagsField, TextField, type Binder } from './fields'
-import { NETWORKS, NETWORK_HYSTERIA, NETWORK_LABELS, XHTTP_MODES, getAt, hasNetworkChoice, hasStream, networkKey, networkOf, withNetwork, type Network, type Path } from './model'
+import {
+  NETWORKS,
+  NETWORK_HYSTERIA,
+  NETWORK_LABELS,
+  XHTTP_MODES,
+  getAt,
+  hasNetworkChoice,
+  hasStream,
+  networkKey,
+  networkOf,
+  prefillNetwork,
+  randomPath,
+  randomServiceName,
+  withNetwork,
+  type InboundDraft,
+  type Network,
+  type Path,
+} from './model'
+
+/** 路径输入框旁的“随机”按钮：换一段随机路径。 */
+function RandomPathButton({ b, path }: { b: Binder; path: Path }) {
+  return <Button onClick={() => b.set(path, randomPath())}>随机</Button>
+}
 
 const HEADER_TYPES = [
   { value: 'none', label: '无' },
@@ -60,7 +82,7 @@ function XhttpFields({ b, base }: { b: Binder; base: Path }) {
   ]
   return (
     <>
-      <TextField b={b} path={[...base, 'path']} label="路径" />
+      <TextField b={b} path={[...base, 'path']} label="路径" action={<RandomPathButton b={b} path={[...base, 'path']} />} />
       <TextField b={b} path={[...base, 'host']} label="Host" />
       <SelectField b={b} path={[...base, 'mode']} label="模式" options={XHTTP_MODES} />
       <TextField b={b} path={[...base, 'xPaddingBytes']} label="填充字节" />
@@ -107,7 +129,7 @@ function NetworkFields({ b, network }: { b: Binder; network: string }) {
       return (
         <>
           <SwitchField b={b} path={[...base, 'acceptProxyProtocol']} label="接收 PROXY 协议" />
-          <TextField b={b} path={[...base, 'path']} label="路径" />
+          <TextField b={b} path={[...base, 'path']} label="路径" action={<RandomPathButton b={b} path={[...base, 'path']} />} />
           <TextField b={b} path={[...base, 'host']} label="Host" />
           <KeyValueField b={b} path={[...base, 'headers']} label="请求头" />
           <NumberField b={b} path={[...base, 'heartbeatPeriod']} label="心跳间隔（秒）" min={0} />
@@ -116,7 +138,12 @@ function NetworkFields({ b, network }: { b: Binder; network: string }) {
     case 'grpc':
       return (
         <>
-          <TextField b={b} path={[...base, 'serviceName']} label="服务名" />
+          <TextField
+            b={b}
+            path={[...base, 'serviceName']}
+            label="服务名"
+            action={<Button onClick={() => b.set([...base, 'serviceName'], randomServiceName())}>随机</Button>}
+          />
           <TextField b={b} path={[...base, 'authority']} label="Authority" />
           <SwitchField b={b} path={[...base, 'multiMode']} label="Multi Mode" />
         </>
@@ -125,7 +152,7 @@ function NetworkFields({ b, network }: { b: Binder; network: string }) {
       return (
         <>
           <SwitchField b={b} path={[...base, 'acceptProxyProtocol']} label="接收 PROXY 协议" />
-          <TextField b={b} path={[...base, 'path']} label="路径" />
+          <TextField b={b} path={[...base, 'path']} label="路径" action={<RandomPathButton b={b} path={[...base, 'path']} />} />
           <TextField b={b} path={[...base, 'host']} label="Host" />
           <KeyValueField b={b} path={[...base, 'headers']} label="请求头" />
         </>
@@ -181,7 +208,13 @@ export function TransportTab({ b }: { b: Binder }) {
         <Select<string>
           value={network}
           options={NETWORKS.map((n) => ({ value: n, label: NETWORK_LABELS[n] }))}
-          onChange={(n) => b.update((d) => withNetwork(d, n as Network))}
+          onChange={(n) =>
+            b.update((d) => {
+              const next: InboundDraft = withNetwork(d, n as Network)
+              // 新建时把能预判的空项填上（Ruling-53）
+              return b.hints === null ? next : prefillNetwork(next, b.hints)
+            })
+          }
         />
       </Form.Item>
       <NetworkFields b={b} network={network} />

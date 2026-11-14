@@ -13,6 +13,7 @@ import {
   MIN_EXIT_PORT,
   hasFlow,
   hasStream,
+  isPlainProxy,
   normalizeExitFields,
   securitiesOf,
   type ExitFieldKey,
@@ -28,6 +29,8 @@ const PROTOCOL_LABELS: Record<ExitProtocol, string> = {
   trojan: 'Trojan',
   shadowsocks: 'Shadowsocks',
   socks: 'SOCKS5',
+  http: 'HTTP',
+  https: 'HTTPS',
 }
 const NETWORK_LABELS: Record<ExitNetwork, string> = {
   tcp: 'RAW (TCP)',
@@ -126,15 +129,26 @@ export function ChainExitFieldsForm({ fields, onChange, problems, shouldShowProb
           <Select id={idOf('method')} options={optionsOf(ssMethods)} value={fields.method} onChange={(v: string) => set({ method: v })} />
         </Form.Item>
       )}
-      {protocol === 'socks' && (
+      {isPlainProxy(protocol) && (
         <Form.Item label="用户名" {...row('username')}>
           <Input {...text('username', MAX_CREDENTIAL_LEN)} placeholder="可选" />
         </Form.Item>
       )}
-      {(protocol === 'trojan' || protocol === 'shadowsocks' || protocol === 'socks') && (
-        <Form.Item label="口令" {...row('passphrase', protocol !== 'socks')}>
-          <Input {...text('passphrase', MAX_CREDENTIAL_LEN)} placeholder={protocol === 'socks' ? '可选' : undefined} />
+      {(protocol === 'trojan' || protocol === 'shadowsocks' || isPlainProxy(protocol)) && (
+        <Form.Item label="口令" {...row('passphrase', !isPlainProxy(protocol))}>
+          <Input {...text('passphrase', MAX_CREDENTIAL_LEN)} placeholder={isPlainProxy(protocol) ? '可选' : undefined} />
         </Form.Item>
+      )}
+
+      {protocol === 'https' && (
+        <>
+          <Form.Item label="SNI" {...row('sni')} extra="留空则用地址里的域名">
+            <Input {...text('sni', MAX_HOST_LEN)} />
+          </Form.Item>
+          <Form.Item label="允许不安全" htmlFor={idOf('isInsecure')} extra="跳过证书校验">
+            <Switch id={idOf('isInsecure')} checked={fields.isInsecure} onChange={(v) => set({ isInsecure: v })} />
+          </Form.Item>
+        </>
       )}
 
       {isStream && (

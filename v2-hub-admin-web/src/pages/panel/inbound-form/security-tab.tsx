@@ -1,6 +1,7 @@
 import { DeleteOutlined, PlusOutlined } from '@ant-design/icons'
-import { Alert, Button, Card, Form, Radio, Space } from 'antd'
+import { Alert, App, Button, Card, Form, Radio, Space } from 'antd'
 import { useState } from 'react'
+import type { ServerWebCert } from '../../../api/client'
 import { LinesField, NumberField, SelectField, SwitchField, TagsField, TextField, type Binder } from './fields'
 import type { KeyGen } from './protocol-tab'
 import {
@@ -19,9 +20,11 @@ import {
   defaultCertificate,
   getAt,
   networkOf,
+  prefillSecurity,
   randomShortIds,
   securityOf,
   withSecurity,
+  withWebCert,
   type JsonObject,
   type Path,
   type Security,
@@ -31,9 +34,31 @@ const TLS_FINGERPRINTS = [{ value: '', label: '不指定' }, ...UTLS_FINGERPRINT
 const TLS_BASE: Path = ['streamSettings', TLS_KEY]
 const REALITY_BASE: Path = ['streamSettings', REALITY_KEY]
 
-function Certificates({ b }: { b: Binder }) {
+/** 取面板自己的网页证书路径；失败（已提示）返回 null。 */
+export type WebCertFetch = () => Promise<ServerWebCert | null>
+
+const MSG_NO_WEB_CERT = '面板没有配置网页证书，证书路径请手动填写'
+
+function Certificates({ b, fetchWebCert }: { b: Binder; fetchWebCert: WebCertFetch }) {
+  const { message } = App.useApp()
+  const [loadingIndex, setLoadingIndex] = useState<number | null>(null)
   const path: Path = [...TLS_BASE, 'certificates']
   const certs = (Array.isArray(getAt(b.draft, path)) ? getAt(b.draft, path) : []) as JsonObject[]
+  /** 照 3x-ui 的“从面板设置证书”：把面板的网页证书路径填进这一张证书。 */
+  const fillFromPanel = async (index: number) => {
+    setLoadingIndex(index)
+    const files = await fetchWebCert()
+    setLoadingIndex(null)
+    if (files === null) {
+      return
+    }
+    if (files.certFile === '' || files.keyFile === '') {
+      void message.info(MSG_NO_WEB_CERT)
+      return
+    }
+    b.set([...path, index, 'certificateFile'], files.certFile)
+    b.set([...path, index, 'keyFile'], files.keyFile)
+  }
   return (
     <Form.Item label="证书">
       <Space orientation="vertical" className="full-width">
@@ -65,6 +90,11 @@ function Certificates({ b }: { b: Binder }) {
                 <>
                   <TextField b={b} path={[...base, 'certificateFile']} label="公钥文件" placeholder="/root/cert/fullchain.pem" />
                   <TextField b={b} path={[...base, 'keyFile']} label="私钥文件" placeholder="/root/cert/privkey.pem" />
+                  <Form.Item label=" " colon={false}>
+                    <Button size="small" loading={loadingIndex === i} onClick={() => void fillFromPanel(i)}>
+                      取面板证书
+                    </Button>
+                  </Form.Item>
                 </>
               )}
               <SelectField b={b} path={[...base, 'usage']} label="用途" options={CERT_USAGES} />
@@ -82,7 +112,7 @@ function Certificates({ b }: { b: Binder }) {
   )
 }
 
-function TlsFields({ b }: { b: Binder }) {
+function TlsFields({ b, fetchWebCert }: { b: Binder; fetchWebCert: WebCertFetch }) {
   return (
     <>
       <TextField b={b} path={[...TLS_BASE, 'serverName']} label="SNI" />
@@ -94,7 +124,7 @@ function TlsFields({ b }: { b: Binder }) {
       <SwitchField b={b} path={[...TLS_BASE, 'rejectUnknownSni']} label="拒绝未知 SNI" />
       <SwitchField b={b} path={[...TLS_BASE, 'disableSystemRoot']} label="不用系统根证书" />
       <SwitchField b={b} path={[...TLS_BASE, 'enableSessionResumption']} label="会话恢复" />
-      <Certificates b={b} />
+      <Certificates b={b} fetchWebCert={fetchWebCert} />
       <TextField b={b} path={[...TLS_BASE, 'echServerKeys']} label="ECH 服务端密钥" />
       <TextField b={b} path={[...TLS_BASE, 'settings', 'echConfigList']} label="ECH 配置" extra="写进客户端分享链接" />
     </>
@@ -166,7 +196,8 @@ function RealityFields({ b, keygen }: { b: Binder; keygen: KeyGen }) {
 }
 
 /** 安全页：无 / TLS / Reality，可选项随协议与传输变化（对照 3x-ui）。 */
-export function SecurityTab({ b, keygen }: { b: Binder; keygen: KeyGen }) {
+export function SecurityTab({ b, keygen, fetchWebCert }: { b: Binder; keygen: KeyGen; fetchWebCert: WebCertFetch }) {
+  const { message } = App.useApp()
   const { protocol } = b.draft
   const network = networkOf(b.draft)
   const tlsOk = canTls(protocol, network)
@@ -176,7 +207,19 @@ export function SecurityTab({ b, keygen }: { b: Binder; keygen: KeyGen }) {
   }
   const security = securityOf(b.draft)
   const onChange = async (next: Security) => {
-    b.update((d) => withSecurity(d, next))
+    const { hints } = b
+    // 新建时把能预判的空项填上（Ruling-53）
+    b.update((d) => (hints === null ? withSecurity(d, next) : prefillSecurity(withSecurity(d, next), hints)))
+    if (next === SECURITY_TLS && hints !== null) {
+      // 新建时顺手取一次面板的网页证书路径，填进还空着的证书
+      const files = await fetchWebCert()
+      if (files !== null && (files.certFile === '' || files.keyFile === '')) {
+        void message.info(MSG_NO_WEB_CERT)
+      }
+      if (files !== null) {
+        b.update((d) => withWebCert(d, files.certFile, files.keyFile).draft)
+      }
+    }
     if (next === SECURITY_REALITY) {
       // 和 3x-ui 一样，切到 Reality 时直接生成一对密钥
       const res = await keygen('x25519')
@@ -196,7 +239,7 @@ export function SecurityTab({ b, keygen }: { b: Binder; keygen: KeyGen }) {
       <Form.Item label="安全">
         <Radio.Group optionType="button" value={security} options={options} onChange={(e) => void onChange(e.target.value as Security)} />
       </Form.Item>
-      {security === SECURITY_TLS && <TlsFields b={b} />}
+      {security === SECURITY_TLS && <TlsFields b={b} fetchWebCert={fetchWebCert} />}
       {security === SECURITY_REALITY && <RealityFields b={b} keygen={keygen} />}
     </>
   )

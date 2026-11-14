@@ -10,6 +10,7 @@ import { TABLE_SCROLL, formatTime } from '../system/format'
 import { ChainApplyCard } from './ChainApplyCard'
 import { EndpointModal } from './InboundModals'
 import { InboundFormModal } from './inbound-form/InboundFormModal'
+import { serverDomainOf } from './inbound-form/model'
 import { ServerStatusTag } from './status'
 
 interface EndpointTagProps {
@@ -168,6 +169,8 @@ export function ServerDetailPage() {
   }
 
   const srv = server.data
+  // 新建入站时预填 Host 与 SNI 用的域名：先看已有的对外地址，再看面板地址（docs/03 §5.2 入站预填）
+  const serverDomain = serverDomainOf([...(inbounds.data ?? []).flatMap((i) => i.endpoints.map((e) => e.address)), srv?.baseUrl ?? ''])
   return (
     <>
       <Typography.Paragraph>
@@ -205,6 +208,7 @@ export function ServerDetailPage() {
 
       <InboundFormModal
         serverId={serverId}
+        serverDomain={serverDomain}
         inbound={editing}
         isOpen={isCreating || editing !== null}
         onClose={() => {

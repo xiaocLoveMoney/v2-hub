@@ -45,11 +45,11 @@ function mockServer(handlers: Record<string, () => Response>) {
   return calls
 }
 
-function renderWith(node: ReactNode, path = '/', routePath = '/') {
-  const granted = new Set<string>(ALL)
+function renderWith(node: ReactNode, path = '/', routePath = '/', permissions: string[] = ALL) {
+  const granted = new Set<string>(permissions)
   const value: SessionContextValue = {
     status: 'authenticated',
-    session: { admin: { id: 1, username: 'root' }, permissions: ALL, csrfToken: CSRF, totpEnabled: false },
+    session: { admin: { id: 1, username: 'root' }, permissions, csrfToken: CSRF, totpEnabled: false },
     login: async () => null,
     logout: async () => undefined,
     refresh: async () => undefined,
@@ -169,6 +169,84 @@ describe('ServerDetailPage', () => {
         sniffing: { enabled: false },
       },
     })
+  })
+
+  it('新建入站选 TLS：SNI 预填服务器域名、证书路径取自面板；“取面板证书”可再取一次（Ruling-53）', async () => {
+    let cert = { certFile: '/root/cert/fullchain.pem', keyFile: '/root/cert/privkey.pem' }
+    const calls = mockServer({
+      'GET /api/admin/servers/1': () => ok({ ...server, status: 'online', lastError: '' }),
+      'GET /api/admin/servers/1/inbounds': () => ok([]),
+      'GET /api/admin/servers/1/web-cert': () => ok(cert),
+      'POST /api/admin/servers/1/inbounds': () => ok({}),
+    })
+    renderWith(<ServerDetailPage />, '/servers/1', '/servers/:id')
+    fireEvent.click(await screen.findByRole('button', { name: /新建入站/ }))
+    const dialog = await screen.findByRole('dialog')
+    fireEvent.change(within(dialog).getByLabelText('备注'), { target: { value: 'tls-in' } })
+    fireEvent.click(within(dialog).getByRole('tab', { name: '安全' }))
+    fireEvent.click(await within(dialog).findByRole('radio', { name: 'TLS' }))
+    // 没有对外地址时取面板地址里的域名
+    expect((within(dialog).getByLabelText('SNI') as HTMLInputElement).value).toBe('panel.example.com')
+    await waitFor(() => expect((within(dialog).getByLabelText('公钥文件') as HTMLInputElement).value).toBe('/root/cert/fullchain.pem'))
+    expect((within(dialog).getByLabelText('私钥文件') as HTMLInputElement).value).toBe('/root/cert/privkey.pem')
+
+    // 手动改掉后再点“取面板证书”：按面板现在的路径覆盖这一张
+    cert = { certFile: '/root/cert/new.pem', keyFile: '/root/cert/new.key' }
+    fireEvent.change(within(dialog).getByLabelText('公钥文件'), { target: { value: '/tmp/mine.pem' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: '取面板证书' }))
+    await waitFor(() => expect((within(dialog).getByLabelText('公钥文件') as HTMLInputElement).value).toBe('/root/cert/new.pem'))
+
+    fireEvent.click(within(dialog).getByRole('button', { name: /创\s*建/ }))
+    await waitFor(() => expect(calls.some((c) => c.path === '/api/admin/servers/1/inbounds' && c.method === 'POST')).toBe(true))
+    expect(calls.find((c) => c.path === '/api/admin/servers/1/inbounds' && c.method === 'POST')?.body).toMatchObject({
+      config: {
+        streamSettings: {
+          security: 'tls',
+          tlsSettings: {
+            serverName: 'panel.example.com',
+            settings: { fingerprint: 'chrome' },
+            certificates: [{ certificateFile: '/root/cert/new.pem', keyFile: '/root/cert/new.key' }],
+          },
+        },
+      },
+    })
+  })
+
+  it('面板没配网页证书时证书路径留空并提示；编辑已有入站不预填、不取证书', async () => {
+    const inbound = {
+      id: 10, serverId: 1, remoteRef: '3', protocol: 'vless', port: 443, listen: '', tag: 't', remark: 'old', isEnabled: true,
+      network: 'tcp', security: 'none', coreType: 'xray', config: {}, clientCount: 0, driftDetectedAt: null,
+      isMissing: false, endpoints: [{ id: 5, address: 'edge.example.net', port: 0, remark: '', isDisabled: false, isMissing: false }], createdAt: '2026-11-12T00:00:00Z',
+    }
+    const panelConfig = {
+      protocol: 'vless', port: 443, listen: '', remark: 'old', enabled: true,
+      config: { settings: { decryption: 'none' }, streamSettings: { network: 'tcp', security: 'none', tcpSettings: {} }, sniffing: {} },
+    }
+    const calls = mockServer({
+      'GET /api/admin/servers/1': () => ok({ ...server, status: 'online', lastError: '' }),
+      'GET /api/admin/servers/1/inbounds': () => ok([inbound]),
+      'GET /api/admin/servers/1/web-cert': () => ok({ certFile: '', keyFile: '' }),
+      'GET /api/admin/inbounds/10/panel-config': () => ok(panelConfig),
+    })
+    renderWith(<ServerDetailPage />, '/servers/1', '/servers/:id')
+    fireEvent.click(await screen.findByRole('button', { name: /新建入站/ }))
+    let dialog = await screen.findByRole('dialog')
+    fireEvent.click(within(dialog).getByRole('tab', { name: '安全' }))
+    fireEvent.click(await within(dialog).findByRole('radio', { name: 'TLS' }))
+    // 有对外地址时优先用它的域名
+    expect((within(dialog).getByLabelText('SNI') as HTMLInputElement).value).toBe('edge.example.net')
+    expect(await screen.findByText('面板没有配置网页证书，证书路径请手动填写')).toBeDefined()
+    expect((within(dialog).getByLabelText('公钥文件') as HTMLInputElement).value).toBe('')
+    fireEvent.click(within(dialog).getByRole('button', { name: /关\s*闭/ }))
+
+    const before = calls.filter((c) => c.path.endsWith('/web-cert')).length
+    fireEvent.click(screen.getByRole('button', { name: /编\s*辑/ }))
+    dialog = (await screen.findAllByRole('dialog')).at(-1) as HTMLElement
+    await waitFor(() => expect((within(dialog).getByLabelText('备注') as HTMLInputElement).value).toBe('old'))
+    fireEvent.click(within(dialog).getByRole('tab', { name: '安全' }))
+    fireEvent.click(await within(dialog).findByRole('radio', { name: 'TLS' }))
+    expect((within(dialog).getByLabelText('SNI') as HTMLInputElement).value).toBe('')
+    expect(calls.filter((c) => c.path.endsWith('/web-cert')).length).toBe(before)
   })
 
   it('编辑入站时从面板读出完整配置（含私钥）回显，保存提交修改后的配置', async () => {
@@ -402,6 +480,69 @@ describe('链式出口', () => {
 
     fireEvent.click(within(ownRow).getByRole('button', { name: '删 除' }))
     expect(await screen.findByText('会连带删除引用它的 2 条规则。')).toBeDefined()
+  })
+
+  it('测试出口：选服务器与方式后提交，显示延迟与出口 IP；不通时显示面板给的原因；没有 server:read 时不出现按钮', async () => {
+    let result: Record<string, unknown> = { ok: true, mode: 'http', delayMs: 87, httpStatus: 204, egressIp: '198.51.100.7', egressRegion: 'JP', error: '' }
+    const calls = mockServer({
+      ...handlers(),
+      'GET /api/admin/servers': () => ok([server, { ...server, id: 2, name: 'jp-off', isDisabled: true }]),
+      'POST /api/admin/chain-exits/12/test': () => ok(result),
+    })
+    const view = renderWith(<ChainExitsPage />)
+    const ownRow = (await screen.findByText('家宽')).closest('tr')
+    if (ownRow === null) {
+      throw new Error('row not rendered')
+    }
+    fireEvent.click(await within(ownRow).findByRole('button', { name: /测\s*试/ }))
+    const dialog = await screen.findByRole('dialog')
+    // 起点只列启用中的服务器，默认第一台
+    expect(within(dialog).getByText('hk-1')).toBeDefined()
+    expect(within(dialog).queryByText('jp-off')).toBeNull()
+    fireEvent.click(within(dialog).getByText('HTTP 请求'))
+    fireEvent.click(within(dialog).getByRole('button', { name: /开始测试/ }))
+    expect(await within(dialog).findByText('87 ms')).toBeDefined()
+    expect(within(dialog).getByText('198.51.100.7 (JP)')).toBeDefined()
+    const sent = calls.find((c) => c.method === 'POST' && c.path === '/api/admin/chain-exits/12/test')
+    expect(sent?.csrf).toBe(CSRF)
+    expect(sent?.body).toEqual({ serverId: 1, mode: 'http' })
+
+    result = { ok: false, mode: 'http', delayMs: 0, httpStatus: 0, egressIp: '', egressRegion: '', error: 'dial tcp: i/o timeout' }
+    // 按钮退出“加载中”要再过一次渲染，之前的点击会被 antd 吞掉
+    await waitFor(() => expect(within(dialog).getByRole('button', { name: /开始测试/ }).className).not.toContain('ant-btn-loading'))
+    fireEvent.click(within(dialog).getByRole('button', { name: /开始测试/ }))
+    expect(await within(dialog).findByText('不通')).toBeDefined()
+    expect(within(dialog).getByText('dial tcp: i/o timeout')).toBeDefined()
+    view.unmount()
+    cleanup()
+
+    const before = calls.filter((c) => c.path === '/api/admin/servers').length
+    renderWith(<ChainExitsPage />, '/', '/', [PERMISSIONS.NODE_READ, PERMISSIONS.NODE_WRITE])
+    const row = (await screen.findByText('家宽')).closest('tr') as HTMLElement
+    expect(within(row).getByRole('button', { name: /停\s*用/ })).toBeDefined()
+    expect(within(row).queryByRole('button', { name: /测\s*试/ })).toBeNull()
+    expect(calls.filter((c) => c.path === '/api/admin/servers').length).toBe(before)
+  })
+
+  it('平台出口选 HTTPS 代理：只填地址、端口、用户名与口令，提交 https:// 地址', async () => {
+    const calls = mockServer({ ...handlers(), 'POST /api/admin/chain-exits': () => ok(platform) })
+    renderWith(<ChainExitsPage />)
+    await screen.findByText('东京出口')
+    fireEvent.click(screen.getByRole('button', { name: /新建平台出口/ }))
+    fireEvent.change(await screen.findByLabelText('名称'), { target: { value: '办公室代理' } })
+    fireEvent.click(screen.getByText('分享链接'))
+    fireEvent.change(await screen.findByLabelText('链接'), { target: { value: 'https://bob:pw@proxy.example.net:8443?sni=front.example.net' } })
+    fireEvent.click(screen.getByText('表单'))
+    expect(((await screen.findByLabelText('用户名')) as HTMLInputElement).value).toBe('bob')
+    expect((screen.getByLabelText('SNI') as HTMLInputElement).value).toBe('front.example.net')
+    expect(screen.queryByLabelText('ID')).toBeNull()
+    expect(screen.queryByLabelText('传输')).toBeNull()
+    fireEvent.change(screen.getByLabelText('端口'), { target: { value: '443' } })
+    fireEvent.click(screen.getByRole('button', { name: '创 建' }))
+    await waitFor(() => expect(calls.some((c) => c.method === 'POST')).toBe(true))
+    expect(calls.find((c) => c.method === 'POST')?.body).toMatchObject({
+      link: 'https://bob:pw@proxy.example.net:443?sni=front.example.net#%E5%8A%9E%E5%85%AC%E5%AE%A4%E4%BB%A3%E7%90%86',
+    })
   })
 
   it('新建平台出口可直接粘贴分享链接；修改时不动连接参数就不提交链接', async () => {

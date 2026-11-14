@@ -1,12 +1,12 @@
 import { Alert, App, Button, Form, Input, InputNumber, Modal, Select, Space, Spin, Switch, Tabs } from 'antd'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { api, csrfHeader, toApiError, type ApiError, type Inbound } from '../../../api/client'
 import { useOpenGeneration } from '../../../hooks/use-open-generation'
 import { mutate } from '../../../hooks/use-remote'
 import type { Binder } from './fields'
 import { PROTOCOLS, fromPanelConfig, isKnownProtocol, newDraft, setAt, toConfig, withProtocol, wireguardKeypair, type InboundDraft, type JsonObject, type Path } from './model'
 import { ProtocolTab, type KeyGen } from './protocol-tab'
-import { SecurityTab, SniffingTab } from './security-tab'
+import { SecurityTab, SniffingTab, type WebCertFetch } from './security-tab'
 import { TransportTab } from './transport-tab'
 
 const MIN_PORT = 1
@@ -17,6 +17,8 @@ const MODAL_WIDTH = 800
 
 interface InboundFormModalProps {
   serverId: number
+  /** 服务器的域名，新建时用来预填 Host 与 SNI；不知道或只有 IP 时传空串（Ruling-53）。 */
+  serverDomain: string
   /** null 表示新建。 */
   inbound: Inbound | null
   isOpen: boolean
@@ -28,18 +30,19 @@ interface InboundFormModalProps {
  * 新建 / 编辑入站，表单与 3x-ui 同构（Ruling-16）：基础 / 协议 / 传输 / 安全 / 嗅探 / 高级。
  * 每次打开都重建表单（useOpenGeneration），上一次的草稿不会带到下一次。
  */
-export function InboundFormModal({ serverId, inbound, isOpen, onClose, onSaved }: InboundFormModalProps) {
+export function InboundFormModal({ serverId, serverDomain, inbound, isOpen, onClose, onSaved }: InboundFormModalProps) {
   const generation = useOpenGeneration(isOpen)
   const title = inbound === null ? '新建入站' : `编辑入站：${inbound.remark}`
   return (
     <Modal title={title} open={isOpen} onCancel={onClose} footer={null} destroyOnHidden width={MODAL_WIDTH}>
-      <InboundFormBody key={generation} serverId={serverId} inbound={inbound} onClose={onClose} onSaved={onSaved} />
+      <InboundFormBody key={generation} serverId={serverId} serverDomain={serverDomain} inbound={inbound} onClose={onClose} onSaved={onSaved} />
     </Modal>
   )
 }
 
 interface BodyProps {
   serverId: number
+  serverDomain: string
   inbound: Inbound | null
   onClose: () => void
   onSaved: () => void
@@ -55,7 +58,7 @@ function parseObject(text: string): JsonObject | null {
   }
 }
 
-function InboundFormBody({ serverId, inbound, onClose, onSaved }: BodyProps) {
+function InboundFormBody({ serverId, serverDomain, inbound, onClose, onSaved }: BodyProps) {
   const { message } = App.useApp()
   const isEdit = inbound !== null
   const [draft, setDraft] = useState<InboundDraft | null>(isEdit ? null : newDraft())
@@ -120,6 +123,25 @@ function InboundFormBody({ serverId, inbound, onClose, onSaved }: BodyProps) {
     [serverId, message],
   )
 
+  /** 取面板自己的网页证书路径（Ruling-53）；失败时提示并返回 null。 */
+  const fetchWebCert: WebCertFetch = useCallback(async () => {
+    try {
+      const res = await api.GET('/api/admin/servers/{id}/web-cert', { params: { path: { id: serverId } } })
+      if (res.error !== undefined || res.data?.data === undefined) {
+        void message.error(toApiError(res.error).message)
+        return null
+      }
+      return res.data.data
+    } catch (err) {
+      reportError(err)
+      void message.error(toApiError(err).message)
+      return null
+    }
+  }, [serverId, message])
+
+  // 只在新建时预填；编辑已有入站时照面板上的配置来，不动它
+  const hints = useMemo(() => (isEdit ? null : { domain: serverDomain }), [isEdit, serverDomain])
+
   // 新建 WireGuard 时和 3x-ui 一样自动生成服务端私钥
   const needsWgKey = draft?.protocol === 'wireguard' && draft.settings.secretKey === ''
   useEffect(() => {
@@ -134,7 +156,7 @@ function InboundFormBody({ serverId, inbound, onClose, onSaved }: BodyProps) {
   if (draft === null) {
     return error === null ? <Spin /> : <Alert type="error" title={error.message} showIcon />
   }
-  const b: Binder = { draft, set, update }
+  const b: Binder = { draft, set, update, hints }
   const isFormCovered = !isEdit || isKnownProtocol(panelProtocol)
   const config = toConfig(draft)
   const shownJson = advancedText ?? JSON.stringify(config, null, JSON_INDENT)
@@ -233,7 +255,7 @@ function InboundFormBody({ serverId, inbound, onClose, onSaved }: BodyProps) {
         { key: 'basic', label: '基础配置', children: basic },
         { key: 'protocol', label: '协议', children: <ProtocolTab b={b} keygen={keygen} /> },
         { key: 'transport', label: '传输', children: <TransportTab b={b} /> },
-        { key: 'security', label: '安全', children: <SecurityTab b={b} keygen={keygen} /> },
+        { key: 'security', label: '安全', children: <SecurityTab b={b} keygen={keygen} fetchWebCert={fetchWebCert} /> },
         { key: 'sniffing', label: '嗅探', children: <SniffingTab b={b} /> },
         { key: 'advanced', label: '高级配置', children: advanced },
       ]
