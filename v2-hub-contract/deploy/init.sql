@@ -702,7 +702,7 @@ CREATE TABLE chain_exit (
     resolved_ip  INET,
     resolved_at  TIMESTAMPTZ,
     CONSTRAINT uk_chain_exit_user_name UNIQUE (user_id, name),
-    CONSTRAINT ck_chain_exit_protocol CHECK (protocol IN ('vless', 'vmess', 'trojan', 'shadowsocks', 'socks')),
+    CONSTRAINT ck_chain_exit_protocol CHECK (protocol IN ('vless', 'vmess', 'trojan', 'shadowsocks', 'socks', 'http')),
     CONSTRAINT ck_chain_exit_port CHECK (port BETWEEN 1 AND 65535)
 );
 CREATE UNIQUE INDEX uk_chain_exit_platform_name ON chain_exit (name) WHERE user_id IS NULL;
