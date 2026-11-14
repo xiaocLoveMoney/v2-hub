@@ -254,6 +254,27 @@ func (q *Queries) ListNodes(ctx context.Context, arg ListNodesParams) ([]ListNod
 	return items, nil
 }
 
+const renameLegacyDirectNodes = `-- name: RenameLegacyDirectNodes :execrows
+UPDATE node n
+SET display_name = substr(n.display_name, char_length(s.name) + char_length($1::text) + 1),
+    updated_at   = now()
+FROM inbound i
+JOIN server s ON s.id = i.server_id
+WHERE n.inbound_id = i.id
+  AND n.endpoint_id IS NULL
+  AND char_length(n.display_name) > char_length(s.name) + char_length($1::text)
+  AND left(n.display_name, char_length(s.name) + char_length($1::text)) = s.name || $1::text
+`
+
+// 旧默认名“服务器名 · 入站称呼”去掉服务器名前缀，只改直连节点（Ruling-63）
+func (q *Queries) RenameLegacyDirectNodes(ctx context.Context, separator string) (int64, error) {
+	result, err := q.db.Exec(ctx, renameLegacyDirectNodes, separator)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const updateNode = `-- name: UpdateNode :execrows
 UPDATE node SET display_name = $2, region = $3, tags = $4, sort_order = $5, is_enabled = $6, updated_at = now()
 WHERE id = $1

@@ -22,16 +22,17 @@ import (
 )
 
 const (
-	minPort            = 1
-	maxPort            = 65535
-	maxListenLen       = 64
-	maxConfigBytes     = 64 << 10
-	maxAddressLen      = 255
-	maxEndpointAddrs   = 32
-	maxEndpointInbound = 64
-	msgInboundNotFound = "入站不存在"
-	msgInboundMissing  = "该入站在面板上已不存在，只能删除"
-	nodeNameSeparator  = " · "
+	minPort                = 1
+	maxPort                = 65535
+	maxListenLen           = 64
+	maxConfigBytes         = 64 << 10
+	maxAddressLen          = 255
+	maxEndpointAddrs       = 32
+	maxEndpointInbound     = 64
+	msgInboundNotFound     = "入站不存在"
+	msgInboundMissing      = "该入站在面板上已不存在，只能删除"
+	nodeNameSeparator      = " · "
+	nodeLabelPortSeparator = "-"
 
 	ActionInboundCreate   = "inbound.create"
 	ActionInboundUpdate   = "inbound.update"
@@ -212,21 +213,25 @@ func upsertParams(serverID int64, in panel.Inbound) sqlcgen.UpsertInboundFromPla
 	}
 }
 
-func directNodeName(serverName string, in panel.Inbound) string {
-	label := in.Remark
-	if label == "" {
-		label = fmt.Sprint(in.Port)
+// inboundLabel 是入站在节点名里的称呼：备注，备注为空取“协议-端口”。不带服务器名（Ruling-63）。
+func inboundLabel(in panel.Inbound) string {
+	if in.Remark != "" {
+		return in.Remark
 	}
-	return truncate(serverName+nodeNameSeparator+label, maxNodeNameLen)
+	return fmt.Sprintf("%s%s%d", in.Protocol, nodeLabelPortSeparator, in.Port)
+}
+
+func directNodeName(in panel.Inbound) string {
+	return truncate(inboundLabel(in), maxNodeNameLen)
 }
 
 // savePlatformWrite 落库一次平台发起的写入结果：入站即“已确认”，并保证有直连节点。
-func savePlatformWrite(ctx context.Context, q *sqlcgen.Queries, serverID int64, serverName string, in panel.Inbound) (int64, error) {
+func savePlatformWrite(ctx context.Context, q *sqlcgen.Queries, serverID int64, in panel.Inbound) (int64, error) {
 	id, err := q.UpsertInboundFromPlatform(ctx, upsertParams(serverID, in))
 	if err != nil {
 		return 0, fmt.Errorf("save inbound %s of server %d: %w", in.Ref, serverID, err)
 	}
-	if err := q.EnsureNode(ctx, sqlcgen.EnsureNodeParams{InboundID: id, DisplayName: directNodeName(serverName, in)}); err != nil {
+	if err := q.EnsureNode(ctx, sqlcgen.EnsureNodeParams{InboundID: id, DisplayName: directNodeName(in)}); err != nil {
 		return 0, fmt.Errorf("ensure direct node of inbound %d: %w", id, err)
 	}
 	return id, nil
@@ -261,7 +266,7 @@ func (s *PanelService) SyncServer(ctx context.Context, actor *AdminPrincipal, id
 	var result *SyncResult
 	err = s.inTx(ctx, func(q *sqlcgen.Queries) error {
 		var err error
-		if result, err = s.applySync(ctx, q, id, row.Name, inbounds, endpoints); err != nil {
+		if result, err = s.applySync(ctx, q, id, inbounds, endpoints); err != nil {
 			return err
 		}
 		if actor == nil {
@@ -280,8 +285,7 @@ func (s *PanelService) SyncServer(ctx context.Context, actor *AdminPrincipal, id
 }
 
 // applySync 把面板现状写入缓存：新增入站与节点、刷新已有入站、按摘要判定漂移、标记缺失（docs/03 §5.1）。
-func (s *PanelService) applySync(ctx context.Context, q *sqlcgen.Queries, serverID int64, serverName string,
-	inbounds []panel.Inbound, endpoints []panel.Endpoint) (*SyncResult, error) {
+func (s *PanelService) applySync(ctx context.Context, q *sqlcgen.Queries, serverID int64, inbounds []panel.Inbound, endpoints []panel.Endpoint) (*SyncResult, error) {
 	existing, err := q.ListInboundsByServer(ctx, serverID)
 	if err != nil {
 		return nil, fmt.Errorf("list cached inbounds of server %d: %w", serverID, err)
@@ -300,7 +304,7 @@ func (s *PanelService) applySync(ctx context.Context, q *sqlcgen.Queries, server
 	nameByRef := make(map[string]string, len(inbounds))
 	for _, in := range inbounds {
 		presentRefs = append(presentRefs, in.Ref)
-		nameByRef[in.Ref] = in.Remark
+		nameByRef[in.Ref] = inboundLabel(in)
 		row, ok := byRef[in.Ref]
 		if ok && row.Protocol != in.Protocol {
 			// 同一标识换了协议：面板删了旧入站又把标识分给了新入站（docs/03 §5.1 面板标识复用）
@@ -311,7 +315,7 @@ func (s *PanelService) applySync(ctx context.Context, q *sqlcgen.Queries, server
 			ok = false
 		}
 		if !ok {
-			id, err := savePlatformWrite(ctx, q, serverID, serverName, in)
+			id, err := savePlatformWrite(ctx, q, serverID, in)
 			if err != nil {
 				return nil, err
 			}
@@ -340,7 +344,7 @@ func (s *PanelService) applySync(ctx context.Context, q *sqlcgen.Queries, server
 		}); err != nil {
 			return nil, fmt.Errorf("refresh inbound %d: %w", row.ID, err)
 		}
-		if err := q.EnsureNode(ctx, sqlcgen.EnsureNodeParams{InboundID: row.ID, DisplayName: directNodeName(serverName, in)}); err != nil {
+		if err := q.EnsureNode(ctx, sqlcgen.EnsureNodeParams{InboundID: row.ID, DisplayName: directNodeName(in)}); err != nil {
 			return nil, fmt.Errorf("ensure direct node of inbound %d: %w", row.ID, err)
 		}
 	}
@@ -468,7 +472,7 @@ func (s *PanelService) loadLiveInbound(ctx context.Context, id int64) (sqlcgen.G
 
 // writeInbound 执行一次面板写入并落库、记审计。isNew 表示面板新建了入站：
 // 若它的标识还挂在某条未缺失的记录上，那条记录的入站已在面板上被删，先标记缺失（docs/03 §5.1 面板标识复用）。
-func (s *PanelService) writeInbound(ctx context.Context, actor *AdminPrincipal, serverID int64, serverName, action string,
+func (s *PanelService) writeInbound(ctx context.Context, actor *AdminPrincipal, serverID int64, action string,
 	ip *netip.Addr, detail map[string]any, isNew bool, write func() (panel.Inbound, error)) (*Inbound, error) {
 	in, err := write()
 	if err != nil {
@@ -486,7 +490,7 @@ func (s *PanelService) writeInbound(ctx context.Context, actor *AdminPrincipal, 
 				detail["retiredInboundIds"] = retired
 			}
 		}
-		if id, err = savePlatformWrite(ctx, q, serverID, serverName, in); err != nil {
+		if id, err = savePlatformWrite(ctx, q, serverID, in); err != nil {
 			return err
 		}
 		return writeAudit(ctx, q, AuditEntry{
@@ -506,12 +510,12 @@ func (s *PanelService) CreateInbound(ctx context.Context, actor *AdminPrincipal,
 	if err != nil {
 		return nil, err
 	}
-	p, row, err := s.openEnabledProvider(ctx, serverID)
+	p, _, err := s.openEnabledProvider(ctx, serverID)
 	if err != nil {
 		return nil, err
 	}
 	detail := map[string]any{"serverId": serverID, "protocol": spec.Protocol, "port": spec.Port, "template": in.Template}
-	return s.writeInbound(ctx, actor, serverID, row.Name, ActionInboundCreate, ip, detail, true, func() (panel.Inbound, error) {
+	return s.writeInbound(ctx, actor, serverID, ActionInboundCreate, ip, detail, true, func() (panel.Inbound, error) {
 		return p.CreateInbound(ctx, spec)
 	})
 }
@@ -530,7 +534,7 @@ func (s *PanelService) UpdateInbound(ctx context.Context, actor *AdminPrincipal,
 	if err != nil {
 		return nil, err
 	}
-	p, srv, err := s.openEnabledProvider(ctx, row.ServerID)
+	p, _, err := s.openEnabledProvider(ctx, row.ServerID)
 	if err != nil {
 		return nil, err
 	}
@@ -539,7 +543,7 @@ func (s *PanelService) UpdateInbound(ctx context.Context, actor *AdminPrincipal,
 		Enabled: row.IsEnabled, Config: in.Config,
 	}
 	detail := map[string]any{"port": in.Port, "configChanged": len(in.Config) > 0}
-	return s.writeInbound(ctx, actor, row.ServerID, srv.Name, ActionInboundUpdate, ip, detail, false, func() (panel.Inbound, error) {
+	return s.writeInbound(ctx, actor, row.ServerID, ActionInboundUpdate, ip, detail, false, func() (panel.Inbound, error) {
 		return p.UpdateInbound(ctx, row.RemoteRef, spec)
 	})
 }
@@ -550,11 +554,11 @@ func (s *PanelService) SetInboundEnabled(ctx context.Context, actor *AdminPrinci
 	if err != nil {
 		return nil, err
 	}
-	p, srv, err := s.openEnabledProvider(ctx, row.ServerID)
+	p, _, err := s.openEnabledProvider(ctx, row.ServerID)
 	if err != nil {
 		return nil, err
 	}
-	return s.writeInbound(ctx, actor, row.ServerID, srv.Name, ActionInboundEnable, ip, map[string]any{"enabled": enabled}, false,
+	return s.writeInbound(ctx, actor, row.ServerID, ActionInboundEnable, ip, map[string]any{"enabled": enabled}, false,
 		func() (panel.Inbound, error) {
 			if err := p.SetInboundEnabled(ctx, row.RemoteRef, enabled); err != nil {
 				return panel.Inbound{}, err
@@ -569,11 +573,11 @@ func (s *PanelService) AckInboundDrift(ctx context.Context, actor *AdminPrincipa
 	if err != nil {
 		return err
 	}
-	p, srv, err := s.openProvider(ctx, row.ServerID)
+	p, _, err := s.openProvider(ctx, row.ServerID)
 	if err != nil {
 		return err
 	}
-	_, err = s.writeInbound(ctx, actor, row.ServerID, srv.Name, ActionInboundDriftAck, ip, nil, false, func() (panel.Inbound, error) {
+	_, err = s.writeInbound(ctx, actor, row.ServerID, ActionInboundDriftAck, ip, nil, false, func() (panel.Inbound, error) {
 		return p.GetInbound(ctx, row.RemoteRef)
 	})
 	return err

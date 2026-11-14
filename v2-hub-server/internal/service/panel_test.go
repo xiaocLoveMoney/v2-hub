@@ -107,6 +107,48 @@ func TestCreateServerProbesSealsAndSyncs(t *testing.T) {
 	}
 }
 
+// 默认名不带服务器名，备注为空取“协议-端口”；旧默认名启动时去前缀，管理员改过的不动（Ruling-63）。
+func TestNodeDefaultNames(t *testing.T) {
+	f := newPanelFixture(t)
+	ctx := context.Background()
+	fake := f.fleet.get(fakeBase)
+	seedInbound(fake, "1", 443, "【VLESS】洛杉矶")
+	seedInbound(fake, "2", 8443, "")
+	seedInbound(fake, "3", 9443, "custom")
+	srv, err := f.panels.CreateServer(ctx, f.actor, serverInput("hk-1"), nil)
+	if err != nil {
+		t.Fatalf("CreateServer: %v", err)
+	}
+	names := func() map[int]string {
+		nodes, err := f.panels.ListNodes(ctx, NodeFilter{ServerID: srv.ID}, PageQuery{})
+		if err != nil {
+			t.Fatalf("ListNodes: %v", err)
+		}
+		out := make(map[int]string, len(nodes.Items))
+		for _, n := range nodes.Items {
+			out[n.Port] = n.DisplayName
+		}
+		return out
+	}
+	if got := names(); got[443] != "【VLESS】洛杉矶" || got[8443] != "vless-8443" {
+		t.Fatalf("default names = %v", got)
+	}
+	// 模拟老版本生成的名字，以及管理员改过的名字
+	if _, err := f.pool.Exec(ctx, `UPDATE node SET display_name = CASE
+		WHEN display_name = '【VLESS】洛杉矶' THEN 'hk-1 · 【VLESS】洛杉矶'
+		WHEN display_name = 'vless-8443' THEN 'hk-1 · 8443'
+		ELSE 'hk-1-手改' END`); err != nil {
+		t.Fatalf("seed legacy names: %v", err)
+	}
+	n, err := f.panels.RenameLegacyNodes(ctx)
+	if err != nil || n != 2 {
+		t.Fatalf("RenameLegacyNodes = %d, %v", n, err)
+	}
+	if got := names(); got[443] != "【VLESS】洛杉矶" || got[8443] != "8443" || got[9443] != "hk-1-手改" {
+		t.Fatalf("renamed = %v", got)
+	}
+}
+
 func TestCreateServerRejectsUnreachablePanel(t *testing.T) {
 	f := newPanelFixture(t)
 	f.fleet.get(fakeBase).FailWith(&panel.Error{Kind: panel.KindAuth, Message: "面板拒绝了 API token"})

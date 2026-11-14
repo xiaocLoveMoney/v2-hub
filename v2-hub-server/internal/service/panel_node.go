@@ -150,6 +150,16 @@ func validateNodeInput(in NodeInput) (NodeInput, error) {
 	return in, nil
 }
 
+// RenameLegacyNodes 把仍是旧默认名（“服务器名 · 入站称呼”）的直连节点改成新默认名（Ruling-63），返回改了几个。
+// 启动时调用；管理员改过的名字不以服务器名开头，不受影响。
+func (s *PanelService) RenameLegacyNodes(ctx context.Context) (int64, error) {
+	n, err := s.q.RenameLegacyDirectNodes(ctx, nodeNameSeparator)
+	if err != nil {
+		return 0, fmt.Errorf("rename legacy direct nodes: %w", err)
+	}
+	return n, nil
+}
+
 // UpdateNode 修改节点展示属性（只影响平台，不写回面板）。
 func (s *PanelService) UpdateNode(ctx context.Context, actor *AdminPrincipal, id int64, in NodeInput, ip *netip.Addr) error {
 	in, err := validateNodeInput(in)
