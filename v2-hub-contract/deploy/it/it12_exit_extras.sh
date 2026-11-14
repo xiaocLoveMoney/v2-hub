@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
-# IT-12 出口补全（docs/08，M10 DoD，docs/03 §5.21，Ruling-51 – Ruling-53）：全新 xui-a 一个 VMess+WS 入站
+# IT-12 出口补全（docs/08，M10 DoD，docs/03 §5.21，Ruling-51 – Ruling-55）：全新 xui-a 一个 VMess+WS 入站
+# → 接入后面板模板自动出现平台拦截规则 hub-block（黑洞出站 + 紧跟 api 的路由），Xray 运行
 # → 用户添加 http://、https:// 出口（网页地址 400），列表里协议为 http
 # → 用 HTTP 出口建服务端规则，下发后面板模板里是 http 协议的 hub-r{id} 出站；换成 HTTPS 出口后出站带 TLS
 # → 客户端规则进订阅，Mihomo / sing-box / Xray JSON 各自通过配置检查
 # → 延迟测试：公网出口三种方式都拿到结果（连得上连不上都算）；回环地址的出口 400；别人的出口 404；管理员测平台出口带错误原文字段；
 #   连续测试触发 429
-# → 取面板网页证书路径返回两个字段 → REALITY 目标扫描：公网目标拿到结论，网段与网址 400，回环地址只标记不探测。
+# → 取面板网页证书路径返回两个字段 → REALITY 目标扫描：公网目标拿到结论，网段与网址 400，回环地址只标记不探测
+# → 删除用户后链式条目清掉、拦截规则仍在 → 关掉设置 routing.blockRule 后拦截规则撤掉。
 # 黑盒，只用 curl / jq / docker。延迟测试由 xui-a 容器去连出口：出口用公网 IP 字面量，容器没有外网时结果是“不通”，用例照样通过。
 # 注意：会重建 xui-a 容器（不挂数据卷），不影响 PostgreSQL 与 MinIO。hub-server 用缩短了下发间隔的临时配置启动。
 source "$(dirname "$0")/common.sh"
@@ -124,6 +126,21 @@ portal() { call "$USER_JAR" "$USER_CSRF" "$@"; }
 OTHER_JAR="$WORK/other.jar"
 OTHER_CSRF="$(portal_login "$OTHER_JAR" "$OTHER_USER" "$OTHER_CRED")"; [ -n "$OTHER_CSRF" ] || fail "另一用户登录失败"
 other() { call "$OTHER_JAR" "$OTHER_CSRF" "$@"; }
+
+# ---- 3b. 平台拦截规则（Ruling-55，默认开）：接入后模板出现 hub-block 黑洞出站与紧跟 api 的拦截路由，Xray 运行 ----
+BLOCK_TAG=hub-block
+[ "$(hub GET /api/admin/settings | jq -r .data.routing.blockRule)" = "true" ] || fail "routing.blockRule 默认应为开"
+wait_outbound "$BLOCK_TAG" '.protocol == "blackhole"'
+tpl="$(template)"
+block_rule="$(printf '%s' "$tpl" | jq -c --arg t "$BLOCK_TAG" '.routing.rules[] | select(.ruleTag == $t)')"
+printf '%s' "$block_rule" | jq -e --arg t "$BLOCK_TAG" '.outboundTag == $t and (.domain | index("geosite:category-ads-all") != null)
+  and (.domain | map(select(startswith("regexp:"))) | length) == 7' >/dev/null || fail "拦截路由不对：$block_rule"
+[ "$(printf '%s' "$tpl" | jq -r '[.routing.rules[] | (.ruleTag // .outboundTag)] | .[0:2] | join(",")')" = "api,$BLOCK_TAG" ] || fail "拦截路由应紧跟 api 规则"
+for _ in $(seq 1 15); do
+  [ "$(panel_api GET /server/status | jq -r .obj.xray.state)" = "running" ] && break
+  sleep 1
+done
+[ "$(panel_api GET /server/status | jq -r .obj.xray.state)" = "running" ] || fail "加拦截规则后面板的 Xray 应在运行"
 
 # ---- 4. HTTP / HTTPS 出口：网页地址 400；建出来协议都是 http，名称取自链接 ----
 add_exit() { portal POST /api/user/chain/exits "$(jq -nc --arg l "$1" '{link:$l}')"; }
@@ -250,5 +267,16 @@ for _ in $(seq 1 "$APPLY_WAIT_SECONDS"); do
   sleep 1
 done
 [ -z "$(hub_outbound "$TAG_1")" ] || fail "删除用户后面板上的平台出站应被清掉"
+[ -n "$(hub_outbound "$BLOCK_TAG")" ] || fail "清掉链式条目时拦截规则应保留"
 hub DELETE "/api/admin/chain-exits/$PLATFORM_ID" >/dev/null; expect_code 200 "删除平台出口"
+
+# ---- 13. 关掉 routing.blockRule：下一轮从面板上撤掉拦截规则 ----
+hub PUT /api/admin/settings '{"routing":{"blockRule":false}}' >/dev/null; expect_code 200 "关掉平台拦截规则"
+for _ in $(seq 1 "$APPLY_WAIT_SECONDS"); do
+  [ -z "$(hub_outbound "$BLOCK_TAG")" ] && break
+  sleep 1
+done
+[ -z "$(hub_outbound "$BLOCK_TAG")" ] || fail "关掉设置后拦截出站应被撤掉"
+[ "$(template | jq --arg t "$BLOCK_TAG" '[.routing.rules[] | select(.ruleTag == $t)] | length')" = "0" ] || fail "关掉设置后拦截路由应被撤掉"
+hub PUT /api/admin/settings '{"routing":{"blockRule":true}}' >/dev/null; expect_code 200 "恢复平台拦截规则"
 echo "IT-12 PASS"

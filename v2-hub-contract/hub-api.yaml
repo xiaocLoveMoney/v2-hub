@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: v2-hub API
-  version: 0.7.0
+  version: 0.7.1
   description: |
     v2-hub 对外接口契约（hub-server 提供，v2-hub-admin-web / v2-hub-user-web 消费）。
     - 管理端接口前缀 /api/admin，客户端接口前缀 /api/user，订阅端点前缀 /sub。
@@ -20,6 +20,7 @@ info:
     0.4.1：M6 客户端链式（docs/03 §5.18）——链式规则与自有落地节点接口；会话信息带套餐的链式开关。
     0.5.0：M9 链式改造（docs/03 §5.18、§5.19、§5.21）——规则改为有序的“起飞节点（多选）→ 落地（单选）”（chain/routes），
       自有落地节点改名为出口（chain/exits），新增平台出口与管理端的出口、规则接口；删除 chain/rules、chain/server-rules、admin/server-chain-rules。
+    0.7.1：系统设置增加 routing 分组（routing.blockRule，平台拦截规则，Ruling-55）。
 servers:
   - url: http://127.0.0.1:8080
     description: 本地开发
@@ -4955,7 +4956,7 @@ components:
     Settings:
       type: object
       description: 全部系统设置（docs/03 §5.6 设置清单），键名去掉点号改驼峰分组
-      required: [site, register, invite, checkin, ticket, shared, mail, subscription, shop, rebate, notify, mailEnabled, alert, telegram, report, landing, support, telegramEnabled]
+      required: [site, register, invite, checkin, ticket, shared, mail, subscription, shop, rebate, notify, mailEnabled, alert, telegram, report, landing, support, routing, telegramEnabled]
       properties:
         mailEnabled: { type: boolean, readOnly: true, description: SMTP 环境变量是否已配置（Ruling-24），不可经接口修改 }
         telegramEnabled: { type: boolean, readOnly: true, description: 环境变量 HUB_TELEGRAM_BOT_TOKEN 是否已配置（0.4.3，Ruling-42） }
@@ -4997,6 +4998,12 @@ components:
           properties:
             url: { type: string, maxLength: 255, description: https:// 地址或空串 }
             label: { type: string, minLength: 1, maxLength: 16 }
+        routing:
+          type: object
+          description: 服务器 Xray 模板里的平台条目（0.7.1，docs/03 §5.19 拦截规则）
+          required: [blockRule]
+          properties:
+            blockRule: { type: boolean, description: 在每台已接入服务器的模板里加平台拦截规则 hub-block（Ruling-55），默认开 }
         site:
           type: object
           required: [name, timezone]
@@ -5089,6 +5096,7 @@ components:
         report: { type: object, additionalProperties: true }
         landing: { type: object, additionalProperties: true }
         support: { type: object, additionalProperties: true }
+        routing: { type: object, additionalProperties: true }
     TestMailInput:
       type: object
       required: [to]
