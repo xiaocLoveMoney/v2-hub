@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: v2-hub API
-  version: 0.4.3
+  version: 0.5.0
   description: |
     v2-hub 对外接口契约（hub-server 提供，v2-hub-admin-web / v2-hub-user-web 消费）。
     - 管理端接口前缀 /api/admin，客户端接口前缀 /api/user，订阅端点前缀 /sub。
@@ -18,6 +18,8 @@ info:
       登录记录、订阅记录、订阅端点 /sub/{token}；管理端新增重置用户订阅、清除用户两步验证、订阅记录；新增错误码 account_disabled。
     0.2.7：管理员建用户、重置用户口令的口令长度放宽为 8–128（docs/03 §5.3，原误用管理员的 12 位下限）；xray 格式的订阅说明改为每节点一份完整配置。
     0.4.1：M6 客户端链式（docs/03 §5.18）——链式规则与自有落地节点接口；会话信息带套餐的链式开关。
+    0.5.0：M9 链式改造（docs/03 §5.18、§5.19、§5.21）——规则改为有序的“起飞节点（多选）→ 落地（单选）”（chain/routes），
+      自有落地节点改名为出口（chain/exits），新增平台出口与管理端的出口、规则接口；删除 chain/rules、chain/server-rules、admin/server-chain-rules。
 servers:
   - url: http://127.0.0.1:8080
     description: 本地开发
@@ -55,7 +57,7 @@ tags:
   - name: user-shop
     description: 商店、下单、钱包与充值（docs/03 §5.12–§5.16）；身份只取自会话（R8）
   - name: user-chain
-    description: 链式代理：客户端链式规则、自有落地节点（docs/03 §5.18）与服务端链式规则（§5.19，0.4.2）；身份只取自会话（R8）
+    description: 链式代理：有序的链式规则（客户端 §5.18、服务端 §5.19）与我的出口（§5.21）；身份只取自会话（R8）
   - name: payment
     description: 支付网关回调（docs/03 §5.15）
   - name: subscription
@@ -671,16 +673,17 @@ paths:
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "403": { $ref: "#/components/responses/PermissionDenied" }
         "404": { $ref: "#/components/responses/NotFound" }
-  /api/admin/server-chain-rules:
+  /api/admin/chain-routes:
     get:
       tags: [admin-panel]
-      operationId: listServerChainRules
-      summary: 全站服务端链式规则分页，按 id 倒序（server:read；只读，Ruling-41；0.4.2）
+      operationId: listChainRoutes
+      summary: 全站链式规则分页，按 id 倒序（server:read；只读，Ruling-41；0.5.0 取代 server-chain-rules）
       parameters:
         - $ref: "#/components/parameters/Page"
         - $ref: "#/components/parameters/PageSize"
+        - { name: kind, in: query, schema: { $ref: "#/components/schemas/ChainKind" } }
         - { name: userId, in: query, schema: { type: integer, format: int64, minimum: 1 } }
-        - { name: serverId, in: query, description: 入口所在服务器, schema: { type: integer, format: int64, minimum: 1 } }
+        - { name: serverId, in: query, description: 有起飞节点在这台服务器上的规则, schema: { type: integer, format: int64, minimum: 1 } }
       responses:
         "200":
           description: 规则分页
@@ -691,10 +694,156 @@ paths:
                   - $ref: "#/components/schemas/Envelope"
                   - type: object
                     properties:
-                      data: { $ref: "#/components/schemas/AdminServerChainRulePage" }
+                      data: { $ref: "#/components/schemas/AdminChainRoutePage" }
         "400": { $ref: "#/components/responses/InvalidArgument" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "403": { $ref: "#/components/responses/PermissionDenied" }
+  /api/admin/chain-exits:
+    get:
+      tags: [admin-panel]
+      operationId: listChainExits
+      summary: 全部链式出口分页，按 id 倒序（node:read；docs/03 §5.21，0.5.0）
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+        - { name: owner, in: query, description: 归属；省略 = 全部, schema: { $ref: "#/components/schemas/ChainExitOwner" } }
+        - { name: userId, in: query, description: 只看这个用户的出口, schema: { type: integer, format: int64, minimum: 1 } }
+        - { name: keyword, in: query, description: 按名称或地址模糊查找, schema: { type: string, maxLength: 64 } }
+      responses:
+        "200":
+          description: 出口分页
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/AdminChainExitPage" }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+    post:
+      tags: [admin-panel]
+      operationId: createPlatformChainExit
+      summary: 添加一个平台出口（node:write；0.5.0）
+      description: 链接解析不了或协议不支持返回 400；与已有平台出口同名返回 409。写审计，不记链接。
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AdminChainExitInput" }
+      responses:
+        "200":
+          description: 新建的平台出口
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/AdminChainExit" }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /api/admin/chain-exits/{id}:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    put:
+      tags: [admin-panel]
+      operationId: updatePlatformChainExit
+      summary: 改平台出口（node:write；0.5.0）
+      description: 只能改平台出口；对用户出口调用返回 400（用户出口只能停用 / 启用与删除，Ruling-50）。写审计。
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AdminChainExitUpdateInput" }
+      responses:
+        "200":
+          description: 改后的平台出口
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/AdminChainExit" }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+    delete:
+      tags: [admin-panel]
+      operationId: deleteChainExit
+      summary: 删除出口（平台出口或用户出口），引用它的规则一并删除（node:write；0.5.0）
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      responses:
+        "200": { $ref: "#/components/responses/Ok" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/admin/chain-exits/{id}/enabled:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    put:
+      tags: [admin-panel]
+      operationId: setChainExitEnabled
+      summary: 停用或启用出口，平台出口与用户出口都可以（node:write；0.5.0）
+      description: 停用后引用它的规则阻断（原因 exit），不删除。写审计。
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ChainExitEnabledInput" }
+      responses:
+        "200":
+          description: 改后的出口
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/AdminChainExit" }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/admin/chain-exits/{id}/link:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    get:
+      tags: [admin-panel]
+      operationId: getPlatformChainExitLink
+      summary: 取平台出口的原链接（凭据）（node:write；0.5.0）
+      description: 只对平台出口有效；用户出口的凭据管理员不能查看，返回 404（Ruling-50）。写审计。
+      responses:
+        "200":
+          description: 原链接
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/NodeLink" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "404": { $ref: "#/components/responses/NotFound" }
   /api/admin/servers/{id}/sync:
     parameters:
       - $ref: "#/components/parameters/IdPath"
@@ -3598,9 +3747,9 @@ paths:
     get:
       tags: [user-chain]
       operationId: getChainOverview
-      summary: 链式代理总览：开关、上限、规则、自有落地节点与可选节点（docs/03 §5.18）
+      summary: 链式代理总览：开关、上限、两类规则、我的出口与可选的节点 / 平台出口（docs/03 §5.18、§5.19、§5.21）
       description: |
-        套餐没开链式时照常返回（allowed 为 false，已有规则状态为阻断），页面据此说明原因。
+        套餐没开链式时照常返回（开关为 false，已有规则状态为阻断），页面据此说明原因。
       security: [{ userSession: [] }]
       responses:
         "200":
@@ -3615,15 +3764,17 @@ paths:
                       data: { $ref: "#/components/schemas/ChainOverview" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "403": { $ref: "#/components/responses/UserForbidden" }
-  /api/user/chain/rules:
+  /api/user/chain/routes:
     post:
       tags: [user-chain]
-      operationId: createChainRule
-      summary: 新建一条链式规则
+      operationId: createChainRoute
+      summary: 新建一条链式规则，排在同类型的最后（0.5.0）
       description: |
-        入口与落地（平台节点时）必须是本人当前可用的节点；落地二选一。
-        套餐没开链式、或落地是自有节点而套餐没开自有落地时返回 403 feature_disabled；
-        落地是 hysteria2、入口与落地相同、超过上限返回 400；同一（入口，落地）已有规则返回 409。
+        起飞节点必须是本人当前可用的节点；落地三选一：平台节点、平台出口、我的出口，都必须在本人权限范围内。
+        套餐没开对应的链式、或落地是我的出口而套餐没开自有落地时返回 403 feature_disabled。
+        超过上限、落地是 hysteria2、落地同时是起飞节点返回 400。
+        服务端链式另有：起飞节点所在面板须支持改内核配置；落地节点不能是本人任何服务端规则的起飞节点、反之亦然（防环）；
+        我的出口须是公网地址且不指向平台自己的服务器（Ruling-48、Ruling-49），不满足返回 400；写操作超过频率返回 429。
       security: [{ userSession: [] }]
       parameters:
         - $ref: "#/components/parameters/CsrfHeader"
@@ -3631,7 +3782,7 @@ paths:
         required: true
         content:
           application/json:
-            schema: { $ref: "#/components/schemas/ChainRuleInput" }
+            schema: { $ref: "#/components/schemas/ChainRouteInput" }
       responses:
         "200":
           description: 新建的规则
@@ -3642,20 +3793,19 @@ paths:
                   - $ref: "#/components/schemas/Envelope"
                   - type: object
                     properties:
-                      data: { $ref: "#/components/schemas/ChainRule" }
+                      data: { $ref: "#/components/schemas/ChainRoute" }
         "400": { $ref: "#/components/responses/InvalidArgument" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "403": { $ref: "#/components/responses/UserForbidden" }
-        "409": { $ref: "#/components/responses/Conflict" }
-  /api/user/chain/rules/{id}:
-    parameters:
-      - $ref: "#/components/parameters/IdPath"
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /api/user/chain/routes/order:
     put:
       tags: [user-chain]
-      operationId: updateChainRule
-      summary: 改规则的名称与启用开关；他人的返回 404（R8）
+      operationId: reorderChainRoutes
+      summary: 调整某一类型规则的顺序，越靠前优先级越高（Ruling-46；0.5.0）
       description: |
-        入口与落地不能改，要换线路请删除后新建。套餐没开链式时返回 403 feature_disabled。
+        ids 必须恰好是本人该类型全部规则的一个排列，否则返回 400。套餐没开对应的链式返回 403 feature_disabled；
+        服务端链式的调序计入写操作频率。
       security: [{ userSession: [] }]
       parameters:
         - $ref: "#/components/parameters/CsrfHeader"
@@ -3663,7 +3813,38 @@ paths:
         required: true
         content:
           application/json:
-            schema: { $ref: "#/components/schemas/ChainRuleUpdateInput" }
+            schema: { $ref: "#/components/schemas/ChainRouteOrderInput" }
+      responses:
+        "200":
+          description: 调整后该类型的全部规则，按新顺序
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { type: array, items: { $ref: "#/components/schemas/ChainRoute" } }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/UserForbidden" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /api/user/chain/routes/{id}:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    put:
+      tags: [user-chain]
+      operationId: updateChainRoute
+      summary: 改规则的起飞节点、落地、名称与启用开关；他人的返回 404（R8）（0.5.0）
+      description: 类型不能改。校验与新建相同；套餐没开对应的链式时返回 403 feature_disabled。
+      security: [{ userSession: [] }]
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ChainRouteUpdateInput" }
       responses:
         "200":
           description: 改后的规则
@@ -3674,15 +3855,16 @@ paths:
                   - $ref: "#/components/schemas/Envelope"
                   - type: object
                     properties:
-                      data: { $ref: "#/components/schemas/ChainRule" }
+                      data: { $ref: "#/components/schemas/ChainRoute" }
         "400": { $ref: "#/components/responses/InvalidArgument" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "403": { $ref: "#/components/responses/UserForbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/RateLimited" }
     delete:
       tags: [user-chain]
-      operationId: deleteChainRule
-      summary: 删除规则；套餐没开链式时也允许；他人的返回 404（R8）
+      operationId: deleteChainRoute
+      summary: 删除规则；套餐没开链式时也允许；他人的返回 404（R8）（0.5.0）
       security: [{ userSession: [] }]
       parameters:
         - $ref: "#/components/parameters/CsrfHeader"
@@ -3695,11 +3877,12 @@ paths:
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "403": { $ref: "#/components/responses/UserForbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
-  /api/user/chain/custom-nodes:
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /api/user/chain/exits:
     post:
       tags: [user-chain]
-      operationId: createCustomNode
-      summary: 添加一个自有落地节点
+      operationId: createChainExit
+      summary: 添加一个我的出口（原自有落地节点；0.5.0）
       description: |
         链接保存时解析校验，解析不了或协议不支持返回 400；套餐没开自有落地返回 403 feature_disabled；
         超过上限返回 400；同名返回 409。平台不向该地址发起任何连接（Ruling-38）。
@@ -3710,10 +3893,10 @@ paths:
         required: true
         content:
           application/json:
-            schema: { $ref: "#/components/schemas/CustomNodeInput" }
+            schema: { $ref: "#/components/schemas/ChainExitInput" }
       responses:
         "200":
-          description: 新建的自有落地节点
+          description: 新建的出口
           content:
             application/json:
               schema:
@@ -3721,18 +3904,20 @@ paths:
                   - $ref: "#/components/schemas/Envelope"
                   - type: object
                     properties:
-                      data: { $ref: "#/components/schemas/CustomNode" }
+                      data: { $ref: "#/components/schemas/ChainExit" }
         "400": { $ref: "#/components/responses/InvalidArgument" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "403": { $ref: "#/components/responses/UserForbidden" }
         "409": { $ref: "#/components/responses/Conflict" }
-  /api/user/chain/custom-nodes/{id}:
+  /api/user/chain/exits/{id}:
     parameters:
       - $ref: "#/components/parameters/IdPath"
     put:
       tags: [user-chain]
-      operationId: updateCustomNode
-      summary: 改自有落地节点的名称或链接；他人的返回 404（R8）
+      operationId: updateChainExit
+      summary: 改我的出口的名称或链接；他人的返回 404（R8）（0.5.0）
+      description: |
+        出口被服务端规则引用时，换链接要重新通过地址限制（不通过返回 400），并计入服务端链式的写操作频率（超出 429）。
       security: [{ userSession: [] }]
       parameters:
         - $ref: "#/components/parameters/CsrfHeader"
@@ -3740,10 +3925,10 @@ paths:
         required: true
         content:
           application/json:
-            schema: { $ref: "#/components/schemas/CustomNodeUpdateInput" }
+            schema: { $ref: "#/components/schemas/ChainExitUpdateInput" }
       responses:
         "200":
-          description: 改后的自有落地节点
+          description: 改后的出口
           content:
             application/json:
               schema:
@@ -3751,16 +3936,17 @@ paths:
                   - $ref: "#/components/schemas/Envelope"
                   - type: object
                     properties:
-                      data: { $ref: "#/components/schemas/CustomNode" }
+                      data: { $ref: "#/components/schemas/ChainExit" }
         "400": { $ref: "#/components/responses/InvalidArgument" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "403": { $ref: "#/components/responses/UserForbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
+        "429": { $ref: "#/components/responses/RateLimited" }
     delete:
       tags: [user-chain]
-      operationId: deleteCustomNode
-      summary: 删除自有落地节点，引用它的规则一并删除；他人的返回 404（R8）
+      operationId: deleteChainExit
+      summary: 删除我的出口，引用它的规则一并删除；他人的返回 404（R8）（0.5.0）
       security: [{ userSession: [] }]
       parameters:
         - $ref: "#/components/parameters/CsrfHeader"
@@ -3773,13 +3959,13 @@ paths:
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "403": { $ref: "#/components/responses/UserForbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
-  /api/user/chain/custom-nodes/{id}/link:
+  /api/user/chain/exits/{id}/link:
     parameters:
       - $ref: "#/components/parameters/IdPath"
     get:
       tags: [user-chain]
-      operationId: getCustomNodeLink
-      summary: 取自有落地节点的原链接（凭据）；他人的返回 404（R8）
+      operationId: getChainExitLink
+      summary: 取我的出口的原链接（凭据）；他人的与平台出口返回 404（R8）（0.5.0）
       security: [{ userSession: [] }]
       responses:
         "200":
@@ -3792,85 +3978,6 @@ paths:
                   - type: object
                     properties:
                       data: { $ref: "#/components/schemas/NodeLink" }
-        "401": { $ref: "#/components/responses/Unauthenticated" }
-        "403": { $ref: "#/components/responses/UserForbidden" }
-        "404": { $ref: "#/components/responses/NotFound" }
-  /api/user/chain/server-rules:
-    post:
-      tags: [user-chain]
-      operationId: createServerChainRule
-      summary: 新建一条服务端链式规则（docs/03 §5.19，0.4.2）
-      description: |
-        入口与落地都必须是本人当前可用的平台节点，入口所在面板须支持改内核配置；落地不能是 hysteria2、不能与入口相同。
-        套餐没开服务端链式返回 403 feature_disabled；超过上限或节点不合要求返回 400；同一入口已有服务端规则返回 409。
-        规则保存后由后台下发到入口面板，状态见 applyStatus。
-      security: [{ userSession: [] }]
-      parameters:
-        - $ref: "#/components/parameters/CsrfHeader"
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: "#/components/schemas/ServerChainRuleInput" }
-      responses:
-        "200":
-          description: 新建的规则
-          content:
-            application/json:
-              schema:
-                allOf:
-                  - $ref: "#/components/schemas/Envelope"
-                  - type: object
-                    properties:
-                      data: { $ref: "#/components/schemas/ServerChainRule" }
-        "400": { $ref: "#/components/responses/InvalidArgument" }
-        "401": { $ref: "#/components/responses/Unauthenticated" }
-        "403": { $ref: "#/components/responses/UserForbidden" }
-        "409": { $ref: "#/components/responses/Conflict" }
-  /api/user/chain/server-rules/{id}:
-    parameters:
-      - $ref: "#/components/parameters/IdPath"
-    put:
-      tags: [user-chain]
-      operationId: updateServerChainRule
-      summary: 启用或停用服务端规则；他人的返回 404（R8）（0.4.2）
-      description: 入口与落地不能改，要换线路请删除后新建。套餐没开服务端链式时返回 403 feature_disabled。
-      security: [{ userSession: [] }]
-      parameters:
-        - $ref: "#/components/parameters/CsrfHeader"
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: "#/components/schemas/ServerChainRuleUpdateInput" }
-      responses:
-        "200":
-          description: 改后的规则
-          content:
-            application/json:
-              schema:
-                allOf:
-                  - $ref: "#/components/schemas/Envelope"
-                  - type: object
-                    properties:
-                      data: { $ref: "#/components/schemas/ServerChainRule" }
-        "400": { $ref: "#/components/responses/InvalidArgument" }
-        "401": { $ref: "#/components/responses/Unauthenticated" }
-        "403": { $ref: "#/components/responses/UserForbidden" }
-        "404": { $ref: "#/components/responses/NotFound" }
-    delete:
-      tags: [user-chain]
-      operationId: deleteServerChainRule
-      summary: 删除服务端规则；套餐没开时也允许；他人的返回 404（R8）（0.4.2）
-      security: [{ userSession: [] }]
-      parameters:
-        - $ref: "#/components/parameters/CsrfHeader"
-      responses:
-        "200":
-          description: 已删除
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/Envelope" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "403": { $ref: "#/components/responses/UserForbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
@@ -5552,21 +5659,34 @@ components:
       properties:
         amount: { type: integer, format: int64, description: 入账金额（分） }
         balance: { type: integer, format: int64, description: 入账后的余额 }
+    ChainKind:
+      type: string
+      enum: [client, server]
+      description: client = 客户端链式（只在订阅里表达），server = 服务端链式（改起飞面板的 Xray 配置）
     ChainStatus:
       type: string
       enum: [ok, blocked]
-      description: ok = 通畅（配置与授权成立，平台不探测连通性，Ruling-38）；blocked = 阻断，不进订阅
+      description: ok = 通畅（配置与授权成立，平台不探测连通性，Ruling-38）；blocked = 阻断，不进订阅、不下发
     ChainBlockedReason:
       type: string
-      enum: ["", plan, entry, exit]
-      description: 阻断原因；plan = 套餐不支持，entry = 入口节点当前不可用，exit = 落地节点当前不可用；通畅时为空串
+      enum: ["", plan, exit, unsafe, quarantined]
+      description: |
+        阻断原因，通畅时为空串。plan = 套餐不支持；exit = 落地当前不可用（节点不可用，平台出口未授权 / 停用 / 不允许该类型，我的出口被管理员停用）；
+        unsafe = 我的出口没通过服务端链式的地址限制或字段校验（Ruling-48）；quarantined = 下发失败后被隔离，改规则或出口后解除（Ruling-49）
     ChainExitKind:
       type: string
-      enum: [node, custom]
-      description: node = 平台节点，custom = 自有落地节点
+      enum: [node, platform, own]
+      description: node = 平台节点，platform = 平台出口（管理员添加），own = 我的出口（用户自己添加）
+    ChainEntryState:
+      type: string
+      enum: [inactive, ok, unavailable, duplicate, shadowed, applied, pending, failed]
+      description: |
+        规则里每个起飞节点的状态（docs/03 §5.18、§5.19）。inactive = 规则阻断或停用；unavailable = 该节点当前不可用。
+        客户端链式：ok = 进订阅，duplicate = 同一（起飞，落地）组合已在更靠前的规则里输出。
+        服务端链式：shadowed = 被更靠前的规则覆盖（见 coveredBy），applied = 已在面板生效，pending = 下发中，failed = 该服务器最近一次下发被回滚。
     ChainNodeOption:
       type: object
-      description: 新建规则时可选的平台节点（本人当前可用）
+      description: 可选的平台节点（本人当前可用）
       required: [id, name, region, protocol, canBeExit, canBeServerEntry]
       properties:
         id: { type: integer, format: int64 }
@@ -5574,67 +5694,108 @@ components:
         region: { type: string }
         protocol: { type: string }
         canBeExit: { type: boolean, description: 能否作落地；hysteria2 不能 }
-        canBeServerEntry: { type: boolean, description: 能否作服务端链式的入口：所在面板支持改内核配置（0.4.2） }
-    ChainRule:
+        canBeServerEntry: { type: boolean, description: 能否作服务端链式的起飞节点：所在面板支持改内核配置 }
+    ChainPlatformExitOption:
       type: object
-      required: [id, name, displayName, entry, exit, isEnabled, status, blockedReason, createdAt]
+      description: 本人可用的平台出口；地址与链接不返回
+      required: [id, name, protocol, allowServer, allowClient]
       properties:
         id: { type: integer, format: int64 }
+        name: { type: string }
+        protocol: { type: string }
+        allowServer: { type: boolean, description: 可用于服务端链式 }
+        allowClient: { type: boolean, description: 可用于客户端链式 }
+    ChainRouteEntry:
+      type: object
+      required: [nodeId, name, state, coveredBy]
+      properties:
+        nodeId: { type: integer, format: int64 }
+        name: { type: string }
+        state: { $ref: "#/components/schemas/ChainEntryState" }
+        coveredBy: { type: integer, description: state 为 shadowed 或 duplicate 时，覆盖它的规则的序号（从 1 起）；否则为 0 }
+    ChainRouteExit:
+      type: object
+      required: [kind, id, name, protocol]
+      properties:
+        kind: { $ref: "#/components/schemas/ChainExitKind" }
+        id: { type: integer, format: int64, description: 平台节点 id 或出口 id，取决于 kind }
+        name: { type: string }
+        protocol: { type: string }
+    ChainRoute:
+      type: object
+      required: [id, kind, position, name, displayName, entries, exit, isEnabled, status, blockedReason, createdAt]
+      properties:
+        id: { type: integer, format: int64 }
+        kind: { $ref: "#/components/schemas/ChainKind" }
+        position: { type: integer, minimum: 1, description: 在本人同类型规则里的序号，从 1 起连续；越小越优先（Ruling-46） }
         name: { type: string, description: 用户起的名称，没起为空串 }
-        displayName: { type: string, description: 订阅里显示的节点名；没起名称时为“入口名 → 落地名” }
-        entry:
-          type: object
-          required: [nodeId, name]
-          properties:
-            nodeId: { type: integer, format: int64 }
-            name: { type: string }
-        exit:
-          type: object
-          required: [kind, id, name, protocol]
-          properties:
-            kind: { $ref: "#/components/schemas/ChainExitKind" }
-            id: { type: integer, format: int64, description: 平台节点 id 或自有落地节点 id，取决于 kind }
-            name: { type: string }
-            protocol: { type: string }
+        displayName: { type: string, description: 显示用的名称；没起名称时为落地的名称 }
+        entries: { type: array, items: { $ref: "#/components/schemas/ChainRouteEntry" } }
+        exit: { $ref: "#/components/schemas/ChainRouteExit" }
         isEnabled: { type: boolean }
         status: { $ref: "#/components/schemas/ChainStatus" }
         blockedReason: { $ref: "#/components/schemas/ChainBlockedReason" }
         createdAt: { type: string, format: date-time }
-    ChainRuleInput:
+    ChainRouteInput:
       type: object
-      required: [entryNodeId]
-      description: exitNodeId 与 exitCustomNodeId 必须恰好给一个
+      required: [kind, entryNodeIds, exitKind, exitId]
       properties:
-        entryNodeId: { type: integer, format: int64, minimum: 1 }
-        exitNodeId: { type: integer, format: int64, minimum: 1 }
-        exitCustomNodeId: { type: integer, format: int64, minimum: 1 }
-        name: { type: string, maxLength: 64, description: 可选；省略或空串 = 用“入口名 → 落地名” }
+        kind: { $ref: "#/components/schemas/ChainKind" }
+        entryNodeIds:
+          type: array
+          minItems: 1
+          maxItems: 20
+          uniqueItems: true
+          items: { type: integer, format: int64, minimum: 1 }
+        exitKind: { $ref: "#/components/schemas/ChainExitKind" }
+        exitId: { type: integer, format: int64, minimum: 1 }
+        name: { type: string, maxLength: 64, description: 可选；省略或空串 = 用落地的名称 }
         isEnabled: { type: boolean, default: true }
-    ChainRuleUpdateInput:
+    ChainRouteUpdateInput:
       type: object
-      required: [name, isEnabled]
+      required: [entryNodeIds, exitKind, exitId, name, isEnabled]
       properties:
+        entryNodeIds:
+          type: array
+          minItems: 1
+          maxItems: 20
+          uniqueItems: true
+          items: { type: integer, format: int64, minimum: 1 }
+        exitKind: { $ref: "#/components/schemas/ChainExitKind" }
+        exitId: { type: integer, format: int64, minimum: 1 }
         name: { type: string, maxLength: 64 }
         isEnabled: { type: boolean }
-    CustomNode:
+    ChainRouteOrderInput:
       type: object
-      description: 自有落地节点；原链接属于凭据，不在这里返回
-      required: [id, name, protocol, address, port, ruleCount, createdAt]
+      required: [kind, ids]
+      properties:
+        kind: { $ref: "#/components/schemas/ChainKind" }
+        ids:
+          type: array
+          minItems: 1
+          maxItems: 20
+          uniqueItems: true
+          items: { type: integer, format: int64, minimum: 1 }
+    ChainExit:
+      type: object
+      description: 我的出口（用户自己添加）；原链接属于凭据，不在这里返回
+      required: [id, name, protocol, address, port, isEnabled, routeCount, createdAt]
       properties:
         id: { type: integer, format: int64 }
         name: { type: string }
         protocol: { type: string, enum: [vless, vmess, trojan, shadowsocks, socks] }
         address: { type: string }
         port: { type: integer, minimum: 1, maximum: 65535 }
-        ruleCount: { type: integer, description: 引用它的规则数；删除前据此提示 }
+        isEnabled: { type: boolean, description: false = 已被管理员停用，引用它的规则阻断 }
+        routeCount: { type: integer, description: 引用它的规则数；删除前据此提示 }
         createdAt: { type: string, format: date-time }
-    CustomNodeInput:
+    ChainExitInput:
       type: object
       required: [link]
       properties:
         link: { type: string, minLength: 1, maxLength: 2048, description: "分享链接（vless / vmess / trojan / ss）或 socks5://[用户名:口令@]地址:端口" }
         name: { type: string, maxLength: 64, description: 可选；省略或空串 = 取链接里的名称 }
-    CustomNodeUpdateInput:
+    ChainExitUpdateInput:
       type: object
       required: [name]
       properties:
@@ -5642,69 +5803,32 @@ components:
         link: { type: string, minLength: 1, maxLength: 2048, description: 省略 = 不改链接 }
     ChainOverview:
       type: object
-      required: [allowed, customNodeAllowed, serverAllowed, maxRules, maxCustomNodes, maxServerRules, rules, customNodes, serverRules, nodes]
+      required: [allowed, exitAllowed, serverAllowed, maxClientRoutes, maxServerRoutes, maxRouteEntries, maxExits, clientRoutes, serverRoutes, exits, platformExits, nodes]
       properties:
         allowed: { type: boolean, description: 套餐是否允许客户端链式 }
-        customNodeAllowed: { type: boolean, description: 套餐是否允许自有落地节点 }
-        serverAllowed: { type: boolean, description: 套餐是否允许服务端链式（0.4.2） }
-        maxRules: { type: integer }
-        maxCustomNodes: { type: integer }
-        maxServerRules: { type: integer, description: 0.4.2 }
-        rules: { type: array, items: { $ref: "#/components/schemas/ChainRule" } }
-        customNodes: { type: array, items: { $ref: "#/components/schemas/CustomNode" } }
-        serverRules: { type: array, items: { $ref: "#/components/schemas/ServerChainRule" }, description: 0.4.2 }
+        exitAllowed: { type: boolean, description: 套餐是否允许添加我的出口（allow_custom_node） }
+        serverAllowed: { type: boolean, description: 套餐是否允许服务端链式 }
+        maxClientRoutes: { type: integer }
+        maxServerRoutes: { type: integer }
+        maxRouteEntries: { type: integer, description: 一条规则最多几个起飞节点 }
+        maxExits: { type: integer }
+        clientRoutes: { type: array, items: { $ref: "#/components/schemas/ChainRoute" }, description: 按顺序 }
+        serverRoutes: { type: array, items: { $ref: "#/components/schemas/ChainRoute" }, description: 按顺序 }
+        exits: { type: array, items: { $ref: "#/components/schemas/ChainExit" } }
+        platformExits: { type: array, items: { $ref: "#/components/schemas/ChainPlatformExitOption" } }
         nodes: { type: array, items: { $ref: "#/components/schemas/ChainNodeOption" } }
-    ServerChainApplyState:
-      type: string
-      enum: ["", applied, pending, failed]
-      description: 服务端规则的下发情况（docs/03 §5.19）；applied = 已在入口面板生效，pending = 下发中，failed = 入口服务器最近一次下发被回滚；规则阻断或停用时为空串
-    ServerChainRule:
-      type: object
-      required: [id, entry, exit, isEnabled, status, blockedReason, applyStatus, createdAt]
-      properties:
-        id: { type: integer, format: int64 }
-        entry:
-          type: object
-          required: [nodeId, name]
-          properties:
-            nodeId: { type: integer, format: int64 }
-            name: { type: string }
-        exit:
-          type: object
-          required: [nodeId, name, protocol]
-          properties:
-            nodeId: { type: integer, format: int64 }
-            name: { type: string }
-            protocol: { type: string }
-        isEnabled: { type: boolean }
-        status: { $ref: "#/components/schemas/ChainStatus" }
-        blockedReason: { $ref: "#/components/schemas/ChainBlockedReason" }
-        applyStatus: { $ref: "#/components/schemas/ServerChainApplyState" }
-        createdAt: { type: string, format: date-time }
-    ServerChainRuleInput:
-      type: object
-      required: [entryNodeId, exitNodeId]
-      properties:
-        entryNodeId: { type: integer, format: int64, minimum: 1 }
-        exitNodeId: { type: integer, format: int64, minimum: 1 }
-        isEnabled: { type: boolean, default: true }
-    ServerChainRuleUpdateInput:
-      type: object
-      required: [isEnabled]
-      properties:
-        isEnabled: { type: boolean }
     ChainApplyStatus:
       type: string
       enum: [none, pending, applied, failed]
-      description: 入口服务器的下发状态（docs/03 §3 C1–C5）；none = 从未有过服务端规则
+      description: 起飞服务器的下发状态（docs/03 §3 C1–C5）；none = 从未有过服务端规则
     ChainApply:
       type: object
       required: [serverId, isSupported, status, ruleCount, appliedRuleCount, failCount, isRetryStopped, lastError, lastAttemptAt, nextAttemptAt, appliedAt]
       properties:
         serverId: { type: integer, format: int64 }
-        isSupported: { type: boolean, description: 面板是否支持改内核配置；不支持时不会有服务端规则以它为入口 }
+        isSupported: { type: boolean, description: 面板是否支持改内核配置；不支持时不会有服务端规则以它为起飞 }
         status: { $ref: "#/components/schemas/ChainApplyStatus" }
-        ruleCount: { type: integer, description: 期望生效的规则数（不阻断、启用且落地凭据已就绪） }
+        ruleCount: { type: integer, description: 期望在这台服务器上生效的规则数 }
         appliedRuleCount: { type: integer, description: 当前面板上生效的规则数 }
         failCount: { type: integer, description: 同一期望的连续失败次数 }
         isRetryStopped: { type: boolean, description: 失败次数已达上限，停止自动重试，等期望变化或手动重试 }
@@ -5712,9 +5836,19 @@ components:
         lastAttemptAt: { type: [string, "null"], format: date-time }
         nextAttemptAt: { type: [string, "null"], format: date-time, description: 失败退避到这个时刻 }
         appliedAt: { type: [string, "null"], format: date-time }
-    AdminServerChainRule:
+    AdminChainRouteEntry:
       type: object
-      required: [id, user, entry, exit, isEnabled, status, blockedReason, applyStatus, createdAt]
+      required: [nodeId, name, serverId, serverName, state, coveredBy]
+      properties:
+        nodeId: { type: integer, format: int64 }
+        name: { type: string }
+        serverId: { type: integer, format: int64 }
+        serverName: { type: string }
+        state: { $ref: "#/components/schemas/ChainEntryState" }
+        coveredBy: { type: integer }
+    AdminChainRoute:
+      type: object
+      required: [id, user, kind, position, name, entries, exit, isEnabled, status, blockedReason, createdAt]
       properties:
         id: { type: integer, format: int64 }
         user:
@@ -5723,28 +5857,97 @@ components:
           properties:
             id: { type: integer, format: int64 }
             username: { type: string }
-        entry:
-          type: object
-          required: [nodeId, name, serverId, serverName]
-          properties:
-            nodeId: { type: integer, format: int64 }
-            name: { type: string }
-            serverId: { type: integer, format: int64 }
-            serverName: { type: string }
-        exit:
-          type: object
-          required: [nodeId, name]
-          properties:
-            nodeId: { type: integer, format: int64 }
-            name: { type: string }
+        kind: { $ref: "#/components/schemas/ChainKind" }
+        position: { type: integer, minimum: 1 }
+        name: { type: string }
+        entries: { type: array, items: { $ref: "#/components/schemas/AdminChainRouteEntry" } }
+        exit: { $ref: "#/components/schemas/ChainRouteExit" }
         isEnabled: { type: boolean }
         status: { $ref: "#/components/schemas/ChainStatus" }
         blockedReason: { $ref: "#/components/schemas/ChainBlockedReason" }
-        applyStatus: { $ref: "#/components/schemas/ServerChainApplyState" }
         createdAt: { type: string, format: date-time }
-    AdminServerChainRulePage:
+    AdminChainRoutePage:
       type: object
       required: [items, total]
       properties:
-        items: { type: array, items: { $ref: "#/components/schemas/AdminServerChainRule" } }
+        items: { type: array, items: { $ref: "#/components/schemas/AdminChainRoute" } }
         total: { type: integer, format: int64 }
+    ChainExitOwner:
+      type: string
+      enum: [platform, user]
+      description: platform = 平台出口（管理员添加），user = 用户出口
+    AdminChainExit:
+      type: object
+      description: 管理端看到的出口；原链接不在这里返回，用户出口的链接管理员始终不能查看（Ruling-50）
+      required: [id, owner, user, name, protocol, address, port, remark, isEnabled, allowServer, allowClient, nodeGroups, routeCount, createdAt, updatedAt]
+      properties:
+        id: { type: integer, format: int64 }
+        owner: { $ref: "#/components/schemas/ChainExitOwner" }
+        user:
+          type: [object, "null"]
+          description: 用户出口的所有者；平台出口为 null
+          required: [id, username]
+          properties:
+            id: { type: integer, format: int64 }
+            username: { type: string }
+        name: { type: string }
+        protocol: { type: string, enum: [vless, vmess, trojan, shadowsocks, socks] }
+        address: { type: string }
+        port: { type: integer, minimum: 1, maximum: 65535 }
+        remark: { type: string }
+        isEnabled: { type: boolean }
+        allowServer: { type: boolean, description: 可用于服务端链式；只对平台出口有意义 }
+        allowClient: { type: boolean, description: 可用于客户端链式（凭据会进用户的订阅）；只对平台出口有意义 }
+        nodeGroups:
+          type: array
+          description: 平台出口所属的节点组；用户出口为空数组
+          items:
+            type: object
+            required: [id, name]
+            properties:
+              id: { type: integer, format: int64 }
+              name: { type: string }
+        routeCount: { type: integer, description: 引用它的规则数 }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    AdminChainExitPage:
+      type: object
+      required: [items, total]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/AdminChainExit" } }
+        total: { type: integer, format: int64 }
+    AdminChainExitInput:
+      type: object
+      required: [name, link, allowServer, allowClient, nodeGroupIds]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 64 }
+        link: { type: string, minLength: 1, maxLength: 2048, description: "分享链接（vless / vmess / trojan / ss）或 socks5://[用户名:口令@]地址:端口" }
+        remark: { type: string, maxLength: 255, default: "" }
+        isEnabled: { type: boolean, default: true }
+        allowServer: { type: boolean }
+        allowClient: { type: boolean }
+        nodeGroupIds:
+          type: array
+          maxItems: 100
+          uniqueItems: true
+          items: { type: integer, format: int64, minimum: 1 }
+    AdminChainExitUpdateInput:
+      type: object
+      required: [name, remark, isEnabled, allowServer, allowClient, nodeGroupIds]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 64 }
+        link: { type: string, minLength: 1, maxLength: 2048, description: 省略 = 不改链接 }
+        remark: { type: string, maxLength: 255 }
+        isEnabled: { type: boolean }
+        allowServer: { type: boolean }
+        allowClient: { type: boolean }
+        nodeGroupIds:
+          type: array
+          maxItems: 100
+          uniqueItems: true
+          items: { type: integer, format: int64, minimum: 1 }
+    ChainExitEnabledInput:
+      type: object
+      required: [isEnabled]
+      properties:
+        isEnabled: { type: boolean }
