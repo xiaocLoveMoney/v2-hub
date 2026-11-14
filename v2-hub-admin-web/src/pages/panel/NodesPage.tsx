@@ -6,6 +6,7 @@ import { useSession } from '../../auth/session-context'
 import { mutate, useRemote } from '../../hooks/use-remote'
 import { PERMISSIONS } from '../../menu'
 import { TABLE_SCROLL } from '../system/format'
+import { formatCountry } from './countries'
 
 const DEFAULT_PAGE_SIZE = 20
 /** 节点组成员选择器一次拉取的节点数上限（与接口 pageSize 上限一致）。 */
@@ -17,7 +18,6 @@ const loadPickerNodes = (signal: AbortSignal) => api.GET('/api/admin/nodes', { p
 
 interface NodeForm {
   displayName: string
-  region?: string
   tags?: string[]
   sortOrder?: number
   isEnabled: boolean
@@ -78,7 +78,7 @@ function NodeCatalog({ canWrite, servers, groups }: NodeCatalogProps) {
     const err = await mutate(() =>
       api.PUT('/api/admin/nodes/{id}', {
         params: { ...csrfHeader(), path: { id } },
-        body: { displayName: v.displayName, region: v.region ?? '', tags: v.tags ?? [], sortOrder: v.sortOrder ?? 0, isEnabled: v.isEnabled },
+        body: { displayName: v.displayName, tags: v.tags ?? [], sortOrder: v.sortOrder ?? 0, isEnabled: v.isEnabled },
       }),
     )
     if (err !== null) {
@@ -105,7 +105,7 @@ function NodeCatalog({ canWrite, servers, groups }: NodeCatalogProps) {
     { title: '服务器', dataIndex: 'serverName' },
     { title: '协议', dataIndex: 'protocol' },
     { title: '地址', key: 'address', render: (_: unknown, n: PanelNode) => `${n.address}:${n.port}${n.endpointId === null || n.endpointId === undefined ? '' : '（Host）'}` },
-    { title: '地区', dataIndex: 'region' },
+    { title: '地区', dataIndex: 'region', render: (v: string) => formatCountry(v) },
     { title: '标签', dataIndex: 'tags', render: (tags: string[]) => tags.map((t) => <Tag key={t}>{t}</Tag>) },
     { title: '节点组', dataIndex: 'groupIds', render: (ids: number[]) => ids.map((id) => <Tag key={id} color="blue">{groupName.get(id) ?? id}</Tag>) },
     { title: '排序', dataIndex: 'sortOrder' },
@@ -181,7 +181,6 @@ function NodeCatalog({ canWrite, servers, groups }: NodeCatalogProps) {
           onFinish={handleSave}
           initialValues={{
             displayName: editing?.displayName ?? '',
-            region: editing?.region ?? '',
             tags: editing?.tags ?? [],
             sortOrder: editing?.sortOrder ?? 0,
             isEnabled: editing?.isEnabled ?? true,
@@ -190,8 +189,8 @@ function NodeCatalog({ canWrite, servers, groups }: NodeCatalogProps) {
           <Form.Item name="displayName" label="显示名" rules={[{ required: true, max: 128, message: '1–128 个字符' }]}>
             <Input autoComplete="off" />
           </Form.Item>
-          <Form.Item name="region" label="地区">
-            <Input autoComplete="off" />
+          <Form.Item label="地区" extra="跟随所在服务器的位置，在服务器里修改">
+            <Input aria-label="地区" value={formatCountry(editing?.region, '未知')} disabled />
           </Form.Item>
           <Form.Item name="tags" label="标签" extra="回车添加">
             <Select mode="tags" open={false} />

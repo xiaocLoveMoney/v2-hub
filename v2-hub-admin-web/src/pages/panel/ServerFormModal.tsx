@@ -3,6 +3,7 @@ import { useState } from 'react'
 import { api, csrfHeader, toApiError, type ApiError, type ProviderType, type Server, type TlsMode } from '../../api/client'
 import { useOpenGeneration } from '../../hooks/use-open-generation'
 import { mutate } from '../../hooks/use-remote'
+import { COUNTRY_OPTIONS, countryName } from './countries'
 
 const PROVIDER_OPTIONS: { value: ProviderType; label: string }[] = [{ value: 'xui', label: '3x-ui（v3.x）' }]
 const TLS_VERIFY: TlsMode = 'verify'
@@ -114,6 +115,29 @@ function ServerFormBody({ server, onSaved }: ServerFormBodyProps) {
     }
   }
 
+  /** 扫描位置（Ruling-65）：只把结果填进下拉框，保存才生效。 */
+  const handleLocate = async () => {
+    if (server === null) {
+      return
+    }
+    setIsBusy(true)
+    setError(null)
+    try {
+      const { data, error: apiError } = await api.POST('/api/admin/servers/{id}/locate', { params: { ...csrfHeader(), path: { id: server.id } } })
+      if (apiError !== undefined || data?.data === undefined) {
+        setError(toApiError(apiError))
+        return
+      }
+      form.setFieldValue('region', data.data.region)
+      void message.success(`公网 IP ${data.data.publicIp} 位于${countryName(data.data.region)}，保存后生效`)
+    } catch (err) {
+      reportError(err)
+      setError(toApiError(err))
+    } finally {
+      setIsBusy(false)
+    }
+  }
+
   const handleFinish = async (v: ServerForm) => {
     setIsBusy(true)
     setError(null)
@@ -142,7 +166,7 @@ function ServerFormBody({ server, onSaved }: ServerFormBodyProps) {
           baseUrl: server?.baseUrl ?? '',
           tlsMode: server?.tlsMode ?? TLS_VERIFY,
           certPinSha256: server?.certPinSha256 ?? '',
-          region: server?.region ?? '',
+          region: server?.region === '' ? undefined : server?.region,
           remark: server?.remark ?? '',
           isDisabled: server?.isDisabled ?? false,
         }}
@@ -191,8 +215,23 @@ function ServerFormBody({ server, onSaved }: ServerFormBodyProps) {
             </Space.Compact>
           </Form.Item>
         )}
-        <Form.Item name="region" label="地区">
-          <Input autoComplete="off" placeholder="如 HK" />
+        <Form.Item label="位置" extra={isEdit ? '可从列表选，或按服务器公网 IP 扫描' : '留空则接入后按服务器公网 IP 自动扫描'}>
+          <Space.Compact className="full-width">
+            <Form.Item name="region" noStyle>
+              <Select
+                aria-label="位置"
+                showSearch={{ optionFilterProp: 'label' }}
+                allowClear
+                placeholder="选择国家或地区"
+                options={COUNTRY_OPTIONS as { value: string; label: string }[]}
+              />
+            </Form.Item>
+            {isEdit && (
+              <Button onClick={() => void handleLocate()} loading={isBusy}>
+                扫描位置
+              </Button>
+            )}
+          </Space.Compact>
         </Form.Item>
         <Form.Item name="remark" label="备注">
           <Input autoComplete="off" />
