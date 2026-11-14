@@ -585,3 +585,46 @@ a.hub-btn {
   color: var(--hub-muted);
   cursor: not-allowed;
 }
+
+/* ---- 出口弹窗（M9）：表单 / 分享链接两种填法 ---- */
+.hub-exit-seg {
+  display: flex;
+  justify-content: flex-start;
+}
+
+.hub-exit-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 110px;
+  gap: 12px;
+}
+
+.hub-exit-checks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+}
+
+.hub-exit-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.hub-exit-check-block {
+  display: flex;
+  margin-bottom: 20px;
+}
+
+.hub-exit-keep {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 20px;
+}
+
+.hub-exit-keep .hub-field-hint {
+  margin-top: 0;
+}
