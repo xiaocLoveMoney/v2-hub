@@ -1,0 +1,29 @@
+# 生产部署（Ruling-62，docs/02 §6）：main 有推送时先跑三个模块的全量检查，全部通过才在生产机的自托管 Runner 上部署；
+# Actions 页可手动触发（只认 main）。PR 不经过这里，自托管 Runner 只跑 main 的部署。
+name: deploy
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  server:
+    uses: ./.github/workflows/server.yml
+  admin-web:
+    uses: ./.github/workflows/admin-web.yml
+  user-web:
+    uses: ./.github/workflows/user-web.yml
+  production:
+    needs: [server, admin-web, user-web]
+    if: github.ref == 'refs/heads/main'
+    runs-on: [self-hosted, v2-hub-prod]
+    timeout-minutes: 40
+    # 同一时间只部署一次；排队中的被更新的提交取代，进行中的不取消
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v7
+      - name: 构建并部署
+        run: bash v2-hub-contract/deploy/deploy_prod.sh
