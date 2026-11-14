@@ -298,24 +298,28 @@ hub POST /api/admin/servers/999999/reality-scan '{"target":"www.cloudflare.com"}
 portal POST "/api/admin/servers/$SERVER_A/reality-scan" '{"target":"www.cloudflare.com"}' >/dev/null; expect_code 401 "终端用户扫描目标"
 
 # ---- 11b. 服务器位置与负载趋势（Ruling-65）----
-# 面板报的公网 IP 取自容器的外网出口；容器没有外网时面板不报 IP，扫描只能 409，位置相关断言跳过
-srv="$(hub GET /api/admin/servers | jq -c --argjson s "$SERVER_A" '.data[] | select(.id == $s)')"
+# 面板报的公网 IP 取自容器的外网出口，刚起的面板要过一会儿才取到：接入时可能还没定位上（由每小时补扫兜底，单测覆盖），
+# 这里以“扫描位置”为准；容器没有外网时面板一直不报 IP，扫描只能 409，位置相关断言跳过
 server_body() { jq -nc --arg u "$XUI_A_URL" --arg r "$1" '{name:"it12-a",providerType:"xui",baseUrl:$u,apiToken:"",tlsMode:"verify",region:$r}'; }
+server_region() { hub GET /api/admin/servers | jq -r --argjson s "$SERVER_A" '.data[] | select(.id == $s) | .region'; }
 hub PUT "/api/admin/servers/$SERVER_A" "$(server_body ZZ)" >/dev/null; expect_code 400 "非法国家码"
 hub PUT "/api/admin/servers/$SERVER_A" "$(server_body 美国)" >/dev/null; expect_code 400 "国家名代替国家码"
-if [ "$(printf '%s' "$srv" | jq -r .region)" = "$GEO_COUNTRY" ]; then
-  queried="$(head -1 "$WORK/geo.log")"
-  case "$queried" in 10.*|127.*|172.1[6-9].*|172.2[0-9].*|172.3[01].*|192.168.*|"") fail "发给 IP 库的不是公网地址：$queried" ;; esac
-  hub PUT "/api/admin/servers/$SERVER_A" "$(server_body "")" >/dev/null; expect_code 200 "清空位置"
-  res="$(hub POST "/api/admin/servers/$SERVER_A/locate")"; expect_code 200 "扫描位置"
-  printf '%s' "$res" | jq -e --arg c "$GEO_COUNTRY" --arg ip "$queried" '.data.region == $c and .data.publicIp == $ip' >/dev/null || fail "扫描结果不对：$res"
-  [ "$(hub GET /api/admin/servers | jq -r --argjson s "$SERVER_A" '.data[] | select(.id == $s) | .region')" = "" ] || fail "扫描位置不应保存"
-  hub PUT "/api/admin/servers/$SERVER_A" "$(server_body "$GEO_COUNTRY")" >/dev/null; expect_code 200 "保存位置"
-  echo "  位置：面板公网 IP 查得 $GEO_COUNTRY"
-else
-  hub POST "/api/admin/servers/$SERVER_A/locate" >/dev/null; expect_code 409 "面板没报公网 IP 时扫描位置"
-  echo "  位置：面板没有报出公网 IP（容器无外网？），跳过位置断言"
-fi
+created_region="$(server_region)"
+hub PUT "/api/admin/servers/$SERVER_A" "$(server_body "")" >/dev/null; expect_code 200 "清空位置"
+res="$(hub POST "/api/admin/servers/$SERVER_A/locate")"
+case "$(cat "$WORK/code")" in
+  200)
+    ip="$(printf '%s' "$res" | jq -r .data.publicIp)"
+    printf '%s' "$res" | jq -e --arg c "$GEO_COUNTRY" '.data.region == $c' >/dev/null || fail "扫描结果不对：$res"
+    case "$ip" in 10.*|127.*|172.1[6-9].*|172.2[0-9].*|172.3[01].*|192.168.*|"") fail "面板报的不是公网地址：$ip" ;; esac
+    grep -qx "$ip" "$WORK/geo.log" || fail "IP 库没有收到面板报的 IP：$ip"
+    [ "$(server_region)" = "" ] || fail "扫描位置不应保存"
+    hub PUT "/api/admin/servers/$SERVER_A" "$(server_body "$GEO_COUNTRY")" >/dev/null; expect_code 200 "保存位置"
+    echo "  位置：接入时为“${created_region}”，扫描得 $GEO_COUNTRY"
+    ;;
+  409) echo "  位置：面板没有报出公网 IP（容器无外网？），跳过位置断言" ;;
+  *) fail "扫描位置：期望 200 或 409，实际 $(cat "$WORK/code") $res" ;;
+esac
 region="$(hub GET /api/admin/servers | jq -r --argjson s "$SERVER_A" '.data[] | select(.id == $s) | .region')"
 [ "$(hub GET "/api/admin/nodes?pageSize=100" | jq -r --argjson n "$NODE_A" '.data.items[] | select(.id == $n) | .region')" = "$region" ] || fail "节点地区应跟随服务器"
 [ "$(portal GET /api/user/nodes | jq -r --argjson n "$NODE_A" '.data[].nodes[] | select(.id == $n) | .region')" = "$region" ] || fail "用户端节点地区应跟随服务器"
