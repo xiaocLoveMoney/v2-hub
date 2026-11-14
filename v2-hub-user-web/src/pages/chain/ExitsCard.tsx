@@ -1,93 +1,14 @@
-import { useState, type FormEvent } from 'react'
+import { useState } from 'react'
 import { api, csrfHeader, toApiError, type ChainExit, type ChainOverview } from '../../api/client'
 import { useToast } from '../../components/toast-context'
-import { Alert, Badge, Button, Card, Confirm, Empty, Field, Modal, TextAreaField } from '../../components/ui'
+import { Alert, Badge, Button, Card, Confirm, Empty } from '../../components/ui'
 import { useCopy } from '../../hooks/use-copy'
 import { mutate } from '../../hooks/use-remote'
-import { MAX_CHAIN_NAME_LEN, MAX_EXIT_LINK_LEN, isValidChainName } from './labels'
 import { useI18n } from '../../i18n/i18n-context'
+import { ExitModal } from './ExitModal'
 
-const LINK_ROWS = 4
 const NEW_EXIT_KEY = 'new'
 const NO_ROUTES = 0
-
-interface ExitFormModalProps {
-  /** null = 添加；否则编辑这个出口。 */
-  exit: ChainExit | null
-  isOpen: boolean
-  onClose: () => void
-  onSaved: () => void
-}
-
-/** 添加或编辑我的出口：添加时链接必填；编辑时链接留空表示不换。 */
-function ExitFormModal({ exit, isOpen, onClose, onSaved }: ExitFormModalProps) {
-  const { t } = useI18n()
-  const [name, setName] = useState(exit?.name ?? '')
-  const [link, setLink] = useState('')
-  const [error, setError] = useState<string | null>(null)
-  const [isBusy, setIsBusy] = useState(false)
-  const isEditing = exit !== null
-  const trimmedLink = link.trim()
-  const isNameValid = isValidChainName(name) && (!isEditing || name.trim() !== '')
-  const canSubmit = isNameValid && (isEditing || trimmedLink !== '')
-
-  const handleSubmit = async (e: FormEvent) => {
-    e.preventDefault()
-    if (!canSubmit) {
-      return
-    }
-    setIsBusy(true)
-    setError(null)
-    const err = await mutate(() => {
-      if (exit === null) {
-        return api.POST('/api/user/chain/exits', { params: csrfHeader(), body: { link: trimmedLink, name: name.trim() } })
-      }
-      const body = trimmedLink === '' ? { name: name.trim() } : { name: name.trim(), link: trimmedLink }
-      return api.PUT('/api/user/chain/exits/{id}', { params: { ...csrfHeader(), path: { id: exit.id } }, body })
-    })
-    setIsBusy(false)
-    if (err !== null) {
-      setError(err.message)
-      return
-    }
-    onSaved()
-  }
-
-  return (
-    <Modal title={t(isEditing ? 'chain.editExit' : 'chain.addExit')} isOpen={isOpen} onClose={onClose}>
-      {error !== null && <Alert tone="plain">{error}</Alert>}
-      <form onSubmit={(e) => void handleSubmit(e)} noValidate>
-        <TextAreaField
-          label={t(isEditing ? 'chain.newLink' : 'chain.exitLink')}
-          autoComplete="off"
-          spellCheck={false}
-          rows={LINK_ROWS}
-          maxLength={MAX_EXIT_LINK_LEN}
-          value={link}
-          onChange={(e) => setLink(e.target.value)}
-          hint={t('chain.linkHint')}
-        />
-        <Field
-          label={t(isEditing ? 'chain.name' : 'chain.nameOptional')}
-          autoComplete="off"
-          maxLength={MAX_CHAIN_NAME_LEN}
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          error={isValidChainName(name) ? null : t('chain.badName', { max: MAX_CHAIN_NAME_LEN })}
-          hint={isEditing ? undefined : t('chain.exitNameHint')}
-        />
-        <div className="hub-actions">
-          <Button type="submit" variant="primary" isBusy={isBusy} disabled={!canSubmit}>
-            {t('common.save')}
-          </Button>
-          <Button variant="outline" onClick={onClose}>
-            {t('common.cancel')}
-          </Button>
-        </div>
-      </form>
-    </Modal>
-  )
-}
 
 interface ExitItemProps {
   exit: ChainExit
@@ -215,7 +136,7 @@ export function ExitsCard({ overview, onChanged }: { overview: ChainOverview; on
         <ExitItem key={x.id} exit={x} isWritable={overview.exitAllowed} onEdit={() => setEditing(x)} onDelete={() => setDeleting(x)} />
       ))}
       {/* 每次打开都重新挂载，表单状态不残留上一次的输入 */}
-      {(isAdding || editing !== null) && <ExitFormModal key={editing?.id ?? NEW_EXIT_KEY} exit={editing} isOpen onClose={closeForm} onSaved={handleSaved} />}
+      {(isAdding || editing !== null) && <ExitModal key={editing?.id ?? NEW_EXIT_KEY} exit={editing} isOpen onClose={closeForm} onSaved={handleSaved} />}
       <Confirm title={t('chain.deleteExit')} isOpen={deleting !== null} isBusy={isDeleting} confirmText={t('common.delete')} onConfirm={() => void handleDelete()} onClose={() => setDeleting(null)}>
         <p>{t('chain.deleteExitConfirm', { name: deleting?.name ?? '' })}</p>
         {deleting !== null && deleting.routeCount > NO_ROUTES && <Alert tone="warning">{t('chain.deleteExitCascade', { n: deleting.routeCount })}</Alert>}
