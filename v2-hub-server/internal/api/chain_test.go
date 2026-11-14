@@ -11,7 +11,7 @@ import (
 	"v2-hub-server/internal/service"
 )
 
-// 示例链接里的用户名与口令是示例值，不对应任何真实节点。
+// 示例链接里的用户名与密码是示例值，不对应任何真实节点。
 const (
 	chainTestLink     = "socks5://sample-user:sample-auth-0001@home.example.net:1080#home-socks"
 	chainPath         = "/api/user/chain"

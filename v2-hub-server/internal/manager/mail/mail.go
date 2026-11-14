@@ -54,7 +54,7 @@ type Config struct {
 	Port int
 	// Username 为空时不做认证。
 	Username string
-	// Secret 是 SMTP 口令或授权码。
+	// Secret 是 SMTP 密码或授权码。
 	Secret string
 	// From 是发件人地址；为空即邮件不可用。
 	From string
@@ -172,7 +172,7 @@ func (s *SMTPSender) deliver(c *smtp.Client, to string, body []byte) error {
 		}
 	}
 	if s.cfg.Username != "" {
-		// PlainAuth 自身拒绝在未加密的非本机连接上发送口令
+		// PlainAuth 自身拒绝在未加密的非本机连接上发送密码
 		if err := c.Auth(smtp.PlainAuth("", s.cfg.Username, s.cfg.Secret, s.cfg.Host)); err != nil {
 			return fmt.Errorf("smtp auth: %w", err)
 		}

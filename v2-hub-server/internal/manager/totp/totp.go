@@ -1,4 +1,4 @@
-// Package totp 实现 RFC 6238 基于时间的一次性口令（HMAC-SHA1、30 秒步长、6 位），兼容常见验证器 App。
+// Package totp 实现 RFC 6238 基于时间的一次性密码（HMAC-SHA1、30 秒步长、6 位），兼容常见验证器 App。
 // 选型与参数见 docs/03 §4.3。
 package totp
 

@@ -18,7 +18,7 @@ run:
 	@HUB_INSECURE_DEV_COOKIE=1 HUB_DATABASE_URL="$${HUB_DATABASE_URL:-$(DEV_DB_URL)}" \
 		HUB_ENCRYPTION_KEY="$${HUB_ENCRYPTION_KEY:-$(DEV_ENC_KEY)}" go run ./cmd/hub -f $(CONFIG)
 
-# 创建超级管理员：make admin-create USERNAME=root（口令在终端无回显输入，或经管道传入一行）
+# 创建超级管理员：make admin-create USERNAME=root（密码在终端无回显输入，或经管道传入一行）
 admin-create:
 	@test -n "$(USERNAME)" || { echo "用法: make admin-create USERNAME=<用户名>"; exit 1; }
 	@HUB_DATABASE_URL="$${HUB_DATABASE_URL:-$(DEV_DB_URL)}" go run ./cmd/hub admin-create -f $(CONFIG) -username "$(USERNAME)"

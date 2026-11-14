@@ -355,7 +355,7 @@ type Querier interface {
 	// 系统设置、发件箱与邮箱验证码（docs/03 §5.6、§5.7）。
 	ListSettings(ctx context.Context) ([]ListSettingsRow, error)
 	// ---- 共享账号 ----
-	// 管理端：全部条目与各自限定的套餐，不含口令
+	// 管理端：全部条目与各自限定的套餐，不含密码
 	ListSharedAccounts(ctx context.Context, id int64) ([]ListSharedAccountsRow, error)
 	// 商店里的套餐：已上架且至少有一个时长选项；node_count 是该套餐当前可输出的节点数（条件同 ListUserSubNodes）
 	ListShopPlans(ctx context.Context) ([]ListShopPlansRow, error)

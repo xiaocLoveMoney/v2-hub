@@ -272,7 +272,7 @@ func TestSharedAccountsVisibilityAndEncryption(t *testing.T) {
 			t.Fatalf("%s reveal = %v, want not_found", name, err)
 		}
 	}
-	// 修改时不带口令 = 沿用原值
+	// 修改时不带密码 = 沿用原值
 	in.Secret, in.Remark = "", "换了备注"
 	if _, err := f.content.UpdateSharedAccount(ctx, f.actor, forAll.ID, in, nil); err != nil {
 		t.Fatalf("UpdateSharedAccount: %v", err)

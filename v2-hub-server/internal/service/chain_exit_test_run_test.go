@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	// HTTP / HTTPS 代理出口的示例链接（Ruling-51）；用户名与口令是示例值。
+	// HTTP / HTTPS 代理出口的示例链接（Ruling-51）；用户名与密码是示例值。
 	ownHTTPLink  = "http://sample-user:sample-auth-0001@203.0.114.21:8080#office-http"
 	ownHTTPSLink = "https://home.example.net:8443#office-https"
 	sqlSetExitOn = `UPDATE chain_exit SET is_enabled = $2 WHERE id = $1`

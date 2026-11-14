@@ -20,7 +20,7 @@ import (
 	"v2-hub-server/internal/manager/crypto"
 )
 
-// 邮箱验证码与账号自助（docs/03 §5.7、§5.8）。Ruling-23：注册、找回口令、换绑都用验证码，不发链接。
+// 邮箱验证码与账号自助（docs/03 §5.7、§5.8）。Ruling-23：注册、找回密码、换绑都用验证码，不发链接。
 
 // 验证码用途，互不通用。
 const (
@@ -52,11 +52,11 @@ const (
 
 var emailCodeActions = map[string]string{
 	EmailCodeRegister: "注册账号",
-	EmailCodeReset:    "重设登录口令",
+	EmailCodeReset:    "重设登录密码",
 	EmailCodeBind:     "绑定邮箱",
 }
 
-// AccountService 负责邮箱验证码与账号自助（注册、找回口令、换绑邮箱、注销）。
+// AccountService 负责邮箱验证码与账号自助（注册、找回密码、换绑邮箱、注销）。
 type AccountService struct {
 	store
 	sealer   *crypto.Sealer
@@ -72,7 +72,7 @@ type AccountService struct {
 type AccountDeps struct {
 	Settings *SettingsService
 	Mail     *MailService
-	// Users 用来建用户、删用户与触发对账；Portal 用来建会话与确认口令 / 两步验证。
+	// Users 用来建用户、删用户与触发对账；Portal 用来建会话与确认密码 / 两步验证。
 	Users  *UserService
 	Portal *PortalAuthService
 }
@@ -130,9 +130,9 @@ func (s *AccountService) emailVerifyRequired(cur Settings) bool {
 	return cur.Register.EmailVerify && s.mail.Enabled()
 }
 
-// SendEmailCode 给未登录的访客发注册或找回口令的验证码。
+// SendEmailCode 给未登录的访客发注册或找回密码的验证码。
 // 错误：CodeFeatureDisabled（邮件未配置、注册已关闭）、CodeInvalidArgument（邮箱或用途不合法、域名不允许）、
-// CodeConflict（注册用途下邮箱已被使用）、CodeRateLimited。找回口令对不存在的邮箱同样返回成功，只是不发信。
+// CodeConflict（注册用途下邮箱已被使用）、CodeRateLimited。找回密码对不存在的邮箱同样返回成功，只是不发信。
 func (s *AccountService) SendEmailCode(ctx context.Context, rawEmail, purpose string, ip *netip.Addr) error {
 	if purpose != EmailCodeRegister && purpose != EmailCodeReset {
 		return newError(CodeInvalidArgument, msgEmailCodeBadUse)

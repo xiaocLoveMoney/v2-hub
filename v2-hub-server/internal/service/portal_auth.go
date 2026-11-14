@@ -20,7 +20,7 @@ import (
 	"v2-hub-server/internal/manager/totp"
 )
 
-// 终端用户的登录、会话、口令与两步验证（docs/03 §5.3）。规则与管理员侧同构，差异只在有效期、口令长度与停用处理。
+// 终端用户的登录、会话、密码与两步验证（docs/03 §5.3）。规则与管理员侧同构，差异只在有效期、密码长度与停用处理。
 
 const (
 	// CodeAccountDisabled：账号已停用，只允许查看本人信息与退出（docs/03 §5）。
@@ -42,7 +42,7 @@ const (
 	guardKeyPortalTOTP    = "ptotp:"
 	guardKeyPortalSecret  = "ppw:"
 	msgAccountDisabled    = "账号已停用，请联系管理员"
-	msgOldSecretIncorrect = "原口令不正确"
+	msgOldSecretIncorrect = "原密码不正确"
 )
 
 // ErrAccountDisabled 供 errors.Is 判定。
@@ -96,7 +96,7 @@ type LoginLogItem struct {
 	CreatedAt time.Time
 }
 
-// PortalAuthService 负责终端用户登录、会话校验、改口令与两步验证。
+// PortalAuthService 负责终端用户登录、会话校验、改密码与两步验证。
 type PortalAuthService struct {
 	store
 	cfg    PortalAuthConfig
@@ -138,12 +138,12 @@ func userTOTPAAD(userID int64, pending bool) []byte {
 
 func validateUserLoginSecret(pw string) error {
 	if n := utf8.RuneCountInString(pw); n < minUserPasswordLen || n > maxPasswordLen {
-		return newError(CodeInvalidArgument, fmt.Sprintf("口令长度须为 %d–%d 个字符", minUserPasswordLen, maxPasswordLen))
+		return newError(CodeInvalidArgument, fmt.Sprintf("密码长度须为 %d–%d 个字符", minUserPasswordLen, maxPasswordLen))
 	}
 	return nil
 }
 
-// Login 校验用户名口令并创建会话。停用的用户可以登录（只能看到停用提示）。
+// Login 校验用户名密码并创建会话。停用的用户可以登录（只能看到停用提示）。
 func (s *PortalAuthService) Login(ctx context.Context, in LoginInput) (*PortalLoginResult, error) {
 	userKey := guardKeyPortalUser + strings.ToLower(in.Username)
 	ipKey := ""
@@ -171,7 +171,7 @@ func (s *PortalAuthService) Login(ctx context.Context, in LoginInput) (*PortalLo
 		return nil, failure(msgBadCredentials)
 	}
 	if user.TotpSecretEnc != nil {
-		// 口令已正确：未带验证码时提示补交，不计失败
+		// 密码已正确：未带验证码时提示补交，不计失败
 		if in.TOTPCode == "" {
 			return nil, newError(CodeTOTPRequired, msgTOTPRequired)
 		}
@@ -327,7 +327,7 @@ func (s *PortalAuthService) Logout(ctx context.Context, p *UserPrincipal) error 
 	})
 }
 
-// ChangeLoginSecret 本人改口令：须提交旧口令，成功后其余会话全部失效。
+// ChangeLoginSecret 本人改密码：须提交旧密码，成功后其余会话全部失效。
 func (s *PortalAuthService) ChangeLoginSecret(ctx context.Context, p *UserPrincipal, oldSecret, newSecret string, ip *netip.Addr) error {
 	if err := validateUserLoginSecret(newSecret); err != nil {
 		return err
@@ -350,8 +350,8 @@ func (s *PortalAuthService) ChangeLoginSecret(ctx context.Context, p *UserPrinci
 	})
 }
 
-// confirmSecret 校验本人当前口令，用于改口令、换绑邮箱、注销等敏感操作；连续输错按登录频控锁定。
-// 错误：CodeInvalidArgument（口令不对）、CodeRateLimited。
+// confirmSecret 校验本人当前密码，用于改密码、换绑邮箱、注销等敏感操作；连续输错按登录频控锁定。
+// 错误：CodeInvalidArgument（密码不对）、CodeRateLimited。
 func (s *PortalAuthService) confirmSecret(ctx context.Context, p *UserPrincipal, secret string) error {
 	guardKey := guardKeyPortalSecret + fmt.Sprint(p.UserID)
 	if s.guard.IsLocked(guardKey) {

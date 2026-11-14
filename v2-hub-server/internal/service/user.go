@@ -427,7 +427,7 @@ type ProvisionCounts struct {
 	Failed  int
 }
 
-// User 是用户视图（不含口令与面板凭据）。
+// User 是用户视图（不含密码与面板凭据）。
 type User struct {
 	ID         int64
 	Username   string
@@ -960,7 +960,7 @@ func (s *UserService) UpdateQuota(ctx context.Context, actor *AdminPrincipal, id
 	return s.GetUser(ctx, id)
 }
 
-// ResetUserPassword 重置客户后台登录口令。
+// ResetUserPassword 重置客户后台登录密码。
 func (s *UserService) ResetUserPassword(ctx context.Context, actor *AdminPrincipal, id int64, pw string, ip *netip.Addr) error {
 	if err := validateUserLoginSecret(pw); err != nil {
 		return err
@@ -977,7 +977,7 @@ func (s *UserService) ResetUserPassword(ctx context.Context, actor *AdminPrincip
 		if n == 0 {
 			return newError(CodeNotFound, msgUserNotFound)
 		}
-		// 管理员重置口令后该用户全部会话失效（docs/03 §5.3）
+		// 管理员重置密码后该用户全部会话失效（docs/03 §5.3）
 		if err := q.DeleteUserSessionsByUser(ctx, id); err != nil {
 			return fmt.Errorf("revoke sessions of user %d: %w", id, err)
 		}

@@ -46,7 +46,7 @@ func TestTOTPLoginFlow(t *testing.T) {
 	if _, err := f.auth.SetupTOTP(ctx, p); !errors.Is(err, ErrConflict) {
 		t.Fatalf("setup when enabled err = %v", err)
 	}
-	// 口令正确但缺验证码：totp_required，不计失败
+	// 密码正确但缺验证码：totp_required，不计失败
 	if _, err := f.auth.Login(ctx, LoginInput{Username: "root", Password: cred}); !errors.Is(err, ErrTOTPRequired) {
 		t.Fatalf("login without code err = %v", err)
 	}
@@ -62,7 +62,7 @@ func TestTOTPLoginFlow(t *testing.T) {
 	if !res.Principal.TOTPEnabled {
 		t.Fatal("principal should report totp enabled")
 	}
-	// 错误口令不会泄露“需要验证码”
+	// 错误密码不会泄露“需要验证码”
 	if _, err := f.auth.Login(ctx, LoginInput{Username: "root", Password: bad}); !errors.Is(err, ErrUnauthenticated) {
 		t.Fatalf("bad credential err = %v", err)
 	}

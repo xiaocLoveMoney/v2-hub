@@ -12,14 +12,14 @@ import (
 )
 
 const (
-	promptNew     = "新口令（12–128 个字符）: "
+	promptNew     = "新密码（12–128 个字符）: "
 	promptConfirm = "再输入一次: "
 )
 
-var errCredentialMismatch = errors.New("两次输入的口令不一致")
+var errCredentialMismatch = errors.New("两次输入的密码不一致")
 
-// readNewCredential 读取新口令：stdin 是终端时无回显输入两次并比对；否则（管道 / 脚本）读第一行。
-// 口令只在内存中传给 service，不打印、不写日志。
+// readNewCredential 读取新密码：stdin 是终端时无回显输入两次并比对；否则（管道 / 脚本）读第一行。
+// 密码只在内存中传给 service，不打印、不写日志。
 func readNewCredential(stdin *os.File, prompt io.Writer) (string, error) {
 	fd := int(stdin.Fd())
 	if !term.IsTerminal(fd) {

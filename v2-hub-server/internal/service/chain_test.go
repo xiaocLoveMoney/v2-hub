@@ -13,7 +13,7 @@ import (
 	"v2-hub-server/internal/manager/render"
 )
 
-// 出口的示例链接；用户名、口令与 UUID 都是示例值，不对应任何真实节点。
+// 出口的示例链接；用户名、密码与 UUID 都是示例值，不对应任何真实节点。
 const (
 	chainSocksLink    = "socks5://sample-user:sample-auth-0001@home.example.net:1080#home-socks"
 	chainVLESSLink    = "vless://11111111-1111-4111-8111-111111111111@exit.example.net:443?type=tcp&security=tls&sni=exit.example.net#own-vps"

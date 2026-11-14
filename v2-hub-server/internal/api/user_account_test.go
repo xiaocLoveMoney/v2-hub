@@ -67,7 +67,7 @@ func TestRegisterInviteAndDeleteAccountEndpoints(t *testing.T) {
 		t.Fatalf("invite after reset = %+v, %v", after, err)
 	}
 
-	// 邮件未配置：换绑与找回口令整体不可用
+	// 邮件未配置：换绑与找回密码整体不可用
 	expectStatus(t, alice.do(http.MethodPost, "/api/user/account/email-code", map[string]any{"email": "new@example.com"}),
 		http.StatusForbidden, string(service.CodeFeatureDisabled))
 	expectStatus(t, alice.do(http.MethodPost, "/api/user/auth/password/reset",
@@ -81,7 +81,7 @@ func TestRegisterInviteAndDeleteAccountEndpoints(t *testing.T) {
 		t.Fatalf("admin users by email keyword = %+v, %v", page, err)
 	}
 
-	// 注销：口令错 400；成功后会话失效、用户名可再注册
+	// 注销：密码错 400；成功后会话失效、用户名可再注册
 	expectStatus(t, alice.do(http.MethodPost, "/api/user/account/delete", map[string]any{"currentPassword": "wrong-guess-123"}),
 		http.StatusBadRequest, string(service.CodeInvalidArgument))
 	expectStatus(t, alice.do(http.MethodPost, "/api/user/account/delete", map[string]any{"currentPassword": cred}), http.StatusOK, codeOK)

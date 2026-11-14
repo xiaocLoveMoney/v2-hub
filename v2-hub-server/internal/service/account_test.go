@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-// registerInput 返回一份默认合法的注册输入；secret 用测试口令。
+// registerInput 返回一份默认合法的注册输入；secret 用测试密码。
 func registerInput(username string) RegisterInput {
 	in := RegisterInput{Username: username, Email: username + "@example.com"}
 	in.Password = cred
@@ -420,7 +420,7 @@ func TestResetLoginSecretKeepsTOTPAndRevokesSessions(t *testing.T) {
 	if _, err := f.portal.Login(ctx, LoginInput{Username: "alice", Password: cred}); !errors.Is(err, ErrUnauthenticated) {
 		t.Fatalf("old secret after reset = %v", err)
 	}
-	// 新口令正确 → 进入两步验证环节（而不是直接登录）
+	// 新密码正确 → 进入两步验证环节（而不是直接登录）
 	if _, err := f.portal.Login(ctx, LoginInput{Username: "alice", Password: nextCred}); !errors.Is(err, ErrTOTPRequired) {
 		t.Fatalf("new secret after reset = %v, want totp_required", err)
 	}

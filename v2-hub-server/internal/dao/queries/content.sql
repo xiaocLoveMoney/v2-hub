@@ -75,7 +75,7 @@ DELETE FROM tutorial WHERE id = $1;
 -- ---- 共享账号 ----
 
 -- name: ListSharedAccounts :many
--- 管理端：全部条目与各自限定的套餐，不含口令
+-- 管理端：全部条目与各自限定的套餐，不含密码
 SELECT a.id, a.name, a.category, a.account, a.remark, a.sort_order, a.is_published,
        COALESCE((SELECT array_agg(p.plan_id ORDER BY p.plan_id) FROM shared_account_plan p WHERE p.shared_account_id = a.id), '{}')::bigint[] AS plan_ids
 FROM shared_account a

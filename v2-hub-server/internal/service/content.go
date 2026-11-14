@@ -78,7 +78,7 @@ const (
 	msgBadSortOrder         = "排序值须在 0–100000 之间"
 	msgSharedNotFound       = "共享账号不存在"
 	msgSharedBadFields      = "名称、分类、账号不能为空且不能过长"
-	msgSharedSecretRequired = "请填写口令"
+	msgSharedSecretRequired = "请填写密码"
 	msgSharedBadPlans       = "限定的套餐不存在"
 	msgSharedDisabled       = "共享账号未开启"
 )
@@ -534,7 +534,7 @@ func (s *ContentService) DeleteTutorial(ctx context.Context, actor *AdminPrincip
 
 // ---- 共享账号 ------------------------------------------------------------------
 
-// SharedAccount 是一条共享账号（不含口令）。IsPublished、PlanIDs 只在管理端有意义。
+// SharedAccount 是一条共享账号（不含密码）。IsPublished、PlanIDs 只在管理端有意义。
 type SharedAccount struct {
 	ID          int64
 	Name        string
@@ -588,7 +588,7 @@ func sharedFromRow(r sqlcgen.ListSharedAccountsRow) SharedAccount {
 		IsPublished: r.IsPublished, PlanIDs: plans}
 }
 
-// ListSharedAccounts 列出全部共享账号（管理端，不含口令）。
+// ListSharedAccounts 列出全部共享账号（管理端，不含密码）。
 func (s *ContentService) ListSharedAccounts(ctx context.Context) ([]SharedAccount, error) {
 	rows, err := s.q.ListSharedAccounts(ctx, 0)
 	if err != nil {
@@ -613,7 +613,7 @@ func (s *ContentService) getSharedAccount(ctx context.Context, id int64) (*Share
 	return &a, nil
 }
 
-// saveSharedExtras 写口令（secret 非空时）与限定套餐。
+// saveSharedExtras 写密码（secret 非空时）与限定套餐。
 func (s *ContentService) saveSharedExtras(ctx context.Context, q *sqlcgen.Queries, id int64, in SharedAccountInput) error {
 	if in.Secret != "" {
 		sealed, err := s.sealer.Seal([]byte(in.Secret), sharedAAD(id))
@@ -645,7 +645,7 @@ func (s *ContentService) saveSharedExtras(ctx context.Context, q *sqlcgen.Querie
 	return nil
 }
 
-// CreateSharedAccount 新建共享账号，口令加密保存。错误：CodeInvalidArgument。
+// CreateSharedAccount 新建共享账号，密码加密保存。错误：CodeInvalidArgument。
 func (s *ContentService) CreateSharedAccount(ctx context.Context, actor *AdminPrincipal, in SharedAccountInput, ip *netip.Addr) (*SharedAccount, error) {
 	if err := in.validate(); err != nil {
 		return nil, err
@@ -674,7 +674,7 @@ func (s *ContentService) CreateSharedAccount(ctx context.Context, actor *AdminPr
 	return s.getSharedAccount(ctx, id)
 }
 
-// UpdateSharedAccount 修改共享账号；Secret 为空表示沿用原口令。错误：CodeNotFound、CodeInvalidArgument。
+// UpdateSharedAccount 修改共享账号；Secret 为空表示沿用原密码。错误：CodeNotFound、CodeInvalidArgument。
 func (s *ContentService) UpdateSharedAccount(ctx context.Context, actor *AdminPrincipal, id int64, in SharedAccountInput, ip *netip.Addr) (*SharedAccount, error) {
 	if err := in.validate(); err != nil {
 		return nil, err
@@ -723,7 +723,7 @@ func (s *ContentService) openShared(id int64, sealed []byte) (string, error) {
 	return string(plain), nil
 }
 
-// RevealSharedAccount 返回共享账号的口令（管理端），读取记审计。错误：CodeNotFound。
+// RevealSharedAccount 返回共享账号的密码（管理端），读取记审计。错误：CodeNotFound。
 func (s *ContentService) RevealSharedAccount(ctx context.Context, actor *AdminPrincipal, id int64, ip *netip.Addr) (string, error) {
 	sealed, err := s.q.GetSharedAccountCredential(ctx, id)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -758,7 +758,7 @@ func (s *ContentService) sharedViewer(ctx context.Context, p *UserPrincipal) (in
 	return row.PlanID.Int64, nil
 }
 
-// ListVisibleSharedAccounts 列出本人可见的共享账号（不含口令）。错误：CodeFeatureDisabled。
+// ListVisibleSharedAccounts 列出本人可见的共享账号（不含密码）。错误：CodeFeatureDisabled。
 func (s *ContentService) ListVisibleSharedAccounts(ctx context.Context, p *UserPrincipal) ([]SharedAccount, error) {
 	planID, err := s.sharedViewer(ctx, p)
 	if err != nil {
@@ -778,7 +778,7 @@ func (s *ContentService) ListVisibleSharedAccounts(ctx context.Context, p *UserP
 	return out, nil
 }
 
-// RevealVisibleSharedAccount 返回一条本人可见的共享账号的口令，读取记审计；不可见或不存在一律 CodeNotFound（R8）。
+// RevealVisibleSharedAccount 返回一条本人可见的共享账号的密码，读取记审计；不可见或不存在一律 CodeNotFound（R8）。
 func (s *ContentService) RevealVisibleSharedAccount(ctx context.Context, p *UserPrincipal, id int64, ip *netip.Addr) (string, error) {
 	planID, err := s.sharedViewer(ctx, p)
 	if err != nil {
@@ -796,7 +796,7 @@ func (s *ContentService) RevealVisibleSharedAccount(ctx context.Context, p *User
 	}
 	audit := AuditEntry{ActorType: ActorUser, ActorID: p.UserID, Action: ActionPortalSharedReveal, TargetType: targetShared, TargetID: fmt.Sprint(id), ClientIP: ip}
 	if p.Impersonated() {
-		// 代入会话下看口令的是管理员本人，审计记实际操作的人（docs/03 §5.17 可见范围）
+		// 代入会话下看密码的是管理员本人，审计记实际操作的人（docs/03 §5.17 可见范围）
 		audit.ActorType, audit.ActorID, audit.Detail = ActorAdmin, p.ImpersonatorAdminID, map[string]any{"asUserId": p.UserID}
 	}
 	if err := writeAudit(ctx, s.q, audit); err != nil {

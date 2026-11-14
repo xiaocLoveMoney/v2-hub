@@ -132,7 +132,7 @@ func validExitID(id string) bool {
 	return id != "" && len(id) <= maxLooseIDLen && !hasControl(id) && !strings.ContainsFunc(id, unicode.IsSpace)
 }
 
-// validSSKey 校验 Shadowsocks 的口令；2022 系列必须是定长密钥的 Base64（可以是“服务端密钥:用户密钥”）。
+// validSSKey 校验 Shadowsocks 的密码；2022 系列必须是定长密钥的 Base64（可以是“服务端密钥:用户密钥”）。
 func validSSKey(method, password string) bool {
 	if password == "" || !validExitText(password, maxExitSecretLen) {
 		return false
@@ -206,18 +206,18 @@ func validateExitCredential(n render.ProxyNode) error {
 		}
 	case render.ProtoTrojan:
 		if n.Password == "" || !validExitText(n.Password, maxExitSecretLen) {
-			return badExitField("口令")
+			return badExitField("密码")
 		}
 	case render.ProtoShadowsocks:
 		if !slices.Contains(exitSSMethods, n.Method) {
 			return badExitField("加密方式")
 		}
 		if !validSSKey(n.Method, n.Password) {
-			return badExitField("口令")
+			return badExitField("密码")
 		}
 	case render.ProtoSocks, render.ProtoHTTP:
 		if !validExitText(n.Username, maxExitSecretLen) || !validExitText(n.Password, maxExitSecretLen) {
-			return badExitField("用户名或口令")
+			return badExitField("用户名或密码")
 		}
 	default:
 		return newError(CodeInvalidArgument, msgExitUnsupported)
