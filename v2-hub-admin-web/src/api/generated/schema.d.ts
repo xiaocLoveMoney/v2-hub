@@ -4470,6 +4470,13 @@ export interface components {
          * @enum {string}
          */
         ChainExitTestMode: "tcp" | "http" | "real";
+        /**
+         * @description 不通的原因大类（0.7.2，docs/03 §5.21，Ruling-56）；连通时为 none。
+         *     refused = 出口拒绝连接；timeout = 连接出口超时；proxy_rejected = 端口能连上但代理请求被断开；
+         *     proxy_no_response = 端口能连上但代理请求一直没有回应；bad_status = 请求发出去了但测试地址返回异常状态；unknown = 其他。
+         * @enum {string}
+         */
+        ChainExitTestFailReason: "none" | "refused" | "timeout" | "proxy_rejected" | "proxy_no_response" | "bad_status" | "unknown";
         ChainExitTestInput: {
             /**
              * Format: int64
@@ -4482,6 +4489,7 @@ export interface components {
             /** @description 是否连通 */
             ok: boolean;
             mode: components["schemas"]["ChainExitTestMode"];
+            reason: components["schemas"]["ChainExitTestFailReason"];
             /**
              * Format: int64
              * @description 延迟，毫秒；不通时为 0
