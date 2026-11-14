@@ -29,8 +29,10 @@ type Fake struct {
 	core      fakeCore
 	// 出站测试：预设的结果与收到的请求；网页证书路径
 	testResult panel.OutboundTestResult
-	tests      []OutboundTest
-	webCert    panel.CertFiles
+	// testResultByMode 优先于 testResult：按方式给不同的结果。
+	testResultByMode map[panel.OutboundTestMode]panel.OutboundTestResult
+	tests            []OutboundTest
+	webCert          panel.CertFiles
 	// REALITY 目标扫描：预设的结果（按目标索引）与收到的目标
 	scans       map[string]panel.RealityScan
 	scanTargets [][]string

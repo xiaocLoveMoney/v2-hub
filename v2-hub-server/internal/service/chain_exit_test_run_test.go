@@ -42,7 +42,7 @@ func TestExitTest(t *testing.T) {
 	if err != nil {
 		t.Fatalf("TestExit: %v", err)
 	}
-	want := ExitTestResult{OK: true, Mode: "http", DelayMs: 87, HTTPStatus: 204, EgressIP: "198.51.100.7", EgressRegion: "JP"}
+	want := ExitTestResult{OK: true, Mode: "http", Reason: ExitTestReasonNone, DelayMs: 87, HTTPStatus: 204, EgressIP: "198.51.100.7", EgressRegion: "JP"}
 	if *res != want {
 		t.Errorf("result = %+v, want %+v", *res, want)
 	}
@@ -72,11 +72,65 @@ func TestExitTest(t *testing.T) {
 	_, err = f.chain.TestExit(ctx, f.principal, home.ID, first.ID, "icmp")
 	wantErr(t, "unknown mode", err, ErrInvalidArgument)
 
-	// 连不上：照常返回结果，ok 为 false，原因不外泄
-	f.fake.SetOutboundTestResult(panel.OutboundTestResult{Message: "dial tcp 93.184.216.34:1080: i/o timeout"})
+	// 连不上：照常返回结果，ok 为 false，只给原因大类，面板原文不外泄
+	f.fake.SetOutboundTestResult(panel.OutboundTestResult{Failure: panel.OutboundFailTimeout, Message: "dial tcp 93.184.216.34:1080: i/o timeout"})
 	res, err = f.chain.TestExit(ctx, f.principal, home.ID, first.ID, string(panel.OutboundTestTCP))
-	if err != nil || res.OK || res.Error != "" || res.DelayMs != 0 {
+	if err != nil || res.OK || res.Error != "" || res.DelayMs != 0 || res.Reason != ExitTestReasonTimeout {
 		t.Errorf("failed probe: %+v err %v", res, err)
+	}
+}
+
+// 不通的原因大类（Ruling-56）：tcp 直接按面板的归类；http / real 不通且没有 HTTP 状态时补一次 tcp 探测来区分。
+func TestExitTestReason(t *testing.T) {
+	f := newExitTestFixture(t)
+	ctx := context.Background()
+	platform := f.platformExit(t, chainPlatformName, true, false)
+	failed := func(kind panel.OutboundFailure) panel.OutboundTestResult {
+		return panel.OutboundTestResult{Failure: kind, Message: "panel detail"}
+	}
+	dialOK := panel.OutboundTestResult{OK: true, DelayMs: 3}
+	cases := []struct {
+		name      string
+		mode      panel.OutboundTestMode
+		primary   panel.OutboundTestResult
+		dial      panel.OutboundTestResult
+		want      string
+		wantCalls int
+	}{
+		{"连通", panel.OutboundTestHTTP, panel.OutboundTestResult{OK: true, DelayMs: 80, HTTPStatus: 204}, dialOK, ExitTestReasonNone, 1},
+		{"tcp 被拒", panel.OutboundTestTCP, failed(panel.OutboundFailRefused), failed(panel.OutboundFailRefused), ExitTestReasonRefused, 1},
+		{"tcp 归不了类", panel.OutboundTestTCP, failed(panel.OutboundFailOther), failed(panel.OutboundFailOther), ExitTestReasonUnknown, 1},
+		{"http 被断开、端口能连上", panel.OutboundTestHTTP, failed(panel.OutboundFailAborted), dialOK, ExitTestReasonProxyRejected, 2},
+		{"http 超时、端口能连上", panel.OutboundTestHTTP, failed(panel.OutboundFailTimeout), dialOK, ExitTestReasonProxyNoResponse, 2},
+		{"real 被断开、端口被拒", panel.OutboundTestReal, failed(panel.OutboundFailAborted), failed(panel.OutboundFailRefused), ExitTestReasonRefused, 2},
+		{"http 被断开、连接超时", panel.OutboundTestHTTP, failed(panel.OutboundFailAborted), failed(panel.OutboundFailTimeout), ExitTestReasonTimeout, 2},
+		{
+			"http 拿到异常状态", panel.OutboundTestHTTP,
+			panel.OutboundTestResult{Failure: panel.OutboundFailOther, HTTPStatus: 403}, dialOK, ExitTestReasonBadStatus, 1,
+		},
+		{"面板拒绝执行", panel.OutboundTestHTTP, failed(panel.OutboundFailOther), dialOK, ExitTestReasonUnknown, 1},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			before := len(f.fake.OutboundTests())
+			f.fake.SetOutboundTestResultFor(panel.OutboundTestTCP, c.dial)
+			f.fake.SetOutboundTestResultFor(c.mode, c.primary)
+			res, err := f.chain.TestExitAsAdmin(ctx, platform.ID, f.server.ID, string(c.mode))
+			if err != nil {
+				t.Fatalf("TestExitAsAdmin: %v", err)
+			}
+			isPrimaryKept := res.OK == c.primary.OK && res.DelayMs == c.primary.DelayMs && res.Mode == string(c.mode)
+			if res.Reason != c.want || !isPrimaryKept {
+				t.Errorf("result = %+v, want reason %s", *res, c.want)
+			}
+			calls := f.fake.OutboundTests()[before:]
+			if len(calls) != c.wantCalls {
+				t.Fatalf("panel calls = %d, want %d", len(calls), c.wantCalls)
+			}
+			if c.wantCalls == 2 && (calls[1].Mode != panel.OutboundTestTCP || string(calls[1].Outbound) != string(calls[0].Outbound)) {
+				t.Errorf("follow-up should dial the same outbound over tcp: %+v", calls[1])
+			}
+		})
 	}
 }
 
@@ -175,12 +229,12 @@ func TestExitTestAsAdmin(t *testing.T) {
 	f := newExitTestFixture(t)
 	ctx := context.Background()
 	const mode = string(panel.OutboundTestHTTP)
-	f.fake.SetOutboundTestResult(panel.OutboundTestResult{Message: "connection refused"})
+	f.fake.SetOutboundTestResult(panel.OutboundTestResult{Failure: panel.OutboundFailRefused, Message: "connection refused"})
 
-	// 平台出口不受地址限制，原样下发；管理员看得到错误原文
+	// 平台出口不受地址限制，原样下发；管理员看得到错误原文与原因大类
 	platform := f.platformExit(t, chainPlatformName, true, false)
 	res, err := f.chain.TestExitAsAdmin(ctx, platform.ID, f.server.ID, mode)
-	if err != nil || res.OK || res.Error != "connection refused" {
+	if err != nil || res.OK || res.Error != "connection refused" || res.Reason != ExitTestReasonRefused {
 		t.Fatalf("platform exit: %+v err %v", res, err)
 	}
 	tests := f.fake.OutboundTests()

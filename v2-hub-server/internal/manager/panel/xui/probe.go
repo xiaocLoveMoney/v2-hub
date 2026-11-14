@@ -26,6 +26,39 @@ const (
 	outboundTestTimeout = 30 * time.Second
 )
 
+// 面板把探测失败的原因写成一段 Go 错误文本（没有错误码），归类只能按文本里的关键字（Ruling-56）。
+// 实测 3x-ui v3.11.0：TCP 探测被拒是 “connect: connection refused”，超时是 “i/o timeout”；
+// HTTP 探测超时是 “context deadline exceeded (Client.Timeout exceeded ...)”，其余（认证失败、协议不对、被断开）一律是 “EOF”。
+var (
+	refusedMarks = []string{"connection refused"}
+	timeoutMarks = []string{"timeout", "deadline exceeded"}
+	abortedMarks = []string{"eof", "connection reset", "broken pipe"}
+)
+
+func containsAny(text string, marks []string) bool {
+	for _, m := range marks {
+		if strings.Contains(text, m) {
+			return true
+		}
+	}
+	return false
+}
+
+// outboundFailure 把面板的错误文本归类；文本为空或不认识时是 OutboundFailOther。
+func outboundFailure(message string) panel.OutboundFailure {
+	text := strings.ToLower(message)
+	switch {
+	case containsAny(text, refusedMarks):
+		return panel.OutboundFailRefused
+	case containsAny(text, timeoutMarks):
+		return panel.OutboundFailTimeout
+	case containsAny(text, abortedMarks):
+		return panel.OutboundFailAborted
+	default:
+		return panel.OutboundFailOther
+	}
+}
+
 var (
 	_ panel.OutboundTester = (*Client)(nil)
 	_ panel.CertLocator    = (*Client)(nil)
@@ -74,7 +107,7 @@ func (c *Client) TestOutbound(ctx context.Context, outbound json.RawMessage, mod
 	var resp testOutboundResp
 	err := c.sendWith(ctx, &slow, http.MethodPost, pathTestOutbound, contentTypeForm, []byte(form.Encode()), &resp)
 	if pe := panel.AsError(err); pe != nil && pe.Kind == panel.KindRejected {
-		return panel.OutboundTestResult{Mode: mode, Message: pe.Message}, nil
+		return panel.OutboundTestResult{Mode: mode, Failure: panel.OutboundFailOther, Message: pe.Message}, nil
 	}
 	if err != nil {
 		return panel.OutboundTestResult{}, err
@@ -84,6 +117,8 @@ func (c *Client) TestOutbound(ctx context.Context, outbound json.RawMessage, mod
 	}
 	if resp.Success {
 		out.DelayMs = resp.Delay
+	} else {
+		out.Failure = outboundFailure(resp.Error)
 	}
 	if resp.Egress != nil {
 		out.EgressIP, out.EgressRegion = resp.Egress.IPv4, resp.Egress.Country
