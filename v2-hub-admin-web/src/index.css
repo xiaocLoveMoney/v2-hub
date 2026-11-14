@@ -12,6 +12,7 @@
   --hub-divider: #f9f9f9;
   --hub-surface: #fff;
   --hub-code-bg: #f6f8fa;
+  --hub-scrollbar: rgb(0 0 0 / 15%);
   --hub-radius: 3px;
   --hub-card-shadow: 0 4px 8px rgb(0 0 0 / 3%);
   --hub-band-height: 115px;
@@ -172,6 +173,13 @@ body {
 .admin-sider .ant-layout-sider-children {
   overflow-y: auto;
   overscroll-behavior: contain;
+  /* 滚动条默认隐藏，鼠标移到侧栏上才出现细滚动条；滚轮与触控板照常可滚 */
+  scrollbar-width: none;
+}
+
+.admin-sider .ant-layout-sider-children:hover {
+  scrollbar-width: thin;
+  scrollbar-color: var(--hub-scrollbar) transparent;
 }
 
 .admin-brand {
