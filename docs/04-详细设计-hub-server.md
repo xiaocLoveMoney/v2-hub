@@ -90,6 +90,7 @@ M10 的做法（Ruling-51 – Ruling-53）：`manager/panel` 加两个可选能�
 业务层用类型断言判断面板支不支持，3x-ui 实现分别对应 `/panel/api/xray/testOutbound` 与 `/panel/api/server/getWebCertFiles`。
 出口测试在 `service/chain_test_exit.go`：先做归属与地址限制（复用 `chain_guard.go`），再按用户频控、按服务器互斥，出站 JSON 由 `render.XrayOutbound` 生成；
 本文件不写日志（出站含凭据）。HTTP / HTTPS 出口只是 `manager/render` 多一个协议。
+REALITY 目标扫描（Ruling-54）是第三个可选能力 `RealityScanner`，3x-ui 实现对应 `/panel/api/server/scanRealityTarget(s)`；目标的形状在 service 层校验（不收网段），从不带 `allowPrivate`。
 
 ## 7. 接口待补 / 契约缺口
 
