@@ -235,13 +235,15 @@ LIMIT sqlc.arg(row_limit) OFFSET sqlc.arg(row_offset);
 SELECT id, provider_type FROM server ORDER BY id;
 
 -- name: ListChainApplyServerIDs :many
--- 需要检查下发的服务器：启用中，且有起飞节点在它上面的服务端规则，或面板上还留着平台条目
+-- 需要检查下发的服务器：启用中，且开着平台拦截规则（include_all，Ruling-55）、有起飞节点在它上面的服务端规则，
+-- 或有过下发记录（面板上可能还留着平台条目，如刚关掉拦截规则）
 SELECT s.id FROM server s
 WHERE NOT s.is_disabled
-  AND (EXISTS (SELECT 1 FROM chain_route r JOIN chain_route_entry e ON e.route_id = r.id
+  AND (sqlc.arg(include_all)::boolean
+       OR EXISTS (SELECT 1 FROM chain_route r JOIN chain_route_entry e ON e.route_id = r.id
                JOIN node n ON n.id = e.entry_node_id JOIN inbound i ON i.id = n.inbound_id
                WHERE r.kind = 'server' AND i.server_id = s.id)
-       OR EXISTS (SELECT 1 FROM chain_apply a WHERE a.server_id = s.id AND cardinality(a.applied_rule_ids) > 0))
+       OR EXISTS (SELECT 1 FROM chain_apply a WHERE a.server_id = s.id))
 ORDER BY s.id;
 
 -- name: ListServerRouteUsersOnServer :many

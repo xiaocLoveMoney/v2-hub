@@ -128,6 +128,10 @@ type supportSettingsVO struct {
 	Label string `json:"label"`
 }
 
+type routingSettingsVO struct {
+	BlockRule bool `json:"blockRule"`
+}
+
 // settingsVO 对应 hub-api.yaml Settings。
 type settingsVO struct {
 	MailEnabled     bool                   `json:"mailEnabled"`
@@ -137,6 +141,7 @@ type settingsVO struct {
 	Report          reportSettingsVO       `json:"report"`
 	Landing         landingSettingsVO      `json:"landing"`
 	Support         supportSettingsVO      `json:"support"`
+	Routing         routingSettingsVO      `json:"routing"`
 	Site            siteSettingsVO         `json:"site"`
 	Register        registerSettingsVO     `json:"register"`
 	Invite          inviteSettingsVO       `json:"invite"`
@@ -166,6 +171,7 @@ func toSettingsVO(s service.Settings, mailEnabled, telegramEnabled bool) setting
 		Report:  reportSettingsVO{DailyEnabled: s.Report.DailyEnabled, DailyHour: s.Report.DailyHour},
 		Landing: landingSettingsVO{Enabled: s.Landing.Enabled, Headline: s.Landing.Headline, Intro: s.Landing.Intro},
 		Support: supportSettingsVO{URL: s.Support.URL, Label: s.Support.Label},
+		Routing: routingSettingsVO{BlockRule: s.Routing.BlockRule},
 		Site:    siteSettingsVO{Name: s.Site.Name, Timezone: s.Site.Timezone, PortalURL: s.Site.PortalURL},
 		Shop:    shopSettingsVO{Enabled: s.Shop.Enabled, Currency: s.Shop.Currency},
 		Rebate:  rebateSettingsVO{Percent: s.Rebate.Percent, Mode: s.Rebate.Mode},

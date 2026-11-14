@@ -283,8 +283,9 @@ type Querier interface {
 	// 到期且开了扣余额续费的用户；一轮最多处理一批，剩下的下一轮再来
 	ListAutoRenewDueIDs(ctx context.Context, arg ListAutoRenewDueIDsParams) ([]int64, error)
 	ListChainApplies(ctx context.Context, serverIds []int64) ([]ListChainAppliesRow, error)
-	// 需要检查下发的服务器：启用中，且有起飞节点在它上面的服务端规则，或面板上还留着平台条目
-	ListChainApplyServerIDs(ctx context.Context) ([]int64, error)
+	// 需要检查下发的服务器：启用中，且开着平台拦截规则（include_all，Ruling-55）、有起飞节点在它上面的服务端规则，
+	// 或有过下发记录（面板上可能还留着平台条目，如刚关掉拦截规则）
+	ListChainApplyServerIDs(ctx context.Context, includeAll bool) ([]int64, error)
 	// 渲染订阅与下发用：这些出口的名称、链接密文与固定的地址
 	ListChainExitSecrets(ctx context.Context, ids []int64) ([]ListChainExitSecretsRow, error)
 	// 出口 ------------------------------------------------------------------------------------

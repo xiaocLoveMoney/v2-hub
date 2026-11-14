@@ -178,6 +178,7 @@ func runServer(args []string) error {
 
 	go job.RunSessionCleanup(ctx, job.PurgeFunc(users.PurgeSubscribeLogs), cfg.Auth.SessionCleanupInterval)
 	chainCfg := service.DefaultChainApplyConfig()
+	chainCfg.Settings = settings
 	chainCfg.MinInterval = cfg.Chain.MinApplyInterval
 	chainApplier := service.NewChainApplier(pool, sealer, users, panels, chainCfg, nil)
 	go job.RunChainApply(ctx, chainApplier, cfg.Chain.ApplyInterval)

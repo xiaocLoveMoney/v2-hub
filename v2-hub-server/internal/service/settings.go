@@ -109,6 +109,12 @@ type Settings struct {
 	Report       ReportSettings
 	Landing      LandingSettings
 	Support      SupportSettings
+	Routing      RoutingSettings
+}
+
+// RoutingSettings 是服务器 Xray 模板里的平台条目（docs/03 §5.19）：BlockRule 为真时下发平台拦截规则（Ruling-55）。
+type RoutingSettings struct {
+	BlockRule bool
 }
 
 // AlertSettings 是掉线告警（docs/03 §5.20，Ruling-43）：收件人与连续不在线多少分钟才告警。
@@ -586,6 +592,12 @@ var settingDefs = map[string]settingDef{
 			return decodeSetting(raw, textBetween(1, maxSupportLabelLen), func(v string) { s.Support.Label = v })
 		},
 	},
+	"routing.blockRule": {
+		get: func(s *Settings) any { return s.Routing.BlockRule },
+		set: func(s *Settings, raw json.RawMessage) error {
+			return decodeSetting(raw, nil, func(v bool) { s.Routing.BlockRule = v })
+		},
+	},
 	"subscription.logRetentionDays": {
 		get: func(s *Settings) any { return s.Subscription.LogRetentionDays },
 		set: func(s *Settings, raw json.RawMessage) error {
@@ -638,6 +650,7 @@ func defaultSettings(sub SubscriptionConfig) Settings {
 		Telegram: TelegramSettings{NotifyAlerts: true, NotifyTickets: true},
 		Report:   ReportSettings{DailyHour: defaultReportDailyHour},
 		Support:  SupportSettings{Label: defaultSupportLabel},
+		Routing:  RoutingSettings{BlockRule: true},
 		Subscription: SubscriptionSettings{
 			BaseURL: strings.TrimRight(sub.BaseURL, "/"), Title: title, UpdateIntervalHours: interval, InfoNodes: sub.InfoNodes, LogRetentionDays: retention,
 		},

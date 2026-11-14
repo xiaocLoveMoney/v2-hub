@@ -527,6 +527,51 @@ func TestChainApplyPlanRevoked(t *testing.T) {
 	}
 }
 
+const sqlSetBlockRule = `INSERT INTO setting (key, value) VALUES ('routing.blockRule', $1)
+ON CONFLICT (key) DO UPDATE SET value = excluded.value`
+
+// 平台拦截规则（Ruling-55）：默认开，没有链式规则的服务器也下发；排在链式条目之前；关掉后撤掉，链式条目不受影响。
+func TestChainApplyBlockRule(t *testing.T) {
+	f := newChainApplyFixture(t)
+	ctx := context.Background()
+	f.applier.cfg.Settings = NewSettingsService(f.pool, SubscriptionConfig{}, f.clock.now)
+
+	ids, err := f.applier.ListServerIDs(ctx)
+	if err != nil || len(ids) != 1 || ids[0] != f.server.ID {
+		t.Fatalf("with the block rule on every enabled server should be checked: %v, %v", ids, err)
+	}
+	f.apply(t)
+	if _, ok := f.hubRules(t)[chain.BlockTag]; !ok || len(f.hubRules(t)) != 1 {
+		t.Fatalf("block rule should be applied without any chain route: %v", f.hubRules(t))
+	}
+	if st := f.status(t); st.Status != chainApplyApplied || st.RuleCount != 0 {
+		t.Fatalf("status with only the block rule = %+v", st)
+	}
+
+	route := f.mustRoute(t, serverIn(ChainExitNode, f.nodes[1].ID, f.nodes[0].ID))
+	tag := chain.Tag(route.ID)
+	f.applyLater(t)
+	tpl := f.template(t)
+	if rules := f.hubRules(t); len(rules) != 2 || rules[tag] == "" {
+		t.Fatalf("chain entry should be added next to the block rule: %v", rules)
+	}
+	if strings.Index(tpl, `"ruleTag":"`+chain.BlockTag+`"`) > strings.Index(tpl, `"ruleTag":"`+tag+`"`) {
+		t.Fatalf("block rule should come before chain rules: %s", tpl)
+	}
+
+	// 关掉设置（拨过设置缓存与最小间隔）：只撤掉拦截条目
+	if _, err := f.pool.Exec(ctx, sqlSetBlockRule, []byte("false")); err != nil {
+		t.Fatal(err)
+	}
+	f.applyLater(t)
+	if rules := f.hubRules(t); len(rules) != 1 || rules[tag] == "" {
+		t.Fatalf("turning off should remove only the block rule: %v", rules)
+	}
+	if strings.Contains(f.template(t), chain.BlockTag) {
+		t.Fatal("block outbound should be removed too")
+	}
+}
+
 func TestChainApplyRejectedOnSave(t *testing.T) {
 	f := newChainApplyFixture(t)
 	before, _, _, _ := f.fake.CoreSnapshot()

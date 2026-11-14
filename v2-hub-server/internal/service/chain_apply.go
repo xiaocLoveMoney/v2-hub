@@ -21,7 +21,8 @@ import (
 )
 
 // 服务端链式下发（docs/03 §5.19、§3 C1–C5，Ruling-40）：以起飞服务器为单位，把面板内核模板里的平台条目整体对齐到期望；
-// 写入前加密备份整份模板，重启后内核未运行即写回备份并记失败。期望条目由生效计算（chain_resolve.go）的结果生成。
+// 写入前加密备份整份模板，重启后内核未运行即写回备份并记失败。期望条目由生效计算（chain_resolve.go）的结果生成，
+// 设置 routing.blockRule 开着时最前面再加平台拦截条目（Ruling-55）。
 
 // 下发状态（chain_apply.status，与 hub-api.yaml 的 ChainApplyStatus 对应；none 表示没有记录）。
 const (
@@ -59,6 +60,8 @@ type ChainApplyConfig struct {
 	Backoff     []time.Duration
 	// Resolver 解析用户出口的域名（定期复查固定的地址）；nil 用系统解析器。
 	Resolver Resolver
+	// Settings 提供 routing.blockRule（平台拦截规则，Ruling-55）；nil 视为关闭。
+	Settings *SettingsService
 }
 
 // errChainCoreDown 表示写入新模板并重启后内核没能运行（配置有问题的信号，用于失败隔离）。
@@ -154,9 +157,25 @@ func (a *ChainApplier) Requests() <-chan struct{} {
 	return a.kicks
 }
 
-// ListServerIDs 返回需要检查下发的服务器。
+// isBlockRuleOn 返回是否下发平台拦截规则（设置 routing.blockRule）。
+func (a *ChainApplier) isBlockRuleOn(ctx context.Context) (bool, error) {
+	if a.cfg.Settings == nil {
+		return false, nil
+	}
+	cur, err := a.cfg.Settings.Current(ctx)
+	if err != nil {
+		return false, fmt.Errorf("load routing settings: %w", err)
+	}
+	return cur.Routing.BlockRule, nil
+}
+
+// ListServerIDs 返回需要检查下发的服务器：拦截规则开着时是全部启用中的服务器。
 func (a *ChainApplier) ListServerIDs(ctx context.Context) ([]int64, error) {
-	ids, err := a.q.ListChainApplyServerIDs(ctx)
+	isBlockOn, err := a.isBlockRuleOn(ctx)
+	if err != nil {
+		return nil, err
+	}
+	ids, err := a.q.ListChainApplyServerIDs(ctx, isBlockOn)
 	if err != nil {
 		return nil, fmt.Errorf("list chain apply servers: %w", err)
 	}
@@ -316,7 +335,7 @@ func (a *ChainApplier) userEntries(ctx context.Context, serverID, userID int64, 
 	return out, nil
 }
 
-// desired 计算这台服务器上应有的平台条目。isRepinAllowed 为真时顺带复查用户出口固定的地址（要做 DNS 查询，只在后台下发时开）。
+// desired 计算这台服务器上应有的平台条目（链式条目，拦截规则开着时最前面加拦截条目）。isRepinAllowed 为真时顺带复查用户出口固定的地址（要做 DNS 查询，只在后台下发时开）。
 func (a *ChainApplier) desired(ctx context.Context, serverID int64, isRepinAllowed bool) (desiredSet, error) {
 	set := desiredSet{changedAt: map[int64]time.Time{}, ownRoutes: map[int64]string{}}
 	userIDs, err := a.q.ListServerRouteUsersOnServer(ctx, serverID)
@@ -336,6 +355,13 @@ func (a *ChainApplier) desired(ctx context.Context, serverID int64, isRepinAllow
 		entries = append(entries, more...)
 	}
 	if set.section, set.included, err = chain.Build(entries); err != nil {
+		return set, err
+	}
+	isBlockOn, err := a.isBlockRuleOn(ctx)
+	if err != nil || !isBlockOn {
+		return set, err
+	}
+	if set.section, err = set.section.WithBlock(); err != nil {
 		return set, err
 	}
 	return set, nil
