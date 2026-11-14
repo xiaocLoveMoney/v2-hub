@@ -2,6 +2,10 @@
   /* 设计变量（Ruling-21），与 src/theme.ts 的 PALETTE、docs/06 §4 一致 */
   --hub-primary: #6777ef;
   --hub-primary-glow: #acb5f6;
+  --hub-success: #47c363;
+  --hub-warning: #ffa426;
+  --hub-info: #3abaf4;
+  --hub-danger: #fc544b;
   --hub-page-bg: #f4f6f9;
   --hub-heading: #34395e;
   --hub-body: #6c757d;
@@ -286,8 +290,18 @@ body {
     padding: 16px;
   }
 
-  .card-grid {
+  .card-grid,
+  .stat-grid,
+  .dashboard-split {
     gap: 16px;
+  }
+
+  .stat-grid {
+    margin-bottom: 16px;
+  }
+
+  .dashboard-split {
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .card-page-header {
@@ -296,10 +310,132 @@ body {
   }
 }
 
-/* 总览的近 7 日流量柱状条（纯 CSS，高度由 --bar-height 给出） */
-.dashboard-traffic {
-  margin-top: 16px;
+/* 总览的统计卡（照客户后台仪表盘）：左侧色块图标，按宽度自动分栏 */
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 230px), 1fr));
+  gap: 24px;
+  margin-bottom: 24px;
 }
+
+.stat-grid:empty {
+  display: none;
+}
+
+.stat-tile {
+  --stat-color: var(--hub-primary);
+
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 18px;
+  padding: 20px 22px 14px;
+  background: var(--hub-surface);
+  border-radius: var(--hub-radius);
+  box-shadow: var(--hub-card-shadow);
+}
+
+.stat-tile-success {
+  --stat-color: var(--hub-success);
+}
+
+.stat-tile-warning {
+  --stat-color: var(--hub-warning);
+}
+
+.stat-tile-info {
+  --stat-color: var(--hub-info);
+}
+
+.stat-tile-danger {
+  --stat-color: var(--hub-danger);
+}
+
+.stat-tile-icon {
+  grid-row: span 2;
+  display: grid;
+  place-items: center;
+  width: 56px;
+  height: 56px;
+  font-size: 24px;
+  color: var(--hub-surface);
+  background: var(--stat-color);
+  border-radius: var(--hub-radius);
+  box-shadow: 0 2px 6px color-mix(in srgb, var(--stat-color) 45%, transparent);
+}
+
+.stat-tile-label {
+  align-self: end;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  color: var(--hub-body);
+}
+
+.stat-tile-value {
+  font-size: 24px;
+  font-weight: 700;
+  line-height: 1.2;
+  color: var(--hub-heading);
+  overflow-wrap: anywhere;
+}
+
+.stat-tile-foot {
+  grid-column: 1 / -1;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--hub-divider);
+  font-size: 12px;
+  color: var(--hub-body);
+}
+
+/* 总览下半部：流量 7、服务器状态 5；只有一张时占满 */
+.dashboard-split {
+  display: grid;
+  grid-template-columns: minmax(0, 7fr) minmax(0, 5fr);
+  gap: 24px;
+  align-items: stretch;
+}
+
+.dashboard-split > :only-child {
+  grid-column: 1 / -1;
+}
+
+.dashboard-split > .ant-card {
+  border: none;
+  box-shadow: var(--hub-card-shadow);
+}
+
+.dashboard-all-online {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  align-items: center;
+  justify-content: center;
+  min-height: 160px;
+  color: var(--hub-body);
+}
+
+.dashboard-ok-icon {
+  font-size: 40px;
+  color: var(--hub-success);
+}
+
+.dashboard-offline-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.dashboard-offline-list li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--hub-divider);
+}
+
+/* 总览的近 7 日流量柱状条（纯 CSS，高度由 --bar-height 给出） */
 
 .traffic-bars {
   display: flex;
