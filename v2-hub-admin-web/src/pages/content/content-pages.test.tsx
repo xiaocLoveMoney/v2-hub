@@ -212,6 +212,7 @@ describe('SettingsPage', () => {
     landing: { enabled: false, headline: '', intro: '' },
     support: { url: '', label: '在线客服' },
     routing: { blockRule: true },
+    menu: { admin: ['users'], user: [] },
   }
 
   it('整张表单一起保存，不带只读的 mailEnabled 与 telegramEnabled；未配置时测试邮件与 Telegram 测试不可用', async () => {
@@ -239,7 +240,8 @@ describe('SettingsPage', () => {
     await waitFor(() => expect(calls.some((c) => c.method === 'PUT')).toBe(true))
     const put = calls.find((c) => c.method === 'PUT')
     expect(put?.csrf).toBe(TEST_CSRF)
-    const { mailEnabled: _readOnly, telegramEnabled: _readOnlyToo, ...editable } = settings
+    // 菜单顺序另有页面编辑，系统设置页不提交它（Ruling-57）
+    const { mailEnabled: _readOnly, telegramEnabled: _readOnlyToo, menu: _otherPage, ...editable } = settings
     expect(put?.body).toEqual({ ...editable, site: { ...settings.site, name: '新站名' }, routing: { blockRule: false } })
   })
 
