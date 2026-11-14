@@ -14,6 +14,7 @@ type Querier interface {
 	// 先加后删（见 RemoveChainRouteEntriesExcept）：起飞节点被删光时触发器会连规则一起删
 	AddChainRouteEntries(ctx context.Context, arg AddChainRouteEntriesParams) error
 	AddExitNodeGroups(ctx context.Context, arg AddExitNodeGroupsParams) error
+	AddExitUsers(ctx context.Context, arg AddExitUsersParams) error
 	AddUserTraffic(ctx context.Context, arg AddUserTrafficParams) error
 	// 原子地推进已用步长；返回 0 行表示该步长已被用过（并发重放）
 	AdvanceAdminTOTPStep(ctx context.Context, arg AdvanceAdminTOTPStepParams) (int64, error)
@@ -56,6 +57,7 @@ type Querier interface {
 	CountGroupMembershipsByInbound(ctx context.Context, inboundID int64) (int64, error)
 	CountInviteCodes(ctx context.Context, kind string) (int64, error)
 	CountLedger(ctx context.Context, arg CountLedgerParams) (int64, error)
+	CountLiveUsersByIDs(ctx context.Context, ids []int64) (int64, error)
 	CountMailOutbox(ctx context.Context, status string) (int64, error)
 	CountNodeGroupsByIDs(ctx context.Context, ids []int64) (int64, error)
 	CountNodes(ctx context.Context, arg CountNodesParams) (int64, error)
@@ -119,6 +121,7 @@ type Querier interface {
 	DeleteChainRoutesByUser(ctx context.Context, userID int64) error
 	DeleteEndpoint(ctx context.Context, id int64) error
 	DeleteExitNodeGroups(ctx context.Context, exitID int64) error
+	DeleteExitUsers(ctx context.Context, exitID int64) error
 	DeleteExpiredAdminSessions(ctx context.Context, expiresAt pgtype.Timestamptz) (int64, error)
 	DeleteExpiredUserSessions(ctx context.Context, expiresAt pgtype.Timestamptz) (int64, error)
 	DeleteInbound(ctx context.Context, id int64) error
@@ -306,6 +309,8 @@ type Querier interface {
 	ListEnabledServerIDs(ctx context.Context) ([]int64, error)
 	ListEndpointsByServer(ctx context.Context, serverID int64) ([]ListEndpointsByServerRow, error)
 	ListExitNodeGroups(ctx context.Context, exitIds []int64) ([]ListExitNodeGroupsRow, error)
+	// 平台出口指定的用户（Ruling-64）；已注销的不列出
+	ListExitUsers(ctx context.Context, exitIds []int64) ([]ListExitUsersRow, error)
 	// 临近到期、还没为这个到期时间提醒过、没有设免费续期的用户；price 是自动续费对象的现价（没有则为 NULL）
 	ListExpiringUsers(ctx context.Context, arg ListExpiringUsersParams) ([]ListExpiringUsersRow, error)
 	ListInboundsByIDs(ctx context.Context, ids []int64) ([]ListInboundsByIDsRow, error)
@@ -380,8 +385,8 @@ type Querier interface {
 	ListUserLoginLogs(ctx context.Context, arg ListUserLoginLogsParams) ([]ListUserLoginLogsRow, error)
 	// 客户后台节点列表：按节点组分段，状态取平台缓存（docs/03 §5.5）
 	ListUserNodeGroups(ctx context.Context, id int64) ([]ListUserNodeGroupsRow, error)
-	// 用户被授权的平台出口：启用，且属于套餐绑定的某个节点组（Ruling-47）
-	ListUserPlatformExits(ctx context.Context, id int64) ([]ListUserPlatformExitsRow, error)
+	// 用户被授权的平台出口：启用，且分配到本人——按节点组时属于套餐绑定的某个节点组（Ruling-47），指定用户时本人在名单里（Ruling-64）
+	ListUserPlatformExits(ctx context.Context, userID int64) ([]ListUserPlatformExitsRow, error)
 	ListUserProvisionLinks(ctx context.Context, userID int64) ([]ListUserProvisionLinksRow, error)
 	ListUserProvisions(ctx context.Context, userID int64) ([]ListUserProvisionsRow, error)
 	// 用户涉及的服务器：已有下发的，加上期望下发到的
@@ -438,6 +443,7 @@ type Querier interface {
 	RotateUserSubscription(ctx context.Context, arg RotateUserSubscriptionParams) (int64, error)
 	SaveUserQuota(ctx context.Context, arg SaveUserQuotaParams) error
 	SetAdminTOTPPending(ctx context.Context, arg SetAdminTOTPPendingParams) error
+	SetChainExitAssignMode(ctx context.Context, arg SetChainExitAssignModeParams) error
 	SetChainExitEnabled(ctx context.Context, arg SetChainExitEnabledParams) (int64, error)
 	// 换链接：展示字段一并更新，固定的 IP 作废（由调用方按需重新固定）
 	SetChainExitLink(ctx context.Context, arg SetChainExitLinkParams) error

@@ -27,10 +27,17 @@ const (
 	ExitOwnerUser     = "user"
 )
 
+// 平台出口的分配方式（Ruling-64）。
+const (
+	ExitAssignGroup = "group"
+	ExitAssignUser  = "user"
+)
+
 const (
 	maxExitRemarkLen     = 255
 	maxExitKeywordLen    = 64
 	maxExitNodeGroups    = 100
+	maxExitUsers         = 500
 	targetChainExit      = "chain_exit"
 	ActionExitCreate     = "chain_exit.create"
 	ActionExitUpdate     = "chain_exit.update"
@@ -50,6 +57,8 @@ const (
 	msgExitBadOwner      = "归属须为 platform 或 user"
 	msgExitBadKeyword    = "关键字不能超过 64 个字符"
 	msgExitBadGroups     = "节点组不存在或数量超出上限"
+	msgExitBadUsers      = "用户不存在、已注销或数量超出上限"
+	msgExitBadAssign     = "分配方式须为 group 或 user"
 	msgExitUserReadOnly  = "用户出口只能停用、启用或删除"
 	msgExitNoUse         = "平台出口至少要允许一种链式"
 	msgExitServerSupport = "这个出口的协议或传输方式不能用于服务端链式，请去掉“可用于服务端链式”"
@@ -73,7 +82,13 @@ type ExitNodeGroup struct {
 	Name string
 }
 
-// AdminChainExit 是管理端看到的出口；UserID 为 0 表示平台出口。
+// ExitUser 是平台出口指定的一个用户（Ruling-64）。
+type ExitUser struct {
+	ID       int64
+	Username string
+}
+
+// AdminChainExit 是管理端看到的出口；UserID 为 0 表示平台出口。AssignMode 只对平台出口有意义。
 type AdminChainExit struct {
 	ID          int64
 	UserID      int64
@@ -86,7 +101,9 @@ type AdminChainExit struct {
 	Enabled     bool
 	AllowServer bool
 	AllowClient bool
+	AssignMode  string
 	NodeGroups  []ExitNodeGroup
+	Users       []ExitUser
 	RouteCount  int
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
@@ -100,6 +117,7 @@ type ChainExitFilter struct {
 }
 
 // PlatformExitInput 是新建或修改平台出口的输入；修改时 Link 为空表示不改链接。
+// AssignMode 为空按 group；只保留所选方式那一组 id，另一组忽略（Ruling-64）。
 type PlatformExitInput struct {
 	Name         string
 	Link         string
@@ -107,7 +125,9 @@ type PlatformExitInput struct {
 	Enabled      bool
 	AllowServer  bool
 	AllowClient  bool
+	AssignMode   string
 	NodeGroupIDs []int64
+	UserIDs      []int64
 }
 
 // parsedExitLink 是一条校验过的出口链接。
@@ -397,12 +417,13 @@ func (s *ChainService) openExitLink(id int64, sealed []byte) (string, error) {
 func adminExitFromRow(r sqlcgen.ListAdminChainExitsRow) AdminChainExit {
 	return AdminChainExit{
 		ID: r.ID, UserID: r.OwnerID, Username: r.Username, Name: r.Name, Protocol: r.Protocol, Address: r.Address, Port: int(r.Port),
-		Remark: r.Remark, Enabled: r.IsEnabled, AllowServer: r.AllowServer, AllowClient: r.AllowClient, NodeGroups: []ExitNodeGroup{},
+		Remark: r.Remark, Enabled: r.IsEnabled, AllowServer: r.AllowServer, AllowClient: r.AllowClient, AssignMode: r.AssignMode,
+		NodeGroups: []ExitNodeGroup{}, Users: []ExitUser{},
 		RouteCount: int(r.RouteCount), CreatedAt: r.CreatedAt.Time, UpdatedAt: r.UpdatedAt.Time,
 	}
 }
 
-// attachExitGroups 给这些出口补上所属的节点组。
+// attachExitGroups 给这些出口补上所属的节点组与指定的用户。
 func attachExitGroups(ctx context.Context, q *sqlcgen.Queries, items []AdminChainExit) error {
 	if len(items) == 0 {
 		return nil
@@ -420,6 +441,14 @@ func attachExitGroups(ctx context.Context, q *sqlcgen.Queries, items []AdminChai
 	for _, r := range rows {
 		i := index[r.ExitID]
 		items[i].NodeGroups = append(items[i].NodeGroups, ExitNodeGroup{ID: r.ID, Name: r.Name})
+	}
+	users, err := q.ListExitUsers(ctx, ids)
+	if err != nil {
+		return fmt.Errorf("list users of chain exits: %w", err)
+	}
+	for _, r := range users {
+		i := index[r.ExitID]
+		items[i].Users = append(items[i].Users, ExitUser{ID: r.ID, Username: r.Username})
 	}
 	return nil
 }
@@ -506,8 +535,8 @@ func normalizePlatformExit(in PlatformExitInput, isLinkRequired bool) (platformE
 	if !in.AllowServer && !in.AllowClient {
 		return platformExitSpec{}, newError(CodeInvalidArgument, msgExitNoUse)
 	}
-	if len(in.NodeGroupIDs) > maxExitNodeGroups {
-		return platformExitSpec{}, newError(CodeInvalidArgument, msgExitBadGroups)
+	if in, err = normalizeExitAssign(in); err != nil {
+		return platformExitSpec{}, err
 	}
 	spec := platformExitSpec{in: in}
 	hasLink := strings.TrimSpace(in.Link) != ""
@@ -522,6 +551,27 @@ func normalizePlatformExit(in PlatformExitInput, isLinkRequired bool) (platformE
 		spec.parsed = &parsed
 	}
 	return spec, nil
+}
+
+// normalizeExitAssign 校验分配方式，只留所选方式那一组 id（去重），另一组清空（Ruling-64）。
+func normalizeExitAssign(in PlatformExitInput) (PlatformExitInput, error) {
+	switch in.AssignMode {
+	case "", ExitAssignGroup:
+		in.AssignMode, in.UserIDs = ExitAssignGroup, nil
+		in.NodeGroupIDs = dedupeIDs(in.NodeGroupIDs)
+		if len(in.NodeGroupIDs) > maxExitNodeGroups {
+			return in, newError(CodeInvalidArgument, msgExitBadGroups)
+		}
+	case ExitAssignUser:
+		in.NodeGroupIDs = nil
+		in.UserIDs = dedupeIDs(in.UserIDs)
+		if len(in.UserIDs) > maxExitUsers {
+			return in, newError(CodeInvalidArgument, msgExitBadUsers)
+		}
+	default:
+		return in, newError(CodeInvalidArgument, msgExitBadAssign)
+	}
+	return in, nil
 }
 
 // checkPlatformServerUse 校验允许用于服务端链式的平台出口确实写得进 Xray 配置（平台出口不受地址限制，Ruling-48）。
@@ -556,9 +606,44 @@ func setExitGroups(ctx context.Context, q *sqlcgen.Queries, exitID int64, ids []
 	return nil
 }
 
+// setExitUsers 把平台出口指定的用户整体换成 ids；有不存在或已注销的用户返回 400。
+func setExitUsers(ctx context.Context, q *sqlcgen.Queries, exitID int64, ids []int64) error {
+	if err := q.DeleteExitUsers(ctx, exitID); err != nil {
+		return fmt.Errorf("clear users of chain exit %d: %w", exitID, err)
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	found, err := q.CountLiveUsersByIDs(ctx, ids)
+	if err != nil {
+		return fmt.Errorf("count users: %w", err)
+	}
+	if int(found) != len(ids) {
+		return newError(CodeInvalidArgument, msgExitBadUsers)
+	}
+	if err := q.AddExitUsers(ctx, sqlcgen.AddExitUsersParams{ExitID: exitID, UserIds: ids}); err != nil {
+		return fmt.Errorf("set users of chain exit %d: %w", exitID, err)
+	}
+	return nil
+}
+
+// setExitAssignment 写平台出口的分配方式与对应名单（Ruling-64）。
+func setExitAssignment(ctx context.Context, q *sqlcgen.Queries, exitID int64, in PlatformExitInput) error {
+	if err := q.SetChainExitAssignMode(ctx, sqlcgen.SetChainExitAssignModeParams{ID: exitID, AssignMode: in.AssignMode}); err != nil {
+		return fmt.Errorf("set assign mode of chain exit %d: %w", exitID, err)
+	}
+	if err := setExitGroups(ctx, q, exitID, in.NodeGroupIDs); err != nil {
+		return err
+	}
+	return setExitUsers(ctx, q, exitID, in.UserIDs)
+}
+
 // exitAuditDetail 是出口审计的详情；不含链接（凭据）。
 func exitAuditDetail(e *AdminChainExit) map[string]any {
-	return map[string]any{"name": e.Name, "protocol": e.Protocol, "userId": e.UserID}
+	return map[string]any{
+		"name": e.Name, "protocol": e.Protocol, "userId": e.UserID,
+		"assignMode": e.AssignMode, "nodeGroups": len(e.NodeGroups), "users": len(e.Users),
+	}
 }
 
 // CreatePlatformExit 添加一个平台出口并写审计。
@@ -586,7 +671,7 @@ func (s *ChainService) CreatePlatformExit(ctx context.Context, actor *AdminPrinc
 		if err := s.sealExitLink(ctx, q, id, *spec.parsed); err != nil {
 			return err
 		}
-		if err := setExitGroups(ctx, q, id, spec.in.NodeGroupIDs); err != nil {
+		if err := setExitAssignment(ctx, q, id, spec.in); err != nil {
 			return err
 		}
 		if created, err = getAdminExit(ctx, q, id); err != nil {
@@ -634,7 +719,7 @@ func (s *ChainService) UpdatePlatformExit(ctx context.Context, actor *AdminPrinc
 				return err
 			}
 		}
-		if err := setExitGroups(ctx, q, id, spec.in.NodeGroupIDs); err != nil {
+		if err := setExitAssignment(ctx, q, id, spec.in); err != nil {
 			return err
 		}
 		if updated, err = getAdminExit(ctx, q, id); err != nil {

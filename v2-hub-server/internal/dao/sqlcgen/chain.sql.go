@@ -45,6 +45,22 @@ func (q *Queries) AddExitNodeGroups(ctx context.Context, arg AddExitNodeGroupsPa
 	return err
 }
 
+const addExitUsers = `-- name: AddExitUsers :exec
+INSERT INTO chain_exit_user (exit_id, user_id)
+SELECT $1, unnest($2::bigint[])
+ON CONFLICT DO NOTHING
+`
+
+type AddExitUsersParams struct {
+	ExitID  int64
+	UserIds []int64
+}
+
+func (q *Queries) AddExitUsers(ctx context.Context, arg AddExitUsersParams) error {
+	_, err := q.db.Exec(ctx, addExitUsers, arg.ExitID, arg.UserIds)
+	return err
+}
+
 const countAdminChainExits = `-- name: CountAdminChainExits :one
 
 SELECT COUNT(*) FROM chain_exit x
@@ -114,6 +130,17 @@ type CountChainRoutesParams struct {
 
 func (q *Queries) CountChainRoutes(ctx context.Context, arg CountChainRoutesParams) (int64, error) {
 	row := q.db.QueryRow(ctx, countChainRoutes, arg.UserID, arg.Kind)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const countLiveUsersByIDs = `-- name: CountLiveUsersByIDs :one
+SELECT COUNT(*) FROM end_user WHERE id = ANY($1::bigint[]) AND deleted_at IS NULL
+`
+
+func (q *Queries) CountLiveUsersByIDs(ctx context.Context, ids []int64) (int64, error) {
+	row := q.db.QueryRow(ctx, countLiveUsersByIDs, ids)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -199,6 +226,15 @@ DELETE FROM node_group_exit WHERE exit_id = $1
 
 func (q *Queries) DeleteExitNodeGroups(ctx context.Context, exitID int64) error {
 	_, err := q.db.Exec(ctx, deleteExitNodeGroups, exitID)
+	return err
+}
+
+const deleteExitUsers = `-- name: DeleteExitUsers :exec
+DELETE FROM chain_exit_user WHERE exit_id = $1
+`
+
+func (q *Queries) DeleteExitUsers(ctx context.Context, exitID int64) error {
+	_, err := q.db.Exec(ctx, deleteExitUsers, exitID)
 	return err
 }
 
@@ -376,7 +412,7 @@ func (q *Queries) InsertChainRoute(ctx context.Context, arg InsertChainRoutePara
 
 const listAdminChainExits = `-- name: ListAdminChainExits :many
 SELECT x.id, coalesce(x.user_id, 0)::bigint AS owner_id, coalesce(u.username, '')::text AS username,
-       x.name, x.protocol, x.address, x.port, x.remark, x.is_enabled, x.allow_server, x.allow_client, x.created_at, x.updated_at,
+       x.name, x.protocol, x.address, x.port, x.remark, x.is_enabled, x.allow_server, x.allow_client, x.assign_mode, x.created_at, x.updated_at,
        (SELECT COUNT(*) FROM chain_route r WHERE r.exit_id = x.id)::int AS route_count
 FROM chain_exit x
 LEFT JOIN end_user u ON u.id = x.user_id
@@ -409,6 +445,7 @@ type ListAdminChainExitsRow struct {
 	IsEnabled   bool
 	AllowServer bool
 	AllowClient bool
+	AssignMode  string
 	CreatedAt   pgtype.Timestamptz
 	UpdatedAt   pgtype.Timestamptz
 	RouteCount  int32
@@ -443,6 +480,7 @@ func (q *Queries) ListAdminChainExits(ctx context.Context, arg ListAdminChainExi
 			&i.IsEnabled,
 			&i.AllowServer,
 			&i.AllowClient,
+			&i.AssignMode,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.RouteCount,
@@ -844,6 +882,40 @@ func (q *Queries) ListExitNodeGroups(ctx context.Context, exitIds []int64) ([]Li
 	return items, nil
 }
 
+const listExitUsers = `-- name: ListExitUsers :many
+SELECT eu.exit_id, u.id, u.username
+FROM chain_exit_user eu JOIN end_user u ON u.id = eu.user_id AND u.deleted_at IS NULL
+WHERE eu.exit_id = ANY($1::bigint[])
+ORDER BY eu.exit_id, u.username, u.id
+`
+
+type ListExitUsersRow struct {
+	ExitID   int64
+	ID       int64
+	Username string
+}
+
+// 平台出口指定的用户（Ruling-64）；已注销的不列出
+func (q *Queries) ListExitUsers(ctx context.Context, exitIds []int64) ([]ListExitUsersRow, error) {
+	rows, err := q.db.Query(ctx, listExitUsers, exitIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListExitUsersRow{}
+	for rows.Next() {
+		var i ListExitUsersRow
+		if err := rows.Scan(&i.ExitID, &i.ID, &i.Username); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listPlatformHosts = `-- name: ListPlatformHosts :many
 SELECT base_url AS host FROM server
 UNION
@@ -973,12 +1045,15 @@ func (q *Queries) ListServerRouteUsersOnServer(ctx context.Context, serverID int
 }
 
 const listUserPlatformExits = `-- name: ListUserPlatformExits :many
-SELECT DISTINCT x.id, x.name, x.protocol, x.allow_server, x.allow_client
-FROM end_user u
-JOIN plan_node_group pg ON pg.plan_id = u.plan_id
-JOIN node_group_exit ge ON ge.node_group_id = pg.node_group_id
-JOIN chain_exit x ON x.id = ge.exit_id AND x.user_id IS NULL AND x.is_enabled
-WHERE u.id = $1 AND u.deleted_at IS NULL
+SELECT x.id, x.name, x.protocol, x.allow_server, x.allow_client
+FROM chain_exit x
+JOIN end_user u ON u.id = $1::bigint AND u.deleted_at IS NULL
+WHERE x.user_id IS NULL AND x.is_enabled
+  AND ((x.assign_mode = 'group' AND EXISTS (
+          SELECT 1 FROM plan_node_group pg JOIN node_group_exit ge ON ge.node_group_id = pg.node_group_id
+          WHERE pg.plan_id = u.plan_id AND ge.exit_id = x.id))
+    OR (x.assign_mode = 'user' AND EXISTS (
+          SELECT 1 FROM chain_exit_user eu WHERE eu.exit_id = x.id AND eu.user_id = u.id)))
 ORDER BY x.name, x.id
 `
 
@@ -990,9 +1065,9 @@ type ListUserPlatformExitsRow struct {
 	AllowClient bool
 }
 
-// 用户被授权的平台出口：启用，且属于套餐绑定的某个节点组（Ruling-47）
-func (q *Queries) ListUserPlatformExits(ctx context.Context, id int64) ([]ListUserPlatformExitsRow, error) {
-	rows, err := q.db.Query(ctx, listUserPlatformExits, id)
+// 用户被授权的平台出口：启用，且分配到本人——按节点组时属于套餐绑定的某个节点组（Ruling-47），指定用户时本人在名单里（Ruling-64）
+func (q *Queries) ListUserPlatformExits(ctx context.Context, userID int64) ([]ListUserPlatformExitsRow, error) {
+	rows, err := q.db.Query(ctx, listUserPlatformExits, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -1061,6 +1136,20 @@ func (q *Queries) ResetChainApplyFailures(ctx context.Context, serverID int64) (
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const setChainExitAssignMode = `-- name: SetChainExitAssignMode :exec
+UPDATE chain_exit SET assign_mode = $1 WHERE id = $2 AND user_id IS NULL
+`
+
+type SetChainExitAssignModeParams struct {
+	AssignMode string
+	ID         int64
+}
+
+func (q *Queries) SetChainExitAssignMode(ctx context.Context, arg SetChainExitAssignModeParams) error {
+	_, err := q.db.Exec(ctx, setChainExitAssignMode, arg.AssignMode, arg.ID)
+	return err
 }
 
 const setChainExitEnabled = `-- name: SetChainExitEnabled :execrows

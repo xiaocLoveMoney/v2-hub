@@ -159,21 +159,23 @@ type exitNodeGroupVO struct {
 
 // adminChainExitVO 对应 hub-api.yaml AdminChainExit；原链接不在这里返回。
 type adminChainExitVO struct {
-	ID          int64             `json:"id"`
-	Owner       string            `json:"owner"`
-	User        *adminChainUserVO `json:"user"`
-	Name        string            `json:"name"`
-	Protocol    string            `json:"protocol"`
-	Address     string            `json:"address"`
-	Port        int               `json:"port"`
-	Remark      string            `json:"remark"`
-	IsEnabled   bool              `json:"isEnabled"`
-	AllowServer bool              `json:"allowServer"`
-	AllowClient bool              `json:"allowClient"`
-	NodeGroups  []exitNodeGroupVO `json:"nodeGroups"`
-	RouteCount  int               `json:"routeCount"`
-	CreatedAt   time.Time         `json:"createdAt"`
-	UpdatedAt   time.Time         `json:"updatedAt"`
+	ID          int64              `json:"id"`
+	Owner       string             `json:"owner"`
+	User        *adminChainUserVO  `json:"user"`
+	Name        string             `json:"name"`
+	Protocol    string             `json:"protocol"`
+	Address     string             `json:"address"`
+	Port        int                `json:"port"`
+	Remark      string             `json:"remark"`
+	IsEnabled   bool               `json:"isEnabled"`
+	AllowServer bool               `json:"allowServer"`
+	AllowClient bool               `json:"allowClient"`
+	AssignMode  string             `json:"assignMode"`
+	NodeGroups  []exitNodeGroupVO  `json:"nodeGroups"`
+	Users       []adminChainUserVO `json:"users"`
+	RouteCount  int                `json:"routeCount"`
+	CreatedAt   time.Time          `json:"createdAt"`
+	UpdatedAt   time.Time          `json:"updatedAt"`
 }
 
 func toAdminChainExitVO(e service.AdminChainExit) adminChainExitVO {
@@ -182,6 +184,8 @@ func toAdminChainExitVO(e service.AdminChainExit) adminChainExitVO {
 		Remark: e.Remark, IsEnabled: e.Enabled, AllowServer: e.AllowServer, AllowClient: e.AllowClient,
 		RouteCount: e.RouteCount, CreatedAt: e.CreatedAt, UpdatedAt: e.UpdatedAt,
 		NodeGroups: mapSlice(e.NodeGroups, func(g service.ExitNodeGroup) exitNodeGroupVO { return exitNodeGroupVO{ID: g.ID, Name: g.Name} }),
+		AssignMode: e.AssignMode,
+		Users:      mapSlice(e.Users, func(u service.ExitUser) adminChainUserVO { return adminChainUserVO{ID: u.ID, Username: u.Username} }),
 	}
 	if e.UserID != 0 {
 		vo.Owner = service.ExitOwnerUser
@@ -200,12 +204,15 @@ type platformExitRequest struct {
 	AllowServer  bool    `json:"allowServer"`
 	AllowClient  bool    `json:"allowClient"`
 	NodeGroupIDs []int64 `json:"nodeGroupIds"`
+	AssignMode   string  `json:"assignMode"`
+	UserIDs      []int64 `json:"userIds"`
 }
 
 func (req platformExitRequest) toInput() service.PlatformExitInput {
 	in := service.PlatformExitInput{
 		Name: req.Name, Link: req.Link, Remark: req.Remark, Enabled: true,
 		AllowServer: req.AllowServer, AllowClient: req.AllowClient, NodeGroupIDs: req.NodeGroupIDs,
+		AssignMode: req.AssignMode, UserIDs: req.UserIDs,
 	}
 	if req.IsEnabled != nil {
 		in.Enabled = *req.IsEnabled
