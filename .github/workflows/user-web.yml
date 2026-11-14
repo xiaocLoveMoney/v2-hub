@@ -1,8 +1,8 @@
-# v2-hub-user-web：本模块或契约目录变动时跑；main 每次合入全量跑。
+# v2-hub-user-web：本模块或契约目录变动时跑；main 每次合入由 deploy.yml 调用全量跑。
 name: v2-hub-user-web
 on:
-  push:
-    branches: [main]
+  # main 上由 deploy.yml 调用（检查全绿才部署，Ruling-62），这里不再单独监听 push
+  workflow_call:
   pull_request:
     paths:
       - "v2-hub-user-web/**"

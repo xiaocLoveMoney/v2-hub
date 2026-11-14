@@ -1,9 +1,9 @@
-# v2-hub-server：本模块或契约目录变动时跑；main 每次合入全量跑。
+# v2-hub-server：本模块或契约目录变动时跑；main 每次合入由 deploy.yml 调用全量跑。
 # 起一个 PostgreSQL 服务容器，让真实数据库用例（每个用例独立 schema）在 CI 里也执行。
 name: v2-hub-server
 on:
-  push:
-    branches: [main]
+  # main 上由 deploy.yml 调用（检查全绿才部署，Ruling-62），这里不再单独监听 push
+  workflow_call:
   pull_request:
     paths:
       - "v2-hub-server/**"
