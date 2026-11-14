@@ -149,6 +149,7 @@ func NewRouter(deps Deps) http.Handler {
 	mux.HandleFunc("DELETE /api/admin/chain-exits/{id}", h.requireAdmin(service.PermNodeWrite, h.deleteChainExitAsAdmin))
 	mux.HandleFunc("PUT /api/admin/chain-exits/{id}/enabled", h.requireAdmin(service.PermNodeWrite, h.setChainExitEnabled))
 	mux.HandleFunc("GET /api/admin/chain-exits/{id}/link", h.requireAdmin(service.PermNodeWrite, h.getPlatformChainExitLink))
+	mux.HandleFunc("POST /api/admin/chain-exits/{id}/test", h.requireAdmin(service.PermNodeWrite, h.testChainExitAsAdmin))
 	mux.HandleFunc("GET /api/admin/servers/{id}/inbounds", h.requireAdmin(service.PermNodeRead, h.listServerInbounds))
 	mux.HandleFunc("POST /api/admin/servers/{id}/inbounds", h.requireAdmin(service.PermNodeWrite, h.createInbound))
 	mux.HandleFunc("POST /api/admin/servers/{id}/endpoints", h.requireAdmin(service.PermNodeWrite, h.createEndpoints))
@@ -159,6 +160,7 @@ func NewRouter(deps Deps) http.Handler {
 	mux.HandleFunc("POST /api/admin/inbounds/{id}/drift/ack", h.requireAdmin(service.PermNodeWrite, h.ackInboundDrift))
 	mux.HandleFunc("GET /api/admin/inbounds/{id}/panel-config", h.requireAdmin(service.PermNodeWrite, h.getInboundPanelConfig))
 	mux.HandleFunc("POST /api/admin/servers/{id}/keys", h.requireAdmin(service.PermNodeWrite, h.generatePanelKeys))
+	mux.HandleFunc("GET /api/admin/servers/{id}/web-cert", h.requireAdmin(service.PermNodeWrite, h.getServerWebCert))
 
 	mux.HandleFunc("GET /api/admin/plans", h.requireAdmin(service.PermPlanRead, h.listPlans))
 	mux.HandleFunc("POST /api/admin/plans", h.requireAdmin(service.PermPlanWrite, h.createPlan))
@@ -291,6 +293,7 @@ func NewRouter(deps Deps) http.Handler {
 	mux.HandleFunc("PUT /api/user/chain/exits/{id}", h.requireUser(false, h.updateChainExit))
 	mux.HandleFunc("DELETE /api/user/chain/exits/{id}", h.requireUser(false, h.deleteChainExit))
 	mux.HandleFunc("GET /api/user/chain/exits/{id}/link", h.requireUser(false, h.getChainExitLink))
+	mux.HandleFunc("POST /api/user/chain/exits/{id}/test", h.requireUser(false, h.testChainExit))
 	// 支付网关回调：没有会话与 CSRF，真实性靠网关实现验签
 	mux.HandleFunc("POST /api/pay/notify/{gateway}", h.paymentNotify)
 	mux.HandleFunc("GET /api/user/wallet/ledger", h.requireUser(false, h.listOwnLedger))

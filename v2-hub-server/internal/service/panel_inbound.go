@@ -639,6 +639,24 @@ func (s *PanelService) GeneratePanelKeys(ctx context.Context, actor *AdminPrinci
 	return out, nil
 }
 
+// WebCertFiles 取这台服务器面板自己的网页证书路径（Ruling-53）：只有路径，不含证书内容，不记审计。
+// 面板类型不支持时返回 conflict。
+func (s *PanelService) WebCertFiles(ctx context.Context, serverID int64) (panel.CertFiles, error) {
+	p, _, err := s.openEnabledProvider(ctx, serverID)
+	if err != nil {
+		return panel.CertFiles{}, err
+	}
+	locator, ok := p.(panel.CertLocator)
+	if !ok {
+		return panel.CertFiles{}, newError(CodeConflict, msgWebCertUnsupported)
+	}
+	files, err := locator.WebCertFiles(ctx)
+	if err != nil {
+		return panel.CertFiles{}, panelError(err)
+	}
+	return files, nil
+}
+
 // DeleteInbound 先删面板再删平台记录（节点级联删除）；面板上已不存在也视为成功。
 // 缺失入站只删平台记录：它的面板标识可能已分给别的入站（docs/03 §5.1 缺失入站）。
 func (s *PanelService) DeleteInbound(ctx context.Context, actor *AdminPrincipal, id int64, ip *netip.Addr) error {

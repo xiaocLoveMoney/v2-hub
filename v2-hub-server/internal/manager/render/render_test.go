@@ -422,3 +422,82 @@ func TestXrayChains(t *testing.T) {
 	}
 	checkGolden(t, "xray-chain.golden.json", out)
 }
+
+// HTTP / HTTPS 代理出口（Ruling-51）；用户名与口令是示例值。
+func TestParseHTTPProxy(t *testing.T) {
+	const host = "proxy.example.net"
+	withAuth := "http://" + sampleSocksUser + ":" + sampleAuth + "@" + host + ":8080#office"
+	tests := []struct {
+		name, link string
+		want       ProxyNode
+	}{
+		{"http with auth", withAuth, ProxyNode{
+			Name: "office", Protocol: ProtoHTTP, Address: host, Port: 8080, Username: sampleSocksUser, Password: sampleAuth, Network: NetTCP, Security: SecNone,
+		}},
+		{"http no auth", "http://203.0.113.9:3128", ProxyNode{Protocol: ProtoHTTP, Address: "203.0.113.9", Port: 3128, Network: NetTCP, Security: SecNone}},
+		{"https with sni", "https://" + host + ":443/?sni=front.example.net&allowInsecure=1#tls", ProxyNode{
+			Name: "tls", Protocol: ProtoHTTP, Address: host, Port: 443, Network: NetTCP, Security: SecTLS, SNI: "front.example.net", AllowInsecure: true,
+		}},
+		{"user without password", "http://only-user@" + host + ":8080", ProxyNode{
+			Protocol: ProtoHTTP, Address: host, Port: 8080, Username: "only-user", Network: NetTCP, Security: SecNone,
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := ParseLink(tt.link)
+			if err != nil {
+				t.Fatalf("ParseLink: %v", err)
+			}
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("got %+v\nwant %+v", got, tt.want)
+			}
+		})
+	}
+	// 没有端口、带路径的网页地址、只有口令没有用户名的都不是代理地址
+	for _, bad := range []string{"http://" + host, "https://" + host + "/index.html", "http://" + host + ":8080/path", "http://:" + sampleAuth + "@" + host + ":8080"} {
+		if _, err := ParseLink(bad); !errors.Is(err, ErrUnsupportedLink) {
+			t.Errorf("ParseLink(%q) err = %v, want ErrUnsupportedLink", bad, err)
+		}
+	}
+}
+
+func TestHTTPProxyOutbounds(t *testing.T) {
+	node := ProxyNode{
+		Name: "office", Protocol: ProtoHTTP, Address: "proxy.example.net", Port: 443, Username: sampleSocksUser, Password: sampleAuth,
+		Network: NetTCP, Security: SecTLS, SNI: "front.example.net",
+	}
+	xr, ok := XrayOutbound(node, "hub-r1")
+	if !ok {
+		t.Fatal("XrayOutbound: unsupported")
+	}
+	raw, err := json.Marshal(xr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`"protocol":"http"`, `"user":"` + sampleSocksUser + `"`, `"security":"tls"`, `"serverName":"front.example.net"`} {
+		if !strings.Contains(string(raw), want) {
+			t.Errorf("xray outbound lacks %s: %s", want, raw)
+		}
+	}
+	if !mihomoSupports(node) || !singBoxSupports(node) {
+		t.Fatal("http proxy should be supported by mihomo and sing-box")
+	}
+	mh := mihomoProxy(node, "office")
+	if mh["type"] != "http" || mh["tls"] != true || mh["sni"] != "front.example.net" || mh["username"] != sampleSocksUser {
+		t.Errorf("mihomo proxy = %v", mh)
+	}
+	if _, hasUDP := mh["udp"]; hasUDP {
+		t.Errorf("mihomo http proxy must not carry udp: %v", mh)
+	}
+	sb := singBoxOutbound(node, "office")
+	tls, _ := sb["tls"].(map[string]any)
+	if sb["type"] != "http" || tls["server_name"] != "front.example.net" || sb["username"] != sampleSocksUser {
+		t.Errorf("sing-box outbound = %v", sb)
+	}
+	// 不带 TLS 的 HTTP 代理：没有 tls 段
+	plain := node
+	plain.Security, plain.SNI = SecNone, ""
+	if _, hasTLS := singBoxOutbound(plain, "p")["tls"]; hasTLS {
+		t.Error("plain http proxy must not carry tls")
+	}
+}

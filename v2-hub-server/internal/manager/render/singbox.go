@@ -96,6 +96,14 @@ func singBoxOutbound(n ProxyNode, tag string) map[string]any {
 		if n.Username != "" {
 			o["username"], o["password"] = n.Username, n.Password
 		}
+	case ProtoHTTP:
+		o["type"] = "http"
+		if n.Username != "" {
+			o["username"], o["password"] = n.Username, n.Password
+		}
+		if tls := singBoxTLS(n); tls != nil {
+			o["tls"] = tls
+		}
 	case ProtoHysteria2:
 		o["type"], o["password"] = "hysteria2", n.Password
 		tls := map[string]any{"enabled": true}

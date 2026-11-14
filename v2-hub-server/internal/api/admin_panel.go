@@ -32,6 +32,7 @@ type PanelManager interface {
 	AckInboundDrift(ctx context.Context, actor *service.AdminPrincipal, id int64, ip *netip.Addr) error
 	GetInboundPanelConfig(ctx context.Context, actor *service.AdminPrincipal, id int64, ip *netip.Addr) (*service.InboundPanelConfig, error)
 	GeneratePanelKeys(ctx context.Context, actor *service.AdminPrincipal, serverID int64, kind string, ip *netip.Addr) (json.RawMessage, error)
+	WebCertFiles(ctx context.Context, serverID int64) (panel.CertFiles, error)
 	DeleteInbound(ctx context.Context, actor *service.AdminPrincipal, id int64, ip *netip.Addr) error
 	CreateEndpoints(ctx context.Context, actor *service.AdminPrincipal, serverID int64, in service.EndpointInput, ip *netip.Addr) error
 	DeleteEndpoint(ctx context.Context, actor *service.AdminPrincipal, id int64, ip *netip.Addr) error
@@ -502,6 +503,26 @@ func (h *handlers) generatePanelKeys(w http.ResponseWriter, r *http.Request, p *
 		return
 	}
 	writeOK(w, keys)
+}
+
+// serverWebCertVO 对应 hub-api.yaml ServerWebCert：只有路径，没有证书内容。
+type serverWebCertVO struct {
+	CertFile string `json:"certFile"`
+	KeyFile  string `json:"keyFile"`
+}
+
+func (h *handlers) getServerWebCert(w http.ResponseWriter, r *http.Request, _ *service.AdminPrincipal) {
+	id, err := pathID(r)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	files, err := h.panels.WebCertFiles(r.Context(), id)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeOK(w, serverWebCertVO{CertFile: files.CertFile, KeyFile: files.KeyFile})
 }
 
 func (h *handlers) deleteInbound(w http.ResponseWriter, r *http.Request, p *service.AdminPrincipal) {

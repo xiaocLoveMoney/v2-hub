@@ -57,6 +57,8 @@ const (
 	defaultChainMinApplyInterval = 60 * time.Second
 	defaultChainUserWriteLimit   = 10
 	defaultChainUserWriteWindow  = time.Hour
+	defaultChainUserTestLimit    = 6
+	defaultChainUserTestWindow   = time.Minute
 )
 
 // ErrInvalidConfig 表示配置内容不合法。
@@ -77,12 +79,15 @@ type Config struct {
 
 // ChainConfig 是服务端链式下发的节奏（docs/03 §5.19）：ApplyInterval 是后台检查间隔，
 // MinApplyInterval 是同一台服务器两次下发的最小间隔（每次下发都会重启该服务器的内核）；
-// UserWriteLimit / UserWriteWindow 是每个用户对服务端规则的写操作频率（Ruling-49）。
+// UserWriteLimit / UserWriteWindow 是每个用户对服务端规则的写操作频率（Ruling-49）；
+// UserTestLimit / UserTestWindow 是每个用户发起出口延迟测试的频率（Ruling-52）。
 type ChainConfig struct {
 	ApplyInterval    time.Duration `yaml:"applyInterval"`
 	MinApplyInterval time.Duration `yaml:"minApplyInterval"`
 	UserWriteLimit   int           `yaml:"userWriteLimit"`
 	UserWriteWindow  time.Duration `yaml:"userWriteWindow"`
+	UserTestLimit    int           `yaml:"userTestLimit"`
+	UserTestWindow   time.Duration `yaml:"userTestWindow"`
 }
 
 // SubscriptionConfig 是订阅的系统级设置。
@@ -217,6 +222,8 @@ func defaults() Config {
 		MinApplyInterval: defaultChainMinApplyInterval,
 		UserWriteLimit:   defaultChainUserWriteLimit,
 		UserWriteWindow:  defaultChainUserWriteWindow,
+		UserTestLimit:    defaultChainUserTestLimit,
+		UserTestWindow:   defaultChainUserTestWindow,
 	}, Portal: PortalConfig{
 		SessionIdleTimeout: defaultPortalSessionIdleTimeout,
 		SessionMaxAge:      defaultPortalSessionMaxAge,
@@ -262,6 +269,9 @@ func (c Config) validate() error {
 	}
 	if c.Chain.UserWriteLimit <= 0 || c.Chain.UserWriteWindow <= 0 {
 		return fmt.Errorf("%w: chain user write limit and window must be positive", ErrInvalidConfig)
+	}
+	if c.Chain.UserTestLimit <= 0 || c.Chain.UserTestWindow <= 0 {
+		return fmt.Errorf("%w: chain user test limit and window must be positive", ErrInvalidConfig)
 	}
 	po := c.Portal
 	if po.SessionIdleTimeout <= a.SessionTouchInterval || po.SessionMaxAge < po.SessionIdleTimeout || po.LoginLogRetention <= 0 {

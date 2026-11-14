@@ -131,7 +131,7 @@ SELECT link_enc FROM chain_exit WHERE id = sqlc.arg(id) AND user_id = sqlc.arg(u
 
 -- name: ListChainExitSecrets :many
 -- 渲染订阅与下发用：这些出口的名称、链接密文与固定的地址
-SELECT id, coalesce(user_id, 0)::bigint AS owner_id, name, link_enc, resolved_ip, resolved_at
+SELECT id, coalesce(user_id, 0)::bigint AS owner_id, name, link_enc, resolved_ip, resolved_at, is_enabled
 FROM chain_exit WHERE id = ANY(sqlc.arg(ids)::bigint[]);
 
 -- name: CountServerRoutesByExit :one

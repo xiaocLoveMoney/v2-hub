@@ -26,6 +26,7 @@ type ChainAdminManager interface {
 	SetExitEnabled(ctx context.Context, actor *service.AdminPrincipal, id int64, enabled bool, ip *netip.Addr) (*service.AdminChainExit, error)
 	DeleteExitAsAdmin(ctx context.Context, actor *service.AdminPrincipal, id int64, ip *netip.Addr) error
 	PlatformExitLink(ctx context.Context, actor *service.AdminPrincipal, id int64, ip *netip.Addr) (string, error)
+	TestExitAsAdmin(ctx context.Context, exitID, serverID int64, mode string) (*service.ExitTestResult, error)
 }
 
 const (
@@ -314,4 +315,35 @@ func (h *handlers) getPlatformChainExitLink(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	writeOK(w, nodeLinkVO{Link: link})
+}
+
+// adminChainExitTestRequest 对应 hub-api.yaml AdminChainExitTestInput。
+type adminChainExitTestRequest struct {
+	ServerID int64  `json:"serverId"`
+	Mode     string `json:"mode"`
+}
+
+// adminChainExitTestVO 对应 hub-api.yaml AdminChainExitTestResult：比用户侧多面板的错误原文。
+type adminChainExitTestVO struct {
+	chainExitTestVO
+	Error string `json:"error"`
+}
+
+func (h *handlers) testChainExitAsAdmin(w http.ResponseWriter, r *http.Request, _ *service.AdminPrincipal) {
+	id, err := pathID(r)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	var req adminChainExitTestRequest
+	if err := decodeJSON(w, r, &req); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	res, err := h.chainAdmin.TestExitAsAdmin(r.Context(), id, req.ServerID, req.Mode)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeOK(w, adminChainExitTestVO{chainExitTestVO: toChainExitTestVO(res), Error: res.Error})
 }

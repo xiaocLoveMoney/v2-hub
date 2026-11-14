@@ -579,7 +579,7 @@ func (q *Queries) ListChainApplyServerIDs(ctx context.Context) ([]int64, error) 
 }
 
 const listChainExitSecrets = `-- name: ListChainExitSecrets :many
-SELECT id, coalesce(user_id, 0)::bigint AS owner_id, name, link_enc, resolved_ip, resolved_at
+SELECT id, coalesce(user_id, 0)::bigint AS owner_id, name, link_enc, resolved_ip, resolved_at, is_enabled
 FROM chain_exit WHERE id = ANY($1::bigint[])
 `
 
@@ -590,6 +590,7 @@ type ListChainExitSecretsRow struct {
 	LinkEnc    []byte
 	ResolvedIp *netip.Addr
 	ResolvedAt pgtype.Timestamptz
+	IsEnabled  bool
 }
 
 // 渲染订阅与下发用：这些出口的名称、链接密文与固定的地址
@@ -609,6 +610,7 @@ func (q *Queries) ListChainExitSecrets(ctx context.Context, ids []int64) ([]List
 			&i.LinkEnc,
 			&i.ResolvedIp,
 			&i.ResolvedAt,
+			&i.IsEnabled,
 		); err != nil {
 			return nil, err
 		}

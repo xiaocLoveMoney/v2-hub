@@ -23,6 +23,7 @@ type ChainManager interface {
 	UpdateExit(ctx context.Context, p *service.UserPrincipal, id int64, name, link string) (*service.ChainExit, error)
 	DeleteExit(ctx context.Context, p *service.UserPrincipal, id int64) error
 	ExitLink(ctx context.Context, p *service.UserPrincipal, id int64) (string, error)
+	TestExit(ctx context.Context, p *service.UserPrincipal, exitID, nodeID int64, mode string) (*service.ExitTestResult, error)
 }
 
 // userFeaturesVO 对应 hub-api.yaml UserSession.features：当前套餐开了哪些功能，决定菜单显隐。
@@ -315,4 +316,43 @@ func (h *handlers) getChainExitLink(w http.ResponseWriter, r *http.Request, p *s
 		return
 	}
 	writeOK(w, nodeLinkVO{Link: link})
+}
+
+// chainExitTestRequest 对应 hub-api.yaml ChainExitTestInput。
+type chainExitTestRequest struct {
+	NodeID int64  `json:"nodeId"`
+	Mode   string `json:"mode"`
+}
+
+// chainExitTestVO 对应 hub-api.yaml ChainExitTestResult：不带面板的错误原文（Ruling-52）。
+type chainExitTestVO struct {
+	OK           bool   `json:"ok"`
+	Mode         string `json:"mode"`
+	DelayMs      int64  `json:"delayMs"`
+	HTTPStatus   int    `json:"httpStatus"`
+	EgressIP     string `json:"egressIp"`
+	EgressRegion string `json:"egressRegion"`
+}
+
+func toChainExitTestVO(r *service.ExitTestResult) chainExitTestVO {
+	return chainExitTestVO{OK: r.OK, Mode: r.Mode, DelayMs: r.DelayMs, HTTPStatus: r.HTTPStatus, EgressIP: r.EgressIP, EgressRegion: r.EgressRegion}
+}
+
+func (h *handlers) testChainExit(w http.ResponseWriter, r *http.Request, p *service.UserPrincipal) {
+	id, err := pathID(r)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	var req chainExitTestRequest
+	if err := decodeJSON(w, r, &req); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	res, err := h.chain.TestExit(r.Context(), p, id, req.NodeID, req.Mode)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeOK(w, toChainExitTestVO(res))
 }

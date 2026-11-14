@@ -83,7 +83,16 @@ func (c *Client) callForm(ctx context.Context, path string, form url.Values, out
 }
 
 // send 发请求并解信封；contentType 为空表示没有请求体。
-func (c *Client) send(ctx context.Context, method, path, contentType string, reader io.Reader, out any) (retErr error) {
+func (c *Client) send(ctx context.Context, method, path, contentType string, reader io.Reader, out any) error {
+	return c.sendVia(ctx, c.http, method, path, contentType, reader, out)
+}
+
+// sendWith 用指定的 HTTP 客户端发一次带请求体的调用（个别接口需要更长的时限）。
+func (c *Client) sendWith(ctx context.Context, hc *http.Client, method, path, contentType string, body []byte, out any) error {
+	return c.sendVia(ctx, hc, method, path, contentType, bytes.NewReader(body), out)
+}
+
+func (c *Client) sendVia(ctx context.Context, hc *http.Client, method, path, contentType string, reader io.Reader, out any) (retErr error) {
 	target := c.base.JoinPath(apiPrefix, path)
 	req, err := http.NewRequestWithContext(ctx, method, target.String(), reader)
 	if err != nil {
@@ -95,7 +104,7 @@ func (c *Client) send(ctx context.Context, method, path, contentType string, rea
 		req.Header.Set(headerContent, contentType)
 	}
 
-	resp, err := c.http.Do(req)
+	resp, err := hc.Do(req)
 	if err != nil {
 		return &panel.Error{Kind: panel.KindUnreachable, Message: "无法连接面板（网络、TLS 或超时）", Err: err}
 	}

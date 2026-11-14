@@ -41,7 +41,7 @@ const (
 	ActionExitDeleteUser = "chain_exit.delete_user"
 
 	msgExitNotFound      = "出口不存在"
-	msgExitBadLink       = "链接无法识别：支持 vless、vmess、trojan、ss 分享链接或 socks5://[用户名:口令@]地址:端口"
+	msgExitBadLink       = "链接无法识别：支持 vless、vmess、trojan、ss 分享链接，或 socks5://、http://、https://[用户名:口令@]地址:端口"
 	msgExitLinkLen       = "链接长度须为 1–2048 个字符"
 	msgExitNameEmpty     = "名称不能为空"
 	msgExitTooMany       = "我的出口已达上限"
@@ -127,7 +127,7 @@ func parseExitLink(link string) (parsedExitLink, error) {
 		return parsedExitLink{}, newError(CodeInvalidArgument, msgExitBadLink)
 	}
 	switch node.Protocol {
-	case render.ProtoVLESS, render.ProtoVMess, render.ProtoTrojan, render.ProtoShadowsocks, render.ProtoSocks:
+	case render.ProtoVLESS, render.ProtoVMess, render.ProtoTrojan, render.ProtoShadowsocks, render.ProtoSocks, render.ProtoHTTP:
 		return parsedExitLink{link: link, node: node}, nil
 	default:
 		return parsedExitLink{}, newError(CodeInvalidArgument, msgExitBadLink)

@@ -18,7 +18,7 @@ func mihomoSupports(n ProxyNode) bool {
 	default:
 		return false
 	}
-	if n.Protocol == ProtoHysteria2 || n.Protocol == ProtoShadowsocks || n.Protocol == ProtoSocks {
+	if n.Protocol == ProtoHysteria2 || n.Protocol == ProtoShadowsocks || n.Protocol == ProtoSocks || n.Protocol == ProtoHTTP {
 		return true
 	}
 	return n.Security != SecReality || n.Protocol == ProtoVLESS || n.Protocol == ProtoTrojan
@@ -94,6 +94,13 @@ func mihomoProxy(n ProxyNode, name string) map[string]any {
 		if n.Username != "" {
 			p["username"], p["password"] = n.Username, n.Password
 		}
+	case ProtoHTTP:
+		p["type"] = "http"
+		delete(p, "udp") // HTTP 代理不带 UDP
+		if n.Username != "" {
+			p["username"], p["password"] = n.Username, n.Password
+		}
+		mihomoTLS(p, n, "sni")
 	case ProtoHysteria2:
 		p["type"], p["password"] = "hysteria2", n.Password
 		if n.SNI != "" {

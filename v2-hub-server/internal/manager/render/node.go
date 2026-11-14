@@ -20,7 +20,8 @@ const (
 	ProtoTrojan      = "trojan"
 	ProtoShadowsocks = "shadowsocks"
 	ProtoHysteria2   = "hysteria2"
-	ProtoSocks       = "socks" // SOCKS5，只来自用户的自有落地节点（docs/03 §5.18）
+	ProtoSocks       = "socks" // SOCKS5，只来自链式出口（docs/03 §5.21）
+	ProtoHTTP        = "http"  // HTTP / HTTPS 代理，只来自链式出口；HTTPS 即 Security 为 tls（Ruling-51）
 )
 
 // 传输与安全层取值。
@@ -45,6 +46,8 @@ const (
 	schemeHy2       = "hy2"
 	schemeSocks5    = "socks5"
 	schemeSocks     = "socks"
+	schemeHTTP      = "http"
+	schemeHTTPS     = "https"
 	schemeSep       = "://"
 
 	vmessDefaultCipher = "auto"
@@ -62,8 +65,8 @@ type ProxyNode struct {
 	Port     int
 
 	UUID     string // vless / vmess
-	Username string // socks
-	Password string // trojan / shadowsocks / hysteria2 / socks
+	Username string // socks / http
+	Password string // trojan / shadowsocks / hysteria2 / socks / http
 	Method   string // shadowsocks 加密方式；vmess 的 scy
 	Flow     string // vless flow
 	AlterID  int    // vmess
@@ -110,6 +113,10 @@ func ParseLink(link string) (ProxyNode, error) {
 		return parseShadowsocks(link)
 	case schemeSocks5, schemeSocks:
 		return parseSocks(link)
+	case schemeHTTP:
+		return parseHTTPProxy(link, SecNone)
+	case schemeHTTPS:
+		return parseHTTPProxy(link, SecTLS)
 	default:
 		return ProxyNode{}, ErrUnsupportedLink
 	}
@@ -335,6 +342,33 @@ func parseSocks(link string) (ProxyNode, error) {
 		return ProxyNode{}, ErrUnsupportedLink
 	}
 	n.Username, n.Password = user, pw
+	return n, nil
+}
+
+// parseHTTPProxy 解析 http://[user:pass@]host:port#name 与 https://…（HTTPS 代理可带 sni、allowInsecure 参数）。
+// 只认“地址 + 端口”：带路径的是网页地址，不当作代理。
+func parseHTTPProxy(link, security string) (ProxyNode, error) {
+	u, err := url.Parse(strings.TrimSpace(link))
+	if err != nil || (u.Path != "" && u.Path != "/") {
+		return ProxyNode{}, ErrUnsupportedLink
+	}
+	host, port, err := splitHostPort(u)
+	if err != nil {
+		return ProxyNode{}, err
+	}
+	n := ProxyNode{Name: u.Fragment, Protocol: ProtoHTTP, Address: host, Port: port, Network: NetTCP, Security: security}
+	if u.User != nil {
+		n.Username = u.User.Username()
+		n.Password, _ = u.User.Password()
+	}
+	if n.Username == "" && n.Password != "" {
+		return ProxyNode{}, ErrUnsupportedLink
+	}
+	if security == SecTLS {
+		q := u.Query()
+		n.SNI = q.Get("sni")
+		n.AllowInsecure = isTruthy(q.Get("allowInsecure")) || isTruthy(q.Get("insecure"))
+	}
 	return n, nil
 }
 
