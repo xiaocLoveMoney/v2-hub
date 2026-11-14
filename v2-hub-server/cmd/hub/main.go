@@ -26,8 +26,8 @@ import (
 	"v2-hub-server/internal/dao"
 	"v2-hub-server/internal/job"
 	"v2-hub-server/internal/manager/crypto"
-	"v2-hub-server/internal/manager/mail"
 	"v2-hub-server/internal/manager/geoip"
+	"v2-hub-server/internal/manager/mail"
 	"v2-hub-server/internal/manager/panel"
 	"v2-hub-server/internal/manager/panel/xui"
 	"v2-hub-server/internal/manager/pay"
@@ -57,6 +57,8 @@ const (
 	envTelegramAPIBase = "HUB_TELEGRAM_API_BASE"
 	// envGeoIPLookupURL 覆盖配置里的 IP 库查询地址（联调指向模拟端；设为空串即关闭扫描，Ruling-65）
 	envGeoIPLookupURL = "HUB_GEOIP_LOOKUP_URL"
+	// serverLocateInterval 是位置为空的服务器的补扫周期（docs/03 §5.1）。
+	serverLocateInterval = time.Hour
 	// telegramOutboxInterval 是 Telegram 发件箱任务的周期；opsInterval 是掉线告警与日报的检查周期。
 	telegramOutboxInterval = 10 * time.Second
 	opsInterval            = time.Minute
@@ -152,8 +154,8 @@ func runServer(args []string) error {
 		InfoNodes: cfg.Subscription.InfoNodes, LogRetention: cfg.Subscription.LogRetention,
 	}
 	go job.RunSessionCleanup(ctx, job.PurgeFunc(panels.PurgeServerMetrics), cfg.Auth.SessionCleanupInterval)
-	// 位置为空的服务器在后台补扫一次，不阻塞启动（Ruling-65）
-	go job.RunServerLocate(ctx, panels)
+	// 位置为空的服务器在后台补扫：启动时一次、之后每小时一次，不阻塞启动（Ruling-65）
+	go job.RunServerLocate(ctx, panels, serverLocateInterval)
 	// 节点旧默认名去掉服务器名前缀（Ruling-63）
 	if _, err := panels.RenameLegacyNodes(ctx); err != nil {
 		return fmt.Errorf("rename legacy nodes: %w", err)
