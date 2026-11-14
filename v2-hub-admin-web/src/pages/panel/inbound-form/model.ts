@@ -630,3 +630,25 @@ export function withWebCert(d: InboundDraft, certFile: string, keyFile: string):
   })
   return { draft: isFilled ? setAt(d, path, next) : d, isFilled }
 }
+
+// ---- REALITY 目标扫描（docs/03 §5.2 REALITY 目标扫描，Ruling-54） ----------------------
+
+/** 一次“查找目标”最多探测几个，与 hub-api.yaml 的 RealityTargetsInput.targets 一致。 */
+export const MAX_REALITY_TARGETS = 20
+const WILDCARD_PREFIX = '*.'
+const TARGET_LINE_SEPARATOR = /[\s,]+/
+
+/** 扫描结果里能直接当 SNI 用的域名：证书里的域名去掉通配符项与重复；一个都没有时退回目标自己的域名（目标是 IP 就没有）。 */
+export function realityServerNames(result: { host: string; serverNames: readonly string[] }): string[] {
+  const names = [...new Set(result.serverNames.map((n) => n.trim()).filter((n) => n !== '' && !n.startsWith(WILDCARD_PREFIX)))]
+  if (names.length > 0) {
+    return names
+  }
+  const host = serverDomainOf([result.host])
+  return host === '' ? [] : [host]
+}
+
+/** 把“每行一个（也可用逗号或空格分隔）”的候选目标拆成列表，去掉空项与重复。 */
+export function parseRealityTargets(text: string): string[] {
+  return [...new Set(text.split(TARGET_LINE_SEPARATOR).filter((t) => t !== ''))]
+}
