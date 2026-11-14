@@ -414,7 +414,7 @@ export const zh = {
   'subLogs.colClient': '客户端标识',
   'subLogs.empty': '还没有订阅记录',
   'connPassword.title': '连接密码',
-  'connPassword.intro': '用于 Trojan、Shadowsocks、TUIC 和 MASQUE 节点；VLESS、VMess、Hysteria 与 WireGuard 不受影响。',
+  'connPassword.intro': '用于 Trojan、Shadowsocks、TUIC 和 MASQUE 节点；VLESS、VMess、Hysteria 与 WireGuard 不受影响。服务器上有 Shadowsocks 2022 节点时，该服务器的这些节点改用平台生成的密钥（SS2022 只认这种密钥）。',
   'connPassword.statusCustom': '已自设',
   'connPassword.statusRandom': '平台随机生成',
   'connPassword.new': '新的连接密码',
