@@ -17,7 +17,7 @@ import (
 
 var update = flag.Bool("update", false, "rewrite golden files")
 
-// 测试链接里的标识与口令均为示例值，不对应任何真实节点。
+// 测试链接里的标识与密码均为示例值，不对应任何真实节点。
 const (
 	sampleUUID = "11111111-1111-4111-8111-111111111111"
 	sampleAuth = "sample-auth-0001"
@@ -250,7 +250,7 @@ func TestUniqueNames(t *testing.T) {
 	}
 }
 
-// 自有落地节点的 SOCKS5 地址；用户名与口令是示例值。
+// 自有落地节点的 SOCKS5 地址；用户名与密码是示例值。
 const (
 	sampleSocksUser = "sample-user"
 	linkSocksAuth   = "socks5://" + sampleSocksUser + ":" + sampleAuth + "@home.example.net:1080#home-socks"
@@ -423,7 +423,7 @@ func TestXrayChains(t *testing.T) {
 	checkGolden(t, "xray-chain.golden.json", out)
 }
 
-// HTTP / HTTPS 代理出口（Ruling-51）；用户名与口令是示例值。
+// HTTP / HTTPS 代理出口（Ruling-51）；用户名与密码是示例值。
 func TestParseHTTPProxy(t *testing.T) {
 	const host = "proxy.example.net"
 	withAuth := "http://" + sampleSocksUser + ":" + sampleAuth + "@" + host + ":8080#office"
@@ -453,7 +453,7 @@ func TestParseHTTPProxy(t *testing.T) {
 			}
 		})
 	}
-	// 没有端口、带路径的网页地址、只有口令没有用户名的都不是代理地址
+	// 没有端口、带路径的网页地址、只有密码没有用户名的都不是代理地址
 	for _, bad := range []string{"http://" + host, "https://" + host + "/index.html", "http://" + host + ":8080/path", "http://:" + sampleAuth + "@" + host + ":8080"} {
 		if _, err := ParseLink(bad); !errors.Is(err, ErrUnsupportedLink) {
 			t.Errorf("ParseLink(%q) err = %v, want ErrUnsupportedLink", bad, err)

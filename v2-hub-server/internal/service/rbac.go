@@ -333,7 +333,7 @@ func checkCanAssign(actor *AdminPrincipal, role Role) error {
 
 func validatePassword(password string) error {
 	if n := utf8.RuneCountInString(password); n < minPasswordLen || n > maxPasswordLen {
-		return newError(CodeInvalidArgument, fmt.Sprintf("口令长度须为 %d–%d 个字符", minPasswordLen, maxPasswordLen))
+		return newError(CodeInvalidArgument, fmt.Sprintf("密码长度须为 %d–%d 个字符", minPasswordLen, maxPasswordLen))
 	}
 	return nil
 }
@@ -543,7 +543,7 @@ func (s *RBACService) UpdateAdmin(ctx context.Context, actor *AdminPrincipal, id
 	return updated, nil
 }
 
-// ResetAdminPassword 重置管理员口令并使其全部会话失效（R3、R7）。
+// ResetAdminPassword 重置管理员密码并使其全部会话失效（R3、R7）。
 func (s *RBACService) ResetAdminPassword(ctx context.Context, actor *AdminPrincipal, id int64, password string, ip *netip.Addr) error {
 	if err := validatePassword(password); err != nil {
 		return err

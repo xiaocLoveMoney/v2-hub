@@ -35,7 +35,7 @@ const (
 	guardPublicV6 = "2606:2800:220:1:248:1893:25c8:1946"
 )
 
-// withKey 返回换了口令字段的节点。
+// withKey 返回换了密码字段的节点。
 func withKey(n render.ProxyNode, key string) render.ProxyNode {
 	n.Password = key
 	return n

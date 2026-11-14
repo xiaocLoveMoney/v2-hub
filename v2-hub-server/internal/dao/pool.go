@@ -27,7 +27,7 @@ func NewPool(ctx context.Context, dsn string, cfg PoolConfig) (*pgxpool.Pool, er
 	}
 	poolCfg, err := pgxpool.ParseConfig(dsn)
 	if err != nil {
-		// 不把 dsn 拼进错误：其中含口令
+		// 不把 dsn 拼进错误：其中含密码
 		return nil, fmt.Errorf("parse database dsn: %w", err)
 	}
 	poolCfg.MaxConns = cfg.MaxConns

@@ -1,4 +1,4 @@
-// Package crypto 封装口令哈希、随机 token 与摘要等通用密码学能力（manager 层）。
+// Package crypto 封装密码哈希、随机 token 与摘要等通用密码学能力（manager 层）。
 package crypto
 
 import (
@@ -24,12 +24,12 @@ const (
 	phcFieldCount          = 6
 )
 
-// ErrMalformedHash 表示存储的口令哈希格式无法解析。
+// ErrMalformedHash 表示存储的密码哈希格式无法解析。
 var ErrMalformedHash = errors.New("malformed password hash")
 
 var b64 = base64.RawStdEncoding
 
-// HashPassword 用 argon2id 计算口令哈希，返回 PHC 格式字符串（含盐与参数）。
+// HashPassword 用 argon2id 计算密码哈希，返回 PHC 格式字符串（含盐与参数）。
 func HashPassword(password string) (string, error) {
 	salt := make([]byte, argonSaltLen)
 	if _, err := rand.Read(salt); err != nil {
@@ -41,7 +41,7 @@ func HashPassword(password string) (string, error) {
 		b64.EncodeToString(salt), b64.EncodeToString(key)), nil
 }
 
-// VerifyPassword 校验口令是否与 PHC 格式哈希匹配；按哈希里记录的参数重算，参数升级后旧哈希仍可校验。
+// VerifyPassword 校验密码是否与 PHC 格式哈希匹配；按哈希里记录的参数重算，参数升级后旧哈希仍可校验。
 func VerifyPassword(password, encoded string) (bool, error) {
 	parts := strings.Split(encoded, "$")
 	if len(parts) != phcFieldCount || !strings.HasPrefix(encoded, phcPrefix) {

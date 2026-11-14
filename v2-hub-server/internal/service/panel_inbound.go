@@ -589,7 +589,7 @@ type InboundPanelConfig struct {
 	Config   json.RawMessage
 }
 
-// GetInboundPanelConfig 从面板实时读取入站完整配置。结果含私钥与口令，所以只给有写权限的管理员，且每次读取记审计。
+// GetInboundPanelConfig 从面板实时读取入站完整配置。结果含私钥与密码，所以只给有写权限的管理员，且每次读取记审计。
 func (s *PanelService) GetInboundPanelConfig(ctx context.Context, actor *AdminPrincipal, id int64, ip *netip.Addr) (*InboundPanelConfig, error) {
 	row, err := s.loadLiveInbound(ctx, id)
 	if err != nil {

@@ -3,7 +3,7 @@
 // 用法：
 //
 //	hub [-f 配置文件]                              启动服务
-//	hub admin-create [-f 配置文件] -username 名称   创建超级管理员（口令从终端无回显读取，或从标准输入读一行）
+//	hub admin-create [-f 配置文件] -username 名称   创建超级管理员（密码从终端无回显读取，或从标准输入读一行）
 package main
 
 import (
@@ -36,7 +36,7 @@ import (
 
 const (
 	defaultConfigPath = "etc/hub-server.yaml"
-	// envDatabaseURL 是 PostgreSQL 连接串（含口令）的环境变量名，不写进配置文件（Ruling-2）。
+	// envDatabaseURL 是 PostgreSQL 连接串（含密码）的环境变量名，不写进配置文件（Ruling-2）。
 	envDatabaseURL = "HUB_DATABASE_URL"
 	// envEncryptionKey 是 AES-256-GCM 主密钥（Base64 的 32 字节），加密 TOTP 密钥等（docs/03 §4.3）。
 	envEncryptionKey = "HUB_ENCRYPTION_KEY"

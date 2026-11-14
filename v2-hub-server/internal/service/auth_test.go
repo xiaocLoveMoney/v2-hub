@@ -13,7 +13,7 @@ import (
 	"v2-hub-server/internal/manager/crypto"
 )
 
-// cred 是测试用口令（仅测试库内有效）；bad 是错误口令。
+// cred 是测试用密码（仅测试库内有效）；bad 是错误密码。
 const (
 	cred = "correct-horse-battery"
 	bad  = "wrong-guess-123"
@@ -126,7 +126,7 @@ func TestLoginFailuresAreUniformAndRateLimited(t *testing.T) {
 			t.Fatalf("Login(%s) err = %v, want uniform bad-credentials", in.Username, err)
 		}
 	}
-	// 同一 IP 再失败 3 次达到 5 次上限，此后正确口令也被拒
+	// 同一 IP 再失败 3 次达到 5 次上限，此后正确密码也被拒
 	for i := 0; i < 3; i++ {
 		if _, err := f.auth.Login(ctx, LoginInput{Username: "root", Password: bad, ClientIP: &ip}); !errors.Is(err, ErrUnauthenticated) {
 			t.Fatalf("attempt %d err = %v", i, err)

@@ -1,6 +1,6 @@
 // Package config 负责加载 hub-server 的 YAML 配置。
 //
-// 配置文件入库（etc/hub-server.yaml），凭据（数据库口令、加密密钥、MinIO 密钥）
+// 配置文件入库（etc/hub-server.yaml），凭据（数据库密码、加密密钥、MinIO 密钥）
 // 一律从环境变量读取，不出现在配置文件里（Ruling-2）。
 package config
 
@@ -151,7 +151,7 @@ type AuthConfig struct {
 	LoginMaxTrackedKeys    int           `yaml:"loginMaxTrackedKeys"`
 }
 
-// DatabaseConfig 是 PostgreSQL 连接池参数。连接串（含口令）只从环境变量 HUB_DATABASE_URL 读（Ruling-2）。
+// DatabaseConfig 是 PostgreSQL 连接池参数。连接串（含密码）只从环境变量 HUB_DATABASE_URL 读（Ruling-2）。
 type DatabaseConfig struct {
 	// MaxConns 连接池最大连接数。
 	MaxConns int32 `yaml:"maxConns"`

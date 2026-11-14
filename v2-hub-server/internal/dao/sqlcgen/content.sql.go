@@ -686,7 +686,7 @@ type ListSharedAccountsRow struct {
 }
 
 // ---- 共享账号 ----
-// 管理端：全部条目与各自限定的套餐，不含口令
+// 管理端：全部条目与各自限定的套餐，不含密码
 func (q *Queries) ListSharedAccounts(ctx context.Context, id int64) ([]ListSharedAccountsRow, error) {
 	rows, err := q.db.Query(ctx, listSharedAccounts, id)
 	if err != nil {

@@ -273,7 +273,7 @@ func (s *MailService) PurgeOutbox(ctx context.Context) (int64, error) {
 	return mails + codes, nil
 }
 
-// sanitizeMailError 把发送错误压成一行、截断到库列长度；SMTP 错误不含口令。
+// sanitizeMailError 把发送错误压成一行、截断到库列长度；SMTP 错误不含密码。
 func sanitizeMailError(err error) string {
 	msg := strings.Join(strings.Fields(err.Error()), " ")
 	if r := []rune(msg); len(r) > mailErrorMaxLen {

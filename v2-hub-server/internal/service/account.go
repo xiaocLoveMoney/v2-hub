@@ -16,7 +16,7 @@ import (
 	"v2-hub-server/internal/manager/ratelimit"
 )
 
-// 注册、找回口令、换绑邮箱与注销（docs/03 §5.8）。
+// 注册、找回密码、换绑邮箱与注销（docs/03 §5.8）。
 
 const (
 	ActionPortalRegister    = "portal.register"
@@ -27,7 +27,7 @@ const (
 	// 注册频控（docs/03 §5.8）：同一 IP 每小时提交 20 次、成功注册 3 个
 	registerAttemptsPerHour  = 20
 	registerSuccessesPerHour = 3
-	// 找回口令的提交按 IP 限 20 次 / 小时（验证码本身另有 5 次上限）
+	// 找回密码的提交按 IP 限 20 次 / 小时（验证码本身另有 5 次上限）
 	resetAttemptsPerHour = 20
 	accountGuardWindow   = time.Hour
 	accountGuardMaxKeys  = 50000
@@ -44,7 +44,7 @@ const (
 	msgEmailUnchanged    = "新邮箱与当前邮箱相同"
 )
 
-// accountGuards 是注册与找回口令的按 IP 计数器：记满即在窗口内拒绝。
+// accountGuards 是注册与找回密码的按 IP 计数器：记满即在窗口内拒绝。
 type accountGuards struct {
 	registerTry *ratelimit.FailureGuard
 	registerOK  *ratelimit.FailureGuard
@@ -193,8 +193,8 @@ func (s *AccountService) registerPlanID(ctx context.Context, q *sqlcgen.Queries,
 	return cur.Register.PlanID, nil
 }
 
-// ResetLoginSecret 凭邮箱验证码重设口令并让该用户全部会话失效；不关闭两步验证（Ruling-23）。
-// 错误：CodeFeatureDisabled（邮件未配置）、CodeInvalidArgument（口令或验证码不合法，邮箱不存在时同样提示验证码错误）、CodeRateLimited。
+// ResetLoginSecret 凭邮箱验证码重设密码并让该用户全部会话失效；不关闭两步验证（Ruling-23）。
+// 错误：CodeFeatureDisabled（邮件未配置）、CodeInvalidArgument（密码或验证码不合法，邮箱不存在时同样提示验证码错误）、CodeRateLimited。
 func (s *AccountService) ResetLoginSecret(ctx context.Context, rawEmail, code, newSecret string, ip *netip.Addr) error {
 	if err := s.mail.requireEnabled(); err != nil {
 		return err
@@ -274,8 +274,8 @@ func (s *AccountService) checkNewEmail(ctx context.Context, q *sqlcgen.Queries, 
 	return email, s.checkEmailFree(ctx, q, email)
 }
 
-// BindEmail 绑定或换绑邮箱：当前口令 + 发到新邮箱的验证码。成功后更新 p 的邮箱字段。
-// 错误：CodeFeatureDisabled、CodeInvalidArgument（口令或验证码不对）、CodeConflict、CodeRateLimited。
+// BindEmail 绑定或换绑邮箱：当前密码 + 发到新邮箱的验证码。成功后更新 p 的邮箱字段。
+// 错误：CodeFeatureDisabled、CodeInvalidArgument（密码或验证码不对）、CodeConflict、CodeRateLimited。
 func (s *AccountService) BindEmail(ctx context.Context, p *UserPrincipal, secret, rawEmail, code string, ip *netip.Addr) error {
 	if err := s.mail.requireEnabled(); err != nil {
 		return err
@@ -310,8 +310,8 @@ func (s *AccountService) BindEmail(ctx context.Context, p *UserPrincipal, secret
 	return nil
 }
 
-// DeleteOwnAccount 注销本人账号：须提交当前口令，已开两步验证的另须验证码；按删除用户处理（docs/03 §5.8 注销账号）。
-// 错误：CodeInvalidArgument（口令或验证码不对）、CodeTOTPRequired、CodeRateLimited。
+// DeleteOwnAccount 注销本人账号：须提交当前密码，已开两步验证的另须验证码；按删除用户处理（docs/03 §5.8 注销账号）。
+// 错误：CodeInvalidArgument（密码或验证码不对）、CodeTOTPRequired、CodeRateLimited。
 func (s *AccountService) DeleteOwnAccount(ctx context.Context, p *UserPrincipal, secret, totpCode string, ip *netip.Addr) error {
 	if err := s.portal.confirmSecret(ctx, p, secret); err != nil {
 		return err

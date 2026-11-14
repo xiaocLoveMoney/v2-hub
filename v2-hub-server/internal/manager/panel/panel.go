@@ -71,7 +71,7 @@ type Inbound struct {
 	ClientCount int
 }
 
-// InboundConfig 是面板上入站的完整配置，含私钥与口令、settings 不含 clients，只供编辑表单回显（Ruling-16）。
+// InboundConfig 是面板上入站的完整配置，含私钥与密码、settings 不含 clients，只供编辑表单回显（Ruling-16）。
 type InboundConfig struct {
 	Protocol string
 	Port     int

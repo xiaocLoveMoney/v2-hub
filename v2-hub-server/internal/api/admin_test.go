@@ -251,7 +251,7 @@ func TestAdminTOTPEndpoints(t *testing.T) {
 	code := totp.CodeAt(raw, totp.Step(time.Now()))
 	expectStatus(t, c.do(http.MethodPost, "/api/admin/auth/totp/enable", map[string]string{"code": code}), http.StatusOK, codeOK)
 
-	// 新会话：口令正确但缺验证码 → 401 totp_required
+	// 新会话：密码正确但缺验证码 → 401 totp_required
 	other := newClient(t, srv.URL)
 	expectStatus(t, other.do(http.MethodPost, "/api/admin/auth/login", map[string]string{"username": "root", "password": cred}),
 		http.StatusUnauthorized, string(service.CodeTOTPRequired))

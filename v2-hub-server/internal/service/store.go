@@ -76,7 +76,7 @@ const (
 	targetRole  = "role"
 )
 
-// AuditEntry 是一条审计记录。Detail 不得包含口令、token、分享链接。
+// AuditEntry 是一条审计记录。Detail 不得包含密码、token、分享链接。
 type AuditEntry struct {
 	ActorType  string
 	ActorID    int64 // 0 表示无（未识别的登录失败、系统操作）

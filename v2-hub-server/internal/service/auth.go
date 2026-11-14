@@ -85,7 +85,7 @@ type LoginResult struct {
 	Principal *AdminPrincipal
 }
 
-// Login 校验用户名口令并创建会话（docs/03 §4.2）。
+// Login 校验用户名密码并创建会话（docs/03 §4.2）。
 func (s *AuthService) Login(ctx context.Context, in LoginInput) (*LoginResult, error) {
 	userKey := guardKeyUserPrefix + strings.ToLower(in.Username)
 	ipKey := ""
@@ -112,7 +112,7 @@ func (s *AuthService) Login(ctx context.Context, in LoginInput) (*LoginResult, e
 		return nil, failure("credentials", msgBadCredentials)
 	}
 	if admin.TotpSecretEnc != nil {
-		// 口令已正确：未带验证码时提示补交，不计失败（docs/03 §4.3）
+		// 密码已正确：未带验证码时提示补交，不计失败（docs/03 §4.3）
 		if in.TOTPCode == "" {
 			return nil, newError(CodeTOTPRequired, msgTOTPRequired)
 		}
@@ -189,7 +189,7 @@ func (s *AuthService) verifyCredentials(ctx context.Context, username, password 
 	if err != nil {
 		return nil, false, fmt.Errorf("verify password of admin %d: %w", row.ID, err)
 	}
-	// 禁用账号与口令错误返回同样结果，不暴露账号状态（docs/03 §4.2）
+	// 禁用账号与密码错误返回同样结果，不暴露账号状态（docs/03 §4.2）
 	return &row, ok && !row.IsDisabled, nil
 }
 

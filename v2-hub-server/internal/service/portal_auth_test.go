@@ -106,7 +106,7 @@ func TestPortalLoginRateLimitAndDisabledUser(t *testing.T) {
 		t.Fatalf("RequireEnabled: err = %v, want account_disabled", err)
 	}
 
-	// 连续 5 次失败后锁定，正确口令也被拒
+	// 连续 5 次失败后锁定，正确密码也被拒
 	for i := range 5 {
 		if _, err := f.login(t, "carol", bad, ""); !errors.Is(err, ErrUnauthenticated) {
 			t.Fatalf("failure %d: err = %v", i, err)
@@ -159,7 +159,7 @@ func TestPortalChangeSecretRevokesOtherSessions(t *testing.T) {
 		t.Fatalf("new secret: %v", err)
 	}
 
-	// 管理员重置口令后全部会话失效
+	// 管理员重置密码后全部会话失效
 	if err := f.users.ResetUserPassword(ctx, f.actor, u.ID, cred, nil); err != nil {
 		t.Fatalf("ResetUserPassword: %v", err)
 	}

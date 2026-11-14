@@ -41,7 +41,7 @@ const (
 	ActionExitDeleteUser = "chain_exit.delete_user"
 
 	msgExitNotFound      = "出口不存在"
-	msgExitBadLink       = "链接无法识别：支持 vless、vmess、trojan、ss 分享链接，或 socks5://、http://、https://[用户名:口令@]地址:端口"
+	msgExitBadLink       = "链接无法识别：支持 vless、vmess、trojan、ss 分享链接，或 socks5://、http://、https://[用户名:密码@]地址:端口"
 	msgExitLinkLen       = "链接长度须为 1–2048 个字符"
 	msgExitNameEmpty     = "名称不能为空"
 	msgExitTooMany       = "我的出口已达上限"
