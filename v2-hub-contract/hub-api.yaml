@@ -13,10 +13,10 @@ info:
     0.2.1：两步验证（docs/03 §4.3）——登录可带 totpCode，新增 totp_required 错误码与 TOTP 开启 / 关闭 / 重置接口。
     0.2.3：删除对外地址只删所点的那一个；对“面板上已不存在”的入站做编辑 / 启停 / 确认漂移 / 添加对外地址返回 409（docs/03 §5.1）。
     0.2.4：入站表单与 3x-ui 同构（Ruling-16）——新增读取面板完整入站配置、代理面板生成密钥两个接口。
-    0.2.5：M2 套餐与用户（docs/03 §5.2）——套餐增删改查、用户增删改查、分配 / 续费套餐、直接改用量与额度、重置口令、下发状态与手动对账。
-    0.2.6：M3 客户后台与订阅（docs/03 §5.3–§5.5）——终端用户登录 / 两步验证 / 改口令、仪表盘、用量、节点、订阅地址与重置、
+    0.2.5：M2 套餐与用户（docs/03 §5.2）——套餐增删改查、用户增删改查、分配 / 续费套餐、直接改用量与额度、重置密码、下发状态与手动对账。
+    0.2.6：M3 客户后台与订阅（docs/03 §5.3–§5.5）——终端用户登录 / 两步验证 / 改密码、仪表盘、用量、节点、订阅地址与重置、
       登录记录、订阅记录、订阅端点 /sub/{token}；管理端新增重置用户订阅、清除用户两步验证、订阅记录；新增错误码 account_disabled。
-    0.2.7：管理员建用户、重置用户口令的口令长度放宽为 8–128（docs/03 §5.3，原误用管理员的 12 位下限）；xray 格式的订阅说明改为每节点一份完整配置。
+    0.2.7：管理员建用户、重置用户密码的密码长度放宽为 8–128（docs/03 §5.3，原误用管理员的 12 位下限）；xray 格式的订阅说明改为每节点一份完整配置。
     0.4.1：M6 客户端链式（docs/03 §5.18）——链式规则与自有落地节点接口；会话信息带套餐的链式开关。
     0.5.0：M9 链式改造（docs/03 §5.18、§5.19、§5.21）——规则改为有序的“起飞节点（多选）→ 落地（单选）”（chain/routes），
       自有落地节点改名为出口（chain/exits），新增平台出口与管理端的出口、规则接口；删除 chain/rules、chain/server-rules、admin/server-chain-rules。
@@ -51,7 +51,7 @@ tags:
   - name: admin-finance
     description: 充值码、订单、余额流水、充值单、返利与收支统计（finance:*），docs/03 §5.13–§5.16
   - name: user-auth
-    description: 终端用户登录、登出、当前会话、口令与两步验证（docs/03 §5.3）
+    description: 终端用户登录、登出、当前会话、密码与两步验证（docs/03 §5.3）
   - name: user-account
     description: 账号自助：邮箱绑定、注销、邀请码（docs/03 §5.8）
   - name: user-portal
@@ -104,7 +104,7 @@ paths:
     post:
       tags: [admin-auth]
       operationId: adminLogin
-      summary: 用户名口令登录，成功后 Set-Cookie hub_admin_session
+      summary: 用户名密码登录，成功后 Set-Cookie hub_admin_session
       description: 失败一律 401“用户名或密码错误”；触发频控返回 429（docs/03 §4.2）。本接口不需要 CSRF 头。
       security: []
       requestBody:
@@ -126,7 +126,7 @@ paths:
                 $ref: "#/components/schemas/SessionEnvelope"
         "400": { $ref: "#/components/responses/InvalidArgument" }
         "401":
-          description: unauthenticated（用户名或口令错误）或 totp_required（需再提交验证码）
+          description: unauthenticated（用户名或密码错误）或 totp_required（需再提交验证码）
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Envelope" }
@@ -413,7 +413,7 @@ paths:
     put:
       tags: [admin-rbac]
       operationId: resetAdminPassword
-      summary: 重置管理员口令（admin:write；对方全部会话失效，R7）
+      summary: 重置管理员密码（admin:write；对方全部会话失效，R7）
       parameters:
         - $ref: "#/components/parameters/CsrfHeader"
       requestBody:
@@ -1074,7 +1074,7 @@ paths:
     get:
       tags: [admin-panel]
       operationId: getInboundPanelConfig
-      summary: 从面板实时读取入站完整配置（含私钥与口令、不含 clients），供编辑表单使用；每次读取记审计（Ruling-16，node:write）
+      summary: 从面板实时读取入站完整配置（含私钥与密码、不含 clients），供编辑表单使用；每次读取记审计（Ruling-16，node:write）
       responses:
         "200":
           description: 面板上的入站配置
@@ -1629,7 +1629,7 @@ paths:
     put:
       tags: [admin-users]
       operationId: resetUserPassword
-      summary: 重置用户的客户后台登录口令（user:write）
+      summary: 重置用户的客户后台登录密码（user:write）
       parameters:
         - $ref: "#/components/parameters/CsrfHeader"
       requestBody:
@@ -2120,10 +2120,10 @@ paths:
     get:
       tags: [admin-content]
       operationId: listSharedAccounts
-      summary: 全部共享账号，不含口令（content:read）
+      summary: 全部共享账号，不含密码（content:read）
       responses:
         "200":
-          description: 全部共享账号，不含口令
+          description: 全部共享账号，不含密码
           content:
             application/json:
               schema:
@@ -2205,10 +2205,10 @@ paths:
     get:
       tags: [admin-content]
       operationId: getSharedAccountCredential
-      summary: 读取共享账号口令，记审计（content:write）
+      summary: 读取共享账号密码，记审计（content:write）
       responses:
         "200":
-          description: 读取共享账号口令，记审计
+          description: 读取共享账号密码，记审计
           content:
             application/json:
               schema:
@@ -2830,7 +2830,7 @@ paths:
               schema: { $ref: "#/components/schemas/UserSessionEnvelope" }
         "400": { $ref: "#/components/responses/InvalidArgument" }
         "401":
-          description: unauthenticated（用户名或口令错误）或 totp_required（需再提交验证码）
+          description: unauthenticated（用户名或密码错误）或 totp_required（需再提交验证码）
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Envelope" }
@@ -2864,7 +2864,7 @@ paths:
     put:
       tags: [user-auth]
       operationId: userChangePassword
-      summary: 本人改口令（须提交旧口令）；成功后其余会话全部失效
+      summary: 本人改密码（须提交旧密码）；成功后其余会话全部失效
       security: [{ userSession: [] }]
       parameters:
         - $ref: "#/components/parameters/CsrfHeader"
@@ -3147,9 +3147,9 @@ paths:
     post:
       tags: [user-auth]
       operationId: sendEmailCode
-      summary: 发注册或找回口令的邮箱验证码（docs/03 §5.7）
+      summary: 发注册或找回密码的邮箱验证码（docs/03 §5.7）
       description: |
-        找回口令对不存在的邮箱同样返回成功。邮件未配置、或用途为 register 而注册已关闭时返回 403 feature_disabled。
+        找回密码对不存在的邮箱同样返回成功。邮件未配置、或用途为 register 而注册已关闭时返回 403 feature_disabled。
       security: []
       requestBody:
         required: true
@@ -3197,7 +3197,7 @@ paths:
     post:
       tags: [user-auth]
       operationId: resetOwnPassword
-      summary: 凭邮箱验证码重设口令，该用户全部会话失效；不关闭两步验证（Ruling-23）
+      summary: 凭邮箱验证码重设密码，该用户全部会话失效；不关闭两步验证（Ruling-23）
       security: []
       requestBody:
         required: true
@@ -3233,7 +3233,7 @@ paths:
     put:
       tags: [user-account]
       operationId: bindEmail
-      summary: 绑定或换绑邮箱：当前口令 + 新邮箱的验证码
+      summary: 绑定或换绑邮箱：当前密码 + 新邮箱的验证码
       security: [{ userSession: [] }]
       parameters:
         - $ref: "#/components/parameters/CsrfHeader"
@@ -3244,7 +3244,7 @@ paths:
             schema: { $ref: "#/components/schemas/BindEmailInput" }
       responses:
         "200":
-          description: 绑定或换绑邮箱：当前口令 + 新邮箱的验证码
+          description: 绑定或换绑邮箱：当前密码 + 新邮箱的验证码
           content:
             application/json:
               schema:
@@ -3262,7 +3262,7 @@ paths:
     post:
       tags: [user-account]
       operationId: deleteOwnAccount
-      summary: 注销账号：当前口令（已开两步验证另须验证码）；按删除用户处理并清除会话
+      summary: 注销账号：当前密码（已开两步验证另须验证码）；按删除用户处理并清除会话
       security: [{ userSession: [] }]
       parameters:
         - $ref: "#/components/parameters/CsrfHeader"
@@ -3364,11 +3364,11 @@ paths:
     get:
       tags: [user-portal]
       operationId: listUserSharedAccounts
-      summary: 本人可见的共享账号，不含口令（docs/03 §5.9）
+      summary: 本人可见的共享账号，不含密码（docs/03 §5.9）
       security: [{ userSession: [] }]
       responses:
         "200":
-          description: 本人可见的共享账号，不含口令
+          description: 本人可见的共享账号，不含密码
           content:
             application/json:
               schema:
@@ -3385,11 +3385,11 @@ paths:
     get:
       tags: [user-portal]
       operationId: getUserSharedAccountCredential
-      summary: 读取一条共享账号的口令，记审计；不可见的条目返回 404
+      summary: 读取一条共享账号的密码，记审计；不可见的条目返回 404
       security: [{ userSession: [] }]
       responses:
         "200":
-          description: 读取一条共享账号的口令，记审计；不可见的条目返回 404
+          description: 读取一条共享账号的密码，记审计；不可见的条目返回 404
           content:
             application/json:
               schema:
@@ -4933,7 +4933,7 @@ components:
         siteName: { type: string }
         registerMode: { $ref: "#/components/schemas/RegisterMode" }
         emailVerifyRequired: { type: boolean, description: 注册是否要先验证邮箱（设置为真且邮件可用） }
-        mailEnabled: { type: boolean, description: 邮件是否可用；为假时找回口令与换绑邮箱不可用 }
+        mailEnabled: { type: boolean, description: 邮件是否可用；为假时找回密码与换绑邮箱不可用 }
         checkinEnabled: { type: boolean }
         ticketEnabled: { type: boolean }
         sharedEnabled: { type: boolean }
@@ -6042,7 +6042,7 @@ components:
       type: object
       required: [link]
       properties:
-        link: { type: string, minLength: 1, maxLength: 2048, description: "分享链接（vless / vmess / trojan / ss），或代理地址 socks5:// http:// https://[用户名:口令@]地址:端口（http / https 自 0.6.0）" }
+        link: { type: string, minLength: 1, maxLength: 2048, description: "分享链接（vless / vmess / trojan / ss），或代理地址 socks5:// http:// https://[用户名:密码@]地址:端口（http / https 自 0.6.0）" }
         name: { type: string, maxLength: 64, description: 可选；省略或空串 = 取链接里的名称 }
     ChainExitUpdateInput:
       type: object
@@ -6170,7 +6170,7 @@ components:
       required: [name, link, allowServer, allowClient, nodeGroupIds]
       properties:
         name: { type: string, minLength: 1, maxLength: 64 }
-        link: { type: string, minLength: 1, maxLength: 2048, description: "分享链接（vless / vmess / trojan / ss），或代理地址 socks5:// http:// https://[用户名:口令@]地址:端口（http / https 自 0.6.0）" }
+        link: { type: string, minLength: 1, maxLength: 2048, description: "分享链接（vless / vmess / trojan / ss），或代理地址 socks5:// http:// https://[用户名:密码@]地址:端口（http / https 自 0.6.0）" }
         remark: { type: string, maxLength: 255, default: "" }
         isEnabled: { type: boolean, default: true }
         allowServer: { type: boolean }

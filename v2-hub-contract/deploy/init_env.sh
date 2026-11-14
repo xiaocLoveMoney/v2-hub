@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 由 .env.example 生成 .env，并为留空的口令项填入随机值。已存在 .env 时不覆盖。
+# 由 .env.example 生成 .env，并为留空的密码项填入随机值。已存在 .env 时不覆盖。
 set -euo pipefail
 cd "$(dirname "$0")"
 if [ -f .env ]; then
@@ -17,4 +17,4 @@ while IFS= read -r line; do
       printf '%s\n' "$line" ;;
   esac
 done < .env.example > .env
-echo "init_env: 已生成 deploy/.env（口令为随机值，仅本机可读）"
+echo "init_env: 已生成 deploy/.env（密码为随机值，仅本机可读）"

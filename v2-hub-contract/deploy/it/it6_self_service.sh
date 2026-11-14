@@ -27,9 +27,9 @@ fail() { echo "IT-6: $*"; exit 1; }
 printf '%s\n' "$CRED" | (cd "$REPO_ROOT/v2-hub-server" && make -s admin-create USERNAME="$ROOT_USER") >/tmp/it-admin-create.log 2>&1 || fail "admin-create 失败"
 start_module v2-hub-server 8080
 HUB_JAR="$WORK/hub.jar"
-# login_body_of <用户名> <口令>
+# login_body_of <用户名> <密码>
 login_body_of() { jq -nc --arg u "$1" --arg p "$2" '{username:$u,password:$p}'; }
-# register_body_of <用户名> [邀请码]：邮箱取 <用户名>@$MAIL_DOMAIN，口令统一用 $USER_CRED
+# register_body_of <用户名> [邀请码]：邮箱取 <用户名>@$MAIL_DOMAIN，密码统一用 $USER_CRED
 register_body_of() {
   login_body_of "$1" "$USER_CRED" | jq -c --arg e "$1@$MAIL_DOMAIN" --arg c "${2:-}" '. + {email:$e} + (if $c == "" then {} else {inviteCode:$c} end)'
 }

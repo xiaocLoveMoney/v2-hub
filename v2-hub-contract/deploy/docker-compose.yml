@@ -1,5 +1,5 @@
 # 开发 / 联调用中间件。应用编排在 compose.deploy.yml。
-# 账号口令从同目录 .env 读（.env 不入库，模板 .env.example）。
+# 账号密码从同目录 .env 读（.env 不入库，模板 .env.example）。
 # 宿主机端口默认避开 5432/9000/9001（本机其它项目常占用），可在 .env 覆盖。
 name: v2-hub-dev
 services:
