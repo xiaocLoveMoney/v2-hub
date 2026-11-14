@@ -290,9 +290,28 @@ const (
 	OutboundTestReal OutboundTestMode = "real"
 )
 
-// OutboundTestResult 是一次出站测试的结果。连不上不算调用失败：OK 为 false，Message 是面板给出的原因（可能含地址，只给管理员看）。
+// OutboundFailure 是面板适配层对一次不通的探测的归类（docs/03 §5.21，Ruling-56）；只说这一次探测断在哪，不含地址。
+type OutboundFailure string
+
+// 一次探测不通的几种情形；连通时为 OutboundFailNone。
+const (
+	OutboundFailNone OutboundFailure = ""
+	// OutboundFailRefused 对端拒绝连接。
+	OutboundFailRefused OutboundFailure = "refused"
+	// OutboundFailTimeout 等到超时也没有结果。
+	OutboundFailTimeout OutboundFailure = "timeout"
+	// OutboundFailAborted 连接或请求被对端断开。
+	OutboundFailAborted OutboundFailure = "aborted"
+	// OutboundFailOther 其余情形（含面板拒绝执行这次测试）。
+	OutboundFailOther OutboundFailure = "other"
+)
+
+// OutboundTestResult 是一次出站测试的结果。连不上不算调用失败：OK 为 false，Failure 是归类，
+// Message 是面板给出的原因（可能含地址，只给管理员看）。
 type OutboundTestResult struct {
 	OK bool
+	// Failure 在 OK 为 false 时必不为 OutboundFailNone。
+	Failure OutboundFailure
 	// Mode 是面板实际采用的方式（UDP 类出站在 tcp 方式下会被面板改走 http）。
 	Mode         OutboundTestMode
 	DelayMs      int64

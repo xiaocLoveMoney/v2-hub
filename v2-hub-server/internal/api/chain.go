@@ -324,10 +324,11 @@ type chainExitTestRequest struct {
 	Mode   string `json:"mode"`
 }
 
-// chainExitTestVO 对应 hub-api.yaml ChainExitTestResult：不带面板的错误原文（Ruling-52）。
+// chainExitTestVO 对应 hub-api.yaml ChainExitTestResult：带不通的原因大类（Ruling-56），不带面板的错误原文（Ruling-52）。
 type chainExitTestVO struct {
 	OK           bool   `json:"ok"`
 	Mode         string `json:"mode"`
+	Reason       string `json:"reason"`
 	DelayMs      int64  `json:"delayMs"`
 	HTTPStatus   int    `json:"httpStatus"`
 	EgressIP     string `json:"egressIp"`
@@ -335,7 +336,9 @@ type chainExitTestVO struct {
 }
 
 func toChainExitTestVO(r *service.ExitTestResult) chainExitTestVO {
-	return chainExitTestVO{OK: r.OK, Mode: r.Mode, DelayMs: r.DelayMs, HTTPStatus: r.HTTPStatus, EgressIP: r.EgressIP, EgressRegion: r.EgressRegion}
+	return chainExitTestVO{
+		OK: r.OK, Mode: r.Mode, Reason: r.Reason, DelayMs: r.DelayMs, HTTPStatus: r.HTTPStatus, EgressIP: r.EgressIP, EgressRegion: r.EgressRegion,
+	}
 }
 
 func (h *handlers) testChainExit(w http.ResponseWriter, r *http.Request, p *service.UserPrincipal) {

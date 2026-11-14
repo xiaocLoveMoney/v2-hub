@@ -96,7 +96,8 @@ func TestTestOutbound(t *testing.T) {
 		fp := &probePanel{reply: map[string]any{"success": true, "obj": map[string]any{"success": false, "delay": 0, "error": "dial timeout", "mode": "tcp"}}}
 		c := newProbeClient(t, fp)
 		got, err := c.TestOutbound(ctx, json.RawMessage(outbound), panel.OutboundTestTCP)
-		if err != nil || got.OK || got.Message != "dial timeout" || got.Mode != panel.OutboundTestTCP || fp.lastForm["mode"] != "tcp" {
+		isTimeout := got.Failure == panel.OutboundFailTimeout
+		if err != nil || got.OK || !isTimeout || got.Message != "dial timeout" || got.Mode != panel.OutboundTestTCP || fp.lastForm["mode"] != "tcp" {
 			t.Errorf("tcp: got %+v err %v form %v", got, err, fp.lastForm)
 		}
 		if _, err := c.TestOutbound(ctx, json.RawMessage(outbound), panel.OutboundTestReal); err != nil || fp.lastForm["mode"] != "real" {
@@ -107,7 +108,7 @@ func TestTestOutbound(t *testing.T) {
 	t.Run("面板拒绝请求（另一项测试在跑）也是失败的结果，不是错误", func(t *testing.T) {
 		fp := &probePanel{reply: map[string]any{"success": false, "msg": "Another outbound test is already running, please wait"}}
 		got, err := newProbeClient(t, fp).TestOutbound(ctx, json.RawMessage(outbound), panel.OutboundTestHTTP)
-		if err != nil || got.OK || !strings.Contains(got.Message, "already running") {
+		if err != nil || got.OK || got.Failure != panel.OutboundFailOther || !strings.Contains(got.Message, "already running") {
 			t.Errorf("got %+v err %v", got, err)
 		}
 	})
@@ -119,6 +120,24 @@ func TestTestOutbound(t *testing.T) {
 			t.Errorf("err = %v, want ErrAuth", err)
 		}
 	})
+}
+
+// 归类用的文本取自 3x-ui v3.11.0 的实测返回（Ruling-56）。
+func TestOutboundFailure(t *testing.T) {
+	cases := map[string]panel.OutboundFailure{
+		"dial tcp 127.0.0.1:18099: connect: connection refused":                                                                 panel.OutboundFailRefused,
+		"dial tcp 93.184.216.34:1080: i/o timeout":                                                                              panel.OutboundFailTimeout,
+		`Get "https://www.google.com/generate_204": context deadline exceeded (Client.Timeout exceeded while awaiting headers)`: panel.OutboundFailTimeout,
+		`Get "https://www.google.com/generate_204": EOF`:                                                                        panel.OutboundFailAborted,
+		`Get "https://www.google.com/generate_204": read: connection reset by peer`:                                             panel.OutboundFailAborted,
+		"outbound has no testable endpoint":                                                                                     panel.OutboundFailOther,
+		"":                                                                                                                      panel.OutboundFailOther,
+	}
+	for message, want := range cases {
+		if got := outboundFailure(message); got != want {
+			t.Errorf("outboundFailure(%q) = %q, want %q", message, got, want)
+		}
+	}
 }
 
 func TestWebCertFiles(t *testing.T) {

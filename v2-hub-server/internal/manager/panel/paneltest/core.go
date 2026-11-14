@@ -135,6 +135,16 @@ func (f *Fake) SetOutboundTestResult(r panel.OutboundTestResult) {
 	f.testResult = r
 }
 
+// SetOutboundTestResultFor 设定某一种方式的出站测试结果，优先于 SetOutboundTestResult 设的那份。
+func (f *Fake) SetOutboundTestResultFor(mode panel.OutboundTestMode, r panel.OutboundTestResult) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.testResultByMode == nil {
+		f.testResultByMode = make(map[panel.OutboundTestMode]panel.OutboundTestResult, 3)
+	}
+	f.testResultByMode[mode] = r
+}
+
 // OutboundTests 返回假面板收到过的出站测试。
 func (f *Fake) OutboundTests() []OutboundTest {
 	f.mu.Lock()
@@ -149,7 +159,7 @@ func (f *Fake) SetWebCert(files panel.CertFiles) {
 	f.webCert = files
 }
 
-// TestOutbound 实现 panel.OutboundTester：记下请求，返回预设的结果（Mode 缺省取请求的方式）。
+// TestOutbound 实现 panel.OutboundTester：记下请求，返回预设的结果（按方式设的优先；Mode 缺省取请求的方式）。
 func (f *Fake) TestOutbound(_ context.Context, outbound json.RawMessage, mode panel.OutboundTestMode) (panel.OutboundTestResult, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -157,7 +167,10 @@ func (f *Fake) TestOutbound(_ context.Context, outbound json.RawMessage, mode pa
 		return panel.OutboundTestResult{}, err
 	}
 	f.tests = append(f.tests, OutboundTest{Outbound: append(json.RawMessage(nil), outbound...), Mode: mode})
-	out := f.testResult
+	out, ok := f.testResultByMode[mode]
+	if !ok {
+		out = f.testResult
+	}
 	if out.Mode == "" {
 		out.Mode = mode
 	}

@@ -32,10 +32,23 @@ const (
 	msgExitTestNotAllowed  = "当前套餐不支持自己的出口"
 )
 
-// ExitTestResult 是一次出口延迟测试的结果。Error 是面板给出的原因，只给管理员（用户侧恒为空）。
+// 出口测试不通的原因大类（docs/03 §5.21，Ruling-56），对应 hub-api.yaml ChainExitTestFailReason。
+const (
+	ExitTestReasonNone            = "none"
+	ExitTestReasonRefused         = "refused"
+	ExitTestReasonTimeout         = "timeout"
+	ExitTestReasonProxyRejected   = "proxy_rejected"
+	ExitTestReasonProxyNoResponse = "proxy_no_response"
+	ExitTestReasonBadStatus       = "bad_status"
+	ExitTestReasonUnknown         = "unknown"
+)
+
+// ExitTestResult 是一次出口延迟测试的结果。Reason 是不通的原因大类（连通为 none）；
+// Error 是面板给出的原因，只给管理员（用户侧恒为空）。
 type ExitTestResult struct {
 	OK           bool
 	Mode         string
+	Reason       string
 	DelayMs      int64
 	HTTPStatus   int
 	EgressIP     string
@@ -137,9 +150,54 @@ func (s *ChainService) runExitTest(ctx context.Context, serverID int64, node ren
 		return nil, panelError(err)
 	}
 	return &ExitTestResult{
-		OK: res.OK, Mode: string(res.Mode), DelayMs: res.DelayMs, HTTPStatus: res.HTTPStatus,
+		OK: res.OK, Mode: string(res.Mode), Reason: exitTestReason(ctx, tester, raw, mode, res),
+		DelayMs: res.DelayMs, HTTPStatus: res.HTTPStatus,
 		EgressIP: res.EgressIP, EgressRegion: res.EgressRegion, Error: res.Message,
 	}, nil
+}
+
+// dialReason 是 TCP 探测不通时的原因大类。
+func dialReason(f panel.OutboundFailure) string {
+	switch f {
+	case panel.OutboundFailRefused:
+		return ExitTestReasonRefused
+	case panel.OutboundFailTimeout:
+		return ExitTestReasonTimeout
+	default:
+		return ExitTestReasonUnknown
+	}
+}
+
+// exitTestReason 把一次测试的结果归成原因大类（Ruling-56）。http / real 不通且没拿到 HTTP 状态时，面板分不出是端口连不上
+// 还是代理请求没走通，这里在同一台面板上补一次 tcp 探测来区分；调用方已持有这台服务器的测试锁。
+// 补测本身失败（面板这时连不上等）不影响主结果，只是归不了类。
+func exitTestReason(
+	ctx context.Context, tester panel.OutboundTester, outbound json.RawMessage, asked panel.OutboundTestMode, res panel.OutboundTestResult,
+) string {
+	if res.OK {
+		return ExitTestReasonNone
+	}
+	if res.HTTPStatus != 0 {
+		return ExitTestReasonBadStatus
+	}
+	if asked == panel.OutboundTestTCP {
+		return dialReason(res.Failure)
+	}
+	isDialWorthIt := res.Failure == panel.OutboundFailRefused || res.Failure == panel.OutboundFailTimeout || res.Failure == panel.OutboundFailAborted
+	if !isDialWorthIt {
+		return ExitTestReasonUnknown
+	}
+	dial, err := tester.TestOutbound(ctx, outbound, panel.OutboundTestTCP)
+	if err != nil {
+		return ExitTestReasonUnknown
+	}
+	if !dial.OK {
+		return dialReason(dial.Failure)
+	}
+	if res.Failure == panel.OutboundFailTimeout {
+		return ExitTestReasonProxyNoResponse
+	}
+	return ExitTestReasonProxyRejected
 }
 
 // TestExit 从本人可用的一个节点所在服务器测试本人的出口（R8：他人的与平台出口按不存在处理）。
