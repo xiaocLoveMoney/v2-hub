@@ -29,6 +29,7 @@ v2-hub-admin-web/
 界面观感与用户端统一（Ruling-21）：保留 antd 与现有页面，只在三处换肤——`src/App.tsx` 的 `ConfigProvider`
 主题 token（主色 `#6777ef`、圆角 3、页面底 `#f4f6f9`、字体 Nunito）；`src/layout/AdminLayout.tsx` 改为 250px
 白色侧栏 + 115px 主色色带 + 页头；`src/index.css` 调卡片阴影与徽章。取值与 06 篇 §4 的设计变量一致。
+平台图标与动效同 06 篇 §4（`src/components/BrandMark.tsx`）：侧栏品牌位与登录卡片显示并播出场动效；antd 的加载指示器经 `ConfigProvider` 统一换成图标的步进旋转。
 总览、系统设置、菜单顺序用卡片式页面（`src/components/CardPage.tsx`，照客户后台仪表盘）：去掉外层白色内容框，标题栏单独一张卡，内容卡片在灰底上按宽度自动分栏（`.card-grid`、`.stat-grid`），窄屏单栏；表格类页面仍用白色内容框。
 
 菜单分组：我的（总览、公告、教程、共享账号、工单）、节点（服务器、节点）、用户（用户、套餐、邀请码、订阅记录、登录记录）、
