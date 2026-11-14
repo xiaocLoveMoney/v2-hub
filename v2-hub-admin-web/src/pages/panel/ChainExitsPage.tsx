@@ -1,28 +1,16 @@
 import { PlusOutlined } from '@ant-design/icons'
-import { App, Button, Form, Input, InputNumber, Modal, Popconfirm, Select, Space, Switch, Tag, Typography, type TableProps } from 'antd'
+import { App, Button, Input, InputNumber, Modal, Popconfirm, Select, Space, Tag, Typography, type TableProps } from 'antd'
 import { useCallback, useState } from 'react'
-import {
-  api,
-  csrfHeader,
-  toApiError,
-  type AdminChainExit,
-  type AdminChainExitInput,
-  type ChainExitOwner,
-  type NodeGroup,
-} from '../../api/client'
+import { api, csrfHeader, toApiError, type AdminChainExit, type ChainExitOwner, type NodeGroup } from '../../api/client'
 import { useSession } from '../../auth/session-context'
 import { ErrorAlert } from '../../components/ErrorAlert'
 import { PagedTable } from '../../components/PagedTable'
-import { useOpenGeneration } from '../../hooks/use-open-generation'
 import { useRemote } from '../../hooks/use-remote'
-import { useRowAction, useSubmit } from '../../hooks/use-submit'
+import { useRowAction } from '../../hooks/use-submit'
 import { PERMISSIONS } from '../../menu'
+import { ChainExitModal } from './ChainExitModal'
 
-const MAX_NAME_LEN = 64
-const MAX_REMARK_LEN = 255
-const MAX_LINK_LEN = 2048
 const MAX_KEYWORD_LEN = 64
-const LINK_ROWS = 3
 const OWNER_PLATFORM: ChainExitOwner = 'platform'
 const NO_ROUTES = 0
 
@@ -32,19 +20,6 @@ const OWNER_OPTIONS: { value: ChainExitOwner; label: string }[] = [
 ]
 
 const loadGroups = (signal: AbortSignal) => api.GET('/api/admin/node-groups', { signal })
-
-/** 表单的字段：比接口输入多一层“链接可空”（修改时留空表示不改）。 */
-type ExitFormValues = Omit<AdminChainExitInput, 'link'> & { link?: string }
-
-function formOf(e: AdminChainExit | null): ExitFormValues {
-  if (e === null) {
-    return { name: '', link: '', remark: '', isEnabled: true, allowServer: true, allowClient: false, nodeGroupIds: [] }
-  }
-  return {
-    name: e.name, link: '', remark: e.remark, isEnabled: e.isEnabled, allowServer: e.allowServer, allowClient: e.allowClient,
-    nodeGroupIds: e.nodeGroups.map((g) => g.id),
-  }
-}
 
 /**
  * 链式出口（node:read 查看，node:write 增改删、停用与查看链接；docs/03 §5.21，Ruling-50）。
@@ -155,7 +130,7 @@ export function ChainExitsPage() {
           </>
         }
       />
-      <ExitModal
+      <ChainExitModal
         exit={editing}
         isOpen={isOpen}
         groups={groups.data ?? []}
@@ -271,85 +246,6 @@ function LinkButton({ exit }: { exit: AdminChainExit }) {
           {link ?? ''}
         </Typography.Paragraph>
       </Modal>
-    </>
-  )
-}
-
-interface ExitModalProps {
-  /** null = 新建。 */
-  exit: AdminChainExit | null
-  isOpen: boolean
-  groups: NodeGroup[]
-  onClose: () => void
-  onSaved: () => void
-}
-
-function ExitModal({ exit, isOpen, groups, onClose, onSaved }: ExitModalProps) {
-  const generation = useOpenGeneration(isOpen)
-  return (
-    <Modal title={exit === null ? '新建平台出口' : `编辑平台出口：${exit.name}`} open={isOpen} onCancel={onClose} footer={null} destroyOnHidden>
-      <ExitForm key={generation} exit={exit} groups={groups} onSaved={onSaved} />
-    </Modal>
-  )
-}
-
-function ExitForm({ exit, groups, onSaved }: Pick<ExitModalProps, 'exit' | 'groups' | 'onSaved'>) {
-  const { error, isBusy, run } = useSubmit(exit === null ? '已创建平台出口' : '已保存', onSaved)
-  const isNew = exit === null
-  const submit = (v: ExitFormValues) => {
-    const common = {
-      name: v.name,
-      remark: v.remark ?? '',
-      isEnabled: v.isEnabled ?? true,
-      allowServer: v.allowServer,
-      allowClient: v.allowClient,
-      nodeGroupIds: v.nodeGroupIds ?? [],
-    }
-    const link = (v.link ?? '').trim()
-    return run(() =>
-      exit === null
-        ? api.POST('/api/admin/chain-exits', { params: csrfHeader(), body: { ...common, link } })
-        : api.PUT('/api/admin/chain-exits/{id}', {
-            params: { ...csrfHeader(), path: { id: exit.id } },
-            // 修改时留空表示不改链接
-            body: { ...common, link: link === '' ? undefined : link },
-          }),
-    )
-  }
-  return (
-    <>
-      <ErrorAlert error={error} />
-      <Form<ExitFormValues> layout="vertical" initialValues={formOf(exit)} onFinish={(v) => void submit(v)}>
-        <Form.Item name="name" label="名称" extra="用户在落地下拉里看到的名字" rules={[{ required: true, max: MAX_NAME_LEN, message: `1–${MAX_NAME_LEN} 个字符` }]}>
-          <Input autoComplete="off" />
-        </Form.Item>
-        <Form.Item
-          name="link"
-          label="链接"
-          extra={isNew ? '分享链接（vless / vmess / trojan / ss）或 socks5://[用户名:口令@]地址:端口；加密存储' : '留空表示不改链接'}
-          rules={[{ required: isNew, max: MAX_LINK_LEN, message: isNew ? '请粘贴链接' : `不超过 ${MAX_LINK_LEN} 个字符` }]}
-        >
-          <Input.TextArea rows={LINK_ROWS} autoComplete="off" spellCheck={false} />
-        </Form.Item>
-        <Form.Item name="nodeGroupIds" label="节点组" extra="套餐绑了其中任一节点组的用户才能用；不选 = 没有用户能用">
-          <Select mode="multiple" optionFilterProp="label" options={groups.map((g) => ({ value: g.id, label: g.name }))} />
-        </Form.Item>
-        <Form.Item name="allowServer" label="可用于服务端链式" valuePropName="checked" extra="链接只留在起飞面板上，用户看不到">
-          <Switch />
-        </Form.Item>
-        <Form.Item name="allowClient" label="可用于客户端链式" valuePropName="checked" extra="链接会写进用户的订阅，用户拿得走">
-          <Switch />
-        </Form.Item>
-        <Form.Item name="remark" label="备注" rules={[{ max: MAX_REMARK_LEN }]}>
-          <Input autoComplete="off" />
-        </Form.Item>
-        <Form.Item name="isEnabled" label="启用" valuePropName="checked">
-          <Switch />
-        </Form.Item>
-        <Button type="primary" htmlType="submit" block loading={isBusy}>
-          {isNew ? '创建' : '保存'}
-        </Button>
-      </Form>
     </>
   )
 }

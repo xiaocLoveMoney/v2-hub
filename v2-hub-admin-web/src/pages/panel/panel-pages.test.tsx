@@ -8,6 +8,7 @@ import { SessionContext, type SessionContextValue } from '../../auth/session-con
 import { PERMISSIONS } from '../../menu'
 import { NodesPage } from './NodesPage'
 import { ChainExitsPage } from './ChainExitsPage'
+import { parseExitLink } from './chain-exit-link'
 import { ChainRoutesPage } from './ChainRoutesPage'
 import { ServerDetailPage } from './ServerDetailPage'
 import { ServersPage } from './ServersPage'
@@ -351,7 +352,8 @@ describe('服务端链式（docs/03 §5.19）', () => {
 
 describe('链式出口', () => {
   // 链接里的 UUID 是示例值，不对应任何真实节点
-  const LINK = 'vless://11111111-1111-4111-8111-111111111111@exit.example.net:443?type=tcp&security=tls#tokyo'
+  const LINK_BASE = 'vless://11111111-1111-4111-8111-111111111111@exit.example.net:443'
+  const LINK = `${LINK_BASE}?type=tcp&security=tls#tokyo`
   const platform = {
     id: 9, owner: 'platform', user: null, name: '东京出口', protocol: 'vless', address: 'exit.example.net', port: 443, remark: '',
     isEnabled: true, allowServer: true, allowClient: false, nodeGroups: [{ id: 2, name: 'basic' }], routeCount: 0,
@@ -402,7 +404,7 @@ describe('链式出口', () => {
     expect(await screen.findByText('会连带删除引用它的 2 条规则。')).toBeDefined()
   })
 
-  it('新建平台出口提交表单；修改时链接留空不提交', async () => {
+  it('新建平台出口可直接粘贴分享链接；修改时不动连接参数就不提交链接', async () => {
     const calls = mockServer({
       ...handlers(),
       'POST /api/admin/chain-exits': () => ok(platform),
@@ -412,7 +414,8 @@ describe('链式出口', () => {
     await screen.findByText('东京出口')
     fireEvent.click(screen.getByRole('button', { name: /新建平台出口/ }))
     fireEvent.change(await screen.findByLabelText('名称'), { target: { value: '大阪出口' } })
-    fireEvent.change(screen.getByLabelText('链接'), { target: { value: LINK } })
+    fireEvent.click(screen.getByText('分享链接'))
+    fireEvent.change(await screen.findByLabelText('链接'), { target: { value: LINK } })
     fireEvent.click(screen.getByRole('button', { name: '创 建' }))
     await waitFor(() => {
       const call = calls.find((c) => c.method === 'POST' && c.path === '/api/admin/chain-exits')
@@ -430,5 +433,69 @@ describe('链式出口', () => {
       const call = calls.find((c) => c.method === 'PUT' && c.path === '/api/admin/chain-exits/9')
       expect(call?.body).toEqual({ name: '东京出口', remark: '', isEnabled: true, allowServer: true, allowClient: false, nodeGroupIds: [2] })
     })
+  })
+
+  it('新建平台出口默认是表单：缺项点创建才标出，填好后提交拼出的链接；链接可转回表单', async () => {
+    const calls = mockServer({ ...handlers(), 'POST /api/admin/chain-exits': () => ok(platform) })
+    renderWith(<ChainExitsPage />)
+    await screen.findByText('东京出口')
+    fireEvent.click(screen.getByRole('button', { name: /新建平台出口/ }))
+    fireEvent.change(await screen.findByLabelText('名称'), { target: { value: '大阪出口' } })
+    expect((screen.getByLabelText('端口') as HTMLInputElement).value).toBe('443')
+    expect(screen.queryByLabelText('SNI')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: '创 建' }))
+    expect(await screen.findAllByText('必填')).toHaveLength(2)
+    expect(calls.some((c) => c.method === 'POST')).toBe(false)
+
+    // 粘贴一条链接再切回表单：各字段按链接填好
+    fireEvent.click(screen.getByText('分享链接'))
+    fireEvent.change(await screen.findByLabelText('链接'), { target: { value: `${LINK_BASE}?type=ws&path=%2Fws&security=tls&sni=exit.example.net#tokyo` } })
+    fireEvent.click(screen.getByText('表单'))
+    expect(((await screen.findByLabelText('地址')) as HTMLInputElement).value).toBe('exit.example.net')
+    expect((screen.getByLabelText('路径') as HTMLInputElement).value).toBe('/ws')
+    expect((screen.getByLabelText('SNI') as HTMLInputElement).value).toBe('exit.example.net')
+    // 名称已经填了，不被链接里的名称覆盖
+    expect((screen.getByLabelText('名称') as HTMLInputElement).value).toBe('大阪出口')
+
+    fireEvent.change(screen.getByLabelText('端口'), { target: { value: '8443' } })
+    fireEvent.click(screen.getByRole('button', { name: '创 建' }))
+    await waitFor(() => expect(calls.some((c) => c.method === 'POST' && c.path === '/api/admin/chain-exits')).toBe(true))
+    const body = calls.find((c) => c.method === 'POST')?.body as { link: string; name: string }
+    expect(body.name).toBe('大阪出口')
+    expect(parseExitLink(body.link)).toMatchObject({
+      name: '大阪出口',
+      fields: { protocol: 'vless', address: 'exit.example.net', port: '8443', network: 'ws', path: '/ws', security: 'tls', sni: 'exit.example.net' },
+    })
+  })
+
+  it('编辑平台出口：点“修改连接参数”才取现有链接填进表单，保存时带上新链接；转不成表单的留在链接方式', async () => {
+    let current = LINK
+    const calls = mockServer({
+      ...handlers(),
+      'GET /api/admin/chain-exits/9/link': () => ok({ link: current }),
+      'PUT /api/admin/chain-exits/9': () => ok(platform),
+    })
+    renderWith(<ChainExitsPage />)
+    const platformRow = (await screen.findByText('东京出口')).closest('tr')
+    if (platformRow === null) {
+      throw new Error('row not rendered')
+    }
+    fireEvent.click(within(platformRow).getByRole('button', { name: '编 辑' }))
+    expect(await screen.findByText('不修改')).toBeDefined()
+    expect(calls.some((c) => c.path.endsWith('/link'))).toBe(false)
+    fireEvent.click(screen.getByRole('button', { name: '修改连接参数' }))
+    expect(((await screen.findByLabelText('地址')) as HTMLInputElement).value).toBe('exit.example.net')
+    fireEvent.change(screen.getByLabelText('地址'), { target: { value: 'new.example.net' } })
+    fireEvent.click(screen.getByRole('button', { name: '保 存' }))
+    await waitFor(() => expect(calls.some((c) => c.method === 'PUT')).toBe(true))
+    const body = calls.find((c) => c.method === 'PUT')?.body as { link: string }
+    expect(parseExitLink(body.link)?.fields).toMatchObject({ address: 'new.example.net', security: 'tls' })
+
+    // 表单表达不了的链接（hysteria2）：留在链接方式，原文放进文本框
+    current = 'hysteria2://example-credential@exit.example.net:443#hy'
+    fireEvent.click(within(platformRow).getByRole('button', { name: '编 辑' }))
+    fireEvent.click(await screen.findByRole('button', { name: '修改连接参数' }))
+    expect(((await screen.findByLabelText('链接')) as HTMLTextAreaElement).value).toBe(current)
+    expect(screen.getByText(/这条链接转不成表单/)).toBeDefined()
   })
 })
