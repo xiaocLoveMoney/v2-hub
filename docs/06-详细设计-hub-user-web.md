@@ -177,7 +177,7 @@ M8 的做法（docs/03 §5.20，Ruling-44、Ruling-45）：
 
 ## 7. 配置与启动
 
-`make run`（5174）；生产 `make build` 后 `publish_web.sh dist web-user`。
+`make run`（5174）；生产由部署脚本构建并发布到 `web-user` 桶（Ruling-62）。
 
 ## 8. 测试策略
 
