@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: v2-hub API
-  version: 0.7.3
+  version: 0.8.0
   description: |
     v2-hub 对外接口契约（hub-server 提供，v2-hub-admin-web / v2-hub-user-web 消费）。
     - 管理端接口前缀 /api/admin，客户端接口前缀 /api/user，订阅端点前缀 /sub。
@@ -23,6 +23,8 @@ info:
     0.7.1：系统设置增加 routing 分组（routing.blockRule，平台拦截规则，Ruling-55）。
     0.7.2：出口延迟测试结果增加 reason（不通的原因大类，Ruling-56）。
     0.7.3：侧栏菜单顺序（Ruling-57）——系统设置增加 menu 分组（menu.admin、menu.user），管理员会话信息与公开站点信息带 menuOrder。
+    0.8.0：订阅地址的路径前缀改为全站随机串（Ruling-59），端点由 /sub/{token} 改为 /{subPath}/{token}，系统设置 subscription 增加 path、pathGraceDays 与只读的 oldPath、oldPathUntil；
+      用户自设连接密码（Ruling-58）——新增 PUT /api/user/subscription/password，订阅信息带 hasCustomPassword。
 servers:
   - url: http://127.0.0.1:8080
     description: 本地开发
@@ -3067,6 +3069,34 @@ paths:
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "403": { $ref: "#/components/responses/AccountDisabled" }
         "429": { $ref: "#/components/responses/RateLimited" }
+  /api/user/subscription/password:
+    put:
+      tags: [user-portal]
+      operationId: setConnectionPassword
+      summary: 自设连接密码（docs/03 §5.4 连接密码，Ruling-58）；空串恢复为随机。只影响面板 client 的 password 字段，触发对账
+      security: [{ userSession: [] }]
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ConnectionPasswordInput" }
+      responses:
+        "200":
+          description: 修改后的订阅信息
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/SubscriptionInfo" }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/AccountDisabled" }
+        "429": { $ref: "#/components/responses/RateLimited" }
   /api/user/login-logs:
     get:
       tags: [user-portal]
@@ -4144,16 +4174,18 @@ paths:
         "409": { $ref: "#/components/responses/Conflict" }
         "429": { $ref: "#/components/responses/RateLimited" }
         "502": { $ref: "#/components/responses/UpstreamUnavailable" }
-  /sub/{token}:
+  /{subPath}/{token}:
     get:
       tags: [subscription]
       operationId: getSubscription
       summary: 按格式渲染该用户的全部可用节点（docs/03 §5.4）
       description: |
+        subPath 是系统设置 subscription.path，或过渡期内的旧前缀（0.8.0 起，Ruling-59；之前固定为 sub），其余前缀 404。
         不走响应信封。响应头带 Subscription-Userinfo、Profile-Update-Interval、Profile-Title、Content-Disposition。
         用户非 active 时仍返回 200，内容只有一条说明状态的信息节点。
       security: []
       parameters:
+        - { name: subPath, in: path, required: true, schema: { type: string, pattern: "^[a-z0-9]{3,32}$" } }
         - { name: token, in: path, required: true, schema: { type: string, pattern: "^[A-Za-z0-9_-]{22,64}$" } }
         - name: format
           in: query
@@ -4171,7 +4203,7 @@ paths:
           content:
             text/plain: { schema: { type: string } }
         "404":
-          description: token 不存在
+          description: token 不存在，或前缀不是当前 / 过渡中的前缀
           content:
             text/plain: { schema: { type: string } }
         "429":
@@ -4878,9 +4910,10 @@ components:
       enum: [base64, mihomo, singbox, xray]
     SubscriptionInfo:
       type: object
-      required: [url, formats, updateIntervalHours]
+      required: [url, formats, updateIntervalHours, hasCustomPassword]
       properties:
         url: { type: string, description: 不带 format 参数的订阅地址，属于凭据 }
+        hasCustomPassword: { type: boolean, description: 是否自设了连接密码（0.8.0，Ruling-58）；不回传密码本身 }
         formats:
           type: array
           items:
@@ -5080,13 +5113,22 @@ components:
             trafficPercent: { type: integer, minimum: 0, maximum: 50, description: 剩余流量低于额度的百分之几时提醒，0 = 不提醒 }
         subscription:
           type: object
-          required: [baseUrl, title, updateIntervalHours, infoNodes, logRetentionDays]
+          required: [baseUrl, title, updateIntervalHours, infoNodes, logRetentionDays, path, pathGraceDays, oldPath, oldPathUntil]
           properties:
             baseUrl: { type: string, maxLength: 255, description: 空串 = 取请求的协议与主机 }
             title: { type: string, minLength: 1, maxLength: 64 }
             updateIntervalHours: { type: integer, minimum: 1, maximum: 168 }
             infoNodes: { type: boolean }
             logRetentionDays: { type: integer, minimum: 1, maximum: 365 }
+            path: { type: string, pattern: "^[a-z0-9]{10,32}$", description: 订阅地址的路径前缀（0.8.0，Ruling-59）；修改时原值转为旧前缀 }
+            pathGraceDays: { type: integer, minimum: 0, maximum: 90, description: 改前缀后旧前缀还能用几天；0 = 立即失效 }
+            oldPath: { type: string, readOnly: true, description: 过渡中的旧前缀；空串 = 没有 }
+            oldPathUntil: { type: [string, "null"], format: date-time, readOnly: true, description: 旧前缀的失效时间 }
+    ConnectionPasswordInput:
+      type: object
+      required: [password]
+      properties:
+        password: { type: string, pattern: "^([A-Za-z0-9._~-]{8,64})?$", description: 新的连接密码；空串 = 恢复为平台随机生成 }
     SettingsInput:
       type: object
       description: 与 Settings 同形，但各分组与各键都可省略；只改出现的键

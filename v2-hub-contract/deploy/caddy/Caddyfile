@@ -1,4 +1,4 @@
-# 生产入口（Ruling-5、Ruling-6）：Caddy 负责 HTTPS；/api 与 /sub 反代到 hub-server，
+# 生产入口（Ruling-5、Ruling-6）：Caddy 负责 HTTPS；/api 与订阅地址（Ruling-59）反代到 hub-server，
 # 其余请求从 MinIO 桶读取前端静态文件。无扩展名的路径回退到 index.html（SPA 路由）。
 {
 	email {$ACME_EMAIL}
@@ -29,6 +29,12 @@
 	handle /api/* {
 		reverse_proxy hub-server:8080
 	}
+	# 订阅地址：/{随机前缀}/{令牌}（Ruling-59）。前缀由后台设置、可改，这里按路径形状转发，后端只认当前与过渡中的前缀
+	@subscription path_regexp ^/[a-z0-9]{10,32}/[A-Za-z0-9_-]{22,64}$
+	handle @subscription {
+		reverse_proxy hub-server:8080
+	}
+	# 旧的固定前缀，升级后的过渡期内仍可用；过期后由后端返回 404
 	handle /sub/* {
 		reverse_proxy hub-server:8080
 	}
