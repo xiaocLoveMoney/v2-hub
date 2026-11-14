@@ -4,7 +4,7 @@
 #   路由按本人 email 匹配 → 再加一条落地为我的出口的规则，被第 1 条覆盖；调顺序后生效的规则随之变化
 # → 我的出口填回环地址 / localhost 用于服务端链式 400、用于客户端链式允许；被服务端规则引用时换成回环地址 400 → 反向规则成环 400
 # → 管理员停用用户出口后规则阻断、靠后的规则顶上；管理员看不了用户出口的链接 → 他人的规则与出口 404
-# → 平台出口摘出节点组后规则阻断、两台面板的条目都撤下 → 客户端规则按（起飞，落地）组合进订阅 → 连续改动触发 429。
+# → 平台出口摘出节点组后规则阻断、两台面板的条目都撤下 → 改为指定用户后按名单授权（Ruling-64）→ 客户端规则按（起飞，落地）组合进订阅 → 连续改动触发 429。
 # 黑盒，只用 curl / jq / docker。用户出口的地址只写进面板配置，没有流量经过，平台与面板都不会去连它。
 # 注意：会重建 xui-a、xui-b 两个容器（不挂数据卷），不影响 PostgreSQL 与 MinIO。hub-server 用缩短了下发间隔的临时配置启动。
 source "$(dirname "$0")/common.sh"
@@ -254,6 +254,20 @@ wait_tags "$TAG_2" ""
 [ "$(portal GET /api/user/chain | jq -r --argjson id "$ROUTE_1" '.data.serverRoutes[] | select(.id == $id) | .status + ":" + .blockedReason')" = "blocked:exit" ] || fail "平台出口取消授权后规则应阻断：$(cat "$WORK/body")"
 [ "$(panel_api "$XUI_A_URL" "$TOKEN_A" GET /server/status | jq -r .obj.xray.state)" = "running" ] || fail "面板 a 的 Xray 应在运行"
 [ "$(panel_api "$XUI_B_URL" "$TOKEN_B" GET /server/status | jq -r .obj.xray.state)" = "running" ] || fail "面板 b 的 Xray 应在运行"
+
+# ---- 11b. 改为指定用户（Ruling-64）：只给另一用户时本人仍阻断、另一用户可见；加上本人后第 1 条恢复，B 上的条目回来 ----
+# assign_users <用户 id 的 JSON 数组>：整体更新平台出口，改为指定用户（节点组照传，服务端应清空）
+assign_users() { hub PUT "/api/admin/chain-exits/$PLATFORM_ID" "$(exit_body "[$GROUP_ID]" | jq -c --argjson u "$1" 'del(.link) + {assignMode:"user",userIds:$u}')"; }
+assign_users "[$OTHER_ID]" >/dev/null; expect_code 200 "平台出口改为指定另一用户"
+[ "$(other GET /api/user/chain | jq '.data.platformExits | length')" = "1" ] || fail "被指定的用户应看到平台出口：$(cat "$WORK/body")"
+[ "$(portal GET /api/user/chain | jq '.data.platformExits | length')" = "0" ] || fail "未被指定的用户不应看到平台出口：$(cat "$WORK/body")"
+assigned="$(assign_users "[$USER_ID,$OTHER_ID]")"; expect_code 200 "平台出口指定两个用户"
+printf '%s' "$assigned" | jq -e '.data | .assignMode == "user" and (.nodeGroups | length) == 0 and (.users | length) == 2' >/dev/null \
+  || fail "指定用户后应只保留用户名单：$assigned"
+wait_tags "$TAG_2" "$TAG_1"
+[ "$(portal GET /api/user/chain | jq -r --argjson id "$ROUTE_1" '.data.serverRoutes[] | select(.id == $id) | .status')" = "ok" ] || fail "被指定后规则应恢复：$(cat "$WORK/body")"
+assign_users '[999999999]' >/dev/null; expect_code 400 "指定不存在的用户"
+hub PUT "/api/admin/chain-exits/$PLATFORM_ID" "$(exit_body '[]' | jq -c 'del(.link) + {assignMode:"nobody"}')" >/dev/null; expect_code 400 "分配方式取值非法"
 
 # ---- 12. 写操作频控：连续调顺序，最终 429 rate_limited；客户端规则不受影响 ----
 limited=""

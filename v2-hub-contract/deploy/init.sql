@@ -701,7 +701,9 @@ CREATE TABLE chain_exit (
     allow_client BOOLEAN      NOT NULL DEFAULT TRUE,
     resolved_ip  INET,
     resolved_at  TIMESTAMPTZ,
+    assign_mode  VARCHAR(8)   NOT NULL DEFAULT 'group',  -- 平台出口的分配方式：group 按节点组 / user 指定用户（Ruling-64）
     CONSTRAINT uk_chain_exit_user_name UNIQUE (user_id, name),
+    CONSTRAINT ck_chain_exit_assign_mode CHECK (assign_mode IN ('group', 'user')),
     CONSTRAINT ck_chain_exit_protocol CHECK (protocol IN ('vless', 'vmess', 'trojan', 'shadowsocks', 'socks', 'http')),
     CONSTRAINT ck_chain_exit_port CHECK (port BETWEEN 1 AND 65535)
 );
@@ -714,6 +716,14 @@ CREATE TABLE node_group_exit (
     PRIMARY KEY (node_group_id, exit_id)
 );
 CREATE INDEX idx_node_group_exit_exit_id ON node_group_exit (exit_id);
+
+-- 平台出口指定给哪些用户（assign_mode = user 时生效，Ruling-64）
+CREATE TABLE chain_exit_user (
+    exit_id BIGINT NOT NULL REFERENCES chain_exit (id) ON DELETE CASCADE,
+    user_id BIGINT NOT NULL REFERENCES end_user (id) ON DELETE CASCADE,
+    PRIMARY KEY (exit_id, user_id)
+);
+CREATE INDEX idx_chain_exit_user_user_id ON chain_exit_user (user_id);
 
 -- 链式规则（docs/03 §5.18、§5.19，Ruling-46）：一组起飞节点（chain_route_entry）→ 一个落地（平台节点或出口，恰好一个）。
 -- kind = client 只在订阅里表达；server 是服务端链式。position 在同一用户同一类型内越小越优先（可有空号，调顺序在事务里整体重排）。
