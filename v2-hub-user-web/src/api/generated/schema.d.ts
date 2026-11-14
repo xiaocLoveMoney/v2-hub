@@ -4731,11 +4731,18 @@ export interface components {
             allowServer: boolean;
             /** @description 可用于客户端链式（凭据会进用户的订阅）；只对平台出口有意义 */
             allowClient: boolean;
-            /** @description 平台出口所属的节点组；用户出口为空数组 */
+            assignMode: components["schemas"]["ChainExitAssignMode"];
+            /** @description 平台出口所属的节点组（assignMode = group 时）；其余为空数组 */
             nodeGroups: {
                 /** Format: int64 */
                 id: number;
                 name: string;
+            }[];
+            /** @description 平台出口指定的用户（assignMode = user 时，自 0.9.0）；其余为空数组 */
+            users: {
+                /** Format: int64 */
+                id: number;
+                username: string;
             }[];
             /** @description 引用它的规则数 */
             routeCount: number;
@@ -4744,6 +4751,11 @@ export interface components {
             /** Format: date-time */
             updatedAt: string;
         };
+        /**
+         * @description 平台出口的分配方式（自 0.9.0，Ruling-64）：group = 按节点组，user = 指定用户；用户出口恒为 group，无意义
+         * @enum {string}
+         */
+        ChainExitAssignMode: "group" | "user";
         AdminChainExitPage: {
             items: components["schemas"]["AdminChainExit"][];
             /** Format: int64 */
@@ -4760,6 +4772,16 @@ export interface components {
             allowServer: boolean;
             allowClient: boolean;
             nodeGroupIds: number[];
+            /**
+             * @description 省略 = group（兼容 0.8 的调用方）；保存时只保留所选方式那一组
+             * @default group
+             */
+            assignMode: components["schemas"]["ChainExitAssignMode"];
+            /**
+             * @description assignMode = user 时的用户（自 0.9.0）；须是未注销的用户
+             * @default []
+             */
+            userIds: number[];
         };
         AdminChainExitUpdateInput: {
             name: string;
@@ -4770,6 +4792,16 @@ export interface components {
             allowServer: boolean;
             allowClient: boolean;
             nodeGroupIds: number[];
+            /**
+             * @description 省略 = group（兼容 0.8 的调用方）；保存时只保留所选方式那一组
+             * @default group
+             */
+            assignMode: components["schemas"]["ChainExitAssignMode"];
+            /**
+             * @description assignMode = user 时的用户（自 0.9.0）；须是未注销的用户
+             * @default []
+             */
+            userIds: number[];
         };
         ChainExitEnabledInput: {
             isEnabled: boolean;
