@@ -31,7 +31,8 @@ cd v2-hub-contract/deploy/it && bash run_all.sh
 - v2-hub 只做控制面，不转发代理流量（Ruling-4）。
 - 面板是入站配置的事实来源；hub-server 缓存副本，定时同步并对账用户 client（docs/02 §3）。
 - 业务层只依赖 `manager/panel` 的 Provider 接口与中立模型，3x-ui 是 `manager/panel/xui` 一个实现（Ruling-8）。
-- 前端静态文件放 MinIO，Caddy 同域反代 `/api`、`/sub`（Ruling-5、Ruling-6）。
+- 前端静态文件放 MinIO；生产单域名，管理端在 `/admin/`，Caddy 反代 `/api` 与订阅地址（Ruling-6、Ruling-61）。
+- 生产自动部署：`main` 检查全绿后由生产机上的自托管 Runner 执行 `deploy_prod.sh`（Ruling-62，docs/02 §6）。
 
 契约（全部在 v2-hub-contract/）：`hub-api.yaml`（server → 前端）、`deploy/init.sql`（server 的表结构）、
 `upstream/3x-ui/openapi-v3.11.0.json`（3x-ui → server 的上游基准）。契约版本用 git tag `vX.Y`，当前 `v0.16`。

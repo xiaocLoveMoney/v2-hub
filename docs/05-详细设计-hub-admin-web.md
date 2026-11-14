@@ -81,7 +81,7 @@ REALITY 的“目标”旁有“扫描”，结果显示在输入框下方（可
 
 ## 5. 配置与启动
 
-`make run`（5173）；生产 `make build` 后 `publish_web.sh dist web-admin`。
+`make run`（5173，开发时在根路径）；生产构建的 base 为 `/admin/`、路由 basename 跟随（Ruling-61），由部署脚本发布到 `web-admin` 桶（Ruling-62）。
 
 ## 6. 测试策略
 
