@@ -3,6 +3,7 @@ import { Button, Layout, Menu, Space, Spin, Typography, type MenuProps } from 'a
 import { useMemo } from 'react'
 import { Navigate, Outlet, useLocation, useNavigate } from 'react-router'
 import { useSession } from '../auth/session-context'
+import { BrandMark } from '../components/BrandMark'
 import { revealChildren } from '../components/motion'
 import { ROUTES, visibleMenu, type MenuEntry } from '../menu'
 
@@ -10,6 +11,8 @@ type MenuItem = Required<MenuProps>['items'][number]
 
 /** 侧栏宽度（docs/06 §4 外壳）。 */
 const SIDER_WIDTH = 250
+/** 侧栏品牌位的图标尺寸（像素）。 */
+const BRAND_MARK_SIZE = 26
 
 /** 把菜单表转成 antd Menu 的 items：有 group 的归到同名分组下，保持表内顺序。 */
 function toMenuItems(entries: MenuEntry[]): MenuItem[] {
@@ -55,7 +58,10 @@ export function AdminLayout() {
   return (
     <Layout className="admin-layout">
       <Layout.Sider breakpoint="lg" collapsedWidth={0} theme="light" width={SIDER_WIDTH} className="admin-sider">
-        <div className="admin-brand">v2-hub</div>
+        <div className="admin-brand">
+          <BrandMark size={BRAND_MARK_SIZE} motion="intro" hasHoverTurn />
+          <span>v2-hub</span>
+        </div>
         <Menu
           mode="inline"
           selectedKeys={[location.pathname]}

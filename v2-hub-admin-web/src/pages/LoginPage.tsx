@@ -6,6 +6,7 @@ import { CODE_TOTP_REQUIRED } from '../api/client'
 import { useSession } from '../auth/session-context'
 import { revealChildren } from '../components/motion'
 import { ROUTES } from '../menu'
+import { BrandMark } from '../components/BrandMark'
 
 interface LoginForm {
   username: string
@@ -17,6 +18,8 @@ interface LocationState {
   from?: string
 }
 
+/** 登录卡片标题前的图标尺寸（像素）。 */
+const LOGIN_MARK_SIZE = 36
 const TOTP_PATTERN = /^\d{6}$/
 
 /** 管理员登录页（管理门户入口）。账号开启两步验证时，密码通过后再显示验证码输入框。 */
@@ -52,7 +55,10 @@ export function LoginPage() {
   return (
     <main className="login-page" ref={revealChildren}>
       <Card className="login-card">
-        <Typography.Title level={3}>v2-hub 管理端</Typography.Title>
+        <div className="login-brand">
+          <BrandMark size={LOGIN_MARK_SIZE} motion="intro" hasHoverTurn />
+          <Typography.Title level={3}>v2-hub 管理端</Typography.Title>
+        </div>
         {errorMessage !== null && <Alert type="error" title={errorMessage} showIcon className="login-alert" />}
         <Form<LoginForm> layout="vertical" onFinish={handleFinish} requiredMark={false}>
           <Form.Item name="username" label="用户名" rules={[{ required: true, message: '请输入用户名' }]}>
