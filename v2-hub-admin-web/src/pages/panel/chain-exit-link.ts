@@ -5,7 +5,8 @@
  * 链接含凭据：本文件不打日志，也不把内容写进任何存储。
  */
 
-export const EXIT_PROTOCOLS = ['vless', 'vmess', 'trojan', 'shadowsocks', 'socks'] as const
+/** http / https 是 HTTP 代理，https 即带 TLS 的 HTTP 代理（Ruling-51）。 */
+export const EXIT_PROTOCOLS = ['vless', 'vmess', 'trojan', 'shadowsocks', 'socks', 'http', 'https'] as const
 export type ExitProtocol = (typeof EXIT_PROTOCOLS)[number]
 
 export const EXIT_NETWORKS = ['tcp', 'ws', 'grpc', 'httpupgrade', 'xhttp'] as const
@@ -47,6 +48,8 @@ const SCHEME_BY_PROTOCOL: Record<ExitProtocol, string> = {
   trojan: 'trojan',
   shadowsocks: 'ss',
   socks: 'socks5',
+  http: 'http',
+  https: 'https',
 }
 const PROTOCOL_BY_SCHEME: Record<string, ExitProtocol> = {
   vless: 'vless',
@@ -55,6 +58,8 @@ const PROTOCOL_BY_SCHEME: Record<string, ExitProtocol> = {
   ss: 'shadowsocks',
   socks5: 'socks',
   socks: 'socks',
+  http: 'http',
+  https: 'https',
 }
 
 const SCHEME_PATTERN = /^([a-z0-9]+):\/\/(.+)$/i
@@ -85,9 +90,9 @@ export interface ExitFields {
   cipher: string
   /** shadowsocks 的加密方式。 */
   method: string
-  /** trojan / shadowsocks / socks 的口令。 */
+  /** trojan / shadowsocks / socks / http / https 的口令。 */
   passphrase: string
-  /** socks 的用户名。 */
+  /** socks / http / https 的用户名。 */
   username: string
   network: ExitNetwork
   host: string
@@ -96,6 +101,7 @@ export interface ExitFields {
   /** xhttp 的模式。 */
   mode: string
   security: ExitSecurity
+  /** TLS / REALITY 的 SNI；HTTPS 代理也用它。 */
   sni: string
   fingerprint: string
   alpn: string[]
@@ -139,6 +145,11 @@ export function emptyExitFields(): ExitFields {
 /** 这个协议有没有传输层与安全层可选（shadowsocks、socks 没有）。 */
 export function hasStream(protocol: ExitProtocol): boolean {
   return protocol === 'vless' || protocol === 'vmess' || protocol === 'trojan'
+}
+
+/** 这个协议是不是“地址 + 可选的用户名口令”形状的代理（socks、http、https）。 */
+export function isPlainProxy(protocol: ExitProtocol): boolean {
+  return protocol === 'socks' || protocol === 'http' || protocol === 'https'
 }
 
 /** 这个协议可选的安全层：vmess 的分享链接表达不了 REALITY。 */
@@ -197,8 +208,8 @@ export function exitFieldProblems(fields: ExitFields): ReadonlySet<ExitFieldKey>
   if (needsPassphrase && fields.passphrase === '') {
     problems.add('passphrase')
   }
-  // socks 只填口令不填用户名没有意义：内核只在有用户名时才带认证
-  if (fields.protocol === 'socks' && fields.passphrase !== '' && fields.username === '') {
+  // 代理只填口令不填用户名没有意义：内核只在有用户名时才带认证
+  if (isPlainProxy(fields.protocol) && fields.passphrase !== '' && fields.username === '') {
     problems.add('username')
   }
   if (hasStream(fields.protocol) && fields.security === 'reality') {
@@ -314,6 +325,20 @@ function buildVMess(fields: ExitFields, name: string): string {
   return `vmess://${encodeBase64(JSON.stringify(payload))}`
 }
 
+/** HTTPS 代理的附加参数（SNI、允许不安全）；其它代理没有参数。 */
+function proxyQuery(fields: ExitFields): string {
+  if (fields.protocol !== 'https') {
+    return ''
+  }
+  const q = new URLSearchParams()
+  setIfPresent(q, 'sni', fields.sni.trim())
+  if (fields.isInsecure) {
+    q.set('allowInsecure', TRUTHY)
+  }
+  const text = q.toString()
+  return text === '' ? '' : `?${text}`
+}
+
 /**
  * 把表单拼成一条分享链接；调用前先用 exitFieldProblems 确认没有缺项。
  * name 写进链接的名称部分（空则不带）。形状与后端的解析一致（v2-hub-server/internal/manager/render/node.go）。
@@ -340,11 +365,13 @@ export function buildExitLink(input: ExitFields, name: string): string {
       const credential = toBase64Url(encodeBase64(`${fields.method}${CREDENTIAL_SEPARATOR}${fields.passphrase}`))
       return `${scheme}://${credential}@${authority}${fragment}`
     }
-    case 'socks': {
-      // 有用户名时总是带上“:口令”（口令可空）：只有用户名的形状会被后端当成 Base64 去解
+    case 'socks':
+    case 'http':
+    case 'https': {
+      // 有用户名时总是带上“:口令”（口令可空）：socks 只有用户名的形状会被后端当成 Base64 去解
       const credential =
         fields.username === '' ? '' : `${encodeURIComponent(fields.username)}${CREDENTIAL_SEPARATOR}${encodeURIComponent(fields.passphrase)}@`
-      return `${scheme}://${credential}${authority}${fragment}`
+      return `${scheme}://${credential}${authority}${proxyQuery(fields)}${fragment}`
     }
     default:
       return ''
@@ -528,38 +555,65 @@ function parseShadowsocks(rest: string): ParsedExitLink | null {
   return { fields, name }
 }
 
-/** socks5://[用户名:口令@]地址:端口；也接受 socks://Base64(用户名:口令)@地址:端口。 */
-function parseSocks(link: string, rest: string): ParsedExitLink | null {
-  const url = parseUrl(link)
-  if (url === null || !isValidPort(url.port) || url.hostname === '') {
+/** 拆开“[凭据@]地址:端口[/][?参数][#名称]”；带路径的（网页地址）不是代理，返回 null。 */
+function splitProxyRest(rest: string): { userinfo: string | null; target: { address: string; port: string }; query: URLSearchParams; name: string } | null {
+  const [beforeFragment, rawName = ''] = rest.split('#')
+  const [beforeQuery, rawQuery = ''] = beforeFragment.split('?')
+  const name = safeDecode(rawName)
+  const body = beforeQuery.replace(/\/$/, '')
+  const at = body.lastIndexOf('@')
+  const target = splitHostPort(body.slice(at + 1))
+  if (name === null || target === null || body.slice(at + 1).includes('/')) {
     return null
   }
-  const name = nameOf(url)
-  const username = safeDecode(url.username)
-  const passphrase = safeDecode(url.password)
-  if (name === null || username === null || passphrase === null) {
-    return null
-  }
-  const fields: ExitFields = { ...emptyExitFields(), protocol: 'socks', address: stripBrackets(url.hostname), port: url.port }
-  const at = rest.indexOf('@')
-  if (at < 0) {
-    return { fields, name }
-  }
-  if (rest.slice(0, at).includes(CREDENTIAL_SEPARATOR)) {
-    return { fields: { ...fields, username, passphrase }, name }
-  }
-  const decoded = decodeBase64(username)
-  const cut = decoded?.indexOf(CREDENTIAL_SEPARATOR) ?? -1
-  if (decoded === null || cut <= 0) {
-    return null
-  }
-  fields.username = decoded.slice(0, cut)
-  fields.passphrase = decoded.slice(cut + 1)
-  return { fields, name }
+  return { userinfo: at < 0 ? null : body.slice(0, at), target, query: new URLSearchParams(rawQuery), name }
 }
 
 /**
- * 把一条分享链接解析成表单。表单表达不了的（hysteria2、带 HTTP 伪装、形状不对）返回 null，调用方让用户改用链接方式。
+ * 代理地址：socks5:// http:// https://[用户名:口令@]地址:端口。socks 另接受 socks://Base64(用户名:口令)@地址:端口；
+ * http / https 接受只有用户名的写法。不用 URL 解析：浏览器会把 http 的 80、https 的 443 端口吞掉。
+ */
+function parseProxy(rest: string, protocol: 'socks' | 'http' | 'https'): ParsedExitLink | null {
+  const parts = splitProxyRest(rest)
+  if (parts === null) {
+    return null
+  }
+  const fields: ExitFields = { ...emptyExitFields(), protocol, ...parts.target }
+  if (protocol === 'https') {
+    fields.sni = parts.query.get('sni') ?? ''
+    fields.isInsecure = isTruthy(parts.query.get('allowInsecure')) || isTruthy(parts.query.get('insecure'))
+  }
+  if (parts.userinfo === null) {
+    return { fields, name: parts.name }
+  }
+  const cut = parts.userinfo.indexOf(CREDENTIAL_SEPARATOR)
+  if (cut >= 0) {
+    const username = safeDecode(parts.userinfo.slice(0, cut))
+    const passphrase = safeDecode(parts.userinfo.slice(cut + 1))
+    if (username === null || passphrase === null || (username === '' && passphrase !== '')) {
+      return null
+    }
+    return { fields: { ...fields, username, passphrase }, name: parts.name }
+  }
+  const single = safeDecode(parts.userinfo)
+  if (single === null) {
+    return null
+  }
+  if (protocol !== 'socks') {
+    return { fields: { ...fields, username: single }, name: parts.name }
+  }
+  const decoded = decodeBase64(single)
+  const decodedCut = decoded?.indexOf(CREDENTIAL_SEPARATOR) ?? -1
+  if (decoded === null || decodedCut <= 0) {
+    return null
+  }
+  fields.username = decoded.slice(0, decodedCut)
+  fields.passphrase = decoded.slice(decodedCut + 1)
+  return { fields, name: parts.name }
+}
+
+/**
+ * 把一条分享链接或代理地址解析成表单。表单表达不了的（hysteria2、带 HTTP 伪装、形状不对）返回 null，调用方让用户改用链接方式。
  * 链接里表单没有的参数会被丢掉——后端同样不读它们。
  */
 export function parseExitLink(link: string): ParsedExitLink | null {
@@ -578,7 +632,9 @@ export function parseExitLink(link: string): ParsedExitLink | null {
     case 'shadowsocks':
       return parseShadowsocks(m[2])
     case 'socks':
-      return parseSocks(text, m[2])
+    case 'http':
+    case 'https':
+      return parseProxy(m[2], protocol)
     default:
       return null
   }

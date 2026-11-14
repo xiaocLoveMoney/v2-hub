@@ -35,12 +35,16 @@ describe('出口表单与分享链接互转', () => {
     expectRoundTrip(fieldsOf({ protocol: 'socks', port: '1080', username: 'us er', passphrase: 'p:w@x' }))
     expectRoundTrip(fieldsOf({ protocol: 'socks', port: '1080', username: 'only-user' }))
     expectRoundTrip(fieldsOf({ protocol: 'vless', id: TEST_ID, address: '2001:4860:4860::8888' }))
+    // HTTP / HTTPS 代理（Ruling-51）：默认端口也要原样保留
+    expectRoundTrip(fieldsOf({ protocol: 'http', port: '80', username: 'u', passphrase: 'p:w@x' }))
+    expectRoundTrip(fieldsOf({ protocol: 'https', port: '443', sni: 'front.example.com', isInsecure: true }), '')
   })
 
   it('表单表达不了的链接返回 null', () => {
     expect(parseExitLink('hysteria2://pw@a.example.com:443')).toBeNull()
     expect(parseExitLink(`vless://${TEST_ID}@a.example.com:443?type=tcp&headerType=http`)).toBeNull()
     expect(parseExitLink(`vless://${TEST_ID}@a.example.com:70000`)).toBeNull()
+    expect(parseExitLink('https://exit.example.com/index.html')).toBeNull()
     expect(parseExitLink('not a link')).toBeNull()
   })
 

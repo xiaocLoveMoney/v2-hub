@@ -466,3 +466,167 @@ export function fromPanelConfig(cfg: PanelConfig): InboundDraft {
     sniffing: { ...defaultSniffing(), ...asObject(cfg.config.sniffing) },
   }
 }
+
+// ---- 新建入站的预填（docs/03 §5.2 入站预填，Ruling-53） -----------------------------
+
+/** 预填的依据；编辑已有入站时不预填（调用方传 null）。 */
+export interface PrefillHints {
+  /** 服务器的域名；不知道或只有 IP 时为空串，域名类字段就不填。 */
+  domain: string
+}
+
+/** REALITY 目标的候选：3x-ui v3.11.0 的默认候选站点（internal/web/service/reality_scan.go）。 */
+export const REALITY_TARGET_CANDIDATES = [
+  'www.cloudflare.com:443',
+  'www.microsoft.com:443',
+  'www.amazon.com:443',
+  'aws.amazon.com:443',
+  'www.samsung.com:443',
+  'www.nvidia.com:443',
+  'www.amd.com:443',
+  'www.intel.com:443',
+  'www.sony.com:443',
+  'dl.google.com:443',
+] as const
+
+const RANDOM_PATH_LEN = 10
+const SPIDER_X_LEN = 15
+const PATH_ROOT = '/'
+const DEFAULT_FINGERPRINT = 'chrome'
+/** 带 Host 与路径的传输。 */
+const HOST_PATH_NETWORKS: readonly string[] = ['ws', 'httpupgrade', 'xhttp']
+/** 这些传输走 HTTP/1.1 升级，TLS 的 ALPN 只留 http/1.1（同 3x-ui）。 */
+const HTTP1_NETWORKS: readonly string[] = ['ws', 'httpupgrade']
+const ALPN_HTTP1 = ['http/1.1']
+const IPV4_PATTERN = /^[0-9]{1,3}(\.[0-9]{1,3}){3}$/
+const DOMAIN_PATTERN = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/i
+
+/** 一个随机路径：“/” 加一段小写字母数字。 */
+export function randomPath(length: number = RANDOM_PATH_LEN): string {
+  return PATH_ROOT + randomAlphanum(length)
+}
+
+/** gRPC 的随机 serviceName。 */
+export function randomServiceName(): string {
+  return randomAlphanum(RANDOM_PATH_LEN)
+}
+
+function hostnameOf(value: string): string {
+  const text = value.trim()
+  if (!text.includes('://')) {
+    return text
+  }
+  try {
+    return new URL(text).hostname
+  } catch {
+    // 不是合法的地址：当作没有
+    return ''
+  }
+}
+
+/** 从候选里取第一个域名（候选可以是主机名或带协议的地址）；IP 与单段主机名不算。没有则返回空串。 */
+export function serverDomainOf(candidates: readonly string[]): string {
+  for (const candidate of candidates) {
+    const host = hostnameOf(candidate)
+    if (DOMAIN_PATTERN.test(host) && !IPV4_PATTERN.test(host)) {
+      return host.toLowerCase()
+    }
+  }
+  return ''
+}
+
+function strAt(d: InboundDraft, path: Path): string {
+  const v = getAt(d, path)
+  return typeof v === 'string' ? v : ''
+}
+
+function isEmptyList(v: unknown): boolean {
+  return !Array.isArray(v) || v.length === 0
+}
+
+/** 传输层的预填：空着的路径给随机串、Host 给服务器域名、serviceName 给随机串；TLS 下 ws / httpupgrade 的 ALPN 取 http/1.1。 */
+export function prefillNetwork(d: InboundDraft, hints: PrefillHints): InboundDraft {
+  const network = networkOf(d)
+  const base: Path = ['streamSettings', networkKey(network)]
+  let next = d
+  if (HOST_PATH_NETWORKS.includes(network)) {
+    const path = strAt(next, [...base, 'path'])
+    if (path === '' || path === PATH_ROOT) {
+      next = setAt(next, [...base, 'path'], randomPath())
+    }
+    if (hints.domain !== '' && strAt(next, [...base, 'host']) === '') {
+      next = setAt(next, [...base, 'host'], hints.domain)
+    }
+  }
+  if (network === 'grpc' && strAt(next, [...base, 'serviceName']) === '') {
+    next = setAt(next, [...base, 'serviceName'], randomServiceName())
+  }
+  if (securityOf(next) === SECURITY_TLS && HTTP1_NETWORKS.includes(network)) {
+    next = setAt(next, ['streamSettings', TLS_KEY, 'alpn'], [...ALPN_HTTP1])
+  }
+  return next
+}
+
+function prefillTls(d: InboundDraft, hints: PrefillHints): InboundDraft {
+  const base: Path = ['streamSettings', TLS_KEY]
+  let next = d
+  if (hints.domain !== '' && strAt(next, [...base, 'serverName']) === '') {
+    next = setAt(next, [...base, 'serverName'], hints.domain)
+  }
+  if (next.protocol !== 'hysteria' && strAt(next, [...base, 'settings', 'fingerprint']) === '') {
+    next = setAt(next, [...base, 'settings', 'fingerprint'], DEFAULT_FINGERPRINT)
+  }
+  if (HTTP1_NETWORKS.includes(networkOf(next))) {
+    next = setAt(next, [...base, 'alpn'], [...ALPN_HTTP1])
+  }
+  return next
+}
+
+function prefillReality(d: InboundDraft): InboundDraft {
+  const base: Path = ['streamSettings', REALITY_KEY]
+  let next = d
+  if (strAt(next, [...base, 'target']) === '') {
+    const [pick] = randomBytes(1)
+    const target = REALITY_TARGET_CANDIDATES[pick % REALITY_TARGET_CANDIDATES.length]
+    next = setAt(next, [...base, 'target'], target)
+    if (isEmptyList(getAt(next, [...base, 'serverNames']))) {
+      next = setAt(next, [...base, 'serverNames'], [target.split(':')[0]])
+    }
+  }
+  const spiderX = strAt(next, [...base, 'settings', 'spiderX'])
+  if (spiderX === '' || spiderX === PATH_ROOT) {
+    next = setAt(next, [...base, 'settings', 'spiderX'], randomPath(SPIDER_X_LEN))
+  }
+  return next
+}
+
+/** 安全层的预填：TLS 的 SNI 给服务器域名、指纹给 chrome；REALITY 的目标与 SNI 随机取一个候选、SpiderX 给随机串。 */
+export function prefillSecurity(d: InboundDraft, hints: PrefillHints): InboundDraft {
+  switch (securityOf(d)) {
+    case SECURITY_TLS:
+      return prefillTls(d, hints)
+    case SECURITY_REALITY:
+      return prefillReality(d)
+    default:
+      return d
+  }
+}
+
+/** 面板的网页证书路径填进还空着的“文件路径”证书；两项有一项为空就不动。返回是否填了至少一个。 */
+export function withWebCert(d: InboundDraft, certFile: string, keyFile: string): { draft: InboundDraft; isFilled: boolean } {
+  const path: Path = ['streamSettings', TLS_KEY, 'certificates']
+  const certs = getAt(d, path)
+  if (certFile === '' || keyFile === '' || !Array.isArray(certs)) {
+    return { draft: d, isFilled: false }
+  }
+  let isFilled = false
+  const next = (certs as JsonObject[]).map((c) => {
+    const isBlankFile = c.useFile !== false && (c.certificateFile ?? '') === '' && (c.keyFile ?? '') === ''
+    if (!isBlankFile) {
+      return c
+    }
+    isFilled = true
+    return { ...c, certificateFile: certFile, keyFile }
+  })
+  return { draft: isFilled ? setAt(d, path, next) : d, isFilled }
+}

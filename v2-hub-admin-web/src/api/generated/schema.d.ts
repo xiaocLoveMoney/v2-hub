@@ -529,6 +529,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/admin/chain-exits/{id}/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 从一台服务器测试出口的延迟（node:write；0.6.0）
+         * @description 由指定服务器的面板去连出口并返回结果，hub-server 自己不连出口（Ruling-52）。平台出口与用户出口都可测；
+         *     用户出口先过服务端链式的地址限制（docs/03 §5.19），不过返回 400。不改任何状态，不记审计。
+         *     同一台服务器同时只跑一个测试，占用中返回 409。
+         */
+        post: operations["testChainExitAsAdmin"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/admin/servers/{id}/sync": {
         parameters: {
             query?: never;
@@ -678,6 +702,28 @@ export interface paths {
         put?: never;
         /** 让该服务器的面板生成一组密钥（Reality x25519、ML-DSA-65、VLESS encryption），原样返回给表单（Ruling-16，node:write） */
         post: operations["generatePanelKeys"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/servers/{id}/web-cert": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        /**
+         * 取该服务器面板自己的网页证书路径，供新建入站的 TLS 证书预填（Ruling-53，node:write；0.6.0）
+         * @description 只返回面板所在机器上的文件路径，不返回证书内容；面板没配证书时两个字段都是空串。面板类型不支持时返回 409。
+         */
+        get: operations["getServerWebCert"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -2587,6 +2633,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/user/chain/exits/{id}/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 从我可用的一个节点所在服务器测试我的出口的延迟（0.6.0）
+         * @description 由起点节点所在服务器的面板去连出口并返回结果（Ruling-52）。只能测自己的出口，他人的与平台出口返回 404（R8）；
+         *     起点必须是本人可用、面板支持测试的节点，否则 400。出口先过服务端链式的地址限制（公网地址等，docs/03 §5.19），不过返回 400。
+         *     每用户频控，超出返回 429；同一台服务器同时只跑一个测试，占用中返回 409。不返回面板的错误原文。
+         */
+        post: operations["testChainExit"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/sub/{token}": {
         parameters: {
             query?: never;
@@ -4329,8 +4399,11 @@ export interface components {
             /** Format: int64 */
             id: number;
             name: string;
-            /** @enum {string} */
-            protocol: "vless" | "vmess" | "trojan" | "shadowsocks" | "socks";
+            /**
+             * @description http = HTTP 或 HTTPS 代理（自 0.6.0）
+             * @enum {string}
+             */
+            protocol: "vless" | "vmess" | "trojan" | "shadowsocks" | "socks" | "http";
             address: string;
             port: number;
             /** @description false = 已被管理员停用，引用它的规则阻断 */
@@ -4340,8 +4413,55 @@ export interface components {
             /** Format: date-time */
             createdAt: string;
         };
+        /**
+         * @description tcp = 只做 TCP 连接；http = 经出口发一次 HTTP 请求，报热连接的往返时间；real = 真实延迟，含建立隧道在内的整次请求耗时（Ruling-52）
+         * @enum {string}
+         */
+        ChainExitTestMode: "tcp" | "http" | "real";
+        ChainExitTestInput: {
+            /**
+             * Format: int64
+             * @description 起点节点（本人可用），由它所在服务器的面板发起测试
+             */
+            nodeId: number;
+            mode: components["schemas"]["ChainExitTestMode"];
+        };
+        ChainExitTestResult: {
+            /** @description 是否连通 */
+            ok: boolean;
+            mode: components["schemas"]["ChainExitTestMode"];
+            /**
+             * Format: int64
+             * @description 延迟，毫秒；不通时为 0
+             */
+            delayMs: number;
+            /** @description http / real 方式下测试请求的 HTTP 状态码；没有则为 0 */
+            httpStatus: number;
+            /** @description http 方式下探到的出口 IP；没有则为空串 */
+            egressIp: string;
+            /** @description 出口 IP 的国家或地区代码；没有则为空串 */
+            egressRegion: string;
+        };
+        AdminChainExitTestInput: {
+            /**
+             * Format: int64
+             * @description 发起测试的服务器
+             */
+            serverId: number;
+            mode: components["schemas"]["ChainExitTestMode"];
+        };
+        AdminChainExitTestResult: components["schemas"]["ChainExitTestResult"] & {
+            /** @description 面板返回的错误原文（已截断）；连通时为空串 */
+            error: string;
+        };
+        ServerWebCert: {
+            /** @description 证书文件在面板所在机器上的路径；没配为空串 */
+            certFile: string;
+            /** @description 私钥文件在面板所在机器上的路径；没配为空串 */
+            keyFile: string;
+        };
         ChainExitInput: {
-            /** @description 分享链接（vless / vmess / trojan / ss）或 socks5://[用户名:口令@]地址:端口 */
+            /** @description 分享链接（vless / vmess / trojan / ss），或代理地址 socks5:// http:// https://[用户名:口令@]地址:端口（http / https 自 0.6.0） */
             link: string;
             /** @description 可选；省略或空串 = 取链接里的名称 */
             name?: string;
@@ -4453,8 +4573,11 @@ export interface components {
                 username: string;
             } | null;
             name: string;
-            /** @enum {string} */
-            protocol: "vless" | "vmess" | "trojan" | "shadowsocks" | "socks";
+            /**
+             * @description http = HTTP 或 HTTPS 代理（自 0.6.0）
+             * @enum {string}
+             */
+            protocol: "vless" | "vmess" | "trojan" | "shadowsocks" | "socks" | "http";
             address: string;
             port: number;
             remark: string;
@@ -4483,7 +4606,7 @@ export interface components {
         };
         AdminChainExitInput: {
             name: string;
-            /** @description 分享链接（vless / vmess / trojan / ss）或 socks5://[用户名:口令@]地址:端口 */
+            /** @description 分享链接（vless / vmess / trojan / ss），或代理地址 socks5:// http:// https://[用户名:口令@]地址:端口（http / https 自 0.6.0） */
             link: string;
             /** @default  */
             remark: string;
@@ -5626,6 +5749,42 @@ export interface operations {
             404: components["responses"]["NotFound"];
         };
     };
+    testChainExitAsAdmin: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminChainExitTestInput"];
+            };
+        };
+        responses: {
+            /** @description 测试结果（连不上也是 200，ok 为 false） */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["AdminChainExitTestResult"];
+                    };
+                };
+            };
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            502: components["responses"]["UpstreamUnavailable"];
+        };
+    };
     syncServer: {
         parameters: {
             query?: never;
@@ -5940,6 +6099,35 @@ export interface operations {
                 };
             };
             400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            502: components["responses"]["UpstreamUnavailable"];
+        };
+    };
+    getServerWebCert: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 证书与私钥的文件路径 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["ServerWebCert"];
+                    };
+                };
+            };
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["PermissionDenied"];
             404: components["responses"]["NotFound"];
@@ -9480,6 +9668,43 @@ export interface operations {
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["UserForbidden"];
             404: components["responses"]["NotFound"];
+        };
+    };
+    testChainExit: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ChainExitTestInput"];
+            };
+        };
+        responses: {
+            /** @description 测试结果（连不上也是 200，ok 为 false） */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["ChainExitTestResult"];
+                    };
+                };
+            };
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["UserForbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            429: components["responses"]["RateLimited"];
+            502: components["responses"]["UpstreamUnavailable"];
         };
     };
     getSubscription: {

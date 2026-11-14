@@ -1,7 +1,7 @@
 import { PlusOutlined } from '@ant-design/icons'
 import { App, Button, Input, InputNumber, Modal, Popconfirm, Select, Space, Tag, Typography, type TableProps } from 'antd'
 import { useCallback, useState } from 'react'
-import { api, csrfHeader, toApiError, type AdminChainExit, type ChainExitOwner, type NodeGroup } from '../../api/client'
+import { api, csrfHeader, toApiError, type AdminChainExit, type ChainExitOwner, type NodeGroup, type Server } from '../../api/client'
 import { useSession } from '../../auth/session-context'
 import { ErrorAlert } from '../../components/ErrorAlert'
 import { PagedTable } from '../../components/PagedTable'
@@ -9,6 +9,7 @@ import { useRemote } from '../../hooks/use-remote'
 import { useRowAction } from '../../hooks/use-submit'
 import { PERMISSIONS } from '../../menu'
 import { ChainExitModal } from './ChainExitModal'
+import { ChainExitTestButton } from './ChainExitTestButton'
 
 const MAX_KEYWORD_LEN = 64
 const OWNER_PLATFORM: ChainExitOwner = 'platform'
@@ -20,6 +21,9 @@ const OWNER_OPTIONS: { value: ChainExitOwner; label: string }[] = [
 ]
 
 const loadGroups = (signal: AbortSignal) => api.GET('/api/admin/node-groups', { signal })
+const loadServers = (signal: AbortSignal) => api.GET('/api/admin/servers', { signal })
+/** 没有 server:read 时不请求服务器列表，测试按钮也不出现。 */
+const loadNoServers = () => Promise.resolve({ data: { data: [] as Server[] } })
 
 /**
  * 链式出口（node:read 查看，node:write 增改删、停用与查看链接；docs/03 §5.21，Ruling-50）。
@@ -35,6 +39,10 @@ export function ChainExitsPage() {
   const [editing, setEditing] = useState<AdminChainExit | null>(null)
   const [isOpen, setIsOpen] = useState(false)
   const groups = useRemote<NodeGroup[]>(loadGroups)
+  // 延迟测试的起点：启用中的服务器（docs/03 §5.21）；列服务器要 server:read
+  const canTest = canWrite && can(PERMISSIONS.SERVER_READ)
+  const servers = useRemote<Server[]>(canTest ? loadServers : loadNoServers)
+  const testServers = (servers.data ?? []).filter((s) => !s.isDisabled)
   const refresh = () => setRefreshKey((k) => k + 1)
   const act = useRowAction(refresh)
 
@@ -76,7 +84,7 @@ export function ChainExitsPage() {
       title: '操作',
       key: 'actions',
       render: (_: unknown, e: AdminChainExit) => (
-        <RowActions exit={e} onEdit={() => open(e)} onToggle={() => setEnabled(e, !e.isEnabled)} onDelete={() => remove(e)} />
+        <RowActions exit={e} servers={canTest ? testServers : null} onEdit={() => open(e)} onToggle={() => setEnabled(e, !e.isEnabled)} onDelete={() => remove(e)} />
       ),
     })
   }
@@ -94,7 +102,7 @@ export function ChainExitsPage() {
       <Typography.Paragraph type="secondary">
         出口只用作链式规则的落地。平台出口挂到节点组后，套餐绑了该节点组的用户才能用；用户出口由用户自己添加，这里可以停用或删除，但不能查看它的链接。
       </Typography.Paragraph>
-      <ErrorAlert error={groups.error} />
+      <ErrorAlert error={groups.error ?? servers.error} />
       <PagedTable<AdminChainExit>
         load={load}
         columns={columns}
@@ -178,13 +186,15 @@ function UsageCell({ exit }: { exit: AdminChainExit }) {
 
 interface RowActionsProps {
   exit: AdminChainExit
+  /** 延迟测试可选的起点；null = 当前管理员不能测（没有 server:read）。 */
+  servers: Server[] | null
   onEdit: () => void
   onToggle: () => Promise<boolean>
   onDelete: () => Promise<boolean>
 }
 
-/** 行内操作：平台出口可编辑与查看链接；用户出口只能停用 / 启用与删除（Ruling-50）。 */
-function RowActions({ exit, onEdit, onToggle, onDelete }: RowActionsProps) {
+/** 行内操作：平台出口可编辑与查看链接；用户出口只能停用 / 启用与删除（Ruling-50）；两种都可以测试延迟（Ruling-52）。 */
+function RowActions({ exit, servers, onEdit, onToggle, onDelete }: RowActionsProps) {
   const affected = exit.routeCount === NO_ROUTES ? '没有规则引用它。' : `会连带删除引用它的 ${exit.routeCount} 条规则。`
   return (
     <Space>
@@ -196,6 +206,7 @@ function RowActions({ exit, onEdit, onToggle, onDelete }: RowActionsProps) {
           <LinkButton exit={exit} />
         </>
       )}
+      {servers !== null && <ChainExitTestButton exit={exit} servers={servers} />}
       <Popconfirm
         title={exit.isEnabled ? `停用出口 ${exit.name}？` : `启用出口 ${exit.name}？`}
         description={exit.isEnabled ? '引用它的规则会阻断，不会被删除。' : '引用它的规则恢复生效。'}

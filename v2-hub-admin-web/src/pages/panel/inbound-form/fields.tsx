@@ -1,7 +1,7 @@
 import { DeleteOutlined, PlusOutlined } from '@ant-design/icons'
 import { Button, Form, Input, InputNumber, Select, Space, Switch } from 'antd'
 import type { ReactNode } from 'react'
-import { fieldId, getAt, type InboundDraft, type JsonObject, type Path } from './model'
+import { fieldId, getAt, type InboundDraft, type JsonObject, type Path, type PrefillHints } from './model'
 
 /** 表单字段读写草稿的入口：所有字段按路径读写同一个 InboundDraft。 */
 export interface Binder {
@@ -9,6 +9,8 @@ export interface Binder {
   set: (path: Path, value: unknown) => void
   /** 整体变换草稿（换协议 / 传输 / 安全层时按规则重置相关段落）。 */
   update: (change: (d: InboundDraft) => InboundDraft) => void
+  /** 新建入站时的预填依据；编辑已有入站时为 null，不预填（Ruling-53）。 */
+  hints: PrefillHints | null
 }
 
 interface FieldProps {
