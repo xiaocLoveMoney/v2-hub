@@ -583,3 +583,131 @@
     transition: none;
   }
 }
+
+/* ---- 链路示意（链式代理页）：积木 + 平滑曲线 ---- */
+.hub-flow-scroll {
+  overflow-x: auto;
+}
+
+.hub-flow {
+  display: block;
+  width: 100%;
+  min-width: 640px;
+  height: auto;
+  margin-inline: auto;
+}
+
+.hub-flow-block-bg {
+  fill: var(--hub-surface);
+  stroke: var(--hub-border);
+  stroke-width: 1;
+  filter: drop-shadow(0 4px 8px rgb(52 57 94 / 8%));
+}
+
+.hub-flow-block.is-active .hub-flow-block-bg {
+  stroke: var(--hub-primary-glow);
+}
+
+.hub-flow-icon-bg {
+  fill: var(--flow-tone, var(--hub-primary));
+}
+
+.hub-flow-device {
+  --flow-tone: var(--hub-primary);
+}
+
+.hub-flow-entry {
+  --flow-tone: var(--hub-info);
+}
+
+.hub-flow-exit {
+  --flow-tone: var(--hub-success);
+}
+
+.hub-flow-block:not(.is-active) .hub-flow-icon-bg {
+  fill: var(--hub-muted);
+}
+
+.hub-flow-icon {
+  color: var(--hub-on-color);
+}
+
+.hub-flow-title {
+  font-size: 13px;
+  font-weight: 700;
+  fill: var(--hub-heading);
+}
+
+.hub-flow-sub {
+  font-size: 11px;
+  fill: var(--hub-muted);
+}
+
+.hub-flow-handle {
+  fill: var(--hub-surface);
+  stroke: var(--hub-muted);
+  stroke-width: 1.5;
+}
+
+.hub-flow-block.is-active .hub-flow-handle {
+  stroke: var(--hub-primary);
+}
+
+.hub-flow-link {
+  fill: none;
+  stroke: var(--hub-border);
+  stroke-width: 2;
+  stroke-dasharray: 5 5;
+}
+
+.hub-flow-link.is-active {
+  stroke: var(--hub-primary-glow);
+  stroke-dasharray: none;
+}
+
+/* 生效连线上沿流向移动的光点 */
+.hub-flow-pulse {
+  fill: none;
+  stroke: var(--hub-primary);
+  stroke-width: 2.5;
+  stroke-linecap: round;
+  stroke-dasharray: 10 40;
+  animation: hub-flow-dash 1.6s linear infinite;
+}
+
+@keyframes hub-flow-dash {
+  to {
+    stroke-dashoffset: -50;
+  }
+}
+
+.hub-flow-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 20px;
+  margin-top: 12px;
+  font-size: 12px;
+  color: var(--hub-muted);
+}
+
+.hub-flow-legend-item {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.hub-flow-swatch {
+  width: 24px;
+  border-top: 2px dashed var(--hub-border);
+}
+
+.hub-flow-swatch.is-active {
+  border-top: 2px solid var(--hub-primary);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hub-flow-pulse {
+    animation: none;
+    stroke-dasharray: none;
+  }
+}

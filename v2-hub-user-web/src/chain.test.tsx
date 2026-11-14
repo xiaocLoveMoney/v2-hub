@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { visibleMenu } from './menu'
+import { buildChainFlow, curvePath, truncateByWidth } from './pages/chain/chain-flow'
 import { entryState, isValidChainName, routeState } from './pages/chain/labels'
 import { TEST_CSRF, enT, mockServer, ok, renderApp, zhT } from './test/harness'
 
@@ -95,6 +96,37 @@ describe('链式代理文案与菜单', () => {
     const ordered = visibleMenu({ ...site, menuOrder: ['nodes', 'unknown', 'chain', 'account'] } as never, features).map((m) => m.key)
     expect(ordered.slice(0, 3)).toEqual(['nodes', 'chain', 'tutorials'])
     expect(ordered.slice(-4)).toEqual(['account', 'invite', 'dashboard', 'announcements'])
+  })
+})
+
+describe('链路示意（docs/06 链路示意卡）', () => {
+  it('起飞节点与落地去重；规则通畅且起飞节点生效才算生效，被覆盖的连线为虚线', () => {
+    const flow = buildChainFlow([serverTop, serverWide] as never)
+    expect(flow.entries.map((e) => [e.name, e.isActive])).toEqual([['香港 A', true], ['新加坡 D', true]])
+    expect(flow.exits.map((e) => [e.name, e.isActive])).toEqual([['东京出口', true], ['自家 VPS', true]])
+    expect(flow.links).toEqual([
+      { from: 'entry:1', to: 'exit:platform:30', isActive: true },
+      { from: 'entry:1', to: 'exit:own:9', isActive: false },
+      { from: 'entry:4', to: 'exit:own:9', isActive: true },
+    ])
+    // 阻断的规则整条不生效
+    const blocked = buildChainFlow([clientRoute] as never)
+    expect(blocked.entries[0]?.isActive).toBe(false)
+    expect(blocked.links[0]?.isActive).toBe(false)
+    expect(curvePath(0, 10, 100, 50)).toBe('M 0 10 C 50 10, 50 50, 100 50')
+    expect(truncateByWidth('香港 A 节点很长很长', 10)).toBe('香港 A 节…')
+    expect(truncateByWidth('short', 10)).toBe('short')
+  })
+
+  it('页面底部画出当前页签的链路，切页签跟着换', async () => {
+    mockServer({ ...signedIn(overview), 'GET /api/user/dashboard': () => ok({ onlineDevices: 3 }) })
+    renderApp('/chain')
+    expect(await screen.findByRole('img', { name: '链路示意：2 个起飞节点、2 个落地' })).toBeDefined()
+    expect(screen.getByText('链路示意 · 服务端链式')).toBeDefined()
+    expect(await screen.findByText('在线 3 台')).toBeDefined()
+    fireEvent.click(screen.getByRole('tab', { name: '客户端链式（1 / 20）' }))
+    expect(await screen.findByRole('img', { name: '链路示意：1 个起飞节点、1 个落地' })).toBeDefined()
+    expect(screen.getByText('链路示意 · 客户端链式')).toBeDefined()
   })
 })
 
