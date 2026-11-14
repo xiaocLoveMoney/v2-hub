@@ -204,7 +204,7 @@ describe('SettingsPage', () => {
     ticket: { enabled: true, notifyEmail: '' },
     shared: { enabled: false },
     mail: { ratePerMinute: 30 },
-    subscription: { baseUrl: '', title: 'v2-hub', updateIntervalHours: 12, infoNodes: true, logRetentionDays: 30 },
+    subscription: { baseUrl: '', title: 'v2-hub', updateIntervalHours: 12, infoNodes: true, logRetentionDays: 30, path: 'abcdefghij12', pathGraceDays: 30, oldPath: 'sub', oldPathUntil: '2026-12-14T00:00:00Z' },
     telegramEnabled: false,
     alert: { emails: [], offlineMinutes: 5 },
     telegram: { chatId: '', notifyAlerts: true, notifyTickets: true, notifyPayments: false },
@@ -226,6 +226,12 @@ describe('SettingsPage', () => {
     expect(screen.getByLabelText('收件邮箱')).toHaveProperty('disabled', true)
     expect(screen.getByText('未配置 token')).toBeDefined()
     expect(screen.getByRole('button', { name: '发送到已保存的会话' })).toHaveProperty('disabled', true)
+    // 订阅路径前缀（Ruling-59）：显示过渡中的旧前缀；随机生成后写法合规
+    expect(screen.getByText('sub')).toBeDefined()
+    const pathInput = screen.getByLabelText('订阅路径前缀') as HTMLInputElement
+    fireEvent.click(screen.getByRole('button', { name: '随机生成' }))
+    expect(pathInput.value).toMatch(/^[a-z0-9]{16}$/)
+    fireEvent.change(pathInput, { target: { value: 'abcdefghij12' } })
     // 客服链接只收 https
     fireEvent.change(screen.getByLabelText('客服链接'), { target: { value: 'http://chat.example.com' } })
     fireEvent.click(screen.getByRole('button', { name: /保存全部设置/ }))
@@ -242,7 +248,9 @@ describe('SettingsPage', () => {
     expect(put?.csrf).toBe(TEST_CSRF)
     // 菜单顺序另有页面编辑，系统设置页不提交它（Ruling-57）
     const { mailEnabled: _readOnly, telegramEnabled: _readOnlyToo, menu: _otherPage, ...editable } = settings
-    expect(put?.body).toEqual({ ...editable, site: { ...settings.site, name: '新站名' }, routing: { blockRule: false } })
+    // 旧前缀只读，不随表单提交（Ruling-59）
+    const { oldPath: _oldPath, oldPathUntil: _oldPathUntil, ...subscription } = settings.subscription
+    expect(put?.body).toEqual({ ...editable, site: { ...settings.site, name: '新站名' }, routing: { blockRule: false }, subscription })
   })
 
   it('只有 setting:read 时表单只读、没有保存按钮', async () => {

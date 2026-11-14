@@ -1948,6 +1948,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/user/subscription/password": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** 自设连接密码（docs/03 §5.4 连接密码，Ruling-58）；空串恢复为随机。只影响面板 client 的 password 字段，触发对账 */
+        put: operations["setConnectionPassword"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/user/login-logs": {
         parameters: {
             query?: never;
@@ -2701,7 +2718,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/sub/{token}": {
+    "/{subPath}/{token}": {
         parameters: {
             query?: never;
             header?: never;
@@ -2710,7 +2727,8 @@ export interface paths {
         };
         /**
          * 按格式渲染该用户的全部可用节点（docs/03 §5.4）
-         * @description 不走响应信封。响应头带 Subscription-Userinfo、Profile-Update-Interval、Profile-Title、Content-Disposition。
+         * @description subPath 是系统设置 subscription.path，或过渡期内的旧前缀（0.8.0 起，Ruling-59；之前固定为 sub），其余前缀 404。
+         *     不走响应信封。响应头带 Subscription-Userinfo、Profile-Update-Interval、Profile-Title、Content-Disposition。
          *     用户非 active 时仍返回 200，内容只有一条说明状态的信息节点。
          */
         get: operations["getSubscription"];
@@ -3303,6 +3321,8 @@ export interface components {
         SubscriptionInfo: {
             /** @description 不带 format 参数的订阅地址，属于凭据 */
             url: string;
+            /** @description 是否自设了连接密码（0.8.0，Ruling-58）；不回传密码本身 */
+            hasCustomPassword: boolean;
             formats: {
                 format: components["schemas"]["SubscriptionFormat"];
                 url: string;
@@ -3478,7 +3498,22 @@ export interface components {
                 updateIntervalHours: number;
                 infoNodes: boolean;
                 logRetentionDays: number;
+                /** @description 订阅地址的路径前缀（0.8.0，Ruling-59）；修改时原值转为旧前缀 */
+                path: string;
+                /** @description 改前缀后旧前缀还能用几天；0 = 立即失效 */
+                pathGraceDays: number;
+                /** @description 过渡中的旧前缀；空串 = 没有 */
+                readonly oldPath: string;
+                /**
+                 * Format: date-time
+                 * @description 旧前缀的失效时间
+                 */
+                readonly oldPathUntil: string | null;
             };
+        };
+        ConnectionPasswordInput: {
+            /** @description 新的连接密码；空串 = 恢复为平台随机生成 */
+            password: string;
         };
         /** @description 与 Settings 同形，但各分组与各键都可省略；只改出现的键 */
         SettingsInput: {
@@ -8650,6 +8685,38 @@ export interface operations {
             429: components["responses"]["RateLimited"];
         };
     };
+    setConnectionPassword: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConnectionPasswordInput"];
+            };
+        };
+        responses: {
+            /** @description 修改后的订阅信息 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["SubscriptionInfo"];
+                    };
+                };
+            };
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["AccountDisabled"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
     listUserLoginLogs: {
         parameters: {
             query?: never;
@@ -9897,6 +9964,7 @@ export interface operations {
             };
             header?: never;
             path: {
+                subPath: string;
                 token: string;
             };
             cookie?: never;
@@ -9925,7 +9993,7 @@ export interface operations {
                     "text/plain": string;
                 };
             };
-            /** @description token 不存在 */
+            /** @description token 不存在，或前缀不是当前 / 过渡中的前缀 */
             404: {
                 headers: {
                     [name: string]: unknown;
