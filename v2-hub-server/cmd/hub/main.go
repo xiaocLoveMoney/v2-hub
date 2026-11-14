@@ -166,6 +166,10 @@ func runServer(args []string) error {
 	go job.RunOps(ctx, ops, opsInterval)
 	go job.RunSessionCleanup(ctx, job.PurgeFunc(mails.PurgeOutbox), cfg.Auth.SessionCleanupInterval)
 	users := service.NewUserService(pool, sealer, panels, service.UserConfig{Location: quotaLoc, Subscription: subCfg, Settings: settings}, nil)
+	// 老用户补 SS2022 密钥（Ruling-60），对账随后写到面板
+	if _, err := users.EnsureSS2022Keys(ctx); err != nil {
+		return fmt.Errorf("ensure ss2022 keys: %w", err)
+	}
 	account := service.NewAccountService(pool, sealer, service.AccountDeps{Settings: settings, Mail: mails, Users: users, Portal: portalAuth}, nil)
 	shop := service.NewShopService(pool, settings, users, mails, nil)
 	// M5 不带具体支付网关（Ruling-28）：注册表为空，在线充值入口不出现；接入网关时在这里注册，密钥走环境变量

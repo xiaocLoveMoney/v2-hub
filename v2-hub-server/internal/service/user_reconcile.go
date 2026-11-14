@@ -86,6 +86,9 @@ type desiredClient struct {
 	credVersion   int32
 	syncedVersion int32
 	hasLinks      bool
+	// ssKeyLen 是这台服务器上该用户挂的 SS2022 入站要的密钥字节数（0 = 没有）；ssErr 非空表示 128 / 256 位混用（Ruling-60）
+	ssKeyLen int
+	ssErr    error
 }
 
 // needsRotation 报告面板上的凭据是否落后于用户当前凭据。
@@ -93,11 +96,20 @@ func (d desiredClient) needsRotation() bool {
 	return d.syncedVersion < d.credVersion
 }
 
-func (d desiredClient) spec() panel.ClientSpec {
+// spec 返回期望的面板 client。password 字段：挂了 SS2022 入站时写 SS2022 密钥，否则写自设连接密码（空则面板沿用 Auth）。
+func (d desiredClient) spec() (panel.ClientSpec, error) {
 	spec := panel.ClientSpec{Email: d.email, UUID: d.cred.UUID, LimitIP: d.limitIP, Enabled: d.enabled, InboundRefs: d.refs}
 	spec.Auth = d.cred.Auth
 	spec.Password = d.cred.Password
-	return spec
+	if d.ssKeyLen == 0 {
+		return spec, nil
+	}
+	key, err := ss2022KeyFor(d.cred.SSKey, d.ssKeyLen)
+	if err != nil {
+		return panel.ClientSpec{}, fmt.Errorf("ss2022 key of user %d: %w", d.userID, err)
+	}
+	spec.Password = key
+	return spec, nil
 }
 
 // ReconcileServer 把一台面板上平台管理的 client 对齐到期望状态（docs/03 §5.2 对账，铁律五）。
@@ -112,7 +124,11 @@ func (s *UserService) ReconcileServer(ctx context.Context, serverID int64) error
 	if srv.IsDisabled {
 		return nil
 	}
-	desired, err := s.loadDesired(ctx, serverID)
+	refLen, err := s.ssKeyLens(ctx, serverID)
+	if err != nil {
+		return err
+	}
+	desired, err := s.loadDesired(ctx, serverID, refLen)
 	if err != nil {
 		return err
 	}
@@ -145,14 +161,14 @@ func (s *UserService) ReconcileServer(ctx context.Context, serverID int64) error
 		case !d.present && exists:
 			opErr = p.DeleteClient(ctx, d.email)
 		case !d.present:
+		case d.ssErr != nil:
+			opErr = d.ssErr
 		case !exists:
-			opErr = p.AddClient(ctx, d.spec())
+			opErr = addClient(ctx, p, d)
 			needLinks[d.userID] = true
-		case d.needsRotation():
-			// 换凭据时启停与 IP 限制一并写入，不再进批量启停
-			if _, opErr = applyMounts(ctx, p, d, cur); opErr == nil {
-				opErr = p.SetClientCredential(ctx, d.spec())
-			}
+		// 换凭据，或挂载变化让这台服务器上“要不要 SS2022 密钥、要几字节”变了（Ruling-60）
+		case d.needsRotation() || actualSSKeyLen(cur, refLen) != d.ssKeyLen:
+			opErr = remountWithCredential(ctx, p, d, cur)
 			needLinks[d.userID] = true
 		default:
 			var mounted bool
@@ -228,9 +244,63 @@ func applyClientDiff(ctx context.Context, p panel.Provider, d desiredClient, cur
 		return mounted, err
 	}
 	if cur.LimitIP != d.limitIP {
-		return mounted, p.UpdateClient(ctx, d.spec())
+		spec, err := d.spec()
+		if err != nil {
+			return mounted, err
+		}
+		return mounted, p.UpdateClient(ctx, spec)
 	}
 	return mounted, nil
+}
+
+func addClient(ctx context.Context, p panel.Provider, d desiredClient) error {
+	spec, err := d.spec()
+	if err != nil {
+		return err
+	}
+	return p.AddClient(ctx, spec)
+}
+
+// remountWithCredential 调整挂载并写入凭据（启停与 IP 限制一并写，不再进批量启停）。要写 SS2022 密钥时先换凭据再挂载，
+// 不再要时先卸下 SS2022 入站再换回普通密码——任何时刻挂着的 SS2022 入站都配着合法密钥（Ruling-60）。
+func remountWithCredential(ctx context.Context, p panel.Provider, d desiredClient, cur panel.Client) error {
+	spec, err := d.spec()
+	if err != nil {
+		return err
+	}
+	if d.ssKeyLen > 0 {
+		if err := p.SetClientCredential(ctx, spec); err != nil {
+			return err
+		}
+		_, err := applyMounts(ctx, p, d, cur)
+		return err
+	}
+	if _, err := applyMounts(ctx, p, d, cur); err != nil {
+		return err
+	}
+	return p.SetClientCredential(ctx, spec)
+}
+
+// ssKeyLens 返回这台服务器上各 Shadowsocks 入站要求的 SS2022 密钥字节数（非 SS2022 为 0）。
+func (s *UserService) ssKeyLens(ctx context.Context, serverID int64) (map[string]int, error) {
+	rows, err := s.q.ListServerShadowsocksInbounds(ctx, serverID)
+	if err != nil {
+		return nil, fmt.Errorf("list shadowsocks inbounds of server %d: %w", serverID, err)
+	}
+	out := make(map[string]int, len(rows))
+	for _, r := range rows {
+		out[r.RemoteRef] = ss2022KeyLen(r.Method)
+	}
+	return out, nil
+}
+
+// actualSSKeyLen 是面板上 client 现有挂载要的密钥字节数；混用时返回 -1，迫使对账重写凭据。
+func actualSSKeyLen(cur panel.Client, refLen map[string]int) int {
+	n, err := ss2022KeyLenOf(cur.InboundRefs, refLen)
+	if err != nil {
+		return -1
+	}
+	return n
 }
 
 // applyMounts 把 client 挂载的入站补齐到期望，返回是否有变化。
@@ -260,7 +330,7 @@ func applyMounts(ctx context.Context, p panel.Provider, d desiredClient, cur pan
 }
 
 // loadDesired 汇总这台面板上每个相关用户的期望：有授权的、已有下发记录的（可能需要删除）。
-func (s *UserService) loadDesired(ctx context.Context, serverID int64) ([]desiredClient, error) {
+func (s *UserService) loadDesired(ctx context.Context, serverID int64, refLen map[string]int) ([]desiredClient, error) {
 	rows, err := s.q.ListDesiredClients(ctx, serverID)
 	if err != nil {
 		return nil, fmt.Errorf("list desired clients of server %d: %w", serverID, err)
@@ -299,6 +369,7 @@ func (s *UserService) loadDesired(ctx context.Context, serverID int64) ([]desire
 			syncedVersion: max(synced[u.ID].CredVersion, initialCredVersion),
 		}
 		slices.Sort(d.refs)
+		d.ssKeyLen, d.ssErr = ss2022KeyLenOf(d.refs, refLen)
 		if d.present {
 			if d.cred, err = s.openCredential(u.ID, u.ClientCredEnc); err != nil {
 				return nil, err

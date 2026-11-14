@@ -211,3 +211,13 @@ SELECT DISTINCT server_id FROM (
 -- name: AddUserTraffic :exec
 INSERT INTO user_traffic_hourly (user_id, hour, up, down) VALUES ($1, $2, $3, $4)
 ON CONFLICT (user_id, hour) DO UPDATE SET up = user_traffic_hourly.up + EXCLUDED.up, down = user_traffic_hourly.down + EXCLUDED.down;
+
+-- name: ListServerShadowsocksInbounds :many
+-- 一台服务器上的 Shadowsocks 入站与加密方式，对账据此决定面板 password 写不写 SS2022 密钥（docs/03 §5.4 SS2022 密钥）
+SELECT remote_ref, COALESCE(config->'settings'->>'method', '')::text AS method
+FROM inbound
+WHERE server_id = $1 AND protocol = 'shadowsocks' AND NOT is_missing;
+
+-- name: ListUserCredentials :many
+-- 未删除用户的连接凭据，启动时给老用户补 SS2022 密钥用（Ruling-60）
+SELECT id, client_cred_enc FROM end_user WHERE deleted_at IS NULL ORDER BY id;

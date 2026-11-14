@@ -137,7 +137,8 @@ type EndpointMove struct {
 }
 
 // ClientSpec 是平台期望的一个面板 client（docs/03 §5.2 下发）。凭据各协议共用：UUID 给 vless / vmess，
-// Auth 给 hysteria，Password 给 trojan、shadowsocks、tuic 等用 password 的协议（SS2022 由面板派生合法密钥）。面板上不设额度与到期。
+// Auth 给 hysteria，Password 给 trojan、shadowsocks、tuic 等用 password 的协议；挂了 SS2022 入站时业务层把它设成合法密钥
+// （标准 Base64 的 16 或 32 字节，Ruling-60），面板原样使用。面板上不设额度与到期。
 type ClientSpec struct {
 	Email string
 	UUID  string

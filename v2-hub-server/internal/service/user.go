@@ -465,11 +465,13 @@ type UserFilter struct {
 }
 
 // clientCredential 是用户在各面板 client 上共用的凭据，加密存储（关联数据 end_user:<id>:client）。
-// Password 是用户自设的连接密码（Ruling-58），空 = 面板的 password 字段沿用 Auth。
+// Password 是用户自设的连接密码（Ruling-58），空 = 面板的 password 字段沿用 Auth；
+// SSKey 是 SS2022 密钥（Ruling-60），挂了 SS2022 入站的服务器上 password 写它。
 type clientCredential struct {
 	UUID     string `json:"uuid"`
 	Auth     string `json:"auth"`
 	Password string `json:"password,omitempty"`
+	SSKey    string `json:"ssKey,omitempty"`
 }
 
 func credentialAAD(userID int64) []byte {
@@ -501,7 +503,11 @@ func newClientCredential() (clientCredential, error) {
 		return clientCredential{}, err
 	}
 	id := fmt.Sprintf("%x-%x-%x-%x-%x", u[0:4], u[4:6], u[6:8], u[8:10], u[10:16])
-	cred := clientCredential{UUID: id}
+	ssKey, err := newSS2022Key()
+	if err != nil {
+		return clientCredential{}, err
+	}
+	cred := clientCredential{UUID: id, SSKey: ssKey}
 	cred.Auth = tok
 	return cred, nil
 }

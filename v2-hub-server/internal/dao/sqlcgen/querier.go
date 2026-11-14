@@ -354,6 +354,8 @@ type Querier interface {
 	ListServerRouteNodeRoles(ctx context.Context, userID int64) ([]ListServerRouteNodeRolesRow, error)
 	// 有服务端规则的起飞节点在这台服务器上的用户
 	ListServerRouteUsersOnServer(ctx context.Context, serverID int64) ([]int64, error)
+	// 一台服务器上的 Shadowsocks 入站与加密方式，对账据此决定面板 password 写不写 SS2022 密钥（docs/03 §5.4 SS2022 密钥）
+	ListServerShadowsocksInbounds(ctx context.Context, serverID int64) ([]ListServerShadowsocksInboundsRow, error)
 	// 服务器（docs/03 §2、§3 T1–T4、§5.1）---------------------------------------
 	ListServers(ctx context.Context) ([]ListServersRow, error)
 	// 系统设置、发件箱与邮箱验证码（docs/03 §5.6、§5.7）。
@@ -373,6 +375,8 @@ type Querier interface {
 	// ---- 教程 ----
 	// only_published 为真时只取已发布的（用户端）
 	ListTutorials(ctx context.Context, arg ListTutorialsParams) ([]ListTutorialsRow, error)
+	// 未删除用户的连接凭据，启动时给老用户补 SS2022 密钥用（Ruling-60）
+	ListUserCredentials(ctx context.Context) ([]ListUserCredentialsRow, error)
 	ListUserLoginLogs(ctx context.Context, arg ListUserLoginLogsParams) ([]ListUserLoginLogsRow, error)
 	// 客户后台节点列表：按节点组分段，状态取平台缓存（docs/03 §5.5）
 	ListUserNodeGroups(ctx context.Context, id int64) ([]ListUserNodeGroupsRow, error)
