@@ -265,6 +265,7 @@ func NewRouter(deps Deps) http.Handler {
 	mux.HandleFunc("GET /api/user/nodes/{id}/link", h.requireUser(false, h.getUserNodeLink))
 	mux.HandleFunc("GET /api/user/subscription", h.requireUser(false, h.getUserSubscription))
 	mux.HandleFunc("POST /api/user/subscription/reset", h.requireUser(false, h.resetOwnSubscription))
+	mux.HandleFunc("PUT /api/user/subscription/password", h.requireUser(false, h.setConnectionPassword))
 	mux.HandleFunc("GET /api/user/subscribe-logs", h.requireUser(false, h.listOwnSubscribeLogs))
 
 	// 公告、教程、共享账号、工单、签到（docs/03 §5.9–§5.11）
@@ -309,7 +310,8 @@ func NewRouter(deps Deps) http.Handler {
 	mux.HandleFunc("POST /api/user/invite/reset", h.requireUser(false, h.resetInviteCode))
 
 	// 订阅端点：凭 token 访问，供代理客户端直接拉取（docs/03 §5.4）
-	mux.HandleFunc("GET /sub/{token}", h.getSubscription)
+	// 订阅地址的前缀可由管理员改（Ruling-59），所以这里匹配任意前缀，由业务层只认当前与过渡中的前缀
+	mux.HandleFunc("GET /{subPath}/{token}", h.getSubscription)
 	return withSecurityHeaders(mux)
 }
 

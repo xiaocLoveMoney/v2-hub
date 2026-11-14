@@ -51,7 +51,7 @@ func (f *subFixture) token(t *testing.T) string {
 
 func (f *subFixture) render(t *testing.T, token, format, ua string) *SubscriptionResult {
 	t.Helper()
-	res, err := f.users.RenderSubscription(context.Background(), SubscriptionRequest{Token: token, Format: format, UserAgent: ua})
+	res, err := f.users.RenderSubscription(context.Background(), SubscriptionRequest{Path: LegacySubPath, Token: token, Format: format, UserAgent: ua})
 	if err != nil {
 		t.Fatalf("RenderSubscription(%s, %q): %v", format, ua, err)
 	}
@@ -139,10 +139,10 @@ func TestSubscriptionRenderFormats(t *testing.T) {
 		t.Fatalf("xray configs = %+v, %v", xr, err)
 	}
 
-	if _, err := f.users.RenderSubscription(ctx, SubscriptionRequest{Token: token, Format: "surge"}); !errors.Is(err, ErrInvalidArgument) {
+	if _, err := f.users.RenderSubscription(ctx, SubscriptionRequest{Path: LegacySubPath, Token: token, Format: "surge"}); !errors.Is(err, ErrInvalidArgument) {
 		t.Fatalf("bad format: err = %v, want invalid_argument", err)
 	}
-	if _, err := f.users.RenderSubscription(ctx, SubscriptionRequest{Token: "no-such-token-000000000000"}); !errors.Is(err, ErrNotFound) {
+	if _, err := f.users.RenderSubscription(ctx, SubscriptionRequest{Path: LegacySubPath, Token: "no-such-token-000000000000"}); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("unknown token: err = %v, want not_found", err)
 	}
 
@@ -177,7 +177,7 @@ func TestSubscriptionResetRotatesCredential(t *testing.T) {
 	if newToken == oldToken {
 		t.Fatal("reset must issue a new token")
 	}
-	if _, err := f.users.RenderSubscription(ctx, SubscriptionRequest{Token: oldToken}); !errors.Is(err, ErrNotFound) {
+	if _, err := f.users.RenderSubscription(ctx, SubscriptionRequest{Path: LegacySubPath, Token: oldToken}); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("old token: err = %v, want not_found", err)
 	}
 	if ps, _ := f.users.ListUserProvisions(ctx, f.user.ID); len(ps) != 1 || ps[0].Status != ProvisionPending {
@@ -206,7 +206,7 @@ func TestSubscriptionResetRotatesCredential(t *testing.T) {
 	if err := f.users.ResetUserSubscription(ctx, f.actor, f.user.ID, nil); err != nil {
 		t.Fatalf("ResetUserSubscription: %v", err)
 	}
-	if _, err := f.users.RenderSubscription(ctx, SubscriptionRequest{Token: newToken}); !errors.Is(err, ErrNotFound) {
+	if _, err := f.users.RenderSubscription(ctx, SubscriptionRequest{Path: LegacySubPath, Token: newToken}); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("token after admin reset: err = %v, want not_found", err)
 	}
 	if err := f.users.ResetUserSubscription(ctx, f.actor, f.user.ID+999, nil); !errors.Is(err, ErrNotFound) {
@@ -280,26 +280,26 @@ func TestSubscriptionRateLimits(t *testing.T) {
 	ctx := context.Background()
 	token := f.token(t)
 	for i := range subTokenRatePerMinute {
-		if _, err := f.users.RenderSubscription(ctx, SubscriptionRequest{Token: token}); err != nil {
+		if _, err := f.users.RenderSubscription(ctx, SubscriptionRequest{Path: LegacySubPath, Token: token}); err != nil {
 			t.Fatalf("request %d: %v", i, err)
 		}
 	}
-	if _, err := f.users.RenderSubscription(ctx, SubscriptionRequest{Token: token}); !errors.Is(err, ErrRateLimited) {
+	if _, err := f.users.RenderSubscription(ctx, SubscriptionRequest{Path: LegacySubPath, Token: token}); !errors.Is(err, ErrRateLimited) {
 		t.Fatalf("over token rate: err = %v, want rate_limited", err)
 	}
 	f.clock.advance(subRateWindow + time.Second)
-	if _, err := f.users.RenderSubscription(ctx, SubscriptionRequest{Token: token}); err != nil {
+	if _, err := f.users.RenderSubscription(ctx, SubscriptionRequest{Path: LegacySubPath, Token: token}); err != nil {
 		t.Fatalf("after window: %v", err)
 	}
 
 	// 同一 IP 连续猜 token 被锁后，正确的 token 也拒绝
 	ip := netip.MustParseAddr("203.0.113.9")
 	for i := range subMissMaxFailures {
-		if _, err := f.users.RenderSubscription(ctx, SubscriptionRequest{Token: "guess-000000000000000000", ClientIP: &ip}); !errors.Is(err, ErrNotFound) {
+		if _, err := f.users.RenderSubscription(ctx, SubscriptionRequest{Path: LegacySubPath, Token: "guess-000000000000000000", ClientIP: &ip}); !errors.Is(err, ErrNotFound) {
 			t.Fatalf("guess %d: err = %v, want not_found", i, err)
 		}
 	}
-	if _, err := f.users.RenderSubscription(ctx, SubscriptionRequest{Token: token, ClientIP: &ip}); !errors.Is(err, ErrRateLimited) {
+	if _, err := f.users.RenderSubscription(ctx, SubscriptionRequest{Path: LegacySubPath, Token: token, ClientIP: &ip}); !errors.Is(err, ErrRateLimited) {
 		t.Fatalf("after guessing: err = %v, want rate_limited", err)
 	}
 }
@@ -349,5 +349,75 @@ func TestPortalDashboardNodesAndTraffic(t *testing.T) {
 	}
 	if _, err := f.users.GetNodeLink(ctx, other, f.nodes[0].ID); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("bob reading alice's node link: err = %v, want not_found", err)
+	}
+}
+
+// 前缀不对与 token 不存在同样 404（docs/03 §5.4 订阅路径，Ruling-59）。
+func TestSubscriptionRejectsUnknownPath(t *testing.T) {
+	f := newSubFixture(t)
+	token := f.token(t)
+	if _, err := f.users.RenderSubscription(context.Background(), SubscriptionRequest{Path: "zzzzzzzzzz9", Token: token}); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("unknown path: err = %v, want not_found", err)
+	}
+	f.render(t, token, render.FormatBase64, "")
+}
+
+// 自设连接密码（docs/03 §5.4 连接密码，Ruling-58）：只换 trojan 的密码，vless 的 UUID 与订阅地址不变；重置订阅清掉；有频控。
+func TestConnectionPassword(t *testing.T) {
+	f := newSubFixture(t)
+	ctx := context.Background()
+	token := f.token(t)
+	links := func() map[string]string {
+		out := make(map[string]string, len(f.nodes))
+		for _, n := range f.nodes {
+			l, err := f.users.GetNodeLink(ctx, f.principal, n.ID)
+			if err != nil {
+				t.Fatalf("GetNodeLink: %v", err)
+			}
+			out[strings.SplitN(l, "://", 2)[0]] = l
+		}
+		return out
+	}
+	before := links()
+	for _, bad := range []string{"short", "has space 123", strings.Repeat("a", 65), "中文密码中文密码"} {
+		if _, err := f.users.SetConnectionPassword(ctx, f.principal, bad, subRequestBase, nil); !errors.Is(err, ErrInvalidArgument) {
+			t.Fatalf("password %q: err = %v, want invalid_argument", bad, err)
+		}
+	}
+	const custom = "my-Pass_word.1~"
+	info, err := f.users.SetConnectionPassword(ctx, f.principal, custom, subRequestBase, nil)
+	if err != nil || !info.HasCustomPassword || !strings.HasSuffix(info.URL, "/"+token) {
+		t.Fatalf("SetConnectionPassword = %+v, %v", info, err)
+	}
+	if got, _ := f.users.GetSubscription(ctx, f.principal, subRequestBase); !got.HasCustomPassword {
+		t.Fatal("subscription info should report a custom password")
+	}
+	if ps, _ := f.users.ListUserProvisions(ctx, f.user.ID); len(ps) != 1 || ps[0].Status != ProvisionPending {
+		t.Fatalf("provisions after password change = %+v, want pending", ps)
+	}
+	f.reconcile(t)
+	after := links()
+	if !strings.Contains(after["trojan"], custom+"@") || after["trojan"] == before["trojan"] {
+		t.Fatalf("trojan link should carry the custom password: %s", after["trojan"])
+	}
+	if after["vless"] != before["vless"] {
+		t.Fatalf("vless link should keep its UUID: %s -> %s", before["vless"], after["vless"])
+	}
+
+	if _, err := f.users.ResetOwnSubscription(ctx, f.principal, subRequestBase, nil); err != nil {
+		t.Fatalf("ResetOwnSubscription: %v", err)
+	}
+	if got, _ := f.users.GetSubscription(ctx, f.principal, subRequestBase); got.HasCustomPassword {
+		t.Fatal("reset should clear the custom password")
+	}
+
+	// 已经改过 1 次，再改 4 次到上限，第 6 次 429
+	for i := range connPasswordPerHour - 1 {
+		if _, err := f.users.SetConnectionPassword(ctx, f.principal, "", subRequestBase, nil); err != nil {
+			t.Fatalf("change %d: %v", i, err)
+		}
+	}
+	if _, err := f.users.SetConnectionPassword(ctx, f.principal, custom, subRequestBase, nil); !errors.Is(err, ErrRateLimited) {
+		t.Fatalf("over the hourly limit: err = %v, want rate_limited", err)
 	}
 }

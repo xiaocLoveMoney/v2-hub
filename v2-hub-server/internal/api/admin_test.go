@@ -39,7 +39,7 @@ type apiResult struct {
 func newAPIServer(t *testing.T) (*httptest.Server, *service.RBACService) {
 	t.Helper()
 	pool := daotest.NewPool(t)
-	sealer, err := crypto.NewSealer("KioqKioqKioqKioqKioqKioqKioqKioqKioqKioqKio=")
+	sealer, err := crypto.NewSealer(testSealerKey)
 	if err != nil {
 		t.Fatalf("NewSealer: %v", err)
 	}

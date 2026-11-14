@@ -86,3 +86,16 @@ JOIN server s ON s.id = i.server_id AND NOT s.is_disabled
 LEFT JOIN endpoint e ON e.id = n.endpoint_id
 WHERE u.id = $1 AND u.deleted_at IS NULL AND (e.id IS NULL OR (NOT e.is_missing AND NOT e.is_disabled))
 ORDER BY g.name, g.id, n.sort_order, n.display_name, n.id;
+
+-- name: GetUserCredentialForUpdate :one
+-- 读连接凭据并锁行，改连接密码时用（docs/03 §5.4 连接密码）
+SELECT client_cred_enc FROM end_user WHERE id = $1 AND deleted_at IS NULL FOR UPDATE;
+
+-- name: GetUserCredential :one
+-- 读连接凭据（只读），订阅信息里判断是否自设了连接密码
+SELECT client_cred_enc FROM end_user WHERE id = $1 AND deleted_at IS NULL;
+
+-- name: UpdateUserCredential :execrows
+-- 换连接凭据并把凭据版本 +1，交给对账写到各面板（docs/03 §5.4 连接密码）
+UPDATE end_user SET client_cred_enc = $2, cred_version = cred_version + 1, updated_at = now()
+WHERE id = $1 AND deleted_at IS NULL;

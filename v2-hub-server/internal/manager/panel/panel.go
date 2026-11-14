@@ -137,14 +137,24 @@ type EndpointMove struct {
 }
 
 // ClientSpec 是平台期望的一个面板 client（docs/03 §5.2 下发）。凭据各协议共用：UUID 给 vless / vmess，
-// Auth 给 trojan、hysteria 与 shadowsocks（SS2022 由面板派生合法密钥）。面板上不设额度与到期。
+// Auth 给 hysteria，Password 给 trojan、shadowsocks、tuic 等用 password 的协议（SS2022 由面板派生合法密钥）。面板上不设额度与到期。
 type ClientSpec struct {
-	Email       string
-	UUID        string
-	Auth        string
+	Email string
+	UUID  string
+	Auth  string
+	// Password 是用户自设的连接密码（Ruling-58）；空 = 沿用 Auth。用 PasswordOrAuth 取实际值。
+	Password    string
 	LimitIP     int
 	Enabled     bool
 	InboundRefs []string
+}
+
+// PasswordOrAuth 返回面板 password 字段该用的值：自设的连接密码，没设时沿用 Auth。
+func (c ClientSpec) PasswordOrAuth() string {
+	if c.Password != "" {
+		return c.Password
+	}
+	return c.Auth
 }
 
 // Client 是面板上一个 client 的现状；Up / Down 是面板累计的流量计数（字节）。

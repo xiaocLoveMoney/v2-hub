@@ -56,7 +56,8 @@ func TestSettingsDefaultsComeFromCodeAndConfigFile(t *testing.T) {
 	if cur.Register.Mode != RegisterInvite || !cur.Register.EmailVerify || cur.Checkin.Enabled || !cur.Ticket.Enabled || cur.Shared.Enabled {
 		t.Fatalf("defaults = %+v", cur)
 	}
-	want := SubscriptionSettings{BaseURL: "https://user.example.com", Title: "from-file", UpdateIntervalHours: 6, InfoNodes: true, LogRetentionDays: 2}
+	want := SubscriptionSettings{BaseURL: "https://user.example.com", Title: "from-file", UpdateIntervalHours: 6, InfoNodes: true, LogRetentionDays: 2,
+		Path: LegacySubPath, PathGraceDays: defaultSubPathGraceDays}
 	if cur.Subscription != want {
 		t.Fatalf("subscription defaults = %+v, want %+v", cur.Subscription, want)
 	}
@@ -156,7 +157,7 @@ func TestSubscriptionFollowsSettings(t *testing.T) {
 	if len(info.URL) <= len(prefix) || info.URL[:len(prefix)] != prefix || info.UpdateIntervalHours != 3 {
 		t.Fatalf("subscription info = %+v, want base from settings", info)
 	}
-	res, err := uf.users.RenderSubscription(context.Background(), SubscriptionRequest{Token: info.URL[len(prefix):], Format: "base64"})
+	res, err := uf.users.RenderSubscription(context.Background(), SubscriptionRequest{Path: LegacySubPath, Token: info.URL[len(prefix):], Format: "base64"})
 	if err != nil {
 		t.Fatalf("RenderSubscription: %v", err)
 	}
@@ -194,5 +195,60 @@ func TestSettingsMenuOrder(t *testing.T) {
 	reset, err := f.update(t, map[string]any{"menu.admin": []string{}})
 	if err != nil || reset.Menu.Admin == nil || len(reset.Menu.Admin) != 0 {
 		t.Fatalf("reset menu = %+v, %v", reset.Menu, err)
+	}
+}
+
+// 订阅路径前缀（docs/03 §5.4 订阅路径，Ruling-59）：首次启动生成随机前缀、sub 进过渡期；改前缀按过渡天数保留旧前缀；旧前缀只读。
+func TestSubscriptionPathSettings(t *testing.T) {
+	f := newSettingsFixture(t)
+	ctx := context.Background()
+	if err := f.settings.EnsureSubscriptionPath(ctx); err != nil {
+		t.Fatalf("EnsureSubscriptionPath: %v", err)
+	}
+	cur, err := f.settings.Current(ctx)
+	if err != nil {
+		t.Fatalf("Current: %v", err)
+	}
+	sub := cur.Subscription
+	now := f.clock.now()
+	if !subPathPattern.MatchString(sub.Path) || sub.OldPath != LegacySubPath || !sub.OldPathUntil.Equal(now.AddDate(0, 0, defaultSubPathGraceDays)) {
+		t.Fatalf("ensured path = %+v", sub)
+	}
+	if !sub.AcceptsSubPath(sub.Path, now) || !sub.AcceptsSubPath(LegacySubPath, now) || sub.AcceptsSubPath(LegacySubPath, sub.OldPathUntil) || sub.AcceptsSubPath("other", now) {
+		t.Fatalf("AcceptsSubPath wrong for %+v", sub)
+	}
+	// 已有前缀时不再生成
+	if err := f.settings.EnsureSubscriptionPath(ctx); err != nil {
+		t.Fatalf("EnsureSubscriptionPath again: %v", err)
+	}
+	if again, _ := f.settings.Current(ctx); again.Subscription.Path != sub.Path {
+		t.Fatalf("second ensure changed the path: %s -> %s", sub.Path, again.Subscription.Path)
+	}
+
+	const graceDays = 5
+	next, err := f.update(t, map[string]any{"subscription.path": "newpath0001", "subscription.pathGraceDays": graceDays})
+	if err != nil {
+		t.Fatalf("change path: %v", err)
+	}
+	if next.Subscription.OldPath != sub.Path || !next.Subscription.OldPathUntil.Equal(now.AddDate(0, 0, graceDays)) {
+		t.Fatalf("after change = %+v, want old path %s for %d days", next.Subscription, sub.Path, graceDays)
+	}
+	reloaded, err := f.settings.load(ctx, f.settings.q)
+	if err != nil || reloaded.Subscription.OldPath != sub.Path {
+		t.Fatalf("old path not persisted: %+v, %v", reloaded.Subscription, err)
+	}
+	next, err = f.update(t, map[string]any{"subscription.path": "newpath0002", "subscription.pathGraceDays": 0})
+	if err != nil || next.Subscription.OldPath != "" || !next.Subscription.OldPathUntil.IsZero() {
+		t.Fatalf("grace 0 should drop the old path: %+v, %v", next.Subscription, err)
+	}
+	for name, patch := range map[string]map[string]any{
+		"read-only old path": {"subscription.oldPath": "abc"},
+		"bad path":           {"subscription.path": "Bad_Path"},
+		"too short":          {"subscription.path": "abc"},
+		"grace too long":     {"subscription.pathGraceDays": maxSubPathGraceDays + 1},
+	} {
+		if _, err := f.update(t, patch); !errors.Is(err, ErrInvalidArgument) {
+			t.Fatalf("%s: err = %v, want invalid_argument", name, err)
+		}
 	}
 }

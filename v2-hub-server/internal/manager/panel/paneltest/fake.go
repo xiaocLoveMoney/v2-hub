@@ -21,7 +21,7 @@ type Fake struct {
 	inbounds  map[string]panel.Inbound
 	endpoints []panel.Endpoint
 	clients   map[string]*panel.Client
-	creds     map[string][2]string // email → {UUID, Auth}
+	creds     map[string][2]string // email → {UUID, password 字段（自设的连接密码或 Auth）}
 	online    map[string]bool
 	nextID    int
 	nextGroup int
@@ -425,7 +425,7 @@ func (f *Fake) AddClient(_ context.Context, spec panel.ClientSpec) error {
 		return err
 	}
 	f.clients[spec.Email] = &panel.Client{Email: spec.Email, Enabled: spec.Enabled, LimitIP: spec.LimitIP, InboundRefs: append([]string(nil), spec.InboundRefs...)}
-	f.creds[spec.Email] = [2]string{spec.UUID, spec.Auth}
+	f.creds[spec.Email] = [2]string{spec.UUID, spec.PasswordOrAuth()}
 	return nil
 }
 
@@ -539,7 +539,7 @@ func (f *Fake) SetClientCredential(_ context.Context, spec panel.ClientSpec) err
 		return err
 	}
 	c.Enabled, c.LimitIP = spec.Enabled, spec.LimitIP
-	f.creds[spec.Email] = [2]string{spec.UUID, spec.Auth}
+	f.creds[spec.Email] = [2]string{spec.UUID, spec.PasswordOrAuth()}
 	return nil
 }
 
