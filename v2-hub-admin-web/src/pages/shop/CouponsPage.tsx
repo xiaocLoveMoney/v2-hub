@@ -13,6 +13,7 @@ import { useRowAction, useSubmit } from '../../hooks/use-submit'
 import { PERMISSIONS } from '../../menu'
 import { MAX_MONEY_AMOUNT, MONEY_PRECISION, amountToCents, centsToAmount, formatMoney } from '../../money'
 import { formatTime } from '../system/format'
+import { randomCouponCode } from './coupon-code'
 
 const COUPON_CODE_PATTERN = /^[A-Za-z0-9]{4,32}$/
 const MAX_PERCENT = 100
@@ -197,8 +198,13 @@ function CouponFormBody({ coupon, plans, onSaved }: Pick<CouponModalProps, 'coup
     <>
       <ErrorAlert error={error} />
       <Form<CouponForm> form={form} layout="vertical" initialValues={formOf(coupon)} onFinish={(v) => void submit(v)}>
-        <Form.Item name="code" label="优惠码" extra="4–32 位字母或数字，不区分大小写" rules={[{ required: true, pattern: COUPON_CODE_PATTERN, message: '4–32 位字母或数字' }]}>
-          <Input autoComplete="off" className="mono" />
+        <Form.Item label="优惠码" required extra="4–32 位字母或数字，不区分大小写">
+          <Space.Compact className="full-width">
+            <Form.Item name="code" noStyle rules={[{ required: true, pattern: COUPON_CODE_PATTERN, message: '4–32 位字母或数字' }]}>
+              <Input autoComplete="off" aria-label="优惠码" className="mono" />
+            </Form.Item>
+            {coupon === null && <Button onClick={() => form.setFieldValue('code', randomCouponCode())}>随机生成</Button>}
+          </Space.Compact>
         </Form.Item>
         <Form.Item name="kind" label="优惠方式">
           <Radio.Group optionType="button" options={KIND_OPTIONS} />

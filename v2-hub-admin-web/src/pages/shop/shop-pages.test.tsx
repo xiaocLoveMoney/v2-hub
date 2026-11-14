@@ -4,6 +4,7 @@ import { PERMISSIONS } from '../../menu'
 import { amountToCents, centsToAmount, formatMoney } from '../../money'
 import { TEST_CSRF, mockServer, ok, renderWith } from '../../test/harness'
 import { UsersPage } from '../users/UsersPage'
+import { randomCouponCode } from './coupon-code'
 import { CouponsPage } from './CouponsPage'
 import { FinanceStatsPage } from './FinanceStatsPage'
 import { LedgerPage, OrdersPage } from './RecordPages'
@@ -77,6 +78,21 @@ describe('CouponsPage', () => {
       code: 'SPRING20', kind: 'percent', value: 20, allPlans: true, planIds: [], forTrafficPack: false, minAmount: 0, maxUses: 0, maxUsesPerUser: 1,
       startsAt: null, endsAt: null, isDisabled: false,
     })
+  })
+
+  it('新建时可随机生成 10 位码，字符集不含易混字符；编辑时不出现按钮', async () => {
+    mockServer({ 'GET /api/admin/coupons': () => ok({ items: [used], total: 1 }) })
+    renderWith(SHOP_ALL, <CouponsPage />)
+    await screen.findByText('WELCOME10')
+    fireEvent.click(screen.getByRole('button', { name: /新建优惠码/ }))
+    const dialog = await screen.findByRole('dialog')
+    fireEvent.click(within(dialog).getByRole('button', { name: /随机生成/ }))
+    const value = (within(dialog).getByLabelText('优惠码') as HTMLInputElement).value
+    expect(value).toMatch(/^[A-HJKMNP-Z2-9]{10}$/)
+  })
+
+  it('randomCouponCode 每次不同', () => {
+    expect(randomCouponCode()).not.toBe(randomCouponCode())
   })
 })
 
