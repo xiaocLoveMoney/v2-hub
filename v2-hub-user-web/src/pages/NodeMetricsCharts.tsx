@@ -107,7 +107,11 @@ export function NodeMetricsCharts({ nodeId }: { nodeId: number }) {
         ))}
       </div>
       {metrics.error !== null && <Alert tone="plain">{metrics.error.message}</Alert>}
-      {metrics.error === null && points === null && <Loading isInline />}
+      {metrics.error === null && points === null && (
+        <div className="hub-metric-loading">
+          <Loading isInline />
+        </div>
+      )}
       {points !== null && points.length === 0 && <div className="hub-empty">{t('nodes.noMetrics')}</div>}
       {points !== null && points.length > 0 && (
         <>
