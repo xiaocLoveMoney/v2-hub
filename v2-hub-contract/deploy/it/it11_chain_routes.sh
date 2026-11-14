@@ -68,7 +68,7 @@ template() {
   panel_api "$url" "$token" POST /xray/ | jq -r '.obj' | jq '.xraySetting | if type == "string" then fromjson else . end'
 }
 # hub_tags <a|b>：该面板模板里平台出站的 tag，逗号连接（没有为空串）
-hub_tags() { template "$1" | jq -r '[.outbounds[] | select(.tag | startswith("hub-")) | .tag] | join(",")'; }
+hub_tags() { template "$1" | jq -r '[.outbounds[] | select(.tag | startswith("hub-r")) | .tag] | join(",")'; }
 # wait_tags <a 的期望> <b 的期望>：轮询到两台面板的平台出站都符合
 wait_tags() {
   for _ in $(seq 1 "$APPLY_WAIT_SECONDS"); do

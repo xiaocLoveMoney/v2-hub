@@ -58,7 +58,8 @@ TOKEN_B="$(xui_token xui-b "$XUI_B_URL")"; [ -n "$TOKEN_B" ] || fail "xui-b 签�
 panel_api() { curl -s -X "$3" "$1/panel/api$4" -H "Authorization: Bearer $2" -H 'Accept: application/json'; }
 # entry_template：入口面板当前的 Xray 模板
 entry_template() { panel_api "$XUI_A_URL" "$TOKEN_A" POST /xray/ | jq -r '.obj' | jq '.xraySetting | if type == "string" then fromjson else . end'; }
-hub_entries() { entry_template | jq '[.outbounds[] | select(.tag | startswith("hub-"))] | length'; }
+# 只数链式条目（hub-r{id}）；平台拦截规则 hub-block 默认也在模板里（Ruling-55），由 IT-12 验
+hub_entries() { entry_template | jq '[.outbounds[] | select(.tag | startswith("hub-r"))] | length'; }
 
 # ---- 2. hub-server（下发检查 2 秒一次、同一服务器两次下发至少隔 5 秒）与超管 ----
 sed -e 's/^  applyInterval: .*/  applyInterval: 2s/' -e 's/^  minApplyInterval: .*/  minApplyInterval: 5s/' \
@@ -159,7 +160,7 @@ TAG="hub-r$RULE_ID"
 rule="$(printf '%s' "$tpl" | jq -c --arg t "$TAG" '.routing.rules[] | select(.ruleTag == $t)')"
 [ "$(printf '%s' "$rule" | jq -r '.user[0]')" = "$EMAIL_A" ] || fail "路由应按本人在入口面板的 email 匹配：$rule"
 [ "$(printf '%s' "$rule" | jq -r '.inboundTag | length')" = "1" ] || fail "路由应只匹配入口入站：$rule"
-[ "$(printf '%s' "$tpl" | jq -r '[.routing.rules[] | (.ruleTag // .outboundTag)] | .[0:2] | join(",")')" = "api,$TAG" ] || fail "平台路由应紧跟 api 规则"
+[ "$(printf '%s' "$tpl" | jq -r '[.routing.rules[] | (.ruleTag // .outboundTag) | select(. != "hub-block")] | .[0:2] | join(",")')" = "api,$TAG" ] || fail "平台路由应紧跟 api 规则"
 [ "$(panel_api "$XUI_A_URL" "$TOKEN_A" GET /server/status | jq -r .obj.xray.state)" = "running" ] || fail "入口 Xray 应在运行"
 [ "$(hub GET "/api/admin/servers/$SERVER_A/chain-apply" | jq -r '.data.status + ":" + (.data.appliedRuleCount | tostring)')" = "applied:1" ] || fail "管理端下发状态不对：$(cat "$WORK/body")"
 [ "$(hub GET "/api/admin/chain-routes?kind=server&serverId=$SERVER_A" | jq -r '(.data.total | tostring) + ":" + .data.items[0].entries[0].state')" = "1:applied" ] || fail "全站规则列表应有 1 条已生效的规则：$(cat "$WORK/body")"
