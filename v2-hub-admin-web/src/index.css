@@ -163,6 +163,15 @@ body {
 .admin-sider {
   box-shadow: var(--hub-card-shadow);
   z-index: 2;
+  /* 侧栏固定在视口高度内、自己滚动：菜单再长也不把右侧主区撑高 */
+  position: sticky !important; /* antd 的运行时样式同权重且注入在后（position: relative），只能这样覆盖 */
+  top: 0;
+  height: 100vh;
+}
+
+.admin-sider .ant-layout-sider-children {
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .admin-brand {
