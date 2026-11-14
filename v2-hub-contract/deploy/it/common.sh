@@ -11,7 +11,8 @@ start_module() {
   local dir="$1" port="$2"; shift 2
   # set -m 让后台任务自成进程组，stop_all 才能连同 go run / vite 的子进程一起结束
   set -m
-  ( cd "$REPO_ROOT/$dir" && env "$@" make run >"/tmp/it-$dir.log" 2>&1 ) &
+  # 联调默认关掉服务器位置扫描，不把本机出口 IP 发给外部 IP 库；需要的用例（IT-12）自己传模拟端地址覆盖
+  ( cd "$REPO_ROOT/$dir" && env HUB_GEOIP_LOOKUP_URL="" "$@" make run >"/tmp/it-$dir.log" 2>&1 ) &
   IT_PIDS+=($!)
   set +m
   wait_port "$port" 30 || { echo "start_module: $dir 在 $port 端口 30s 未就绪, 日志 /tmp/it-$dir.log"; return 1; }

@@ -7,6 +7,8 @@
 # → 延迟测试：公网出口三种方式都拿到结果（连得上连不上都算）；回环地址的出口 400；别人的出口 404；管理员测平台出口带错误原文字段；
 #   连续测试触发 429
 # → 取面板网页证书路径返回两个字段 → REALITY 目标扫描：公网目标拿到结论，网段与网址 400，回环地址只标记不探测
+# → 服务器位置（Ruling-65）：接入时按面板报的公网 IP 查模拟 IP 库得到位置，非法国家码 400，“扫描位置”只返回不保存，节点地区跟随服务器、
+#   节点编辑不再收地区；健康探测记下负载采样，用户能看本人节点的 24h / 7d 趋势
 # → 删除用户后链式条目清掉、拦截规则仍在 → 关掉设置 routing.blockRule 后拦截规则撤掉。
 # 黑盒，只用 curl / jq / docker。延迟测试由 xui-a 容器去连出口：出口用公网 IP 字面量，容器没有外网时结果是“不通”，用例照样通过。
 # 注意：会重建 xui-a 容器（不挂数据卷），不影响 PostgreSQL 与 MinIO。hub-server 用缩短了下发间隔的临时配置启动。
@@ -35,6 +37,9 @@ LOOP_LINK="http://127.0.0.1:8080#it12-loop"
 PAGE_LINK="https://one.one.one.one/index.html"
 PLATFORM_LINK="socks5://xui-a:1080#it12-platform"   # 平台出口不受地址限制（Ruling-48）
 CLOSED_LINK="http://127.0.0.1:9#it12-closed"        # 面板容器里没人监听的端口：原因大类必是 refused（Ruling-56）
+GEO_PORT=18093                                      # 模拟 IP 库：任何 IP 都答 JP，并记下被查的 IP
+GEO_COUNTRY=JP
+METRIC_WAIT_SECONDS=20
 REASONS='["none","refused","timeout","proxy_rejected","proxy_no_response","bad_status","unknown"]'
 WORK="$(mktemp -d /tmp/it12.XXXXXX)"
 trap 'rm -rf "$WORK"; stop_all' EXIT
@@ -77,13 +82,34 @@ wait_outbound() {
   fail "${APPLY_WAIT_SECONDS}s 内出站 $1 没有满足 $2：实际 $(hub_outbound "$1" | jq -c 'del(.settings)')，下发 $(hub GET "/api/admin/servers/$SERVER_A/chain-apply")"
 }
 
-# ---- 2. hub-server（下发检查 2 秒一次、同一服务器两次下发至少隔 5 秒、测试次数上限改小）与超管 ----
-sed -e 's/^  applyInterval: .*/  applyInterval: 2s/' -e 's/^  minApplyInterval: .*/  minApplyInterval: 5s/' \
+# ---- 2. 模拟 IP 库；hub-server（下发检查 2 秒一次、同一服务器两次下发至少隔 5 秒、测试次数上限改小、探测 2 秒一次）与超管 ----
+cat > "$WORK/geo_stub.py" <<'PY'
+import http.server, json, sys
+LOG, COUNTRY = sys.argv[2], sys.argv[3]
+class Handler(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        with open(LOG, "a") as f:
+            f.write(self.path.rsplit("/", 1)[-1] + "\n")
+        body = json.dumps({"country": COUNTRY}).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.end_headers()
+        self.wfile.write(body)
+    def log_message(self, *args):
+        pass
+http.server.HTTPServer(("127.0.0.1", int(sys.argv[1])), Handler).serve_forever()
+PY
+set -m
+python3 -I "$WORK/geo_stub.py" "$GEO_PORT" "$WORK/geo.log" "$GEO_COUNTRY" >/dev/null 2>&1 &
+IT_PIDS+=($!)
+set +m
+wait_port "$GEO_PORT" 10 || fail "模拟 IP 库没起来"
+sed -e 's/^  applyInterval: .*/  applyInterval: 2s/' -e 's/^  minApplyInterval: .*/  minApplyInterval: 5s/' -e 's/^  probeInterval: .*/  probeInterval: 2s/' \
   -e "s/^  userTestLimit: .*/  userTestLimit: $TEST_LIMIT/" "$REPO_ROOT/v2-hub-server/etc/hub-server.yaml" > "$WORK/hub-server.yaml"
 grep -q 'applyInterval: 2s' "$WORK/hub-server.yaml" || fail "临时配置没有改到下发间隔"
 grep -q "userTestLimit: $TEST_LIMIT" "$WORK/hub-server.yaml" || fail "临时配置没有改到测试次数上限"
 printf '%s\n' "$CRED" | (cd "$REPO_ROOT/v2-hub-server" && make -s admin-create USERNAME="$ROOT_USER") >/tmp/it-admin-create.log 2>&1 || fail "admin-create 失败"
-start_module v2-hub-server 8080 CONFIG="$WORK/hub-server.yaml"
+start_module v2-hub-server 8080 CONFIG="$WORK/hub-server.yaml" HUB_GEOIP_LOOKUP_URL="http://127.0.0.1:$GEO_PORT/geo/{ip}"
 HUB_JAR="$WORK/hub.jar"
 login_body_of() { jq -nc --arg u "$1" --arg p "$2" '{username:$u,password:$p}'; }
 CSRF="$(curl -s -b "$HUB_JAR" -c "$HUB_JAR" -X POST "$BASE/api/admin/auth/login" -H 'Content-Type: application/json' --data "$(login_body_of "$ROOT_USER" "$CRED")" \
@@ -270,6 +296,43 @@ res="$(hub POST "/api/admin/servers/$SERVER_A/reality-targets" '{"targets":["www
 hub POST "/api/admin/servers/$SERVER_A/reality-targets" "$(jq -nc '{targets: [range(21) | "t\(.).example.com"]}')" >/dev/null; expect_code 400 "一次超过 20 个候选"
 hub POST /api/admin/servers/999999/reality-scan '{"target":"www.cloudflare.com"}' >/dev/null; expect_code 404 "在不存在的服务器上扫描"
 portal POST "/api/admin/servers/$SERVER_A/reality-scan" '{"target":"www.cloudflare.com"}' >/dev/null; expect_code 401 "终端用户扫描目标"
+
+# ---- 11b. 服务器位置与负载趋势（Ruling-65）----
+# 面板报的公网 IP 取自容器的外网出口；容器没有外网时面板不报 IP，扫描只能 409，位置相关断言跳过
+srv="$(hub GET /api/admin/servers | jq -c --argjson s "$SERVER_A" '.data[] | select(.id == $s)')"
+server_body() { jq -nc --arg u "$XUI_A_URL" --arg r "$1" '{name:"it12-a",providerType:"xui",baseUrl:$u,apiToken:"",tlsMode:"verify",region:$r}'; }
+hub PUT "/api/admin/servers/$SERVER_A" "$(server_body ZZ)" >/dev/null; expect_code 400 "非法国家码"
+hub PUT "/api/admin/servers/$SERVER_A" "$(server_body 美国)" >/dev/null; expect_code 400 "国家名代替国家码"
+if [ "$(printf '%s' "$srv" | jq -r .region)" = "$GEO_COUNTRY" ]; then
+  queried="$(head -1 "$WORK/geo.log")"
+  case "$queried" in 10.*|127.*|172.1[6-9].*|172.2[0-9].*|172.3[01].*|192.168.*|"") fail "发给 IP 库的不是公网地址：$queried" ;; esac
+  hub PUT "/api/admin/servers/$SERVER_A" "$(server_body "")" >/dev/null; expect_code 200 "清空位置"
+  res="$(hub POST "/api/admin/servers/$SERVER_A/locate")"; expect_code 200 "扫描位置"
+  printf '%s' "$res" | jq -e --arg c "$GEO_COUNTRY" --arg ip "$queried" '.data.region == $c and .data.publicIp == $ip' >/dev/null || fail "扫描结果不对：$res"
+  [ "$(hub GET /api/admin/servers | jq -r --argjson s "$SERVER_A" '.data[] | select(.id == $s) | .region')" = "" ] || fail "扫描位置不应保存"
+  hub PUT "/api/admin/servers/$SERVER_A" "$(server_body "$GEO_COUNTRY")" >/dev/null; expect_code 200 "保存位置"
+  echo "  位置：面板公网 IP 查得 $GEO_COUNTRY"
+else
+  hub POST "/api/admin/servers/$SERVER_A/locate" >/dev/null; expect_code 409 "面板没报公网 IP 时扫描位置"
+  echo "  位置：面板没有报出公网 IP（容器无外网？），跳过位置断言"
+fi
+region="$(hub GET /api/admin/servers | jq -r --argjson s "$SERVER_A" '.data[] | select(.id == $s) | .region')"
+[ "$(hub GET "/api/admin/nodes?pageSize=100" | jq -r --argjson n "$NODE_A" '.data.items[] | select(.id == $n) | .region')" = "$region" ] || fail "节点地区应跟随服务器"
+[ "$(portal GET /api/user/nodes | jq -r --argjson n "$NODE_A" '.data[].nodes[] | select(.id == $n) | .region')" = "$region" ] || fail "用户端节点地区应跟随服务器"
+hub PUT "/api/admin/nodes/$NODE_A" '{"displayName":"it12-node","region":"HK","tags":[],"sortOrder":0,"isEnabled":true}' >/dev/null; expect_code 400 "节点编辑带地区"
+hub PUT "/api/admin/nodes/$NODE_A" '{"displayName":"it12-node","tags":[],"sortOrder":0,"isEnabled":true}' >/dev/null; expect_code 200 "节点编辑不带地区"
+for _ in $(seq 1 "$METRIC_WAIT_SECONDS"); do
+  res="$(portal GET "/api/user/nodes/$NODE_A/metrics")"
+  [ "$(printf '%s' "$res" | jq '.data.points | length')" -gt 0 ] && break
+  sleep 1
+done
+printf '%s' "$res" | jq -e '.data.range == "24h" and (.data.points | length) > 0 and (.data.points[0] | (.onlineClients | type) == "number" and (.load | type) == "number")' >/dev/null \
+  || fail "健康探测后应有负载采样：$res"
+res="$(portal GET "/api/user/nodes/$NODE_A/metrics?range=7d")"; expect_code 200 "7 天趋势"
+printf '%s' "$res" | jq -e '.data.range == "7d" and (.data.points | length) > 0' >/dev/null || fail "7 天趋势不对：$res"
+portal GET "/api/user/nodes/$NODE_A/metrics?range=1h" >/dev/null; expect_code 400 "非法趋势范围"
+portal GET /api/user/nodes/999999/metrics >/dev/null; expect_code 404 "不在本人列表里的节点"
+echo "  趋势：$(printf '%s' "$res" | jq -c '.data.points[-1]')"
 
 # ---- 12. 收尾：删除用户后面板上的平台条目清空 ----
 hub DELETE "/api/admin/users/$USER_ID" >/dev/null; expect_code 200 "删除用户"
