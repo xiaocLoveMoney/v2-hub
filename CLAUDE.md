@@ -34,7 +34,7 @@ cd v2-hub-contract/deploy/it && bash run_all.sh
 - 前端静态文件放 MinIO，Caddy 同域反代 `/api`、`/sub`（Ruling-5、Ruling-6）。
 
 契约（全部在 v2-hub-contract/）：`hub-api.yaml`（server → 前端）、`deploy/init.sql`（server 的表结构）、
-`upstream/3x-ui/openapi-v3.11.0.json`（3x-ui → server 的上游基准）。契约版本用 git tag `vX.Y`，当前 `v0.15`。
+`upstream/3x-ui/openapi-v3.11.0.json`（3x-ui → server 的上游基准）。契约版本用 git tag `vX.Y`，当前 `v0.16`。
 
 ## 跨目录纪律
 
@@ -83,7 +83,7 @@ GitHub 仓库设置见 `docs/github-仓库设置清单.md`。
   真实流量的出口 IP、两端 M9 页面登录后的浏览器实测未自动化，待人工验证。
 - M10 完成（2026-11-14，tag `v0.11`）：出口补全与入站预填（Ruling-51 – Ruling-53）：出口支持 HTTP / HTTPS 代理；出口延迟测试（TCP、HTTP、真实延迟），
   手动发起、由起飞面板执行，用户出口先过服务端链式的地址限制，按用户频控、按服务器互斥；出口弹窗改为“表单 / 分享链接”两种填法；
-  新建入站预填路径、Host、SNI、证书路径与 REALITY 目标；补充（tag `v0.12`，Ruling-54）：入站表单的 REALITY 目标扫描与查找候选，由面板探测；补充（tag `v0.13`，Ruling-55）：平台拦截规则，系统设置 `routing.blockRule` 默认开，每台已接入服务器的 Xray 模板里加 `hub-block` 拦截条目；补充（tag `v0.14`，Ruling-56）：出口测试不通时返回原因大类，`http` / `real` 不通时补一次 `tcp` 探测；补充（tag `v0.15`，Ruling-57）：两端侧栏菜单顺序可在管理端“菜单顺序”页统一调整，管理端总览与系统设置改为卡片式布局；IT-12 通过。真实代理出口上连通的测试结果、两端 M10 页面登录后的浏览器实测待人工验证。
+  新建入站预填路径、Host、SNI、证书路径与 REALITY 目标；补充（tag `v0.12`，Ruling-54）：入站表单的 REALITY 目标扫描与查找候选，由面板探测；补充（tag `v0.13`，Ruling-55）：平台拦截规则，系统设置 `routing.blockRule` 默认开，每台已接入服务器的 Xray 模板里加 `hub-block` 拦截条目；补充（tag `v0.14`，Ruling-56）：出口测试不通时返回原因大类，`http` / `real` 不通时补一次 `tcp` 探测；补充（tag `v0.15`，Ruling-57）：两端侧栏菜单顺序可在管理端“菜单顺序”页统一调整，管理端总览与系统设置改为卡片式布局；补充（tag `v0.16`，Ruling-58 – Ruling-60）：用户自设连接密码、订阅路径前缀改为随机且可改（旧前缀按天过渡）、每用户另存 SS2022 合法密钥；IT-12 通过。真实代理出口上连通的测试结果、两端 M10 页面登录后的浏览器实测待人工验证。
 - 路线图 M3–M8、M9（链式改造）与 M10（出口补全与入站预填）已完成；后续工作待定。
 - 路线（2026-11-13，Ruling-17 – Ruling-22）：参考 SSPanel-Uim Malio 的功能与界面，自行实现；里程碑为
   M3 订阅与用户端基础 → M4 自助运营 → M5 商店与钱包 → M6 / M7 两种链式 → M8 运营，见 docs/07。
