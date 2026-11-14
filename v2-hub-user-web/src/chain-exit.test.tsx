@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { buildExitLink, emptyExitFields, exitFieldProblems, parseExitLink, type ExitFields } from './pages/chain/exit-link'
-import { TEST_CSRF, mockServer, ok, renderApp } from './test/harness'
+import { TEST_CSRF, fail, mockServer, ok, renderApp } from './test/harness'
 
 const NOW = '2026-11-14T00:00:00Z'
 const EXITS_PATH = '/api/user/chain/exits'
@@ -75,6 +75,11 @@ describe('出口表单与分享链接互转', () => {
     expectRoundTrip(fieldsOf({ protocol: 'socks', port: '1080', username: 'us er', passphrase: 'p:w@x' }))
     expectRoundTrip(fieldsOf({ protocol: 'socks', port: '1080', username: 'only-user' }))
     expectRoundTrip(fieldsOf({ protocol: 'vless', id: TEST_ID, address: '2001:4860:4860::8888' }))
+    // HTTP / HTTPS 代理（Ruling-51）：默认端口也要原样保留
+    expectRoundTrip(fieldsOf({ protocol: 'http', port: '80' }), '')
+    expectRoundTrip(fieldsOf({ protocol: 'http', port: '8080', username: 'us er', passphrase: 'p:w@x' }))
+    expectRoundTrip(fieldsOf({ protocol: 'https', port: '443', username: 'only-user', sni: 'front.example.com', isInsecure: true }))
+    expectRoundTrip(fieldsOf({ protocol: 'https', port: '8443' }))
   })
 
   it('拼出的形状与后端解析一致：SIP002 用 URL 安全的 Base64，socks 有用户名时总带冒号，IPv6 带方括号', () => {
@@ -83,6 +88,15 @@ describe('出口表单与分享链接互转', () => {
     )
     expect(buildExitLink(fieldsOf({ protocol: 'socks', port: '1080', username: 'u' }), 'n')).toBe('socks5://u:@exit.example.com:1080#n')
     expect(buildExitLink(fieldsOf({ protocol: 'vless', id: TEST_ID, address: '::1' }), '')).toContain('@[::1]:443?')
+    expect(buildExitLink(fieldsOf({ protocol: 'http', port: '8080', username: 'u', passphrase: 'p' }), 'n')).toBe('http://u:p@exit.example.com:8080#n')
+    expect(buildExitLink(fieldsOf({ protocol: 'https', sni: 'front.example.com', isInsecure: true }), '')).toBe(
+      'https://exit.example.com:443?sni=front.example.com&allowInsecure=1',
+    )
+    // http 代理不带 sni；带路径的网页地址不是代理地址
+    expect(buildExitLink(fieldsOf({ protocol: 'http', port: '3128', sni: 'x' }), '')).toBe('http://exit.example.com:3128')
+    expect(parseExitLink('https://exit.example.com/index.html')).toBeNull()
+    expect(parseExitLink('http://exit.example.com:8080/path')).toBeNull()
+    expect(parseExitLink('http://only-user@exit.example.com:8080/')?.fields).toMatchObject({ protocol: 'http', username: 'only-user', passphrase: '', port: '8080' })
     // 与当前选择无关的字段不进链接：传输是 RAW 时不带 host / path，没有安全层时不带 sni
     const link = buildExitLink(fieldsOf({ protocol: 'vless', id: TEST_ID, host: 'x', path: '/y', sni: 'z', flow: 'xtls-rprx-vision' }), '')
     expect(link).toBe(`vless://${TEST_ID}@exit.example.com:443?type=tcp&security=none&encryption=none`)
@@ -111,6 +125,7 @@ describe('出口表单与分享链接互转', () => {
     expect([...exitFieldProblems(emptyExitFields())].sort()).toEqual(['address', 'id'])
     expect([...exitFieldProblems(fieldsOf({ protocol: 'trojan', port: '0' }))].sort()).toEqual(['passphrase', 'port'])
     expect([...exitFieldProblems(fieldsOf({ protocol: 'socks', passphrase: 'x' }))]).toEqual(['username'])
+    expect([...exitFieldProblems(fieldsOf({ protocol: 'https', passphrase: 'x' }))]).toEqual(['username'])
     expect([...exitFieldProblems(fieldsOf({ protocol: 'vless', id: TEST_ID, security: 'reality' }))].sort()).toEqual(['publicKey', 'sni'])
   })
 })
@@ -214,5 +229,79 @@ describe('我的出口：添加与编辑弹窗', () => {
     const body = calls.find((c) => c.method === 'PUT')?.body as { name: string; link: string }
     expect(body.name).toBe('自家 VPS')
     expect(parseExitLink(body.link)?.fields).toMatchObject({ address: 'new.example.com', port: '8443', security: 'reality', shortId: '0a1b' })
+  })
+})
+
+describe('我的出口：HTTP 代理与延迟测试', () => {
+  const nodes = [
+    { id: 1, name: '香港 A', region: 'HK', protocol: 'vless', canBeExit: true, canBeServerEntry: true },
+    { id: 2, name: '日本 Hy2', region: 'JP', protocol: 'hysteria2', canBeExit: false, canBeServerEntry: false },
+    { id: 3, name: '美国 B', region: 'US', protocol: 'trojan', canBeExit: true, canBeServerEntry: true },
+  ]
+  const withNodes = (list: unknown[]) => ({ ...signedIn(), 'GET /api/user/chain': () => ok({ ...overview, nodes: list }) })
+  const TEST_PATH = `${EXITS_PATH}/9/test`
+
+  it('添加 HTTPS 代理：选协议后只剩地址、端口、用户名、口令、SNI 与允许不安全', async () => {
+    const calls = mockServer({ ...signedIn(), [`POST ${EXITS_PATH}`]: () => ok({ ...ownExit, id: 10, protocol: 'http' }) })
+    const card = await openExitsCard()
+    fireEvent.click(within(card).getByRole('button', { name: '添加' }))
+    const dialog = await screen.findByRole('dialog')
+    typeInto(dialog, '协议', 'https')
+    expect(within(dialog).queryByLabelText('ID')).toBeNull()
+    expect(within(dialog).queryByLabelText('传输')).toBeNull()
+    typeInto(dialog, '地址', 'proxy.example.com')
+    typeInto(dialog, '端口', '8443')
+    typeInto(dialog, '口令（可选）', 'pw')
+    fireEvent.click(within(dialog).getByRole('button', { name: '保存' }))
+    // 只填口令不填用户名：标出用户名
+    expect(within(dialog).getAllByText('必填')).toHaveLength(1)
+    typeInto(dialog, '用户名（可选）', 'bob')
+    typeInto(dialog, 'SNI', 'front.example.com')
+    fireEvent.click(within(dialog).getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(calls.some((c) => c.method === 'POST')).toBe(true))
+    expect(calls.find((c) => c.method === 'POST')?.body).toEqual({ link: 'https://bob:pw@proxy.example.com:8443?sni=front.example.com', name: '' })
+  })
+
+  it('测试延迟：只列面板支持的节点，按所选节点与方式提交，显示延迟、HTTP 状态与出口 IP', async () => {
+    const calls = mockServer({
+      ...withNodes(nodes),
+      [`POST ${TEST_PATH}`]: () => ok({ ok: true, mode: 'http', delayMs: 87, httpStatus: 204, egressIp: '198.51.100.7', egressRegion: 'JP' }),
+    })
+    const card = await openExitsCard()
+    expect(within(card).queryByLabelText('起点节点')).toBeNull()
+    fireEvent.click(within(card).getByRole('button', { name: '测试延迟' }))
+    const from = within(card).getByLabelText('起点节点') as HTMLSelectElement
+    expect([...from.options].map((o) => o.textContent)).toEqual(['香港 A', '美国 B'])
+    fireEvent.change(from, { target: { value: '3' } })
+    fireEvent.click(within(card).getByRole('button', { name: 'HTTP 请求' }))
+    fireEvent.click(within(card).getByRole('button', { name: '开始测试' }))
+    expect(await within(card).findByText('87 ms')).toBeDefined()
+    expect(within(card).getByText('HTTP 204')).toBeDefined()
+    expect(within(card).getByText(/出口 IP 198\.51\.100\.7/).textContent).toBe('出口 IP 198.51.100.7 (JP)')
+    const sent = calls.find((c) => c.method === 'POST' && c.path === TEST_PATH)
+    expect(sent?.csrf).toBe(TEST_CSRF)
+    expect(sent?.body).toEqual({ nodeId: 3, mode: 'http' })
+  })
+
+  it('测试延迟：连不上只说失败；被拒绝时显示后端的说明；没有可用起点时给提示', async () => {
+    let reply = () => ok({ ok: false, mode: 'tcp', delayMs: 0, httpStatus: 0, egressIp: '', egressRegion: '' })
+    mockServer({ ...withNodes(nodes), [`POST ${TEST_PATH}`]: () => reply() })
+    const card = await openExitsCard()
+    fireEvent.click(within(card).getByRole('button', { name: '测试延迟' }))
+    fireEvent.click(within(card).getByRole('button', { name: '开始测试' }))
+    expect(await within(card).findByText('连接失败或超时')).toBeDefined()
+    expect(within(card).queryByText(/出口 IP/)).toBeNull()
+
+    reply = () => fail(429, 'rate_limited', '测试太频繁，请稍后再试')
+    fireEvent.click(within(card).getByRole('button', { name: '开始测试' }))
+    expect(await within(card).findByText('测试太频繁，请稍后再试')).toBeDefined()
+    expect(within(card).queryByText('连接失败或超时')).toBeNull()
+    cleanup()
+    vi.unstubAllGlobals()
+
+    mockServer(withNodes([nodes[1]]))
+    const empty = await openExitsCard()
+    fireEvent.click(within(empty).getByRole('button', { name: '测试延迟' }))
+    expect(within(empty).getByText(/没有可用的起点节点/)).toBeDefined()
   })
 })

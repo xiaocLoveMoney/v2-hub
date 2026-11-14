@@ -14,6 +14,7 @@ import {
   MIN_EXIT_PORT,
   hasFlow,
   hasStream,
+  isPlainProxy,
   normalizeExitFields,
   securitiesOf,
   type ExitFieldKey,
@@ -30,6 +31,8 @@ const PROTOCOL_LABELS: Record<ExitProtocol, string> = {
   trojan: 'Trojan',
   shadowsocks: 'Shadowsocks',
   socks: 'SOCKS5',
+  http: 'HTTP',
+  https: 'HTTPS',
 }
 const NETWORK_LABELS: Record<ExitNetwork, string> = {
   tcp: 'RAW (TCP)',
@@ -145,7 +148,7 @@ export function ExitFieldsForm({ fields, onChange, problems, shouldShowProblems 
           ))}
         </SelectField>
       )}
-      {protocol === 'socks' && (
+      {isPlainProxy(protocol) && (
         <Field
           label={t('chain.fUsernameOptional')}
           autoComplete="off"
@@ -156,9 +159,9 @@ export function ExitFieldsForm({ fields, onChange, problems, shouldShowProblems 
           error={errorOf('username')}
         />
       )}
-      {(protocol === 'trojan' || protocol === 'shadowsocks' || protocol === 'socks') && (
+      {(protocol === 'trojan' || protocol === 'shadowsocks' || isPlainProxy(protocol)) && (
         <Field
-          label={t(protocol === 'socks' ? 'chain.fPassphraseOptional' : 'chain.fPassphrase')}
+          label={t(isPlainProxy(protocol) ? 'chain.fPassphraseOptional' : 'chain.fPassphrase')}
           autoComplete="off"
           spellCheck={false}
           maxLength={MAX_CREDENTIAL_LEN}
@@ -166,6 +169,24 @@ export function ExitFieldsForm({ fields, onChange, problems, shouldShowProblems 
           onChange={(e) => set({ passphrase: e.target.value })}
           error={errorOf('passphrase')}
         />
+      )}
+
+      {protocol === 'https' && (
+        <>
+          <Field
+            label={t('chain.fSni')}
+            autoComplete="off"
+            spellCheck={false}
+            maxLength={MAX_HOST_LEN}
+            value={fields.sni}
+            onChange={(e) => set({ sni: e.target.value })}
+            hint={t('chain.fSniProxyHint')}
+          />
+          <label className="hub-exit-check hub-exit-check-block">
+            <input type="checkbox" checked={fields.isInsecure} onChange={(e) => set({ isInsecure: e.target.checked })} />
+            <span>{t('chain.fInsecure')}</span>
+          </label>
+        </>
       )}
 
       {isStream && (

@@ -46,6 +46,8 @@ export type ChainEntryState = components['schemas']['ChainEntryState']
 export type ChainNodeOption = components['schemas']['ChainNodeOption']
 export type ChainBlockedReason = components['schemas']['ChainBlockedReason']
 export type ChainExit = components['schemas']['ChainExit']
+export type ChainExitTestMode = components['schemas']['ChainExitTestMode']
+export type ChainExitTestResult = components['schemas']['ChainExitTestResult']
 export type PublicPlan = components['schemas']['PublicPlan']
 
 /** 分页结果（hub-api.yaml 各分页接口的 data 形状）。 */

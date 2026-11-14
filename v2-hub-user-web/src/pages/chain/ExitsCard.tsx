@@ -1,29 +1,33 @@
 import { useState } from 'react'
-import { api, csrfHeader, toApiError, type ChainExit, type ChainOverview } from '../../api/client'
+import { api, csrfHeader, toApiError, type ChainExit, type ChainNodeOption, type ChainOverview } from '../../api/client'
 import { useToast } from '../../components/toast-context'
 import { Alert, Badge, Button, Card, Confirm, Empty } from '../../components/ui'
 import { useCopy } from '../../hooks/use-copy'
 import { mutate } from '../../hooks/use-remote'
 import { useI18n } from '../../i18n/i18n-context'
 import { ExitModal } from './ExitModal'
+import { ExitTestPanel } from './ExitTestPanel'
 
 const NEW_EXIT_KEY = 'new'
 const NO_ROUTES = 0
 
 interface ExitItemProps {
   exit: ChainExit
+  /** 可作延迟测试起点的节点。 */
+  testNodes: ChainNodeOption[]
   isWritable: boolean
   onEdit: () => void
   onDelete: () => void
 }
 
 /** 一个出口：原链接属于凭据，默认不取，点“查看链接”才单独请求，只留在本组件内存里。被管理员停用的标出来。 */
-function ExitItem({ exit, isWritable, onEdit, onDelete }: ExitItemProps) {
+function ExitItem({ exit, testNodes, isWritable, onEdit, onDelete }: ExitItemProps) {
   const { t } = useI18n()
   const toast = useToast()
   const copy = useCopy()
   const [link, setLink] = useState<string | null>(null)
   const [isBusy, setIsBusy] = useState(false)
+  const [isTesting, setIsTesting] = useState(false)
 
   const reveal = async () => {
     setIsBusy(true)
@@ -72,6 +76,11 @@ function ExitItem({ exit, isWritable, onEdit, onDelete }: ExitItemProps) {
           </>
         )}
         {isWritable && (
+          <Button variant="outline" disabled={!exit.isEnabled} aria-expanded={isTesting} onClick={() => setIsTesting((v) => !v)}>
+            {t('chain.test')}
+          </Button>
+        )}
+        {isWritable && (
           <Button variant="outline" onClick={onEdit}>
             {t('chain.edit')}
           </Button>
@@ -80,6 +89,7 @@ function ExitItem({ exit, isWritable, onEdit, onDelete }: ExitItemProps) {
           {t('common.delete')}
         </Button>
       </div>
+      {isTesting && <ExitTestPanel exit={exit} nodes={testNodes} />}
     </div>
   )
 }
@@ -94,6 +104,8 @@ export function ExitsCard({ overview, onChanged }: { overview: ChainOverview; on
   const [isDeleting, setIsDeleting] = useState(false)
   const exits = overview.exits
   const isFull = exits.length >= overview.maxExits
+  // 起点要由面板去连出口，所以只列面板支持的节点（与能作服务端起飞的是同一批）
+  const testNodes = overview.nodes.filter((n) => n.canBeServerEntry)
 
   const closeForm = () => {
     setIsAdding(false)
@@ -133,7 +145,7 @@ export function ExitsCard({ overview, onChanged }: { overview: ChainOverview; on
       {overview.exitAllowed && isFull && <Alert tone="info">{t('chain.exitsFull', { max: overview.maxExits })}</Alert>}
       {exits.length === 0 && <Empty>{t('chain.exitsEmpty')}</Empty>}
       {exits.map((x) => (
-        <ExitItem key={x.id} exit={x} isWritable={overview.exitAllowed} onEdit={() => setEditing(x)} onDelete={() => setDeleting(x)} />
+        <ExitItem key={x.id} exit={x} testNodes={testNodes} isWritable={overview.exitAllowed} onEdit={() => setEditing(x)} onDelete={() => setDeleting(x)} />
       ))}
       {/* 每次打开都重新挂载，表单状态不残留上一次的输入 */}
       {(isAdding || editing !== null) && <ExitModal key={editing?.id ?? NEW_EXIT_KEY} exit={editing} isOpen onClose={closeForm} onSaved={handleSaved} />}

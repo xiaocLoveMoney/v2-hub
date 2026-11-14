@@ -628,3 +628,24 @@ a.hub-btn {
 .hub-exit-keep .hub-field-hint {
   margin-top: 0;
 }
+
+/* ---- 出口延迟测试（M10） ---- */
+.hub-exit-test {
+  margin-top: 12px;
+  padding: 14px 14px 4px;
+  border: 1px solid var(--hub-border);
+  border-radius: var(--hub-radius);
+  background: var(--hub-surface-alt);
+}
+
+.hub-exit-test .hub-field {
+  margin-bottom: 12px;
+}
+
+.hub-exit-test-result {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin: 12px 0 0;
+}
