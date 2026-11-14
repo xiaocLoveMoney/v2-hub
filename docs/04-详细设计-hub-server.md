@@ -86,6 +86,11 @@ M9 链式改造（docs/03 §5.18、§5.19、§5.21）在 `internal/service` 里�
 - 契约测试：`manager/panel/xui` 用 `httptest` 模拟面板，请求 / 响应形状对照上游快照。
 - 集成：IT 用例起真实 3x-ui 容器（`--profile xui`）。
 
+M10 的做法（Ruling-51 – Ruling-53）：`manager/panel` 加两个可选能力接口——`OutboundTester`（在面板上测一个出站）与 `CertLocator`（面板自己的网页证书路径），
+业务层用类型断言判断面板支不支持，3x-ui 实现分别对应 `/panel/api/xray/testOutbound` 与 `/panel/api/server/getWebCertFiles`。
+出口测试在 `service/chain_test_exit.go`：先做归属与地址限制（复用 `chain_guard.go`），再按用户频控、按服务器互斥，出站 JSON 由 `render.XrayOutbound` 生成；
+本文件不写日志（出站含凭据）。HTTP / HTTPS 出口只是 `manager/render` 多一个协议。
+
 ## 7. 接口待补 / 契约缺口
 
 - 见《任务与边界》契约缺口节。
