@@ -11,6 +11,6 @@
     （后三个由 paths 过滤，PR 不涉及时不会出现，如被卡住可改为只要求 `preflight`）
 - [ ] Settings → Rules → Rulesets：对 tag `v*` 限制创建与删除
 - [ ] Settings → Actions → General：Workflow permissions = Read repository contents
-- [ ] Settings → Secrets and variables → Actions：部署流水线启用时再添加（数据库口令、MinIO 密钥等），当前无需
+- [ ] Settings → Secrets and variables → Actions：部署流水线启用时再添加（数据库密码、MinIO 密钥等），当前无需
 - [ ] Issues → Labels：`mod:server`、`mod:admin-web`、`mod:user-web`、`mod:contract`、`type:feat/fix/docs/chore/refactor`
 - [ ] Issues → Milestones：M0 脚手架与登录 / M1 聚合 / M2 派发 / M3 订阅 / M4 客户端链式 / M5 服务端链式 / M6 运营
