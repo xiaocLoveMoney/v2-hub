@@ -10,7 +10,7 @@ const typed = 'correct-horse-battery'
 const POPUP_KEY = 'hub.popup.dismissed'
 
 const site = {
-  siteName: '测试站', registerMode: 'invite', emailVerifyRequired: false, mailEnabled: false, checkinEnabled: false, ticketEnabled: true, sharedEnabled: true,
+  siteName: '测试站', menuOrder: [], registerMode: 'invite', emailVerifyRequired: false, mailEnabled: false, checkinEnabled: false, ticketEnabled: true, sharedEnabled: true,
 }
 const session = { user: { id: 7, username: 'alice', status: 'active', email: null, isEmailVerified: false }, csrfToken: TEST_CSRF, totpEnabled: false }
 const dashboard = {
