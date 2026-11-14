@@ -646,3 +646,13 @@ a.hub-btn {
   gap: 8px 12px;
   margin: 12px 0 0;
 }
+
+/* ---- 连接密码卡片（订阅记录页，Ruling-58） ---- */
+.hub-conn-password-intro {
+  margin-top: 0;
+  margin-bottom: 14px;
+}
+
+.hub-conn-password-form {
+  max-width: 420px;
+}
