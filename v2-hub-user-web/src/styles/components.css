@@ -497,6 +497,13 @@
   margin: 20px 0 8px;
 }
 
+/* 切换范围时占住两张图的高度，弹窗不会跳动 */
+.hub-metric-loading {
+  display: grid;
+  min-height: 400px;
+  place-items: center;
+}
+
 .hub-metric-title {
   margin: 12px 0 0;
   font-size: 13px;
