@@ -265,7 +265,8 @@ describe('我的出口：HTTP 代理与延迟测试', () => {
   it('测试延迟：只列面板支持的节点，按所选节点与方式提交，显示延迟、HTTP 状态与出口 IP', async () => {
     const calls = mockServer({
       ...withNodes(nodes),
-      [`POST ${TEST_PATH}`]: () => ok({ ok: true, mode: 'http', delayMs: 87, httpStatus: 204, egressIp: '198.51.100.7', egressRegion: 'JP' }),
+      [`POST ${TEST_PATH}`]: () =>
+        ok({ ok: true, mode: 'http', reason: 'none', delayMs: 87, httpStatus: 204, egressIp: '198.51.100.7', egressRegion: 'JP' }),
     })
     const card = await openExitsCard()
     expect(within(card).queryByLabelText('起点节点')).toBeNull()
@@ -283,14 +284,26 @@ describe('我的出口：HTTP 代理与延迟测试', () => {
     expect(sent?.body).toEqual({ nodeId: 3, mode: 'http' })
   })
 
-  it('测试延迟：连不上只说失败；被拒绝时显示后端的说明；没有可用起点时给提示', async () => {
-    let reply = () => ok({ ok: false, mode: 'tcp', delayMs: 0, httpStatus: 0, egressIp: '', egressRegion: '' })
+  it('测试延迟：连不上按原因大类说明；被拒绝时显示后端的说明；没有可用起点时给提示', async () => {
+    const failed = (reason: string) => ok({ ok: false, mode: 'tcp', reason, delayMs: 0, httpStatus: 0, egressIp: '', egressRegion: '' })
+    let reply = () => failed('unknown')
     mockServer({ ...withNodes(nodes), [`POST ${TEST_PATH}`]: () => reply() })
     const card = await openExitsCard()
     fireEvent.click(within(card).getByRole('button', { name: '测试延迟' }))
     fireEvent.click(within(card).getByRole('button', { name: '开始测试' }))
     expect(await within(card).findByText('连接失败或超时')).toBeDefined()
     expect(within(card).queryByText(/出口 IP/)).toBeNull()
+
+    // 归得了类的给标题和排查提示（Ruling-56）
+    reply = () => failed('proxy_no_response')
+    fireEvent.click(within(card).getByRole('button', { name: '开始测试' }))
+    expect(await within(card).findByText('代理没有回应')).toBeDefined()
+    expect(within(card).getByText(/不在代理的白名单里/)).toBeDefined()
+    expect(within(card).queryByText('连接失败或超时')).toBeNull()
+    reply = () => failed('refused')
+    fireEvent.click(within(card).getByRole('button', { name: '开始测试' }))
+    expect(await within(card).findByText('出口拒绝连接')).toBeDefined()
+    expect(within(card).queryByText(/不在代理的白名单里/)).toBeNull()
 
     reply = () => fail(429, 'rate_limited', '测试太频繁，请稍后再试')
     fireEvent.click(within(card).getByRole('button', { name: '开始测试' }))

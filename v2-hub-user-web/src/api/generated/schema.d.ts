@@ -708,6 +708,50 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/admin/servers/{id}/reality-scan": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 让该服务器的面板探测一个 REALITY 目标是否可用（Ruling-54，node:write；0.7.0）
+         * @description 由面板所在机器对目标做一次 TLS 1.3 探测。目标是“域名或 IP[:端口]”，不接受网段；面板判定为内网地址的不探测，结果的 privateTarget 为 true。面板类型不支持时返回 409。不记审计。
+         */
+        post: operations["scanRealityTarget"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/servers/{id}/reality-targets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 让该服务器的面板探测一组 REALITY 候选目标并排序（Ruling-54，node:write；0.7.0）
+         * @description targets 为空时探测面板自己的候选站点；否则最多 20 个，每个是“域名或 IP[:端口]”，不接受网段。结果按可用优先、延迟从低到高排。
+         */
+        post: operations["scanRealityTargets"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/admin/servers/{id}/web-cert": {
         parameters: {
             query?: never;
@@ -3356,6 +3400,11 @@ export interface components {
                 url: string;
                 label: string;
             };
+            /** @description 服务器 Xray 模板里的平台条目（0.7.1，docs/03 §5.19 拦截规则） */
+            routing: {
+                /** @description 在每台已接入服务器的模板里加平台拦截规则 hub-block（Ruling-55），默认开 */
+                blockRule: boolean;
+            };
             site: {
                 name: string;
                 /** @description IANA 时区名 */
@@ -3470,6 +3519,9 @@ export interface components {
                 [key: string]: unknown;
             };
             support?: {
+                [key: string]: unknown;
+            };
+            routing?: {
                 [key: string]: unknown;
             };
         };
@@ -4418,6 +4470,13 @@ export interface components {
          * @enum {string}
          */
         ChainExitTestMode: "tcp" | "http" | "real";
+        /**
+         * @description 不通的原因大类（0.7.2，docs/03 §5.21，Ruling-56）；连通时为 none。
+         *     refused = 出口拒绝连接；timeout = 连接出口超时；proxy_rejected = 端口能连上但代理请求被断开；
+         *     proxy_no_response = 端口能连上但代理请求一直没有回应；bad_status = 请求发出去了但测试地址返回异常状态；unknown = 其他。
+         * @enum {string}
+         */
+        ChainExitTestFailReason: "none" | "refused" | "timeout" | "proxy_rejected" | "proxy_no_response" | "bad_status" | "unknown";
         ChainExitTestInput: {
             /**
              * Format: int64
@@ -4430,6 +4489,7 @@ export interface components {
             /** @description 是否连通 */
             ok: boolean;
             mode: components["schemas"]["ChainExitTestMode"];
+            reason: components["schemas"]["ChainExitTestFailReason"];
             /**
              * Format: int64
              * @description 延迟，毫秒；不通时为 0
@@ -4453,6 +4513,42 @@ export interface components {
         AdminChainExitTestResult: components["schemas"]["ChainExitTestResult"] & {
             /** @description 面板返回的错误原文（已截断）；连通时为空串 */
             error: string;
+        };
+        RealityScanInput: {
+            /** @description 域名或 IP，可带端口（缺省 443），如 www.cloudflare.com:443 */
+            target: string;
+            /** @description 握手时用的 SNI；省略或空串 = 用目标的域名 */
+            sni?: string;
+            /** @description 目标期望的 PROXY 协议版本，与入站的 Xver 一致；省略 = 0 */
+            xver?: number;
+        };
+        RealityTargetsInput: {
+            /** @description 省略或空数组 = 探测面板自己的候选站点 */
+            targets?: string[];
+        };
+        RealityScanResult: {
+            /** @description 归一化后的目标，域名或 IP 加端口 */
+            target: string;
+            host: string;
+            port: number;
+            /** @description 实际探测的 IP；没有解析到为空串 */
+            ip: string;
+            /** @description 是否适合作 REALITY 目标（TLS 1.3 + h2 + X25519 + 可信证书） */
+            feasible: boolean;
+            /** @description 不可用的原因（面板给出的原文）；可用时为空串 */
+            reason: string;
+            /** @description 握手耗时，毫秒 */
+            latencyMs: number;
+            tlsVersion: string;
+            alpn: string;
+            /** @description 证书对这个 SNI 是否有效 */
+            certValid: boolean;
+            certSubject: string;
+            certIssuer: string;
+            /** @description 证书里可作 SNI 的域名；可能为空 */
+            serverNames: string[];
+            /** @description 目标解析到内网 / 回环地址，没有探测 */
+            privateTarget: boolean;
         };
         ServerWebCert: {
             /** @description 证书文件在面板所在机器上的路径；没配为空串 */
@@ -6095,6 +6191,78 @@ export interface operations {
                         data?: {
                             [key: string]: unknown;
                         };
+                    };
+                };
+            };
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            502: components["responses"]["UpstreamUnavailable"];
+        };
+    };
+    scanRealityTarget: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RealityScanInput"];
+            };
+        };
+        responses: {
+            /** @description 探测结果（目标不可用也是 200，feasible 为 false） */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["RealityScanResult"];
+                    };
+                };
+            };
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            502: components["responses"]["UpstreamUnavailable"];
+        };
+    };
+    scanRealityTargets: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RealityTargetsInput"];
+            };
+        };
+        responses: {
+            /** @description 探测结果（目标不可用也是 200，feasible 为 false） */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["RealityScanResult"][];
                     };
                 };
             };
