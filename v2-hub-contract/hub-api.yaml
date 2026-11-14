@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: v2-hub API
-  version: 0.7.1
+  version: 0.7.2
   description: |
     v2-hub 对外接口契约（hub-server 提供，v2-hub-admin-web / v2-hub-user-web 消费）。
     - 管理端接口前缀 /api/admin，客户端接口前缀 /api/user，订阅端点前缀 /sub。
@@ -21,6 +21,7 @@ info:
     0.5.0：M9 链式改造（docs/03 §5.18、§5.19、§5.21）——规则改为有序的“起飞节点（多选）→ 落地（单选）”（chain/routes），
       自有落地节点改名为出口（chain/exits），新增平台出口与管理端的出口、规则接口；删除 chain/rules、chain/server-rules、admin/server-chain-rules。
     0.7.1：系统设置增加 routing 分组（routing.blockRule，平台拦截规则，Ruling-55）。
+    0.7.2：出口延迟测试结果增加 reason（不通的原因大类，Ruling-56）。
 servers:
   - url: http://127.0.0.1:8080
     description: 本地开发
@@ -5961,6 +5962,13 @@ components:
       type: string
       enum: [tcp, http, real]
       description: tcp = 只做 TCP 连接；http = 经出口发一次 HTTP 请求，报热连接的往返时间；real = 真实延迟，含建立隧道在内的整次请求耗时（Ruling-52）
+    ChainExitTestFailReason:
+      type: string
+      enum: [none, refused, timeout, proxy_rejected, proxy_no_response, bad_status, unknown]
+      description: |
+        不通的原因大类（0.7.2，docs/03 §5.21，Ruling-56）；连通时为 none。
+        refused = 出口拒绝连接；timeout = 连接出口超时；proxy_rejected = 端口能连上但代理请求被断开；
+        proxy_no_response = 端口能连上但代理请求一直没有回应；bad_status = 请求发出去了但测试地址返回异常状态；unknown = 其他。
     ChainExitTestInput:
       type: object
       required: [nodeId, mode]
@@ -5969,10 +5977,11 @@ components:
         mode: { $ref: "#/components/schemas/ChainExitTestMode" }
     ChainExitTestResult:
       type: object
-      required: [ok, mode, delayMs, httpStatus, egressIp, egressRegion]
+      required: [ok, mode, reason, delayMs, httpStatus, egressIp, egressRegion]
       properties:
         ok: { type: boolean, description: 是否连通 }
         mode: { $ref: "#/components/schemas/ChainExitTestMode" }
+        reason: { $ref: "#/components/schemas/ChainExitTestFailReason" }
         delayMs: { type: integer, format: int64, description: 延迟，毫秒；不通时为 0 }
         httpStatus: { type: integer, description: http / real 方式下测试请求的 HTTP 状态码；没有则为 0 }
         egressIp: { type: string, description: http 方式下探到的出口 IP；没有则为空串 }

@@ -35,6 +35,8 @@ HTTPS_LINK="https://1.1.1.1:443?sni=one.one.one.one#it12-https"
 LOOP_LINK="http://127.0.0.1:8080#it12-loop"
 PAGE_LINK="https://one.one.one.one/index.html"
 PLATFORM_LINK="socks5://xui-a:1080#it12-platform"   # 平台出口不受地址限制（Ruling-48）
+CLOSED_LINK="http://127.0.0.1:9#it12-closed"        # 面板容器里没人监听的端口：原因大类必是 refused（Ruling-56）
+REASONS='["none","refused","timeout","proxy_rejected","proxy_no_response","bad_status","unknown"]'
 WORK="$(mktemp -d /tmp/it12.XXXXXX)"
 trap 'rm -rf "$WORK"; stop_all' EXIT
 
@@ -197,7 +199,10 @@ run_test() {
     || fail "测试结果的形状不对（用户侧不应带 error）：$res"
   # Docker Desktop 的网络栈会在本地应答 TCP 握手，tcp 方式的延迟可能是 0 毫秒，所以只要求不通时为 0
   printf '%s' "$res" | jq -e '.data | .delayMs >= 0 and (.ok or .delayMs == 0)' >/dev/null || fail "不通时延迟应为 0：$res"
-  echo "  测试 $2：$(printf '%s' "$res" | jq -c '.data | {ok, delayMs, httpStatus, egressIp}')"
+  # 原因大类：连通必是 none，不通必不是 none（Ruling-56）
+  printf '%s' "$res" | jq -e --argjson all "$REASONS" '.data | (.reason as $r | $all | index($r) != null) and (.ok == (.reason == "none"))' >/dev/null \
+    || fail "原因大类不对：$res"
+  echo "  测试 $2：$(printf '%s' "$res" | jq -c '.data | {ok, reason, delayMs, httpStatus, egressIp}')"
 }
 run_test "$HTTPS_EXIT" tcp     # 第 1 次
 run_test "$HTTPS_EXIT" http    # 第 2 次
@@ -219,6 +224,14 @@ res="$(admin_test "$PLATFORM_ID" "$SERVER_A" tcp)"; expect_code 200 "管理员�
 printf '%s' "$res" | jq -e '.data | (.ok | type == "boolean") and (.error | type == "string")' >/dev/null || fail "管理端测试结果应带 error 字段：$res"
 echo "  管理员测试平台出口：$(printf '%s' "$res" | jq -c '.data | {ok, delayMs, error}')"
 admin_test "$LOOP_EXIT" "$SERVER_A" tcp >/dev/null; expect_code 400 "管理员测试回环地址的用户出口"
+# 原因大类（Ruling-56）：端口没人监听，tcp 直接是 refused；http 先不通、平台补一次 tcp 探测后也归到 refused
+CLOSED_ID="$(hub POST /api/admin/chain-exits "$(jq -nc --arg l "$CLOSED_LINK" --argjson g "[$GROUP_ID]" \
+  '{name:"it12-关着的端口",link:$l,remark:"",isEnabled:true,allowServer:true,allowClient:false,nodeGroupIds:$g}')" | jq -r '.data.id // empty')"; expect_code 200 "新建端口关着的平台出口"
+for mode in tcp http; do
+  res="$(admin_test "$CLOSED_ID" "$SERVER_A" "$mode")"; expect_code 200 "管理员测试端口关着的出口（$mode）"
+  printf '%s' "$res" | jq -e '.data | .ok == false and .reason == "refused" and .delayMs == 0' >/dev/null || fail "端口关着应归到 refused（$mode）：$res"
+done
+hub DELETE "/api/admin/chain-exits/$CLOSED_ID" >/dev/null; expect_code 200 "删除端口关着的平台出口"
 admin_test "$PLATFORM_ID" 999999 tcp >/dev/null; expect_code 404 "从不存在的服务器发起测试"
 portal POST "/api/user/chain/exits/$PLATFORM_ID/test" "$(test_body "$NODE_A" tcp)" >/dev/null; expect_code 404 "用户测试平台出口"
 
