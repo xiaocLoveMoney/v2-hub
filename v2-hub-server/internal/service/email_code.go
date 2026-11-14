@@ -101,6 +101,8 @@ type SiteInfo struct {
 	// Landing 与 Support 是落地页与客服入口（docs/03 §5.20）；落地页没开时标题与介绍为空。
 	Landing LandingSettings
 	Support SupportSettings
+	// MenuOrder 是客户门户的侧栏菜单顺序（设置 menu.user，Ruling-57），空 = 默认顺序。
+	MenuOrder []string
 }
 
 // Site 返回公开的站点信息。
@@ -113,7 +115,7 @@ func (s *AccountService) Site(ctx context.Context) (*SiteInfo, error) {
 		SiteName: cur.Site.Name, RegisterMode: cur.Register.Mode, EmailVerifyRequired: s.emailVerifyRequired(cur), MailEnabled: s.mail.Enabled(),
 		CheckinEnabled: cur.Checkin.Enabled, TicketEnabled: cur.Ticket.Enabled, SharedEnabled: cur.Shared.Enabled,
 		ShopEnabled: cur.Shop.Enabled, Currency: cur.Shop.Currency, Support: cur.Support,
-		Landing: publicLanding(cur.Landing),
+		Landing: publicLanding(cur.Landing), MenuOrder: slices.Clone(cur.Menu.User),
 	}, nil
 }
 

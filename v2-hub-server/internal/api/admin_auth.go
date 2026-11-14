@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"crypto/subtle"
+	"log/slog"
 	"net/http"
 	"net/netip"
 	"time"
@@ -46,6 +47,8 @@ type sessionVO struct {
 	Permissions []string     `json:"permissions"`
 	CSRFToken   string       `json:"csrfToken"`
 	TOTPEnabled bool         `json:"totpEnabled"`
+	// MenuOrder 是管理端侧栏菜单顺序（设置 menu.admin，Ruling-57），空 = 默认顺序。
+	MenuOrder []string `json:"menuOrder"`
 }
 
 func toSessionVO(p *service.AdminPrincipal) sessionVO {
@@ -54,7 +57,21 @@ func toSessionVO(p *service.AdminPrincipal) sessionVO {
 		Permissions: p.Permissions.Sorted(),
 		CSRFToken:   p.CSRFToken,
 		TOTPEnabled: p.TOTPEnabled,
+		MenuOrder:   []string{},
 	}
+}
+
+// adminSessionVO 组装会话信息并带上管理端菜单顺序。设置读不到时按默认顺序返回并留痕：
+// 它只影响菜单排列，不能因此让登录失败。
+func (h *handlers) adminSessionVO(r *http.Request, p *service.AdminPrincipal) sessionVO {
+	vo := toSessionVO(p)
+	cur, err := h.settings.Current(r.Context())
+	if err != nil {
+		slog.Error("load menu order", "admin_id", p.AdminID, "err", err)
+		return vo
+	}
+	vo.MenuOrder = nonNil(cur.Menu.Admin)
+	return vo
 }
 
 // loginRequest 对应 hub-api.yaml LoginRequest（JSON 字段名 password）。
@@ -91,7 +108,7 @@ func (h *handlers) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.SetCookie(w, h.sessionCookie(res.Token, res.ExpiresAt))
-	writeOK(w, toSessionVO(res.Principal))
+	writeOK(w, h.adminSessionVO(r, res.Principal))
 }
 
 func (h *handlers) logout(w http.ResponseWriter, r *http.Request, p *service.AdminPrincipal) {
@@ -105,8 +122,8 @@ func (h *handlers) logout(w http.ResponseWriter, r *http.Request, p *service.Adm
 	writeOK(w, nil)
 }
 
-func (h *handlers) me(w http.ResponseWriter, _ *http.Request, p *service.AdminPrincipal) {
-	writeOK(w, toSessionVO(p))
+func (h *handlers) me(w http.ResponseWriter, r *http.Request, p *service.AdminPrincipal) {
+	writeOK(w, h.adminSessionVO(r, p))
 }
 
 func (h *handlers) sessionCookie(value string, expires time.Time) *http.Cookie {

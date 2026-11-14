@@ -41,6 +41,7 @@ type siteInfoVO struct {
 	Currency            string            `json:"currency"`
 	Landing             landingSettingsVO `json:"landing"`
 	Support             supportSettingsVO `json:"support"`
+	MenuOrder           []string          `json:"menuOrder"`
 }
 
 func (h *handlers) getSiteInfo(w http.ResponseWriter, r *http.Request) {
@@ -53,8 +54,9 @@ func (h *handlers) getSiteInfo(w http.ResponseWriter, r *http.Request) {
 		SiteName: info.SiteName, RegisterMode: info.RegisterMode, EmailVerifyRequired: info.EmailVerifyRequired, MailEnabled: info.MailEnabled,
 		CheckinEnabled: info.CheckinEnabled, TicketEnabled: info.TicketEnabled, SharedEnabled: info.SharedEnabled,
 		ShopEnabled: info.ShopEnabled, Currency: info.Currency,
-		Landing: landingSettingsVO{Enabled: info.Landing.Enabled, Headline: info.Landing.Headline, Intro: info.Landing.Intro},
-		Support: supportSettingsVO{URL: info.Support.URL, Label: info.Support.Label},
+		Landing:   landingSettingsVO{Enabled: info.Landing.Enabled, Headline: info.Landing.Headline, Intro: info.Landing.Intro},
+		Support:   supportSettingsVO{URL: info.Support.URL, Label: info.Support.Label},
+		MenuOrder: nonNil(info.MenuOrder),
 	})
 }
 

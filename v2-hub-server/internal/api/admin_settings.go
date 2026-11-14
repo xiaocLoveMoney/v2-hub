@@ -132,6 +132,11 @@ type routingSettingsVO struct {
 	BlockRule bool `json:"blockRule"`
 }
 
+type menuSettingsVO struct {
+	Admin []string `json:"admin"`
+	User  []string `json:"user"`
+}
+
 // settingsVO 对应 hub-api.yaml Settings。
 type settingsVO struct {
 	MailEnabled     bool                   `json:"mailEnabled"`
@@ -142,6 +147,7 @@ type settingsVO struct {
 	Landing         landingSettingsVO      `json:"landing"`
 	Support         supportSettingsVO      `json:"support"`
 	Routing         routingSettingsVO      `json:"routing"`
+	Menu            menuSettingsVO         `json:"menu"`
 	Site            siteSettingsVO         `json:"site"`
 	Register        registerSettingsVO     `json:"register"`
 	Invite          inviteSettingsVO       `json:"invite"`
@@ -172,6 +178,7 @@ func toSettingsVO(s service.Settings, mailEnabled, telegramEnabled bool) setting
 		Landing: landingSettingsVO{Enabled: s.Landing.Enabled, Headline: s.Landing.Headline, Intro: s.Landing.Intro},
 		Support: supportSettingsVO{URL: s.Support.URL, Label: s.Support.Label},
 		Routing: routingSettingsVO{BlockRule: s.Routing.BlockRule},
+		Menu:    menuSettingsVO{Admin: nonNil(s.Menu.Admin), User: nonNil(s.Menu.User)},
 		Site:    siteSettingsVO{Name: s.Site.Name, Timezone: s.Site.Timezone, PortalURL: s.Site.PortalURL},
 		Shop:    shopSettingsVO{Enabled: s.Shop.Enabled, Currency: s.Shop.Currency},
 		Rebate:  rebateSettingsVO{Percent: s.Rebate.Percent, Mode: s.Rebate.Mode},
