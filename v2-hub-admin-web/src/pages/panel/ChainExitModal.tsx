@@ -1,10 +1,11 @@
-import { Alert, Button, Form, Input, Modal, Segmented, Select, Space, Switch, Typography } from 'antd'
+import { Alert, Button, Form, Input, Modal, Radio, Segmented, Select, Space, Switch, Typography } from 'antd'
 import { useState } from 'react'
-import { api, csrfHeader, toApiError, type AdminChainExit, type AdminChainExitInput, type ApiError, type NodeGroup } from '../../api/client'
+import { api, csrfHeader, toApiError, type AdminChainExit, type AdminChainExitInput, type ApiError, type ChainExitAssignMode, type NodeGroup } from '../../api/client'
 import { ErrorAlert } from '../../components/ErrorAlert'
 import { useOpenGeneration } from '../../hooks/use-open-generation'
 import { useSubmit } from '../../hooks/use-submit'
 import { ChainExitFieldsForm } from './ChainExitFieldsForm'
+import { ExitUserSelect } from './ExitUserSelect'
 import { buildExitLink, emptyExitFields, exitFieldProblems, parseExitLink, type ExitFields } from './chain-exit-link'
 
 const MAX_NAME_LEN = 64
@@ -28,16 +29,24 @@ const MSG_LINK_REQUIRED = '请粘贴链接'
 const MSG_LINK_TOO_LONG = `链接不能超过 ${MAX_LINK_LEN} 个字符`
 const CODE_INVALID = 'invalid_argument'
 
+/** 分配方式二选一（Ruling-64）。 */
+const ASSIGN_GROUP: ChainExitAssignMode = 'group'
+const ASSIGN_USER: ChainExitAssignMode = 'user'
+const ASSIGN_OPTIONS: { value: ChainExitAssignMode; label: string }[] = [
+  { value: ASSIGN_GROUP, label: '按节点组' },
+  { value: ASSIGN_USER, label: '指定用户' },
+]
+
 /** antd 表单管的字段：连接参数（表单 / 链接）另由组件状态管。 */
 type ExitFormValues = Omit<AdminChainExitInput, 'link'>
 
 function formOf(e: AdminChainExit | null): ExitFormValues {
   if (e === null) {
-    return { name: '', remark: '', isEnabled: true, allowServer: true, allowClient: false, nodeGroupIds: [] }
+    return { name: '', remark: '', isEnabled: true, allowServer: true, allowClient: false, assignMode: ASSIGN_GROUP, nodeGroupIds: [], userIds: [] }
   }
   return {
     name: e.name, remark: e.remark, isEnabled: e.isEnabled, allowServer: e.allowServer, allowClient: e.allowClient,
-    nodeGroupIds: e.nodeGroups.map((g) => g.id),
+    assignMode: e.assignMode, nodeGroupIds: e.nodeGroups.map((g) => g.id), userIds: e.users.map((u) => u.id),
   }
 }
 
@@ -78,6 +87,7 @@ function ExitForm({ exit, groups, onSaved }: Pick<ChainExitModalProps, 'exit' | 
   const [localError, setLocalError] = useState<ApiError | null>(null)
   const [isLoadingLink, setIsLoadingLink] = useState(false)
   const problems = exitFieldProblems(fields)
+  const assignMode = Form.useWatch('assignMode', form) ?? exit?.assignMode ?? ASSIGN_GROUP
   const currentName = () => (form.getFieldValue('name') as string | undefined)?.trim() ?? ''
 
   /** 把一条链接放进表单；表单表达不了时留在链接方式并说明原因。 */
@@ -166,7 +176,10 @@ function ExitForm({ exit, groups, onSaved }: Pick<ChainExitModalProps, 'exit' | 
       isEnabled: v.isEnabled ?? true,
       allowServer: v.allowServer,
       allowClient: v.allowClient,
-      nodeGroupIds: v.nodeGroupIds ?? [],
+      // 只提交所选方式那一组，另一组由服务端清空（Ruling-64）
+      assignMode: v.assignMode ?? ASSIGN_GROUP,
+      nodeGroupIds: v.assignMode === ASSIGN_USER ? [] : (v.nodeGroupIds ?? []),
+      userIds: v.assignMode === ASSIGN_USER ? (v.userIds ?? []) : [],
     }
     void run(() =>
       exit === null
@@ -216,9 +229,18 @@ function ExitForm({ exit, groups, onSaved }: Pick<ChainExitModalProps, 'exit' | 
             )}
           </>
         )}
-        <Form.Item name="nodeGroupIds" label="节点组" extra="套餐绑了其中任一节点组的用户才能用；不选 = 没有用户能用">
-          <Select mode="multiple" optionFilterProp="label" options={groups.map((g) => ({ value: g.id, label: g.name }))} />
+        <Form.Item name="assignMode" label="分配给">
+          <Radio.Group optionType="button" options={ASSIGN_OPTIONS} />
         </Form.Item>
+        {assignMode === ASSIGN_USER ? (
+          <Form.Item name="userIds" label="指定用户" extra="只有选中的用户能用，且其套餐要开了对应的链式；不选 = 没有用户能用">
+            <ExitUserSelect initialUsers={exit?.users ?? []} />
+          </Form.Item>
+        ) : (
+          <Form.Item name="nodeGroupIds" label="节点组" extra="套餐绑了其中任一节点组的用户才能用；不选 = 没有用户能用">
+            <Select mode="multiple" aria-label="节点组" optionFilterProp="label" options={groups.map((g) => ({ value: g.id, label: g.name }))} />
+          </Form.Item>
+        )}
         <Form.Item name="allowServer" label="可用于服务端链式" valuePropName="checked" extra="链接只留在起飞面板上，用户看不到">
           <Switch />
         </Form.Item>
