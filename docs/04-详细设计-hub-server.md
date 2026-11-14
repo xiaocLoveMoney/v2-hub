@@ -98,7 +98,7 @@ REALITY 目标扫描（Ruling-54）是第三个可选能力 `RealityScanner`，3
 IP 换国家在 `internal/manager/geoip`：`Locator` 接口 + HTTP 实现，查询地址是配置 `geoip.lookupURL`（含 `{ip}` 占位，默认 `https://api.country.is/{ip}`，留空即关闭扫描），
 响应取 JSON 的 `country`，只认 ISO 3166-1 两位码（码表是包内常量，`geoip.IsCountryCode` 同时供 service 校验管理员的选择）；只把公网单播地址发出去。
 `PanelService.LocateServer` 经 Provider 探测拿 IP 再查库，新建服务器时位置留空就用接入探测拿到的 IP 顺手查一次（失败不影响接入），
-启动时 `job.RunServerLocate` 在后台对位置为空的启用服务器各扫一次（单次、自带 recover）。
+`job.RunServerLocate` 在后台启动时及之后每小时对位置为空的启用服务器各扫一次（每轮自带 recover）。
 健康探测成功后 `ProbeServer` 写一条 `server_metric`（`date_bin` 对齐 5 分钟，冲突时覆盖为最新值，在线数取 `server.online_clients`），过期采样由清理任务按 7 天删除；
 用户端趋势图走 `UserService.ListNodeMetrics`：先按本人节点列表的同一套连接条件确认节点可见，再按范围取 5 分钟原值或按小时平均。
 
