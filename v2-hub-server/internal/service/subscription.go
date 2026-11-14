@@ -28,8 +28,8 @@ import (
 
 const (
 	subTokenBytes = 24 // 192 bit，URL 安全 Base64 后 32 个字符
-	queryFormat = "format"
-	pathSep     = "/"
+	queryFormat   = "format"
+	pathSep       = "/"
 
 	// 连接密码（docs/03 §5.4 连接密码，Ruling-58）：每用户每小时最多改 5 次
 	connPasswordPerHour = 5

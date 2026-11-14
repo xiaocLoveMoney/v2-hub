@@ -2,8 +2,8 @@ package api
 
 import (
 	"context"
-	"fmt"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -27,7 +27,7 @@ const (
 VALUES ($1, $2, 'abc123', '\x00', $3, $4) RETURNING id`
 	setEndUserCred = `UPDATE end_user SET client_cred_enc = $2 WHERE id = $1`
 	// testSealerKey 是接口测试共用的加密主密钥（仅测试用）。
-	testSealerKey = "KioqKioqKioqKioqKioqKioqKioqKioqKioqKioqKio="
+	testSealerKey  = "KioqKioqKioqKioqKioqKioqKioqKioqKioqKioqKio="
 	testClientCred = `{"uuid":"00000000-0000-4000-8000-000000000001","auth":"test-auth-value"}`
 )
 
