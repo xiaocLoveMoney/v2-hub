@@ -318,3 +318,32 @@ type CertFiles struct {
 type CertLocator interface {
 	WebCertFiles(ctx context.Context) (CertFiles, error)
 }
+
+// RealityScan 是面板对一个 REALITY 目标的探测结果（docs/03 §5.2 REALITY 目标扫描，Ruling-54）。
+type RealityScan struct {
+	Target   string
+	Host     string
+	Port     int
+	IP       string
+	Feasible bool
+	// Reason 是面板给出的不可用原因；可用时为空。
+	Reason      string
+	LatencyMs   int64
+	TLSVersion  string
+	ALPN        string
+	CertValid   bool
+	CertSubject string
+	CertIssuer  string
+	// ServerNames 是证书里可作 SNI 的域名。
+	ServerNames []string
+	// PrivateTarget 表示目标解析到内网 / 回环地址，面板没有探测。
+	PrivateTarget bool
+}
+
+// RealityScanner 是可选能力：让面板所在的机器探测 REALITY 目标。实现不得开启对内网地址的探测。
+type RealityScanner interface {
+	// ScanRealityTarget 探测一个目标；sni 为空用目标的域名，xver 是目标期望的 PROXY 协议版本。
+	ScanRealityTarget(ctx context.Context, target, sni string, xver int) (RealityScan, error)
+	// ScanRealityTargets 探测一组目标并按可用性与延迟排序；targets 为空时探测面板自己的候选站点。
+	ScanRealityTargets(ctx context.Context, targets []string) ([]RealityScan, error)
+}

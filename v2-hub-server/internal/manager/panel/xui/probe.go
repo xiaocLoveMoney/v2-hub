@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/url"
+	"strconv"
+	"strings"
 	"time"
 
 	"v2-hub-server/internal/manager/panel"
@@ -105,4 +107,90 @@ func (c *Client) WebCertFiles(ctx context.Context) (panel.CertFiles, error) {
 		return panel.CertFiles{}, err
 	}
 	return panel.CertFiles{CertFile: resp.WebCertFile, KeyFile: resp.WebKeyFile}, nil
+}
+
+// 3x-ui REALITY 目标扫描（Server 组）。allowPrivate 从不发送：面板默认不探测内网地址。
+const (
+	pathScanRealityTarget  = "/server/scanRealityTarget"
+	pathScanRealityTargets = "/server/scanRealityTargets"
+	formTarget             = "target"
+	formTargets            = "targets"
+	formSNI                = "sni"
+	formXver               = "xver"
+	targetSeparator        = ","
+	// realityScanTimeout 是一次扫描的请求时限：候选站点逐个握手，比普通调用慢。
+	realityScanTimeout = 45 * time.Second
+)
+
+var _ panel.RealityScanner = (*Client)(nil)
+
+// realityScanResp 是面板的 RealityScanResult（只取平台用到的字段）。
+type realityScanResp struct {
+	Target        string   `json:"target"`
+	Host          string   `json:"host"`
+	Port          int      `json:"port"`
+	IP            string   `json:"ip"`
+	Feasible      bool     `json:"feasible"`
+	Reason        string   `json:"reason"`
+	LatencyMs     int64    `json:"latencyMs"`
+	TLSVersion    string   `json:"tlsVersion"`
+	ALPN          string   `json:"alpn"`
+	CertValid     bool     `json:"certValid"`
+	CertSubject   string   `json:"certSubject"`
+	CertIssuer    string   `json:"certIssuer"`
+	ServerNames   []string `json:"serverNames"`
+	PrivateTarget bool     `json:"privateTarget"`
+}
+
+func (r realityScanResp) neutral() panel.RealityScan {
+	names := make([]string, 0, len(r.ServerNames))
+	for _, n := range r.ServerNames {
+		if n != "" {
+			names = append(names, n)
+		}
+	}
+	return panel.RealityScan{
+		Target: r.Target, Host: r.Host, Port: r.Port, IP: r.IP, Feasible: r.Feasible, Reason: truncate(r.Reason), LatencyMs: r.LatencyMs,
+		TLSVersion: r.TLSVersion, ALPN: r.ALPN, CertValid: r.CertValid, CertSubject: r.CertSubject, CertIssuer: r.CertIssuer,
+		ServerNames: names, PrivateTarget: r.PrivateTarget,
+	}
+}
+
+func (c *Client) scanForm(ctx context.Context, path string, form url.Values, out any) error {
+	slow := *c.http
+	slow.Timeout = realityScanTimeout
+	return c.sendWith(ctx, &slow, http.MethodPost, path, contentTypeForm, []byte(form.Encode()), out)
+}
+
+// ScanRealityTarget 实现 panel.RealityScanner。
+func (c *Client) ScanRealityTarget(ctx context.Context, target, sni string, xver int) (panel.RealityScan, error) {
+	form := url.Values{formTarget: {target}}
+	if sni != "" {
+		form.Set(formSNI, sni)
+	}
+	if xver > 0 {
+		form.Set(formXver, strconv.Itoa(xver))
+	}
+	var resp realityScanResp
+	if err := c.scanForm(ctx, pathScanRealityTarget, form, &resp); err != nil {
+		return panel.RealityScan{}, err
+	}
+	return resp.neutral(), nil
+}
+
+// ScanRealityTargets 实现 panel.RealityScanner；targets 为空时面板探测自己的候选站点。
+func (c *Client) ScanRealityTargets(ctx context.Context, targets []string) ([]panel.RealityScan, error) {
+	form := url.Values{}
+	if len(targets) > 0 {
+		form.Set(formTargets, strings.Join(targets, targetSeparator))
+	}
+	var resp []realityScanResp
+	if err := c.scanForm(ctx, pathScanRealityTargets, form, &resp); err != nil {
+		return nil, err
+	}
+	out := make([]panel.RealityScan, 0, len(resp))
+	for _, r := range resp {
+		out = append(out, r.neutral())
+	}
+	return out, nil
 }

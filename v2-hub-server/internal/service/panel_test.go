@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -610,6 +611,69 @@ func TestPanelWebCertFiles(t *testing.T) {
 	}
 	fake.FailWith(panel.ErrUnreachable)
 	if _, err := f.panels.WebCertFiles(ctx, srv.ID); !errors.Is(err, ErrUpstream) {
+		t.Errorf("unreachable panel: err = %v, want ErrUpstream", err)
+	}
+}
+
+// TestPanelRealityScan：REALITY 目标扫描（Ruling-54）——目标形状校验（不收网段与路径）、数量上限、结果透传、面板不可达。
+func TestPanelRealityScan(t *testing.T) {
+	f := newPanelFixture(t)
+	ctx := context.Background()
+	fake := f.fleet.get(fakeBase)
+	srv, err := f.panels.CreateServer(ctx, f.actor, serverInput("hk-1"), nil)
+	if err != nil {
+		t.Fatalf("CreateServer: %v", err)
+	}
+	const good = "www.example.com:443"
+	fake.SetRealityScan(panel.RealityScan{Target: good, Host: "www.example.com", Port: 443, Feasible: true, LatencyMs: 42, ServerNames: []string{"www.example.com"}})
+
+	res, err := f.panels.ScanRealityTarget(ctx, srv.ID, " "+good+" ", "www.example.com", 0)
+	if err != nil || !res.Feasible || res.LatencyMs != 42 || res.Target != good {
+		t.Fatalf("ScanRealityTarget = %+v, %v", res, err)
+	}
+	// 不可用的目标照常返回结果
+	if res, err := f.panels.ScanRealityTarget(ctx, srv.ID, "plain.example.net", "", 1); err != nil || res.Feasible || res.Reason == "" {
+		t.Fatalf("infeasible target = %+v, %v", res, err)
+	}
+	before := len(fake.RealityScanTargets())
+	for what, target := range map[string]string{
+		"empty": "", "cidr": "104.16.0.0/24", "url": "https://www.example.com", "path": "www.example.com/x", "space": "a b.example.com",
+		"bad port": "www.example.com:70000", "comma list": "a.example.com,b.example.com", "too long": strings.Repeat("a", 256),
+	} {
+		if _, err := f.panels.ScanRealityTarget(ctx, srv.ID, target, "", 0); !errors.Is(err, ErrInvalidArgument) {
+			t.Errorf("target %s: err = %v, want ErrInvalidArgument", what, err)
+		}
+	}
+	if _, err := f.panels.ScanRealityTarget(ctx, srv.ID, good, "not a host", 0); !errors.Is(err, ErrInvalidArgument) {
+		t.Errorf("bad sni: err = %v, want ErrInvalidArgument", err)
+	}
+	if _, err := f.panels.ScanRealityTarget(ctx, srv.ID, good, "", 3); !errors.Is(err, ErrInvalidArgument) {
+		t.Errorf("bad xver: err = %v, want ErrInvalidArgument", err)
+	}
+	if _, err := f.panels.ScanRealityTargets(ctx, srv.ID, []string{good, "10.0.0.0/8"}); !errors.Is(err, ErrInvalidArgument) {
+		t.Errorf("cidr in list: err = %v, want ErrInvalidArgument", err)
+	}
+	if _, err := f.panels.ScanRealityTargets(ctx, srv.ID, make([]string, maxRealityTargets+1)); !errors.Is(err, ErrInvalidArgument) {
+		t.Errorf("too many targets: err = %v, want ErrInvalidArgument", err)
+	}
+	if got := len(fake.RealityScanTargets()); got != before {
+		t.Fatalf("rejected scans reached the panel: %d calls", got-before)
+	}
+
+	// 不带目标：探测面板自己的候选；带目标：原样交给面板（IPv6 带方括号也接受）
+	list, err := f.panels.ScanRealityTargets(ctx, srv.ID, nil)
+	if err != nil || len(list) != 1 || list[0].Target != paneltest.FakeRealityCandidate {
+		t.Fatalf("candidate scan = %+v, %v", list, err)
+	}
+	list, err = f.panels.ScanRealityTargets(ctx, srv.ID, []string{good, "203.0.114.9", "[2606:4700::1111]:443"})
+	if err != nil || len(list) != 3 || !list[0].Feasible {
+		t.Fatalf("custom scan = %+v, %v", list, err)
+	}
+	if _, err := f.panels.ScanRealityTarget(ctx, srv.ID+999, good, "", 0); !errors.Is(err, ErrNotFound) {
+		t.Errorf("missing server: err = %v, want ErrNotFound", err)
+	}
+	fake.FailWith(panel.ErrUnreachable)
+	if _, err := f.panels.ScanRealityTargets(ctx, srv.ID, nil); !errors.Is(err, ErrUpstream) {
 		t.Errorf("unreachable panel: err = %v, want ErrUpstream", err)
 	}
 }
