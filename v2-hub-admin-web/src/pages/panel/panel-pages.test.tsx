@@ -7,7 +7,8 @@ import { setCsrfToken } from '../../api/client'
 import { SessionContext, type SessionContextValue } from '../../auth/session-context'
 import { PERMISSIONS } from '../../menu'
 import { NodesPage } from './NodesPage'
-import { ServerChainRulesPage } from './ServerChainRulesPage'
+import { ChainExitsPage } from './ChainExitsPage'
+import { ChainRoutesPage } from './ChainRoutesPage'
 import { ServerDetailPage } from './ServerDetailPage'
 import { ServersPage } from './ServersPage'
 
@@ -315,22 +316,119 @@ describe('服务端链式（docs/03 §5.19）', () => {
     expect(screen.queryByText('服务端链式下发')).toBeNull()
   })
 
-  it('全站规则列表按状态显示，换入口服务器过滤后重新拉取', async () => {
-    const rule = {
-      id: 5, user: { id: 7, username: 'alice' }, entry: { nodeId: 3, name: 'hk-1 · a', serverId: 1, serverName: 'hk-1' }, exit: { nodeId: 4, name: 'jp-1 · b' },
-      isEnabled: true, status: 'ok', blockedReason: '', applyStatus: 'applied', createdAt: '2026-11-14T00:00:00Z',
+  it('全站规则列表按起飞节点显示状态，换起飞服务器过滤后重新拉取', async () => {
+    const route = {
+      id: 5, user: { id: 7, username: 'alice' }, kind: 'server', position: 1, name: '',
+      entries: [
+        { nodeId: 3, name: 'hk-1 · a', serverId: 1, serverName: 'hk-1', state: 'applied', coveredBy: 0 },
+        { nodeId: 4, name: 'hk-1 · b', serverId: 1, serverName: 'hk-1', state: 'shadowed', coveredBy: 2 },
+      ],
+      exit: { kind: 'platform', id: 9, name: '东京出口', protocol: 'vless' },
+      isEnabled: true, status: 'ok', blockedReason: '', createdAt: '2026-11-14T00:00:00Z',
     }
-    const blocked = { ...rule, id: 6, status: 'blocked', blockedReason: 'plan', applyStatus: '' }
+    const blocked = {
+      ...route, id: 6, kind: 'client', position: 2, status: 'blocked', blockedReason: 'unsafe',
+      entries: [{ nodeId: 3, name: 'hk-1 · a', serverId: 1, serverName: 'hk-1', state: 'inactive', coveredBy: 0 }],
+      exit: { kind: 'own', id: 12, name: '家宽', protocol: 'socks' },
+    }
     const calls = mockServer({
       'GET /api/admin/servers': () => ok([server]),
-      'GET /api/admin/server-chain-rules': () => ok({ items: [rule, blocked], total: 2 }),
+      'GET /api/admin/chain-routes': () => ok({ items: [route, blocked], total: 2 }),
     })
-    renderWith(<ServerChainRulesPage />)
+    renderWith(<ChainRoutesPage />)
     expect(await screen.findAllByText('alice #7')).toHaveLength(2)
     expect(screen.getByText('生效')).toBeDefined()
-    expect(screen.getByText('阻断 · 套餐不支持')).toBeDefined()
-    fireEvent.mouseDown(screen.getByRole('combobox', { name: '按入口服务器过滤' }))
+    expect(screen.getByText('被覆盖（第 2 条）')).toBeDefined()
+    expect(screen.getByText('通畅')).toBeDefined()
+    expect(screen.getByText('阻断 · 出口地址不允许')).toBeDefined()
+    expect(screen.getByText('平台出口')).toBeDefined()
+    expect(screen.getByText('用户出口')).toBeDefined()
+    fireEvent.mouseDown(screen.getByRole('combobox', { name: '按起飞服务器过滤' }))
     fireEvent.click(await screen.findByTitle('hk-1'))
-    await waitFor(() => expect(calls.filter((c) => c.path === '/api/admin/server-chain-rules')).toHaveLength(2))
+    await waitFor(() => expect(calls.filter((c) => c.path === '/api/admin/chain-routes')).toHaveLength(2))
+  })
+})
+
+describe('链式出口', () => {
+  // 链接里的 UUID 是示例值，不对应任何真实节点
+  const LINK = 'vless://11111111-1111-4111-8111-111111111111@exit.example.net:443?type=tcp&security=tls#tokyo'
+  const platform = {
+    id: 9, owner: 'platform', user: null, name: '东京出口', protocol: 'vless', address: 'exit.example.net', port: 443, remark: '',
+    isEnabled: true, allowServer: true, allowClient: false, nodeGroups: [{ id: 2, name: 'basic' }], routeCount: 0,
+    createdAt: '2026-11-14T00:00:00Z', updatedAt: '2026-11-14T00:00:00Z',
+  }
+  const own = {
+    ...platform, id: 12, owner: 'user', user: { id: 7, username: 'alice' }, name: '家宽', protocol: 'socks', address: '203.0.114.20', port: 1080,
+    nodeGroups: [], routeCount: 2,
+  }
+  const handlers = () => ({
+    'GET /api/admin/node-groups': () => ok([{ id: 2, name: 'basic', remark: '', nodeIds: [], createdAt: '2026-11-14T00:00:00Z' }]),
+    'GET /api/admin/chain-exits': () => ok({ items: [own, platform], total: 2 }),
+  })
+
+  it('平台出口可编辑与查看链接；用户出口只有停用与删除，删除前写明连带的规则数', async () => {
+    const calls = mockServer({
+      ...handlers(),
+      'GET /api/admin/chain-exits/9/link': () => ok({ link: LINK }),
+      'PUT /api/admin/chain-exits/12/enabled': () => ok({ ...own, isEnabled: false }),
+      'DELETE /api/admin/chain-exits/12': () => ok(null),
+    })
+    renderWith(<ChainExitsPage />)
+    const ownRow = (await screen.findByText('家宽')).closest('tr')
+    const platformRow = screen.getByText('东京出口').closest('tr')
+    if (ownRow === null || platformRow === null) {
+      throw new Error('rows not rendered')
+    }
+    expect(within(ownRow).getByText('alice #7')).toBeDefined()
+    expect(within(ownRow).queryByRole('button', { name: '编 辑' })).toBeNull()
+    expect(within(ownRow).queryByRole('button', { name: '查看链接' })).toBeNull()
+    expect(within(platformRow).getByText('服务端')).toBeDefined()
+    expect(within(platformRow).queryByText('客户端')).toBeNull()
+
+    // 链接点了才取
+    expect(calls.some((c) => c.path === '/api/admin/chain-exits/9/link')).toBe(false)
+    fireEvent.click(within(platformRow).getByRole('button', { name: '查看链接' }))
+    expect(await screen.findByText(LINK)).toBeDefined()
+
+    fireEvent.click(within(ownRow).getByRole('button', { name: '停 用' }))
+    fireEvent.click(await screen.findByRole('button', { name: /确\s*定|OK/ }))
+    await waitFor(() => {
+      const call = calls.find((c) => c.method === 'PUT' && c.path === '/api/admin/chain-exits/12/enabled')
+      expect(call?.csrf).toBe(CSRF)
+      expect(call?.body).toEqual({ isEnabled: false })
+    })
+
+    fireEvent.click(within(ownRow).getByRole('button', { name: '删 除' }))
+    expect(await screen.findByText('会连带删除引用它的 2 条规则。')).toBeDefined()
+  })
+
+  it('新建平台出口提交表单；修改时链接留空不提交', async () => {
+    const calls = mockServer({
+      ...handlers(),
+      'POST /api/admin/chain-exits': () => ok(platform),
+      'PUT /api/admin/chain-exits/9': () => ok(platform),
+    })
+    renderWith(<ChainExitsPage />)
+    await screen.findByText('东京出口')
+    fireEvent.click(screen.getByRole('button', { name: /新建平台出口/ }))
+    fireEvent.change(await screen.findByLabelText('名称'), { target: { value: '大阪出口' } })
+    fireEvent.change(screen.getByLabelText('链接'), { target: { value: LINK } })
+    fireEvent.click(screen.getByRole('button', { name: '创 建' }))
+    await waitFor(() => {
+      const call = calls.find((c) => c.method === 'POST' && c.path === '/api/admin/chain-exits')
+      expect(call?.csrf).toBe(CSRF)
+      expect(call?.body).toEqual({ name: '大阪出口', link: LINK, remark: '', isEnabled: true, allowServer: true, allowClient: false, nodeGroupIds: [] })
+    })
+
+    const platformRow = screen.getByText('东京出口').closest('tr')
+    if (platformRow === null) {
+      throw new Error('row not rendered')
+    }
+    fireEvent.click(within(platformRow).getByRole('button', { name: '编 辑' }))
+    fireEvent.click(await screen.findByRole('button', { name: '保 存' }))
+    await waitFor(() => {
+      const call = calls.find((c) => c.method === 'PUT' && c.path === '/api/admin/chain-exits/9')
+      expect(call?.body).toEqual({ name: '东京出口', remark: '', isEnabled: true, allowServer: true, allowClient: false, nodeGroupIds: [2] })
+    })
   })
 })

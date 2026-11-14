@@ -46,7 +46,7 @@ afterEach(() => {
 describe('visibleMenu', () => {
   it('按权限码过滤菜单，无权限要求的项始终可见', () => {
     const paths = visibleMenu((p) => p === PERMISSIONS.NODE_READ).map((e) => e.path)
-    expect(paths).toEqual([ROUTES.DASHBOARD, ROUTES.NODES, ROUTES.SECURITY])
+    expect(paths).toEqual([ROUTES.DASHBOARD, ROUTES.NODES, ROUTES.CHAIN_EXITS, ROUTES.SECURITY])
   })
 })
 
