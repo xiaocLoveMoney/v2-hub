@@ -119,7 +119,8 @@ NODE_A="$(printf '%s' "$overview" | jq -r '.data.nodes[0].id')"
 NODE_B="$(printf '%s' "$overview" | jq -r '.data.nodes[1].id')"
 
 # ---- 5. 我的出口与两条规则；坏链接 400、重复的组合标为 duplicate、起飞等于落地 400 ----
-portal POST /api/user/chain/exits '{"link":"http://203.0.113.8:1080"}' >/dev/null; expect_code 400 "不支持的链接"
+# http:// 与 https:// 自 M10 起是合法的代理出口（Ruling-51），这里用没有支持的协议
+portal POST /api/user/chain/exits '{"link":"ftp://203.0.113.8:1080"}' >/dev/null; expect_code 400 "不支持的链接"
 custom="$(portal POST /api/user/chain/exits "$(jq -nc --arg l "$CUSTOM_LINK" '{link:$l}')")"; expect_code 200 "添加我的出口"
 CUSTOM_ID="$(printf '%s' "$custom" | jq -r .data.id)"
 [ "$(printf '%s' "$custom" | jq -r '.data.name + " " + .data.protocol')" = "$CUSTOM_NAME socks" ] || fail "出口名称与协议不对：$custom"
