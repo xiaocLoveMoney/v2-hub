@@ -1,7 +1,9 @@
 # 所有分支：提交信息 / 分支名格式、CODEOWNERS 覆盖每个模块目录。
 name: preflight
 on:
+  # 只看分支推送：推 tag（vX.Y）时 GITHUB_REF_NAME 是 tag 名，不该按分支名校验
   push:
+    branches: ['**']
   pull_request:
 permissions:
   contents: read
