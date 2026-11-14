@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: v2-hub API
-  version: 0.7.2
+  version: 0.7.3
   description: |
     v2-hub 对外接口契约（hub-server 提供，v2-hub-admin-web / v2-hub-user-web 消费）。
     - 管理端接口前缀 /api/admin，客户端接口前缀 /api/user，订阅端点前缀 /sub。
@@ -22,6 +22,7 @@ info:
       自有落地节点改名为出口（chain/exits），新增平台出口与管理端的出口、规则接口；删除 chain/rules、chain/server-rules、admin/server-chain-rules。
     0.7.1：系统设置增加 routing 分组（routing.blockRule，平台拦截规则，Ruling-55）。
     0.7.2：出口延迟测试结果增加 reason（不通的原因大类，Ruling-56）。
+    0.7.3：侧栏菜单顺序（Ruling-57）——系统设置增加 menu 分组（menu.admin、menu.user），管理员会话信息与公开站点信息带 menuOrder。
 servers:
   - url: http://127.0.0.1:8080
     description: 本地开发
@@ -4331,10 +4332,11 @@ components:
         username: { type: string }
     Session:
       type: object
-      required: [admin, permissions, csrfToken, totpEnabled]
+      required: [admin, permissions, csrfToken, totpEnabled, menuOrder]
       properties:
         admin: { $ref: "#/components/schemas/AdminBrief" }
         totpEnabled: { type: boolean }
+        menuOrder: { $ref: "#/components/schemas/MenuOrder", description: "管理端侧栏菜单顺序（系统设置 menu.admin，0.7.3，Ruling-57）；空数组 = 默认顺序" }
         permissions:
           type: array
           description: 有效权限码（super_admin 返回全部）
@@ -4928,9 +4930,10 @@ components:
       enum: [open, invite, closed]
     SiteInfo:
       type: object
-      required: [siteName, registerMode, emailVerifyRequired, mailEnabled, checkinEnabled, ticketEnabled, sharedEnabled]
+      required: [siteName, registerMode, emailVerifyRequired, mailEnabled, checkinEnabled, ticketEnabled, sharedEnabled, menuOrder]
       properties:
         siteName: { type: string }
+        menuOrder: { $ref: "#/components/schemas/MenuOrder", description: "客户门户侧栏菜单顺序（系统设置 menu.user，0.7.3，Ruling-57）；空数组 = 默认顺序" }
         registerMode: { $ref: "#/components/schemas/RegisterMode" }
         emailVerifyRequired: { type: boolean, description: 注册是否要先验证邮箱（设置为真且邮件可用） }
         mailEnabled: { type: boolean, description: 邮件是否可用；为假时找回密码与换绑邮箱不可用 }
@@ -4957,7 +4960,7 @@ components:
     Settings:
       type: object
       description: 全部系统设置（docs/03 §5.6 设置清单），键名去掉点号改驼峰分组
-      required: [site, register, invite, checkin, ticket, shared, mail, subscription, shop, rebate, notify, mailEnabled, alert, telegram, report, landing, support, routing, telegramEnabled]
+      required: [site, register, invite, checkin, ticket, shared, mail, subscription, shop, rebate, notify, mailEnabled, alert, telegram, report, landing, support, routing, menu, telegramEnabled]
       properties:
         mailEnabled: { type: boolean, readOnly: true, description: SMTP 环境变量是否已配置（Ruling-24），不可经接口修改 }
         telegramEnabled: { type: boolean, readOnly: true, description: 环境变量 HUB_TELEGRAM_BOT_TOKEN 是否已配置（0.4.3，Ruling-42） }
@@ -5005,6 +5008,13 @@ components:
           required: [blockRule]
           properties:
             blockRule: { type: boolean, description: 在每台已接入服务器的模板里加平台拦截规则 hub-block（Ruling-55），默认开 }
+        menu:
+          type: object
+          description: 侧栏菜单顺序（0.7.3，docs/03 §5.6 菜单顺序，Ruling-57）；空数组 = 默认顺序
+          required: [admin, user]
+          properties:
+            admin: { $ref: "#/components/schemas/MenuOrder" }
+            user: { $ref: "#/components/schemas/MenuOrder" }
         site:
           type: object
           required: [name, timezone]
@@ -5098,6 +5108,13 @@ components:
         landing: { type: object, additionalProperties: true }
         support: { type: object, additionalProperties: true }
         routing: { type: object, additionalProperties: true }
+        menu: { type: object, additionalProperties: true }
+    MenuOrder:
+      type: array
+      description: 菜单键按期望顺序排成的列表（docs/03 §5.6 菜单键目录）；后端只校验格式，前端忽略不认识的键，没列到的项按默认顺序排在后面
+      maxItems: 64
+      uniqueItems: true
+      items: { type: string, pattern: "^[a-z][a-z0-9-]{0,31}$" }
     TestMailInput:
       type: object
       required: [to]
