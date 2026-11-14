@@ -211,6 +211,7 @@ describe('SettingsPage', () => {
     report: { dailyEnabled: false, dailyHour: 9 },
     landing: { enabled: false, headline: '', intro: '' },
     support: { url: '', label: '在线客服' },
+    routing: { blockRule: true },
   }
 
   it('整张表单一起保存，不带只读的 mailEnabled 与 telegramEnabled；未配置时测试邮件与 Telegram 测试不可用', async () => {
@@ -229,13 +230,17 @@ describe('SettingsPage', () => {
     fireEvent.click(screen.getByRole('button', { name: /保存全部设置/ }))
     expect(await screen.findByText('只接受 https:// 开头的地址')).toBeDefined()
     fireEvent.change(screen.getByLabelText('客服链接'), { target: { value: '' } })
+    // 平台拦截规则默认开，关掉后随整张表单保存（Ruling-55）
+    const blockRule = screen.getByRole('switch', { name: '平台拦截规则' })
+    expect(blockRule.getAttribute('aria-checked')).toBe('true')
+    fireEvent.click(blockRule)
 
     fireEvent.click(screen.getByRole('button', { name: /保存全部设置/ }))
     await waitFor(() => expect(calls.some((c) => c.method === 'PUT')).toBe(true))
     const put = calls.find((c) => c.method === 'PUT')
     expect(put?.csrf).toBe(TEST_CSRF)
     const { mailEnabled: _readOnly, telegramEnabled: _readOnlyToo, ...editable } = settings
-    expect(put?.body).toEqual({ ...editable, site: { ...settings.site, name: '新站名' } })
+    expect(put?.body).toEqual({ ...editable, site: { ...settings.site, name: '新站名' }, routing: { blockRule: false } })
   })
 
   it('只有 setting:read 时表单只读、没有保存按钮', async () => {

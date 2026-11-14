@@ -42,7 +42,7 @@ const supportURLRules = [
   },
 ]
 
-/** 掉线告警、Telegram、日报、落地页与客服入口的设置卡片；放在系统设置的同一张表单里整体保存。 */
+/** 掉线告警、Telegram、日报、落地页、客服入口与服务器路由的设置卡片；放在系统设置的同一张表单里整体保存。 */
 export function OpsSettingsCards({ isTelegramEnabled }: { isTelegramEnabled: boolean }) {
   return (
     <>
@@ -107,6 +107,18 @@ export function OpsSettingsCards({ isTelegramEnabled }: { isTelegramEnabled: boo
         </Form.Item>
         <Form.Item name={['support', 'label']} label="客服按钮文字" rules={[{ required: true, max: MAX_SUPPORT_LABEL_LEN, message: `1–${MAX_SUPPORT_LABEL_LEN} 个字符` }]}>
           <Input autoComplete="off" />
+        </Form.Item>
+      </Card>
+
+      <Card title="服务器路由" className="settings-card">
+        {/* docs/03 §5.19 拦截规则，Ruling-55 */}
+        <Form.Item
+          name={['routing', 'blockRule']}
+          label="平台拦截规则"
+          extra="在每台已接入服务器的 Xray 模板里加一条拦截规则 hub-block：广告、360、百度地图上报、临时邮箱、迅雷、部分网站与支付 / 游戏点卡站、MetaTrader。开或关之后每台服务器会重启一次 Xray（断开现有连接）"
+          valuePropName="checked"
+        >
+          <Switch />
         </Form.Item>
       </Card>
     </>
