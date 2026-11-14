@@ -34,7 +34,7 @@ cd v2-hub-contract/deploy/it && bash run_all.sh
 - 前端静态文件放 MinIO，Caddy 同域反代 `/api`、`/sub`（Ruling-5、Ruling-6）。
 
 契约（全部在 v2-hub-contract/）：`hub-api.yaml`（server → 前端）、`deploy/init.sql`（server 的表结构）、
-`upstream/3x-ui/openapi-v3.11.0.json`（3x-ui → server 的上游基准）。契约版本用 git tag `vX.Y`，当前 `v0.9`。
+`upstream/3x-ui/openapi-v3.11.0.json`（3x-ui → server 的上游基准）。契约版本用 git tag `vX.Y`，当前 `v0.10`。
 
 ## 跨目录纪律
 
@@ -77,6 +77,10 @@ GitHub 仓库设置见 `docs/github-仓库设置清单.md`。
 - M8 完成（2026-11-14，tag `v0.9`）：运营（Ruling-42 – Ruling-45）：管理端总览（按权限出区块）、服务器掉线告警与恢复通知（邮件 + Telegram，
   Bot token 只走 `HUB_TELEGRAM_BOT_TOKEN`）、运营日报、落地页与公开套餐、客服入口、收支按月与 CSV 导出；用户端中英双语（自写 i18n，`src/i18n/`）；IT-10 通过。
   真实 Telegram / SMTP 投递、英文界面人工通读与管理端 M8 页面的浏览器实测未自动化，待人工验证。
-- 路线图 M3–M8 已全部完成；后续工作待定。
+- M9 完成（2026-11-14，tag `v0.10`）：链式改造（Ruling-46 – Ruling-50）：规则改为有序的“起飞节点（多选）→ 落地（单选）”，服务端同一起飞入站取最靠前的可用规则、
+  客户端每个组合都进订阅；落地可选平台节点、平台出口（管理员添加，挂节点组授权）或用户出口；用户出口可用于服务端链式，
+  配套防护：只许公网地址并固定 IP、字段白名单、防环、每用户写操作频控、下发失败隔离；管理端可管理全部出口；IT-11 通过。
+  真实流量的出口 IP、两端 M9 页面登录后的浏览器实测未自动化，待人工验证。
+- 路线图 M3–M8 与 M9（链式改造）已完成；后续工作待定。
 - 路线（2026-11-13，Ruling-17 – Ruling-22）：参考 SSPanel-Uim Malio 的功能与界面，自行实现；里程碑为
   M3 订阅与用户端基础 → M4 自助运营 → M5 商店与钱包 → M6 / M7 两种链式 → M8 运营，见 docs/07。
