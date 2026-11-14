@@ -1,7 +1,20 @@
-# 生产入口（Ruling-5、Ruling-6）：Caddy 负责 HTTPS；/api 与订阅地址（Ruling-59）反代到 hub-server，
-# 其余请求从 MinIO 桶读取前端静态文件。无扩展名的路径回退到 index.html（SPA 路由）。
+# 生产入口（Ruling-6、Ruling-61）：单域名，Caddy 负责 HTTPS；/api 与订阅地址（Ruling-59）反代到 hub-server，
+# 管理端在 /admin/ 下、读 MinIO 桶 web-admin，其余读 web-user。无扩展名的路径回退到 index.html（SPA 路由）。
 {
-	email {$ACME_EMAIL}
+	# 证书用 HTTP-01 申请，不登记邮箱（空的 email 会让配置解析失败）。
+	# 域名经 Cloudflare 代理（Ruling-61）：只有来自 Cloudflare 网段的连接才采信 CF-Connecting-IP，其余取直连地址。
+	# 网段取自 https://www.cloudflare.com/ips-v4 与 ips-v6（2026-11-15）
+	servers {
+		trusted_proxies static 173.245.48.0/20 103.21.244.0/22 103.22.200.0/22 103.31.4.0/22 141.101.64.0/18 108.162.192.0/18 190.93.240.0/20 188.114.96.0/20 197.234.240.0/22 198.41.128.0/17 162.158.0.0/15 104.16.0.0/13 104.24.0.0/14 172.64.0.0/13 131.0.72.0/22 2400:cb00::/32 2606:4700::/32 2803:f800::/32 2405:b500::/32 2405:8100::/32 2a06:98c0::/29 2c0f:f248::/32
+		client_ip_headers CF-Connecting-IP
+	}
+}
+
+# 交给 hub-server：X-Forwarded-For 只放 Caddy 认定的客户端地址，hub-server 取最右一个（只采信 docker 网段的直连）
+(to_hub) {
+	reverse_proxy hub-server:8080 {
+		header_up X-Forwarded-For {client_ip}
+	}
 }
 
 (spa_from_minio) {
@@ -16,27 +29,26 @@
 	}
 }
 
-{$HUB_ADMIN_DOMAIN} {
+{$HUB_DOMAIN} {
 	encode zstd gzip
 	handle /api/* {
-		reverse_proxy hub-server:8080
+		import to_hub
 	}
-	import spa_from_minio web-admin
-}
-
-{$HUB_USER_DOMAIN} {
-	encode zstd gzip
-	handle /api/* {
-		reverse_proxy hub-server:8080
-	}
-	# 订阅地址：/{随机前缀}/{令牌}（Ruling-59）。前缀由后台设置、可改，这里按路径形状转发，后端只认当前与过渡中的前缀
+	# 订阅地址：/{随机前缀}/{令牌}（Ruling-59）。前缀由后台设置、可改，这里按路径形状转发，后端只认当前与过渡中的前缀；
+	# 前缀至少 10 位，不会与 /admin/ 等短路径相撞
 	@subscription path_regexp ^/[a-z0-9]{10,32}/[A-Za-z0-9_-]{22,64}$
 	handle @subscription {
-		reverse_proxy hub-server:8080
+		import to_hub
 	}
 	# 旧的固定前缀，升级后的过渡期内仍可用；过期后由后端返回 404
 	handle /sub/* {
-		reverse_proxy hub-server:8080
+		import to_hub
 	}
-	import spa_from_minio web-user
+	redir /admin /admin/ 308
+	handle_path /admin/* {
+		import spa_from_minio web-admin
+	}
+	handle {
+		import spa_from_minio web-user
+	}
 }

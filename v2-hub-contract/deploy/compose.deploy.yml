@@ -1,14 +1,28 @@
 # 生产编排（单台独立服务器）：hub-server + Caddy + PostgreSQL + MinIO。
 # v2-hub 只做控制面，不转发代理流量；对外只开 80/443。
-# 用法：cd deploy && docker compose -f compose.deploy.yml --env-file .env up -d
+# 由 deploy_prod.sh 同步到生产机 /opt/v2-hub 后执行（Ruling-62）；手动操作：
+#   docker compose -f /opt/v2-hub/compose.deploy.yml --env-file /opt/v2-hub/.env ps
 name: v2-hub
+x-logging: &logging
+  driver: json-file
+  options: { max-size: "20m", max-file: "5" }
 services:
   hub-server:
-    image: v2-hub-server:${IMAGE_TAG:-dev}
+    # 部署时以提交号为标签构建并同时打上 current；手动执行 compose 时用 current
+    image: v2-hub-server:${IMAGE_TAG:-current}
     restart: unless-stopped
+    logging: *logging
     environment:
       HUB_DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable
       HUB_ENCRYPTION_KEY: ${HUB_ENCRYPTION_KEY}
+      # 留空 = 邮件 / Telegram 不可用（docs/03 §5.7，Ruling-42）
+      HUB_SMTP_HOST: ${HUB_SMTP_HOST:-}
+      HUB_SMTP_PORT: ${HUB_SMTP_PORT:-587}
+      HUB_SMTP_USERNAME: ${HUB_SMTP_USERNAME:-}
+      HUB_SMTP_PASSWORD: ${HUB_SMTP_PASSWORD:-}
+      HUB_SMTP_FROM: ${HUB_SMTP_FROM:-}
+      HUB_SMTP_TLS: ${HUB_SMTP_TLS:-starttls}
+      HUB_TELEGRAM_BOT_TOKEN: ${HUB_TELEGRAM_BOT_TOKEN:-}
     depends_on:
       postgres: { condition: service_healthy }
 
@@ -16,10 +30,9 @@ services:
     image: caddy:2.10-alpine
     restart: unless-stopped
     ports: ["80:80", "443:443", "443:443/udp"]
+    logging: *logging
     environment:
-      HUB_ADMIN_DOMAIN: ${HUB_ADMIN_DOMAIN}
-      HUB_USER_DOMAIN: ${HUB_USER_DOMAIN}
-      ACME_EMAIL: ${ACME_EMAIL:-}
+      HUB_DOMAIN: ${HUB_DOMAIN}
     volumes:
       - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy-data:/data
@@ -29,6 +42,7 @@ services:
   postgres:
     image: postgres:17-alpine
     restart: unless-stopped
+    logging: *logging
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
@@ -42,6 +56,7 @@ services:
   minio:
     image: pgsty/minio:RELEASE.2026-08-04T00-00-00Z
     restart: unless-stopped
+    logging: *logging
     command: ["server", "/data", "--console-address", ":9001"]
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER}
