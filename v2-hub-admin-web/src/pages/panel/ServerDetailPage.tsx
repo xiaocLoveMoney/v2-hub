@@ -12,6 +12,7 @@ import { EndpointModal } from './InboundModals'
 import { InboundFormModal } from './inbound-form/InboundFormModal'
 import { serverDomainOf } from './inbound-form/model'
 import { ServerStatusTag } from './status'
+import { formatCountry } from './countries'
 
 interface EndpointTagProps {
   endpoint: Endpoint
@@ -183,7 +184,7 @@ export function ServerDetailPage() {
             <ServerStatusTag status={srv.status} lastError={srv.lastError} isDisabled={srv.isDisabled} />
           </Descriptions.Item>
           <Descriptions.Item label="面板">{srv.providerType} {srv.panelVersion}</Descriptions.Item>
-          <Descriptions.Item label="地区">{srv.region || '—'}</Descriptions.Item>
+          <Descriptions.Item label="位置">{formatCountry(srv.region)}</Descriptions.Item>
           <Descriptions.Item label="地址">{srv.baseUrl}</Descriptions.Item>
           <Descriptions.Item label="最近同步">{formatTime(srv.lastSyncedAt)}</Descriptions.Item>
           <Descriptions.Item label="备注">{srv.remark || '—'}</Descriptions.Item>

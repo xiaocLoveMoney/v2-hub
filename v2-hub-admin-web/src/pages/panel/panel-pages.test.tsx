@@ -12,6 +12,7 @@ import { parseExitLink } from './chain-exit-link'
 import { ChainRoutesPage } from './ChainRoutesPage'
 import { ServerDetailPage } from './ServerDetailPage'
 import { ServersPage } from './ServersPage'
+import { countryName } from './countries'
 
 const CSRF = 'csrf-test-token'
 const ALL = [PERMISSIONS.SERVER_READ, PERMISSIONS.SERVER_WRITE, PERMISSIONS.NODE_READ, PERMISSIONS.NODE_WRITE]
@@ -124,6 +125,53 @@ describe('ServersPage', () => {
     expect(valueOf(dialog, '名称')).toBe('')
     expect(valueOf(dialog, '面板地址')).toBe('')
     expect(valueOf(dialog, 'API token')).toBe('')
+  })
+})
+
+describe('服务器位置（Ruling-65）', () => {
+  it('列表显示国家名；编辑时“扫描位置”只填进下拉框，保存才提交', async () => {
+    const calls = mockServer({
+      'GET /api/admin/servers': () => ok([server]),
+      'POST /api/admin/servers/1/locate': () => ok({ region: 'JP', publicIp: '203.0.113.9' }),
+      'PUT /api/admin/servers/1': () => ok({ ...server, region: 'JP' }),
+    })
+    renderWith(<ServersPage />)
+    expect(await screen.findByText(countryName('HK'))).toBeDefined()
+
+    fireEvent.click(screen.getByRole('button', { name: /编\s*辑/ }))
+    const dialog = await screen.findByRole('dialog')
+    fireEvent.click(within(dialog).getByRole('button', { name: /扫描位置/ }))
+    await waitFor(() => expect(calls.some((c) => c.path === '/api/admin/servers/1/locate')).toBe(true))
+    expect(calls.find((c) => c.path === '/api/admin/servers/1/locate')?.csrf).toBe(CSRF)
+    expect(await within(dialog).findByText(`${countryName('JP')}（JP）`)).toBeDefined()
+    expect(calls.some((c) => c.method === 'PUT')).toBe(false)
+
+    fireEvent.click(within(dialog).getByRole('button', { name: /保\s*存/ }))
+    await waitFor(() => expect(calls.some((c) => c.method === 'PUT')).toBe(true))
+    expect(calls.find((c) => c.method === 'PUT')?.body).toMatchObject({ name: 'hk-1', region: 'JP' })
+  })
+
+  it('节点地区跟随服务器：编辑表单里只读，保存不提交地区', async () => {
+    const node = {
+      id: 5, inboundId: 10, endpointId: null, serverId: 1, serverName: 'hk-1', protocol: 'vless', address: 'panel.example.com', port: 443,
+      displayName: '香港 01', region: 'HK', tags: [], sortOrder: 0, isEnabled: true, isMissing: false, groupIds: [],
+    }
+    const calls = mockServer({
+      'GET /api/admin/servers': () => ok([server]),
+      'GET /api/admin/node-groups': () => ok([]),
+      'GET /api/admin/nodes': () => ok({ items: [node], total: 1 }),
+      'PUT /api/admin/nodes/5': () => ok(null),
+    })
+    renderWith(<NodesPage />)
+    await screen.findByText('香港 01')
+    fireEvent.click(screen.getByRole('button', { name: /编\s*辑/ }))
+    const dialog = await screen.findByRole('dialog')
+    const region = within(dialog).getByLabelText('地区') as HTMLInputElement
+    expect(region.value).toBe(countryName('HK'))
+    expect(region.disabled).toBe(true)
+    fireEvent.click(within(dialog).getByRole('button', { name: /保\s*存/ }))
+    await waitFor(() => expect(calls.some((c) => c.method === 'PUT')).toBe(true))
+    expect(calls.find((c) => c.method === 'PUT')?.body).toEqual({ displayName: '香港 01', tags: [], sortOrder: 0, isEnabled: true })
   })
 })
 

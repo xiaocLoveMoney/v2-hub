@@ -708,6 +708,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/admin/servers/{id}/locate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 扫描服务器位置（Ruling-65，server:write；0.10.0）
+         * @description 经面板读服务器自报的公网 IP，再查 IP 库得出国家码；只返回结果、不保存（管理员在表单里保存才生效）。面板没报公网 IP、IP 不是公网地址、IP 库查不到或扫描已关闭返回 409；面板连不上返回 502。不记审计。
+         */
+        post: operations["locateServer"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/admin/servers/{id}/reality-scan": {
         parameters: {
             query?: never;
@@ -1895,6 +1917,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/user/nodes/{id}/metrics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        /**
+         * 该节点所在服务器的在线人数与负载趋势（Ruling-65；0.10.0）
+         * @description 近 24 小时为 5 分钟采样原值，近 7 天按小时平均；服务器不在线的时段没有点。节点不在本人节点列表里返回 404。
+         */
+        get: operations["getUserNodeMetrics"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/user/nodes/{id}/link": {
         parameters: {
             query?: never;
@@ -2866,9 +2910,36 @@ export interface components {
         };
         ServerInput: components["schemas"]["ServerConnInput"] & {
             name: string;
-            region?: string;
+            region?: components["schemas"]["CountryCode"];
             remark?: string;
             isDisabled?: boolean;
+        };
+        /** @description ISO 3166-1 两位国家码（大写），空串表示未知（Ruling-65） */
+        CountryCode: string;
+        ServerLocation: {
+            region: components["schemas"]["CountryCode"];
+            /** @description 面板报出的公网 IP */
+            publicIp: string;
+        };
+        /**
+         * @default 24h
+         * @enum {string}
+         */
+        MetricRange: "24h" | "7d";
+        NodeMetrics: {
+            range: components["schemas"]["MetricRange"];
+            points: components["schemas"]["NodeMetricPoint"][];
+        };
+        NodeMetricPoint: {
+            /**
+             * Format: date-time
+             * @description 时段起点（5 分钟或 1 小时对齐）
+             */
+            at: string;
+            /** @description 所在服务器的在线 client 数 */
+            onlineClients: number;
+            /** @description CPU 占用百分比，未知为 null */
+            load: number | null;
         };
         PanelInfo: {
             version: string;
@@ -2886,6 +2957,7 @@ export interface components {
             baseUrl: string;
             tlsMode: components["schemas"]["TlsMode"];
             certPinSha256?: string | null;
+            /** @description 服务器位置，ISO 两位国家码，空串为未知（Ruling-65） */
             region: string;
             remark: string;
             isDisabled: boolean;
@@ -3023,6 +3095,7 @@ export interface components {
             address: string;
             port: number;
             displayName: string;
+            /** @description 所在服务器的位置（只读，跟随服务器，Ruling-65） */
             region: string;
             tags: string[];
             sortOrder: number;
@@ -3033,7 +3106,6 @@ export interface components {
         };
         NodeInput: {
             displayName: string;
-            region: string;
             tags: string[];
             sortOrder: number;
             isEnabled: boolean;
@@ -3298,6 +3370,7 @@ export interface components {
             /** Format: int64 */
             id: number;
             name: string;
+            /** @description 所在服务器的位置（ISO 两位国家码，空串为未知；Ruling-65） */
             region: string;
             protocol: string;
             isServerOnline: boolean;
@@ -4418,6 +4491,7 @@ export interface components {
             /** Format: int64 */
             id: number;
             name: string;
+            /** @description 所在服务器的位置（ISO 两位国家码，空串为未知；Ruling-65） */
             region: string;
             protocol: string;
             /** @description 能否作落地；hysteria2 不能 */
@@ -6276,6 +6350,37 @@ export interface operations {
                 };
             };
             400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            502: components["responses"]["UpstreamUnavailable"];
+        };
+    };
+    locateServer: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 扫描结果 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["ServerLocation"];
+                    };
+                };
+            };
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["PermissionDenied"];
             404: components["responses"]["NotFound"];
@@ -8636,6 +8741,36 @@ export interface operations {
             };
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["AccountDisabled"];
+        };
+    };
+    getUserNodeMetrics: {
+        parameters: {
+            query?: {
+                range?: components["schemas"]["MetricRange"];
+            };
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 趋势点，按时间升序 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["NodeMetrics"];
+                    };
+                };
+            };
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["AccountDisabled"];
+            404: components["responses"]["NotFound"];
         };
     };
     getUserNodeLink: {

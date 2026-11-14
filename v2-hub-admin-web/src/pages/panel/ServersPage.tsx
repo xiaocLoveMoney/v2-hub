@@ -9,6 +9,7 @@ import { PERMISSIONS } from '../../menu'
 import { TABLE_SCROLL, formatTime } from '../system/format'
 import { ServerFormModal } from './ServerFormModal'
 import { ServerStatusTag } from './status'
+import { formatCountry } from './countries'
 
 const loadServers = (signal: AbortSignal) => api.GET('/api/admin/servers', { signal })
 
@@ -58,7 +59,7 @@ export function ServersPage() {
 
   const columns: TableProps<Server>['columns'] = [
     { title: '名称', dataIndex: 'name', render: (name: string, s: Server) => <Link to={`/servers/${s.id}`}>{name}</Link> },
-    { title: '地区', dataIndex: 'region' },
+    { title: '位置', dataIndex: 'region', render: (v: string) => formatCountry(v) },
     { title: '状态', key: 'status', render: (_: unknown, s: Server) => <ServerStatusTag status={s.status} lastError={s.lastError} isDisabled={s.isDisabled} /> },
     { title: '面板版本', dataIndex: 'panelVersion' },
     { title: '入站', dataIndex: 'inboundCount' },
