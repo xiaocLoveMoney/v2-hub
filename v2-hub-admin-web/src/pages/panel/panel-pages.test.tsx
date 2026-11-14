@@ -532,7 +532,7 @@ describe('链式出口', () => {
   })
 
   it('测试出口：选服务器与方式后提交，显示延迟与出口 IP；不通时显示面板给的原因；没有 server:read 时不出现按钮', async () => {
-    let result: Record<string, unknown> = { ok: true, mode: 'http', delayMs: 87, httpStatus: 204, egressIp: '198.51.100.7', egressRegion: 'JP', error: '' }
+    let result: Record<string, unknown> = { ok: true, mode: 'http', reason: 'none', delayMs: 87, httpStatus: 204, egressIp: '198.51.100.7', egressRegion: 'JP', error: '' }
     const calls = mockServer({
       ...handlers(),
       'GET /api/admin/servers': () => ok([server, { ...server, id: 2, name: 'jp-off', isDisabled: true }]),
@@ -556,12 +556,13 @@ describe('链式出口', () => {
     expect(sent?.csrf).toBe(CSRF)
     expect(sent?.body).toEqual({ serverId: 1, mode: 'http' })
 
-    result = { ok: false, mode: 'http', delayMs: 0, httpStatus: 0, egressIp: '', egressRegion: '', error: 'dial tcp: i/o timeout' }
+    result = { ok: false, mode: 'http', reason: 'timeout', delayMs: 0, httpStatus: 0, egressIp: '', egressRegion: '', error: 'dial tcp: i/o timeout' }
     // 按钮退出“加载中”要再过一次渲染，之前的点击会被 antd 吞掉
     await waitFor(() => expect(within(dialog).getByRole('button', { name: /开始测试/ }).className).not.toContain('ant-btn-loading'))
     fireEvent.click(within(dialog).getByRole('button', { name: /开始测试/ }))
     expect(await within(dialog).findByText('不通')).toBeDefined()
     expect(within(dialog).getByText('dial tcp: i/o timeout')).toBeDefined()
+    expect(within(dialog).getByText(/^连接出口超时/)).toBeDefined()
     view.unmount()
     cleanup()
 
