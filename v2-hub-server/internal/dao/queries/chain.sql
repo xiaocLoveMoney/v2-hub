@@ -138,13 +138,16 @@ FROM chain_exit WHERE id = ANY(sqlc.arg(ids)::bigint[]);
 SELECT COUNT(*) FROM chain_route WHERE exit_id = $1 AND kind = 'server';
 
 -- name: ListUserPlatformExits :many
--- 用户被授权的平台出口：启用，且属于套餐绑定的某个节点组（Ruling-47）
-SELECT DISTINCT x.id, x.name, x.protocol, x.allow_server, x.allow_client
-FROM end_user u
-JOIN plan_node_group pg ON pg.plan_id = u.plan_id
-JOIN node_group_exit ge ON ge.node_group_id = pg.node_group_id
-JOIN chain_exit x ON x.id = ge.exit_id AND x.user_id IS NULL AND x.is_enabled
-WHERE u.id = $1 AND u.deleted_at IS NULL
+-- 用户被授权的平台出口：启用，且分配到本人——按节点组时属于套餐绑定的某个节点组（Ruling-47），指定用户时本人在名单里（Ruling-64）
+SELECT x.id, x.name, x.protocol, x.allow_server, x.allow_client
+FROM chain_exit x
+JOIN end_user u ON u.id = sqlc.arg(user_id)::bigint AND u.deleted_at IS NULL
+WHERE x.user_id IS NULL AND x.is_enabled
+  AND ((x.assign_mode = 'group' AND EXISTS (
+          SELECT 1 FROM plan_node_group pg JOIN node_group_exit ge ON ge.node_group_id = pg.node_group_id
+          WHERE pg.plan_id = u.plan_id AND ge.exit_id = x.id))
+    OR (x.assign_mode = 'user' AND EXISTS (
+          SELECT 1 FROM chain_exit_user eu WHERE eu.exit_id = x.id AND eu.user_id = u.id)))
 ORDER BY x.name, x.id;
 
 -- name: ListPlatformHosts :many
@@ -165,7 +168,7 @@ WHERE (sqlc.narg(is_platform)::boolean IS NULL OR (x.user_id IS NULL) = sqlc.nar
 -- name: ListAdminChainExits :many
 -- 全部出口（Ruling-50），按 id 倒序分页；exit_id 非空时只取这一个
 SELECT x.id, coalesce(x.user_id, 0)::bigint AS owner_id, coalesce(u.username, '')::text AS username,
-       x.name, x.protocol, x.address, x.port, x.remark, x.is_enabled, x.allow_server, x.allow_client, x.created_at, x.updated_at,
+       x.name, x.protocol, x.address, x.port, x.remark, x.is_enabled, x.allow_server, x.allow_client, x.assign_mode, x.created_at, x.updated_at,
        (SELECT COUNT(*) FROM chain_route r WHERE r.exit_id = x.id)::int AS route_count
 FROM chain_exit x
 LEFT JOIN end_user u ON u.id = x.user_id
@@ -189,6 +192,27 @@ DELETE FROM node_group_exit WHERE exit_id = $1;
 INSERT INTO node_group_exit (node_group_id, exit_id)
 SELECT unnest(sqlc.arg(node_group_ids)::bigint[]), sqlc.arg(exit_id)
 ON CONFLICT DO NOTHING;
+
+-- name: ListExitUsers :many
+-- 平台出口指定的用户（Ruling-64）；已注销的不列出
+SELECT eu.exit_id, u.id, u.username
+FROM chain_exit_user eu JOIN end_user u ON u.id = eu.user_id AND u.deleted_at IS NULL
+WHERE eu.exit_id = ANY(sqlc.arg(exit_ids)::bigint[])
+ORDER BY eu.exit_id, u.username, u.id;
+
+-- name: DeleteExitUsers :exec
+DELETE FROM chain_exit_user WHERE exit_id = $1;
+
+-- name: AddExitUsers :exec
+INSERT INTO chain_exit_user (exit_id, user_id)
+SELECT sqlc.arg(exit_id), unnest(sqlc.arg(user_ids)::bigint[])
+ON CONFLICT DO NOTHING;
+
+-- name: CountLiveUsersByIDs :one
+SELECT COUNT(*) FROM end_user WHERE id = ANY(sqlc.arg(ids)::bigint[]) AND deleted_at IS NULL;
+
+-- name: SetChainExitAssignMode :exec
+UPDATE chain_exit SET assign_mode = sqlc.arg(assign_mode) WHERE id = sqlc.arg(id) AND user_id IS NULL;
 
 -- name: UpdatePlatformChainExit :execrows
 UPDATE chain_exit

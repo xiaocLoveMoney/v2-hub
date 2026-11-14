@@ -95,6 +95,12 @@ type ChainExit struct {
 	AllowClient bool
 	ResolvedIp  *netip.Addr
 	ResolvedAt  pgtype.Timestamptz
+	AssignMode  string
+}
+
+type ChainExitUser struct {
+	ExitID int64
+	UserID int64
 }
 
 type ChainRoute struct {

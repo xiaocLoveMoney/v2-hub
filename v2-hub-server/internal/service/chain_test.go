@@ -354,6 +354,70 @@ func TestChainPlatformExitGrant(t *testing.T) {
 	}
 }
 
+// 指定用户（Ruling-64）：只按名单授权，另一组清空；仍要求套餐开链式；名单里不能有不存在的用户。
+func TestChainPlatformExitAssignUsers(t *testing.T) {
+	f := newChainFixture(t)
+	ctx := context.Background()
+	f.setFlags(t, true, false)
+	bob := f.newUser(t, "bob", *f.user.PlanID)
+	bobPrincipal := &UserPrincipal{UserID: bob.ID, Username: bob.Username, Status: UserStatusActive}
+	exit := f.platformExit(t, chainPlatformName, true, true)
+	route := f.mustRoute(t, clientIn(ChainExitPlatform, exit.ID, f.nodes[0].ID))
+
+	// 只指定 bob：节点组被清空，本人的规则阻断，bob 看得到
+	in := PlatformExitInput{
+		Name: chainPlatformName, Enabled: true, AllowServer: true, AllowClient: true,
+		AssignMode: ExitAssignUser, NodeGroupIDs: []int64{f.group.ID}, UserIDs: []int64{bob.ID, bob.ID},
+	}
+	got, err := f.chain.UpdatePlatformExit(ctx, f.actor, exit.ID, in, nil)
+	if err != nil || got.AssignMode != ExitAssignUser || len(got.NodeGroups) != 0 || len(got.Users) != 1 || got.Users[0].Username != "bob" {
+		t.Fatalf("assign to bob = %+v, %v", got, err)
+	}
+	if r := f.reasons(t, ChainKindClient); r[route.ID] != "blocked:exit" {
+		t.Fatalf("unassigned user should be blocked: %v", r)
+	}
+	bobView, err := f.chain.Overview(ctx, bobPrincipal)
+	if err != nil || len(bobView.PlatformExits) != 1 {
+		t.Fatalf("bob overview = %+v, %v", bobView, err)
+	}
+
+	// 加上本人：恢复通畅；套餐关掉链式开关仍然阻断
+	in.UserIDs = []int64{f.user.ID, bob.ID}
+	if _, err := f.chain.UpdatePlatformExit(ctx, f.actor, exit.ID, in, nil); err != nil {
+		t.Fatalf("assign to both: %v", err)
+	}
+	if r := f.reasons(t, ChainKindClient); r[route.ID] != "ok:" {
+		t.Fatalf("assigned user should be ok: %v", r)
+	}
+	f.setFlags(t, false, false)
+	if r := f.reasons(t, ChainKindClient); r[route.ID] != "blocked:plan" {
+		t.Fatalf("plan switch still required: %v", r)
+	}
+	f.setFlags(t, true, false)
+
+	// 非法输入：不存在的用户、未知的分配方式；失败不改动现状
+	in.UserIDs = []int64{f.user.ID, 999999999}
+	_, err = f.chain.UpdatePlatformExit(ctx, f.actor, exit.ID, in, nil)
+	wantErr(t, "unknown user", err, ErrInvalidArgument)
+	in.AssignMode = "nobody"
+	_, err = f.chain.UpdatePlatformExit(ctx, f.actor, exit.ID, in, nil)
+	wantErr(t, "bad assign mode", err, ErrInvalidArgument)
+	if r := f.reasons(t, ChainKindClient); r[route.ID] != "ok:" {
+		t.Fatalf("failed update must not change the grant: %v", r)
+	}
+
+	// 改回按节点组（省略方式 = group）：用户名单清空，按套餐的节点组授权
+	back, err := f.chain.UpdatePlatformExit(ctx, f.actor, exit.ID, PlatformExitInput{
+		Name: chainPlatformName, Enabled: true, AllowServer: true, AllowClient: true, NodeGroupIDs: []int64{f.group.ID}, UserIDs: []int64{bob.ID},
+	}, nil)
+	if err != nil || back.AssignMode != ExitAssignGroup || len(back.Users) != 0 || len(back.NodeGroups) != 1 {
+		t.Fatalf("back to group = %+v, %v", back, err)
+	}
+	if r := f.reasons(t, ChainKindClient); r[route.ID] != "ok:" {
+		t.Fatalf("group grant: %v", r)
+	}
+}
+
 func TestChainSubscriptionOutput(t *testing.T) {
 	f := newChainFixture(t)
 	ctx := context.Background()
