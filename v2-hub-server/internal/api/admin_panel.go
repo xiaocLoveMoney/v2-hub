@@ -34,6 +34,7 @@ type PanelManager interface {
 	GeneratePanelKeys(ctx context.Context, actor *service.AdminPrincipal, serverID int64, kind string, ip *netip.Addr) (json.RawMessage, error)
 	WebCertFiles(ctx context.Context, serverID int64) (panel.CertFiles, error)
 	ScanRealityTarget(ctx context.Context, serverID int64, target, sni string, xver int) (*panel.RealityScan, error)
+	LocateServer(ctx context.Context, id int64) (*service.ServerLocation, error)
 	ScanRealityTargets(ctx context.Context, serverID int64, targets []string) ([]panel.RealityScan, error)
 	DeleteInbound(ctx context.Context, actor *service.AdminPrincipal, id int64, ip *netip.Addr) error
 	CreateEndpoints(ctx context.Context, actor *service.AdminPrincipal, serverID int64, in service.EndpointInput, ip *netip.Addr) error
@@ -220,7 +221,6 @@ type endpointRequest struct {
 
 type nodeRequest struct {
 	DisplayName string   `json:"displayName"`
-	Region      string   `json:"region"`
 	Tags        []string `json:"tags"`
 	SortOrder   int      `json:"sortOrder"`
 	IsEnabled   bool     `json:"isEnabled"`
@@ -718,7 +718,7 @@ func (h *handlers) updateNode(w http.ResponseWriter, r *http.Request, p *service
 		return
 	}
 	if err := h.panels.UpdateNode(r.Context(), p, id, service.NodeInput{
-		DisplayName: req.DisplayName, Region: req.Region, Tags: req.Tags, SortOrder: req.SortOrder, IsEnabled: req.IsEnabled,
+		DisplayName: req.DisplayName, Tags: req.Tags, SortOrder: req.SortOrder, IsEnabled: req.IsEnabled,
 	}, clientIP(r, h.trustedProxies)); err != nil {
 		writeError(w, r, err)
 		return
@@ -786,4 +786,24 @@ func (h *handlers) deleteNodeGroup(w http.ResponseWriter, r *http.Request, p *se
 		return
 	}
 	writeOK(w, nil)
+}
+
+type serverLocationVO struct {
+	Region   string `json:"region"`
+	PublicIP string `json:"publicIp"`
+}
+
+// locateServer 扫描服务器位置，只返回结果不保存（Ruling-65）。
+func (h *handlers) locateServer(w http.ResponseWriter, r *http.Request, _ *service.AdminPrincipal) {
+	id, err := pathID(r)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	loc, err := h.panels.LocateServer(r.Context(), id)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeOK(w, serverLocationVO{Region: loc.Region, PublicIP: loc.PublicIP})
 }

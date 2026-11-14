@@ -38,6 +38,8 @@ type PanelInfo struct {
 	GUID    string
 	// Status 是资源快照（CPU、内存、在线时长等），形状随面板而定，原样透传给前端展示。
 	Status json.RawMessage
+	// PublicIP 是面板自报的服务器公网 IP（优先 IPv4）；面板没报为空。只用于扫描位置（Ruling-65），不落库。
+	PublicIP string
 }
 
 // Capabilities 描述面板能力差异。

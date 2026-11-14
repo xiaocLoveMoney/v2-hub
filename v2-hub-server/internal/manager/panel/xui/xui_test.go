@@ -257,6 +257,24 @@ func TestProbe(t *testing.T) {
 	if strings.Contains(string(info.Status), "publicIP") || !strings.Contains(string(info.Status), "cpu") {
 		t.Fatalf("snapshot should keep whitelisted fields only: %s", info.Status)
 	}
+	if info.PublicIP != "203.0.113.1" {
+		t.Fatalf("PublicIP = %q", info.PublicIP)
+	}
+}
+
+func TestPublicIPOf(t *testing.T) {
+	cases := map[string]string{
+		`{"ipv4":"203.0.113.1","ipv6":"2001:db8::1"}`: "203.0.113.1",
+		`{"ipv4":"N/A","ipv6":"2001:db8::1"}`:         "2001:db8::1",
+		`{"ipv4":"N/A","ipv6":"N/A"}`:                 "",
+		`"bad"`:                                       "",
+		``:                                            "",
+	}
+	for raw, want := range cases {
+		if got := publicIPOf([]byte(raw)); got != want {
+			t.Errorf("publicIPOf(%s) = %q, want %q", raw, got, want)
+		}
+	}
 }
 
 func TestInboundLifecycleRedactsAndRestoresSecrets(t *testing.T) {

@@ -36,6 +36,7 @@ type PortalManager interface {
 	ListTraffic(ctx context.Context, p *service.UserPrincipal, hours int) ([]service.TrafficPoint, error)
 	ListPortalNodes(ctx context.Context, p *service.UserPrincipal) ([]service.PortalNodeGroup, error)
 	GetNodeLink(ctx context.Context, p *service.UserPrincipal, nodeID int64) (string, error)
+	ListNodeMetrics(ctx context.Context, p *service.UserPrincipal, nodeID int64, rng string) ([]service.MetricPoint, error)
 	GetSubscription(ctx context.Context, p *service.UserPrincipal, requestBase string) (*service.SubscriptionInfo, error)
 	ResetOwnSubscription(ctx context.Context, p *service.UserPrincipal, requestBase string, ip *netip.Addr) (*service.SubscriptionInfo, error)
 	SetConnectionPassword(ctx context.Context, p *service.UserPrincipal, password, requestBase string, ip *netip.Addr) (*service.SubscriptionInfo, error)
@@ -276,4 +277,40 @@ func (h *handlers) getSubscription(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set(headerCache, cacheNoStore)
 	w.WriteHeader(http.StatusOK)
 	writeBody(w, res.Body)
+}
+
+const queryMetricRange = "range"
+
+type nodeMetricPointVO struct {
+	At            time.Time `json:"at"`
+	OnlineClients int       `json:"onlineClients"`
+	Load          *float64  `json:"load"`
+}
+
+type nodeMetricsVO struct {
+	Range  string              `json:"range"`
+	Points []nodeMetricPointVO `json:"points"`
+}
+
+// getUserNodeMetrics 返回节点所在服务器的在线人数与负载趋势（Ruling-65），range 缺省为 24h。
+func (h *handlers) getUserNodeMetrics(w http.ResponseWriter, r *http.Request, p *service.UserPrincipal) {
+	id, err := pathID(r)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	rng := r.URL.Query().Get(queryMetricRange)
+	if rng == "" {
+		rng = service.MetricRange24h
+	}
+	points, err := h.portal.ListNodeMetrics(r.Context(), p, id, rng)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	vo := nodeMetricsVO{Range: rng, Points: make([]nodeMetricPointVO, 0, len(points))}
+	for _, pt := range points {
+		vo.Points = append(vo.Points, nodeMetricPointVO{At: pt.At, OnlineClients: pt.OnlineClients, Load: pt.Load})
+	}
+	writeOK(w, vo)
 }

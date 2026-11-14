@@ -18,6 +18,7 @@ import (
 
 	"v2-hub-server/internal/dao/sqlcgen"
 	"v2-hub-server/internal/manager/crypto"
+	"v2-hub-server/internal/manager/geoip"
 	"v2-hub-server/internal/manager/panel"
 )
 
@@ -31,7 +32,6 @@ const (
 
 const (
 	maxServerNameLen      = 64
-	maxRegionLen          = 64
 	maxRemarkLen          = 255
 	maxTokenLen           = 512
 	maxLastErrorLen       = 255
@@ -60,6 +60,8 @@ var statusByErrorKind = map[panel.ErrorKind]string{
 type PanelConfig struct {
 	// RequestTimeout 是单次面板请求超时。
 	RequestTimeout time.Duration
+	// Locator 把服务器公网 IP 换成国家码（Ruling-65）；nil 表示位置扫描已关闭。
+	Locator geoip.Locator
 }
 
 // PanelService 负责服务器接入、探测、入站同步与增删改、对外地址、节点与节点组（docs/03 §5.1）。
@@ -151,10 +153,10 @@ func validateServerFields(in ServerInput) error {
 	if n := utf8.RuneCountInString(strings.TrimSpace(in.Name)); n < 1 || n > maxServerNameLen {
 		return newError(CodeInvalidArgument, fmt.Sprintf("名称长度须为 1–%d", maxServerNameLen))
 	}
-	if utf8.RuneCountInString(in.Region) > maxRegionLen || utf8.RuneCountInString(in.Remark) > maxRemarkLen {
-		return newError(CodeInvalidArgument, "地区或备注过长")
+	if utf8.RuneCountInString(in.Remark) > maxRemarkLen {
+		return newError(CodeInvalidArgument, "备注过长")
 	}
-	return nil
+	return validateServerRegion(in.Region)
 }
 
 // panelError 把面板错误转成对外错误：面板拒绝执行 → 400，其余 → 502（docs/03 §5）。
@@ -337,6 +339,9 @@ func (s *PanelService) CreateServer(ctx context.Context, actor *AdminPrincipal, 
 	if err != nil {
 		return nil, err
 	}
+	if in.Region == "" {
+		s.fillRegionFromIP(ctx, id, info.PublicIP)
+	}
 	if !in.IsDisabled {
 		if _, err := s.SyncServer(ctx, nil, id, nil); err != nil {
 			s.recordProbeError(ctx, id, err)
@@ -480,7 +485,10 @@ func (s *PanelService) ProbeServer(ctx context.Context, id int64) error {
 	if err := s.q.SetServerProbeResult(ctx, params); err != nil {
 		return fmt.Errorf("save probe result of server %d: %w", id, err)
 	}
-	return probeErr
+	if probeErr != nil {
+		return probeErr
+	}
+	return s.recordMetric(ctx, id, info.Status)
 }
 
 // ListEnabledServerIDs 返回需要探测与同步的服务器（T4：停用的跳过）。

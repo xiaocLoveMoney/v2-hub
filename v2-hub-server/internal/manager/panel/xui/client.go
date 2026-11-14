@@ -162,6 +162,11 @@ func truncate(s string) string {
 	return string(r[:maxPanelMsgLen])
 }
 
+const (
+	statusPublicIP  = "publicIP"
+	publicIPUnknown = "N/A"
+)
+
 // statusFields 是写进资源快照的字段白名单（不含公网 IP 等无关信息）。
 var statusFields = []string{"cpu", "cpuCores", "mem", "disk", "swap", "uptime", "loads", "xray", "tcpCount", "udpCount", "netTraffic"}
 
@@ -193,7 +198,25 @@ func (c *Client) Probe(ctx context.Context) (panel.PanelInfo, error) {
 		return panel.PanelInfo{}, fmt.Errorf("xui: marshal status snapshot: %w", err)
 	}
 	info.Status = raw
+	info.PublicIP = publicIPOf(status[statusPublicIP])
 	return info, nil
+}
+
+// publicIPOf 取状态里的公网 IP：优先 IPv4，3x-ui 取不到时填的是 "N/A"。格式异常按没报处理（只影响位置扫描）。
+func publicIPOf(raw json.RawMessage) string {
+	var ips struct {
+		IPv4 string `json:"ipv4"`
+		IPv6 string `json:"ipv6"`
+	}
+	if len(raw) == 0 || json.Unmarshal(raw, &ips) != nil {
+		return ""
+	}
+	for _, ip := range []string{ips.IPv4, ips.IPv6} {
+		if ip != "" && ip != publicIPUnknown {
+			return ip
+		}
+	}
+	return ""
 }
 
 var _ panel.Provider = (*Client)(nil)

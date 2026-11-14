@@ -161,6 +161,7 @@ func NewRouter(deps Deps) http.Handler {
 	mux.HandleFunc("GET /api/admin/inbounds/{id}/panel-config", h.requireAdmin(service.PermNodeWrite, h.getInboundPanelConfig))
 	mux.HandleFunc("POST /api/admin/servers/{id}/keys", h.requireAdmin(service.PermNodeWrite, h.generatePanelKeys))
 	mux.HandleFunc("GET /api/admin/servers/{id}/web-cert", h.requireAdmin(service.PermNodeWrite, h.getServerWebCert))
+	mux.HandleFunc("POST /api/admin/servers/{id}/locate", h.requireAdmin(service.PermServerWrite, h.locateServer))
 	mux.HandleFunc("POST /api/admin/servers/{id}/reality-scan", h.requireAdmin(service.PermNodeWrite, h.scanRealityTarget))
 	mux.HandleFunc("POST /api/admin/servers/{id}/reality-targets", h.requireAdmin(service.PermNodeWrite, h.scanRealityTargets))
 
@@ -263,6 +264,7 @@ func NewRouter(deps Deps) http.Handler {
 	mux.HandleFunc("GET /api/user/traffic", h.requireUser(false, h.listUserTraffic))
 	mux.HandleFunc("GET /api/user/nodes", h.requireUser(false, h.listUserNodes))
 	mux.HandleFunc("GET /api/user/nodes/{id}/link", h.requireUser(false, h.getUserNodeLink))
+	mux.HandleFunc("GET /api/user/nodes/{id}/metrics", h.requireUser(false, h.getUserNodeMetrics))
 	mux.HandleFunc("GET /api/user/subscription", h.requireUser(false, h.getUserSubscription))
 	mux.HandleFunc("POST /api/user/subscription/reset", h.requireUser(false, h.resetOwnSubscription))
 	mux.HandleFunc("PUT /api/user/subscription/password", h.requireUser(false, h.setConnectionPassword))

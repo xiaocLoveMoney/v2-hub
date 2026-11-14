@@ -59,6 +59,10 @@ const (
 	defaultChainUserWriteWindow  = time.Hour
 	defaultChainUserTestLimit    = 6
 	defaultChainUserTestWindow   = time.Minute
+
+	// 服务器位置扫描用的在线 IP 库，语义见 docs/03 §5.1（Ruling-65）
+	defaultGeoIPLookupURL = "https://api.country.is/{ip}"
+	defaultGeoIPTimeout   = 5 * time.Second
 )
 
 // ErrInvalidConfig 表示配置内容不合法。
@@ -73,6 +77,7 @@ type Config struct {
 	User     UserConfig     `yaml:"user"`
 	Portal   PortalConfig   `yaml:"portal"`
 	Chain    ChainConfig    `yaml:"chain"`
+	GeoIP    GeoIPConfig    `yaml:"geoip"`
 	// Subscription 是订阅设置（docs/03 §5.4）；M4 起移入系统设置表。
 	Subscription SubscriptionConfig `yaml:"subscription"`
 }
@@ -88,6 +93,13 @@ type ChainConfig struct {
 	UserWriteWindow  time.Duration `yaml:"userWriteWindow"`
 	UserTestLimit    int           `yaml:"userTestLimit"`
 	UserTestWindow   time.Duration `yaml:"userTestWindow"`
+}
+
+// GeoIPConfig 是服务器位置扫描用的 IP 库（docs/03 §5.1，Ruling-65）。
+// LookupURL 含 {ip} 占位，显式写成空串即关闭扫描。
+type GeoIPConfig struct {
+	LookupURL string        `yaml:"lookupUrl"`
+	Timeout   time.Duration `yaml:"timeout"`
 }
 
 // SubscriptionConfig 是订阅的系统级设置。
@@ -228,6 +240,9 @@ func defaults() Config {
 		SessionIdleTimeout: defaultPortalSessionIdleTimeout,
 		SessionMaxAge:      defaultPortalSessionMaxAge,
 		LoginLogRetention:  defaultPortalLoginLogRetention,
+	}, GeoIP: GeoIPConfig{
+		LookupURL: defaultGeoIPLookupURL,
+		Timeout:   defaultGeoIPTimeout,
 	}, Subscription: SubscriptionConfig{
 		Title:               defaultSubscriptionTitle,
 		UpdateIntervalHours: defaultSubscriptionIntervalHours,
@@ -272,6 +287,9 @@ func (c Config) validate() error {
 	}
 	if c.Chain.UserTestLimit <= 0 || c.Chain.UserTestWindow <= 0 {
 		return fmt.Errorf("%w: chain user test limit and window must be positive", ErrInvalidConfig)
+	}
+	if c.GeoIP.Timeout <= 0 {
+		return fmt.Errorf("%w: geoip.timeout must be positive", ErrInvalidConfig)
 	}
 	po := c.Portal
 	if po.SessionIdleTimeout <= a.SessionTouchInterval || po.SessionMaxAge < po.SessionIdleTimeout || po.LoginLogRetention <= 0 {

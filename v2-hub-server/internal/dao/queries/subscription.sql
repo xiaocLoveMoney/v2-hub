@@ -21,7 +21,7 @@ WHERE id = $1 AND deleted_at IS NULL;
 
 -- name: ListUserSubNodes :many
 -- 用户被授权且可输出的节点：节点启用、入站启用且未缺失、服务器未停用、对外地址未缺失未停用
-SELECT DISTINCT n.id, n.display_name, n.region, n.sort_order, i.id AS inbound_id, i.server_id, i.port AS inbound_port, i.protocol,
+SELECT DISTINCT n.id, n.display_name, s.region, n.sort_order, i.id AS inbound_id, i.server_id, i.port AS inbound_port, i.protocol,
        (n.endpoint_id IS NULL)::boolean AS is_direct,
        coalesce(e.address, '')::text AS endpoint_address, coalesce(e.port, 0)::int AS endpoint_port, s.base_url
 FROM end_user u
@@ -74,7 +74,7 @@ SELECT hour, up, down FROM user_traffic_hourly WHERE user_id = $1 AND hour >= $2
 
 -- name: ListUserNodeGroups :many
 -- 客户后台节点列表：按节点组分段，状态取平台缓存（docs/03 §5.5）
-SELECT g.id AS group_id, g.name AS group_name, n.id, n.display_name, n.region, n.sort_order, i.protocol,
+SELECT g.id AS group_id, g.name AS group_name, n.id, n.display_name, s.region, n.sort_order, i.protocol,
        (s.status = 'online')::boolean AS is_server_online, s.online_clients, s.status_snapshot
 FROM end_user u
 JOIN plan_node_group pg ON pg.plan_id = u.plan_id
@@ -99,3 +99,17 @@ SELECT client_cred_enc FROM end_user WHERE id = $1 AND deleted_at IS NULL;
 -- 换连接凭据并把凭据版本 +1，交给对账写到各面板（docs/03 §5.4 连接密码）
 UPDATE end_user SET client_cred_enc = $2, cred_version = cred_version + 1, updated_at = now()
 WHERE id = $1 AND deleted_at IS NULL;
+
+-- name: GetUserVisibleNodeServerID :one
+-- 节点在本人节点列表里时返回所在服务器（连接条件与 ListUserNodeGroups 一致），趋势图用（Ruling-65）
+SELECT s.id
+FROM end_user u
+JOIN plan_node_group pg ON pg.plan_id = u.plan_id
+JOIN node_group_item gi ON gi.node_group_id = pg.node_group_id
+JOIN node n ON n.id = gi.node_id AND n.is_enabled
+JOIN inbound i ON i.id = n.inbound_id AND NOT i.is_missing AND i.is_enabled
+JOIN server s ON s.id = i.server_id AND NOT s.is_disabled
+LEFT JOIN endpoint e ON e.id = n.endpoint_id
+WHERE u.id = sqlc.arg(user_id) AND u.deleted_at IS NULL AND n.id = sqlc.arg(node_id)
+  AND (e.id IS NULL OR (NOT e.is_missing AND NOT e.is_disabled))
+LIMIT 1;

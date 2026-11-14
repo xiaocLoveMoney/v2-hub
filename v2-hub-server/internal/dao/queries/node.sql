@@ -27,7 +27,7 @@ WHERE (sqlc.narg(server_id)::bigint IS NULL OR i.server_id = sqlc.narg(server_id
         SELECT 1 FROM node_group_item gi WHERE gi.node_id = n.id AND gi.node_group_id = sqlc.narg(group_id)));
 
 -- name: ListNodes :many
-SELECT n.id, n.inbound_id, n.endpoint_id, n.display_name, n.region, n.tags, n.sort_order, n.is_enabled,
+SELECT n.id, n.inbound_id, n.endpoint_id, n.display_name, s.region, n.tags, n.sort_order, n.is_enabled,
        i.server_id, s.name AS server_name, s.base_url, i.protocol, i.port AS inbound_port,
        COALESCE(e.address, '')::text AS endpoint_address, COALESCE(e.port, 0)::int AS endpoint_port,
        (i.is_missing OR COALESCE(e.is_missing, FALSE))::boolean AS is_missing,
@@ -44,7 +44,7 @@ ORDER BY n.sort_order, n.id
 LIMIT sqlc.arg(row_limit) OFFSET sqlc.arg(row_offset);
 
 -- name: UpdateNode :execrows
-UPDATE node SET display_name = $2, region = $3, tags = $4, sort_order = $5, is_enabled = $6, updated_at = now()
+UPDATE node SET display_name = $2, tags = $3, sort_order = $4, is_enabled = $5, updated_at = now()
 WHERE id = $1;
 
 -- name: CountNodesByIDs :one

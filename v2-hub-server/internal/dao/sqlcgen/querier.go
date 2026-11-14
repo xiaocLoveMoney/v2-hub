@@ -161,6 +161,8 @@ type Querier interface {
 	ExistsEndUserIdentity(ctx context.Context, email string) (bool, error)
 	ExistsPlan(ctx context.Context, id int64) (bool, error)
 	ExpirePayments(ctx context.Context, expiresAt pgtype.Timestamptz) (int64, error)
+	// 扫描结果只填进仍为空的位置，不覆盖管理员这期间的选择（Ruling-65）
+	FillServerRegion(ctx context.Context, arg FillServerRegionParams) (int64, error)
 	GetActiveEmailCodeForUpdate(ctx context.Context, arg GetActiveEmailCodeForUpdateParams) (GetActiveEmailCodeForUpdateRow, error)
 	GetAdminByID(ctx context.Context, id int64) (GetAdminByIDRow, error)
 	GetAdminByUsername(ctx context.Context, username string) (GetAdminByUsernameRow, error)
@@ -240,6 +242,8 @@ type Querier interface {
 	GetUserShopState(ctx context.Context, id int64) (GetUserShopStateRow, error)
 	GetUserSubToken(ctx context.Context, id int64) ([]byte, error)
 	GetUserTOTP(ctx context.Context, id int64) (GetUserTOTPRow, error)
+	// 节点在本人节点列表里时返回所在服务器（连接条件与 ListUserNodeGroups 一致），趋势图用（Ruling-65）
+	GetUserVisibleNodeServerID(ctx context.Context, arg GetUserVisibleNodeServerIDParams) (int64, error)
 	// 与 ListVisibleSharedAccounts 同样的可见性条件，防止凭 id 读到不可见的条目
 	GetVisibleSharedAccountCredential(ctx context.Context, arg GetVisibleSharedAccountCredentialParams) ([]byte, error)
 	HasTrialOrder(ctx context.Context, userID pgtype.Int8) (bool, error)
@@ -351,6 +355,10 @@ type Querier interface {
 	ListRolesByCodes(ctx context.Context, codes []string) ([]ListRolesByCodesRow, error)
 	// 这些服务器上全部对外地址（含未授权的），用来判断一条链接是不是某个对外地址的
 	ListServerEndpointAddrs(ctx context.Context, serverIds []int64) ([]ListServerEndpointAddrsRow, error)
+	// 5 分钟采样原值（近 24 小时趋势）
+	ListServerMetrics(ctx context.Context, arg ListServerMetricsParams) ([]ListServerMetricsRow, error)
+	// 按小时平均（近 7 天趋势）；cpu_samples 为 0 表示该小时 CPU 全为空（此时 cpu 无意义）
+	ListServerMetricsHourly(ctx context.Context, arg ListServerMetricsHourlyParams) ([]ListServerMetricsHourlyRow, error)
 	// 服务端链式的下发（docs/03 §5.19）-----------------------------------------------------------
 	// 各服务器的面板类型，用来判断能否改内核配置
 	ListServerProviderTypes(ctx context.Context) ([]ListServerProviderTypesRow, error)
@@ -380,6 +388,8 @@ type Querier interface {
 	// ---- 教程 ----
 	// only_published 为真时只取已发布的（用户端）
 	ListTutorials(ctx context.Context, arg ListTutorialsParams) ([]ListTutorialsRow, error)
+	// 位置未知的启用服务器，启动时补扫（Ruling-65）
+	ListUnlocatedServerIDs(ctx context.Context) ([]int64, error)
 	// 未删除用户的连接凭据，启动时给老用户补 SS2022 密钥用（Ruling-60）
 	ListUserCredentials(ctx context.Context) ([]ListUserCredentialsRow, error)
 	ListUserLoginLogs(ctx context.Context, arg ListUserLoginLogsParams) ([]ListUserLoginLogsRow, error)
@@ -424,7 +434,10 @@ type Querier interface {
 	PurgeDeletedUsers(ctx context.Context) (int64, error)
 	PurgeEmailCodes(ctx context.Context, createdAt pgtype.Timestamptz) (int64, error)
 	PurgeMailOutbox(ctx context.Context, createdAt pgtype.Timestamptz) (int64, error)
+	PurgeServerMetrics(ctx context.Context, bucketAt pgtype.Timestamptz) (int64, error)
 	PurgeTelegramOutbox(ctx context.Context, createdAt pgtype.Timestamptz) (int64, error)
+	// 健康探测成功顺带记一条负载采样：对齐 5 分钟，同一时段覆盖为最新值，在线数取服务器缓存（Ruling-65）
+	RecordServerMetric(ctx context.Context, arg RecordServerMetricParams) error
 	RemoveChainRouteEntriesExcept(ctx context.Context, arg RemoveChainRouteEntriesExceptParams) error
 	RenameChainExit(ctx context.Context, arg RenameChainExitParams) (int64, error)
 	// 旧默认名“服务器名 · 入站称呼”去掉服务器名前缀，只改直连节点（Ruling-63）
