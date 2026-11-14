@@ -1,6 +1,7 @@
 import { useCallback, useState } from 'react'
 import { Link } from 'react-router'
 import { api, type PublicPlan } from '../api/client'
+import { BrandMark } from '../components/BrandMark'
 import { LocaleSwitch } from '../components/LocaleSwitch'
 import { Markdown } from '../components/Markdown'
 import { revealChildren } from '../components/motion'
@@ -12,6 +13,8 @@ import { formatMoney } from '../money'
 import { useCurrency, useSite } from '../site/site-context'
 import { durationLabel, planFeatureLines } from './shop/labels'
 
+/** 顶栏品牌位的图标尺寸（像素）。 */
+const BRAND_MARK_SIZE = 26
 const REGISTER_CLOSED = 'closed'
 
 interface PublicPlanCardProps {
@@ -75,7 +78,10 @@ export function LandingPage() {
   return (
     <div className="hub-landing" ref={revealChildren}>
       <header className="hub-landing-nav">
-        <span className="hub-brand">{site.siteName}</span>
+        <span className="hub-brand">
+          <BrandMark size={BRAND_MARK_SIZE} motion="intro" hasHoverTurn />
+          <span>{site.siteName}</span>
+        </span>
         <span className="hub-actions">
           <Link className="hub-btn hub-btn-outline" to={ROUTES.LOGIN}>
             {t('auth.login')}
