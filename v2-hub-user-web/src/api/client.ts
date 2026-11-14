@@ -37,11 +37,15 @@ export type LedgerEntry = components['schemas']['LedgerEntry']
 export type LedgerKind = components['schemas']['LedgerKind']
 export type UserFeatures = NonNullable<UserSession['features']>
 export type ChainOverview = components['schemas']['ChainOverview']
-export type ChainRule = components['schemas']['ChainRule']
+export type ChainRoute = components['schemas']['ChainRoute']
+export type ChainRouteEntry = components['schemas']['ChainRouteEntry']
+export type ChainRouteInput = components['schemas']['ChainRouteInput']
+export type ChainKind = components['schemas']['ChainKind']
+export type ChainExitKind = components['schemas']['ChainExitKind']
+export type ChainEntryState = components['schemas']['ChainEntryState']
 export type ChainNodeOption = components['schemas']['ChainNodeOption']
 export type ChainBlockedReason = components['schemas']['ChainBlockedReason']
-export type CustomNode = components['schemas']['CustomNode']
-export type ServerChainRule = components['schemas']['ServerChainRule']
+export type ChainExit = components['schemas']['ChainExit']
 export type PublicPlan = components['schemas']['PublicPlan']
 
 /** 分页结果（hub-api.yaml 各分页接口的 data 形状）。 */

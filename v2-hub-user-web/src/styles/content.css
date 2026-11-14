@@ -458,3 +458,130 @@ a.hub-btn {
 .hub-notes li + li {
   margin-top: 6px;
 }
+
+/* ---- 链式代理（M9）：页签、有序的规则列表、下拉多选 ---- */
+.hub-chain-tabs {
+  justify-content: flex-start;
+}
+
+.hub-chain-tabs .hub-seg-item {
+  padding: 8px 18px;
+  font-size: 13px;
+}
+
+.hub-route-list {
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.hub-route {
+  padding: 14px 0;
+  border-top: 1px solid var(--hub-divider);
+}
+
+.hub-route-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.hub-route-position {
+  font-weight: 700;
+  color: var(--hub-primary);
+}
+
+.hub-route-name {
+  font-weight: 600;
+  color: var(--hub-heading);
+  overflow-wrap: anywhere;
+}
+
+.hub-route-line {
+  display: grid;
+  grid-template-columns: 5.5em minmax(0, 1fr);
+  gap: 8px;
+  margin-bottom: 8px;
+  line-height: 1.9;
+}
+
+.hub-route-label {
+  color: var(--hub-muted);
+  font-size: 12px;
+}
+
+.hub-route-entries {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+}
+
+.hub-route-entry {
+  overflow-wrap: anywhere;
+}
+
+.hub-multi {
+  position: relative;
+}
+
+.hub-multi-button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+}
+
+.hub-multi-button.is-empty .hub-multi-summary {
+  color: var(--hub-muted);
+}
+
+.hub-multi-summary {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hub-multi-caret {
+  flex: none;
+  color: var(--hub-muted);
+}
+
+/* 展开的选项面板压在后面的字段上面；选项多时面板内滚动，不把弹窗撑高 */
+.hub-multi-panel {
+  position: absolute;
+  z-index: 5;
+  left: 0;
+  right: 0;
+  max-height: 240px;
+  margin-top: 4px;
+  padding: 6px 0;
+  overflow-y: auto;
+  border: 1px solid var(--hub-border);
+  border-radius: var(--hub-radius);
+  background: var(--hub-surface);
+  box-shadow: var(--hub-float-shadow);
+}
+
+.hub-multi-option {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  cursor: pointer;
+}
+
+.hub-multi-option:hover {
+  background: var(--hub-surface-alt);
+}
+
+.hub-multi-option.is-disabled {
+  color: var(--hub-muted);
+  cursor: not-allowed;
+}
