@@ -538,6 +538,68 @@ func (q *Queries) ListServerProvisions(ctx context.Context, serverID int64) ([]L
 	return items, nil
 }
 
+const listServerShadowsocksInbounds = `-- name: ListServerShadowsocksInbounds :many
+SELECT remote_ref, COALESCE(config->'settings'->>'method', '')::text AS method
+FROM inbound
+WHERE server_id = $1 AND protocol = 'shadowsocks' AND NOT is_missing
+`
+
+type ListServerShadowsocksInboundsRow struct {
+	RemoteRef string
+	Method    string
+}
+
+// 一台服务器上的 Shadowsocks 入站与加密方式，对账据此决定面板 password 写不写 SS2022 密钥（docs/03 §5.4 SS2022 密钥）
+func (q *Queries) ListServerShadowsocksInbounds(ctx context.Context, serverID int64) ([]ListServerShadowsocksInboundsRow, error) {
+	rows, err := q.db.Query(ctx, listServerShadowsocksInbounds, serverID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListServerShadowsocksInboundsRow{}
+	for rows.Next() {
+		var i ListServerShadowsocksInboundsRow
+		if err := rows.Scan(&i.RemoteRef, &i.Method); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listUserCredentials = `-- name: ListUserCredentials :many
+SELECT id, client_cred_enc FROM end_user WHERE deleted_at IS NULL ORDER BY id
+`
+
+type ListUserCredentialsRow struct {
+	ID            int64
+	ClientCredEnc []byte
+}
+
+// 未删除用户的连接凭据，启动时给老用户补 SS2022 密钥用（Ruling-60）
+func (q *Queries) ListUserCredentials(ctx context.Context) ([]ListUserCredentialsRow, error) {
+	rows, err := q.db.Query(ctx, listUserCredentials)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListUserCredentialsRow{}
+	for rows.Next() {
+		var i ListUserCredentialsRow
+		if err := rows.Scan(&i.ID, &i.ClientCredEnc); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listUserProvisions = `-- name: ListUserProvisions :many
 SELECT v.server_id, s.name AS server_name, v.email, v.status, v.last_error, v.retry_count, v.synced_at, v.updated_at
 FROM provision v JOIN server s ON s.id = v.server_id
