@@ -91,6 +91,7 @@ M10 的做法（Ruling-51 – Ruling-53）：`manager/panel` 加两个可选能�
 出口测试在 `service/chain_test_exit.go`：先做归属与地址限制（复用 `chain_guard.go`），再按用户频控、按服务器互斥，出站 JSON 由 `render.XrayOutbound` 生成；
 本文件不写日志（出站含凭据）。HTTP / HTTPS 出口只是 `manager/render` 多一个协议。
 REALITY 目标扫描（Ruling-54）是第三个可选能力 `RealityScanner`，3x-ui 实现对应 `/panel/api/server/scanRealityTarget(s)`；目标的形状在 service 层校验（不收网段），从不带 `allowPrivate`。
+平台拦截规则（Ruling-55）的条目由 `manager/chain` 生成（`BlockTag = "hub-block"`，域名表是包内常量），`ChainApplier` 读设置 `routing.blockRule` 决定期望里带不带它；开着时 `ListChainApplyServerIDs` 返回全部启用中的服务器，关掉后有下发记录的服务器照常检查一轮以撤掉条目。
 
 ## 7. 接口待补 / 契约缺口
 
