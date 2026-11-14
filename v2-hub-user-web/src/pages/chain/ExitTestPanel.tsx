@@ -12,6 +12,17 @@ const TEST_MODES: readonly { mode: ChainExitTestMode; labelKey: MessageKey }[] =
 const DEFAULT_MODE: ChainExitTestMode = 'tcp'
 const NO_HTTP_STATUS = 0
 
+/** 不通的原因大类对应的标题与排查提示（docs/03 §5.21，Ruling-56）；unknown 与 none 没有提示。 */
+const FAIL_TEXT: Record<ChainExitTestResult['reason'], { titleKey: MessageKey; hintKey: MessageKey | null }> = {
+  none: { titleKey: 'chain.testFail', hintKey: null },
+  unknown: { titleKey: 'chain.testFail', hintKey: null },
+  refused: { titleKey: 'chain.testFailRefused', hintKey: 'chain.testFailRefusedHint' },
+  timeout: { titleKey: 'chain.testFailTimeout', hintKey: 'chain.testFailTimeoutHint' },
+  proxy_rejected: { titleKey: 'chain.testFailProxyRejected', hintKey: 'chain.testFailProxyRejectedHint' },
+  proxy_no_response: { titleKey: 'chain.testFailProxyNoResponse', hintKey: 'chain.testFailProxyNoResponseHint' },
+  bad_status: { titleKey: 'chain.testFailBadStatus', hintKey: 'chain.testFailBadStatusHint' },
+}
+
 interface ExitTestPanelProps {
   exit: ChainExit
   /** 可作起点的节点：本人可用、所在面板支持测试的。 */
@@ -20,7 +31,7 @@ interface ExitTestPanelProps {
 
 /**
  * 出口的延迟测试（docs/06 §5 M10，Ruling-52）：选起点节点与方式，由起点所在的服务器去连出口。
- * 结果只留在本组件的内存里；失败时后端不给原因，只说连接失败或超时。
+ * 结果只留在本组件的内存里；失败时后端只给原因大类（Ruling-56），这里换成一句说明和排查提示。
  */
 export function ExitTestPanel({ exit, nodes }: ExitTestPanelProps) {
   const { t } = useI18n()
@@ -56,6 +67,7 @@ export function ExitTestPanel({ exit, nodes }: ExitTestPanelProps) {
   if (nodes.length === 0) {
     return <Alert tone="info">{t('chain.testNoNodes')}</Alert>
   }
+  const failText = result !== null && !result.ok ? FAIL_TEXT[result.reason] : null
   return (
     <div className="hub-exit-test">
       <SelectField label={t('chain.testFrom')} value={nodeId ?? ''} onChange={(e) => setNodeId(Number(e.target.value))}>
@@ -91,7 +103,11 @@ export function ExitTestPanel({ exit, nodes }: ExitTestPanelProps) {
       {error !== null && <Alert tone="plain">{error}</Alert>}
       {result !== null && (
         <p className="hub-exit-test-result" role="status">
-          {result.ok ? <Badge tone="success">{t('chain.testOk', { ms: result.delayMs })}</Badge> : <Badge tone="danger">{t('chain.testFail')}</Badge>}
+          {failText === null ? (
+            <Badge tone="success">{t('chain.testOk', { ms: result.delayMs })}</Badge>
+          ) : (
+            <Badge tone="danger">{t(failText.titleKey)}</Badge>
+          )}
           {result.httpStatus !== NO_HTTP_STATUS && <span>{t('chain.testHttpStatus', { code: result.httpStatus })}</span>}
           {result.egressIp !== '' && (
             <span className="hub-mono">
@@ -101,6 +117,7 @@ export function ExitTestPanel({ exit, nodes }: ExitTestPanelProps) {
           )}
         </p>
       )}
+      {failText !== null && failText.hintKey !== null && <Alert tone="plain">{t(failText.hintKey)}</Alert>}
       <p className="hub-field-hint">{t('chain.testHint')}</p>
     </div>
   )
