@@ -681,56 +681,91 @@ CREATE TABLE impersonate_ticket (
 );
 ALTER TABLE end_user ADD CONSTRAINT end_user_plan_price_id_fkey FOREIGN KEY (plan_price_id) REFERENCES plan_price (id) ON DELETE SET NULL;
 
--- 自有落地节点（docs/03 §5.18，Ruling-37）：用户自己添加、只用作链路落地。链接含凭据，AES-256-GCM 加密，
--- 关联数据 custom_node:<id>:link（先插入空值拿到 id 再回填）；protocol / address / port 是从链接解析出的展示用副本。
-CREATE TABLE custom_node (
-    id         BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    user_id    BIGINT       NOT NULL REFERENCES end_user (id) ON DELETE CASCADE,
-    name       VARCHAR(64)  NOT NULL,
-    protocol   VARCHAR(16)  NOT NULL,
-    address    VARCHAR(255) NOT NULL,
-    port       INTEGER      NOT NULL,
-    link_enc   BYTEA        NOT NULL,
-    created_at TIMESTAMPTZ  NOT NULL DEFAULT now(),
-    updated_at TIMESTAMPTZ  NOT NULL DEFAULT now(),
-    CONSTRAINT uk_custom_node_user_name UNIQUE (user_id, name),
-    CONSTRAINT ck_custom_node_protocol CHECK (protocol IN ('vless', 'vmess', 'trojan', 'shadowsocks', 'socks')),
-    CONSTRAINT ck_custom_node_port CHECK (port BETWEEN 1 AND 65535)
+-- 链式出口（docs/03 §5.21，Ruling-47）：只用作链路落地的外部节点。user_id 为空 = 平台出口（管理员添加，经 node_group_exit 授权），
+-- 否则 = 用户出口（M6 的自有落地节点）。链接含凭据，AES-256-GCM 加密，关联数据 custom_node:<id>:link（沿用 M6 的写法；
+-- 先插入空值拿到 id 再回填）；protocol / address / port 是从链接解析出的展示用副本。
+-- allow_server / allow_client 只对平台出口有意义；resolved_ip 是用户出口用于服务端链式时固定下来的地址（Ruling-48）。
+CREATE TABLE chain_exit (
+    id           BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    user_id      BIGINT       REFERENCES end_user (id) ON DELETE CASCADE,
+    name         VARCHAR(64)  NOT NULL,
+    protocol     VARCHAR(16)  NOT NULL,
+    address      VARCHAR(255) NOT NULL,
+    port         INTEGER      NOT NULL,
+    link_enc     BYTEA        NOT NULL,
+    created_at   TIMESTAMPTZ  NOT NULL DEFAULT now(),
+    updated_at   TIMESTAMPTZ  NOT NULL DEFAULT now(),
+    remark       VARCHAR(255) NOT NULL DEFAULT '',
+    is_enabled   BOOLEAN      NOT NULL DEFAULT TRUE,     -- 用户出口由管理员停用 / 启用
+    allow_server BOOLEAN      NOT NULL DEFAULT TRUE,
+    allow_client BOOLEAN      NOT NULL DEFAULT TRUE,
+    resolved_ip  INET,
+    resolved_at  TIMESTAMPTZ,
+    CONSTRAINT uk_chain_exit_user_name UNIQUE (user_id, name),
+    CONSTRAINT ck_chain_exit_protocol CHECK (protocol IN ('vless', 'vmess', 'trojan', 'shadowsocks', 'socks')),
+    CONSTRAINT ck_chain_exit_port CHECK (port BETWEEN 1 AND 65535)
 );
+CREATE UNIQUE INDEX uk_chain_exit_platform_name ON chain_exit (name) WHERE user_id IS NULL;
 
--- 链式规则（docs/03 §5.18，Ruling-36）：入口节点 → 落地（平台节点或自有落地节点，恰好一个）。
--- kind = client 只在订阅里表达（M6）；server 是服务端链式（M7，落地只能是平台节点，同一入口每人一条）。状态是计算值，不落库。
--- 平台节点或自有落地节点被删除时规则随之删除；每个用户的条数上限由服务端校验。
-CREATE TABLE chain_rule (
-    id             BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    user_id        BIGINT      NOT NULL REFERENCES end_user (id) ON DELETE CASCADE,
-    kind           VARCHAR(16) NOT NULL DEFAULT 'client',
-    name           VARCHAR(64) NOT NULL DEFAULT '',          -- 空 = 显示“入口名 → 落地名”
-    entry_node_id  BIGINT      NOT NULL REFERENCES node (id) ON DELETE CASCADE,
-    exit_node_id   BIGINT      REFERENCES node (id) ON DELETE CASCADE,
-    exit_custom_id BIGINT      REFERENCES custom_node (id) ON DELETE CASCADE,
-    is_enabled     BOOLEAN     NOT NULL DEFAULT TRUE,
-    created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
-    CONSTRAINT ck_chain_rule_kind CHECK (kind IN ('client', 'server')),
-    CONSTRAINT ck_chain_rule_exit CHECK (num_nonnulls(exit_node_id, exit_custom_id) = 1),
-    CONSTRAINT ck_chain_rule_distinct CHECK (exit_node_id IS NULL OR exit_node_id <> entry_node_id),
-    CONSTRAINT uk_chain_rule_route UNIQUE NULLS NOT DISTINCT (user_id, kind, entry_node_id, exit_node_id, exit_custom_id),
-    CONSTRAINT ck_chain_rule_server_exit CHECK (kind = 'client' OR exit_node_id IS NOT NULL)
+-- 平台出口加入节点组，沿用“套餐 → 节点组”授权（Ruling-47）
+CREATE TABLE node_group_exit (
+    node_group_id BIGINT NOT NULL REFERENCES node_group (id) ON DELETE CASCADE,
+    exit_id       BIGINT NOT NULL REFERENCES chain_exit (id) ON DELETE CASCADE,
+    PRIMARY KEY (node_group_id, exit_id)
 );
-CREATE INDEX idx_chain_rule_entry_node ON chain_rule (entry_node_id);
-CREATE INDEX idx_chain_rule_exit_node ON chain_rule (exit_node_id) WHERE exit_node_id IS NOT NULL;
-CREATE INDEX idx_chain_rule_exit_custom ON chain_rule (exit_custom_id) WHERE exit_custom_id IS NOT NULL;
-CREATE UNIQUE INDEX uk_chain_rule_server_entry ON chain_rule (user_id, entry_node_id) WHERE kind = 'server';
+CREATE INDEX idx_node_group_exit_exit_id ON node_group_exit (exit_id);
 
--- 链路下发记录（docs/03 §5.19，Ruling-40）：每台入口服务器一行，记录面板上平台条目的下发状态。
+-- 链式规则（docs/03 §5.18、§5.19，Ruling-46）：一组起飞节点（chain_route_entry）→ 一个落地（平台节点或出口，恰好一个）。
+-- kind = client 只在订阅里表达；server 是服务端链式。position 在同一用户同一类型内越小越优先（可有空号，调顺序在事务里整体重排）。
+-- 状态是计算值，不落库；quarantine_hash 是失败隔离时记下的内容指纹，空 = 未隔离（Ruling-49）。
+-- 落地节点或出口被删除时规则随之删除；每个用户的条数上限由服务端校验。
+CREATE TABLE chain_route (
+    id              BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    user_id         BIGINT      NOT NULL REFERENCES end_user (id) ON DELETE CASCADE,
+    kind            VARCHAR(16) NOT NULL,
+    position        INTEGER     NOT NULL,
+    name            VARCHAR(64) NOT NULL DEFAULT '',          -- 空 = 显示落地的名称
+    exit_node_id    BIGINT      REFERENCES node (id) ON DELETE CASCADE,
+    exit_id         BIGINT      REFERENCES chain_exit (id) ON DELETE CASCADE,
+    is_enabled      BOOLEAN     NOT NULL DEFAULT TRUE,
+    quarantine_hash VARCHAR(64) NOT NULL DEFAULT '',
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT ck_chain_route_kind CHECK (kind IN ('client', 'server')),
+    CONSTRAINT ck_chain_route_exit CHECK (num_nonnulls(exit_node_id, exit_id) = 1),
+    CONSTRAINT ck_chain_route_position CHECK (position >= 1),
+    CONSTRAINT uk_chain_route_position UNIQUE (user_id, kind, position) DEFERRABLE INITIALLY DEFERRED
+);
+CREATE INDEX idx_chain_route_exit_node ON chain_route (exit_node_id) WHERE exit_node_id IS NOT NULL;
+CREATE INDEX idx_chain_route_exit ON chain_route (exit_id) WHERE exit_id IS NOT NULL;
+
+CREATE TABLE chain_route_entry (
+    route_id      BIGINT NOT NULL REFERENCES chain_route (id) ON DELETE CASCADE,
+    entry_node_id BIGINT NOT NULL REFERENCES node (id) ON DELETE CASCADE,
+    PRIMARY KEY (route_id, entry_node_id)
+);
+CREATE INDEX idx_chain_route_entry_node ON chain_route_entry (entry_node_id);
+
+-- 起飞节点被删光的规则一并删除（docs/03 §5.18 阻断与删除）；节点的删除入口不止一处，放在库里保证不漏
+CREATE FUNCTION chain_route_drop_empty() RETURNS trigger AS $$
+BEGIN
+    DELETE FROM chain_route r
+    WHERE r.id = OLD.route_id
+      AND NOT EXISTS (SELECT 1 FROM chain_route_entry e WHERE e.route_id = r.id);
+    RETURN NULL;
+END $$ LANGUAGE plpgsql;
+CREATE TRIGGER trg_chain_route_entry_drop_empty
+    AFTER DELETE ON chain_route_entry
+    FOR EACH ROW EXECUTE FUNCTION chain_route_drop_empty();
+
+-- 链路下发记录（docs/03 §5.19，Ruling-40）：每台起飞服务器一行，记录面板上平台条目的下发状态。
 -- desired_hash 是期望平台条目的 SHA-256；fail_count 只对同一 desired_hash 累计，期望变化即清零；
 -- backup_enc 是最近一次写入前的整份 Xray 模板，AES-256-GCM 加密，关联数据 chain_apply:<server_id>:backup。
 CREATE TABLE chain_apply (
     server_id        BIGINT      PRIMARY KEY REFERENCES server (id) ON DELETE CASCADE,
     status           VARCHAR(16) NOT NULL DEFAULT 'pending',
     desired_hash     VARCHAR(64) NOT NULL DEFAULT '',
-    applied_rule_ids BIGINT[]    NOT NULL DEFAULT '{}',   -- 当前面板上生效的服务端规则 id
+    applied_rule_ids BIGINT[]    NOT NULL DEFAULT '{}',   -- 当前面板上生效的服务端规则（chain_route）id
     fail_count       INTEGER     NOT NULL DEFAULT 0,
     last_error       TEXT        NOT NULL DEFAULT '',     -- 脱敏后的最近错误
     last_attempt_at  TIMESTAMPTZ,
