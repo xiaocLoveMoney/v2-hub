@@ -302,7 +302,6 @@ type Node struct {
 	InboundID   int64
 	EndpointID  pgtype.Int8
 	DisplayName string
-	Region      string
 	Tags        []string
 	SortOrder   int32
 	IsEnabled   bool
@@ -451,6 +450,13 @@ type Server struct {
 	AlertSentAt    pgtype.Timestamptz
 	CreatedAt      pgtype.Timestamptz
 	UpdatedAt      pgtype.Timestamptz
+}
+
+type ServerMetric struct {
+	ServerID      int64
+	BucketAt      pgtype.Timestamptz
+	Cpu           pgtype.Float8
+	OnlineClients int32
 }
 
 type Setting struct {

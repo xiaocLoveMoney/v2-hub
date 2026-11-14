@@ -167,7 +167,7 @@ func (q *Queries) ListNodeGroups(ctx context.Context) ([]ListNodeGroupsRow, erro
 }
 
 const listNodes = `-- name: ListNodes :many
-SELECT n.id, n.inbound_id, n.endpoint_id, n.display_name, n.region, n.tags, n.sort_order, n.is_enabled,
+SELECT n.id, n.inbound_id, n.endpoint_id, n.display_name, s.region, n.tags, n.sort_order, n.is_enabled,
        i.server_id, s.name AS server_name, s.base_url, i.protocol, i.port AS inbound_port,
        COALESCE(e.address, '')::text AS endpoint_address, COALESCE(e.port, 0)::int AS endpoint_port,
        (i.is_missing OR COALESCE(e.is_missing, FALSE))::boolean AS is_missing,
@@ -276,14 +276,13 @@ func (q *Queries) RenameLegacyDirectNodes(ctx context.Context, separator string)
 }
 
 const updateNode = `-- name: UpdateNode :execrows
-UPDATE node SET display_name = $2, region = $3, tags = $4, sort_order = $5, is_enabled = $6, updated_at = now()
+UPDATE node SET display_name = $2, tags = $3, sort_order = $4, is_enabled = $5, updated_at = now()
 WHERE id = $1
 `
 
 type UpdateNodeParams struct {
 	ID          int64
 	DisplayName string
-	Region      string
 	Tags        []string
 	SortOrder   int32
 	IsEnabled   bool
@@ -293,7 +292,6 @@ func (q *Queries) UpdateNode(ctx context.Context, arg UpdateNodeParams) (int64, 
 	result, err := q.db.Exec(ctx, updateNode,
 		arg.ID,
 		arg.DisplayName,
-		arg.Region,
 		arg.Tags,
 		arg.SortOrder,
 		arg.IsEnabled,

@@ -57,6 +57,24 @@ func (q *Queries) DeleteServer(ctx context.Context, id int64) (int64, error) {
 	return result.RowsAffected(), nil
 }
 
+const fillServerRegion = `-- name: FillServerRegion :execrows
+UPDATE server SET region = $1::varchar, updated_at = now() WHERE id = $2 AND region = ''
+`
+
+type FillServerRegionParams struct {
+	Region string
+	ID     int64
+}
+
+// 扫描结果只填进仍为空的位置，不覆盖管理员这期间的选择（Ruling-65）
+func (q *Queries) FillServerRegion(ctx context.Context, arg FillServerRegionParams) (int64, error) {
+	result, err := q.db.Exec(ctx, fillServerRegion, arg.Region, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const getServer = `-- name: GetServer :one
 SELECT s.id, s.name, s.provider_type, s.base_url, s.tls_mode, s.cert_pin_sha256, s.region, s.remark,
        s.is_disabled, s.status, s.last_error, s.last_seen_at, s.panel_version, s.status_snapshot,
@@ -168,6 +186,90 @@ func (q *Queries) ListEnabledServerIDs(ctx context.Context) ([]int64, error) {
 	return items, nil
 }
 
+const listServerMetrics = `-- name: ListServerMetrics :many
+SELECT bucket_at, cpu, online_clients FROM server_metric
+WHERE server_id = $1 AND bucket_at >= $2 ORDER BY bucket_at
+`
+
+type ListServerMetricsParams struct {
+	ServerID int64
+	BucketAt pgtype.Timestamptz
+}
+
+type ListServerMetricsRow struct {
+	BucketAt      pgtype.Timestamptz
+	Cpu           pgtype.Float8
+	OnlineClients int32
+}
+
+// 5 分钟采样原值（近 24 小时趋势）
+func (q *Queries) ListServerMetrics(ctx context.Context, arg ListServerMetricsParams) ([]ListServerMetricsRow, error) {
+	rows, err := q.db.Query(ctx, listServerMetrics, arg.ServerID, arg.BucketAt)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListServerMetricsRow{}
+	for rows.Next() {
+		var i ListServerMetricsRow
+		if err := rows.Scan(&i.BucketAt, &i.Cpu, &i.OnlineClients); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listServerMetricsHourly = `-- name: ListServerMetricsHourly :many
+SELECT date_bin('1 hour', bucket_at, TIMESTAMPTZ '2000-01-01 00:00:00+00')::timestamptz AS bucket_at,
+       coalesce(avg(cpu), 0)::double precision AS cpu, count(cpu) AS cpu_samples,
+       round(avg(online_clients))::integer AS online_clients
+FROM server_metric
+WHERE server_id = $1 AND bucket_at >= $2
+GROUP BY 1 ORDER BY 1
+`
+
+type ListServerMetricsHourlyParams struct {
+	ServerID int64
+	BucketAt pgtype.Timestamptz
+}
+
+type ListServerMetricsHourlyRow struct {
+	BucketAt      pgtype.Timestamptz
+	Cpu           float64
+	CpuSamples    int64
+	OnlineClients int32
+}
+
+// 按小时平均（近 7 天趋势）；cpu_samples 为 0 表示该小时 CPU 全为空（此时 cpu 无意义）
+func (q *Queries) ListServerMetricsHourly(ctx context.Context, arg ListServerMetricsHourlyParams) ([]ListServerMetricsHourlyRow, error) {
+	rows, err := q.db.Query(ctx, listServerMetricsHourly, arg.ServerID, arg.BucketAt)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListServerMetricsHourlyRow{}
+	for rows.Next() {
+		var i ListServerMetricsHourlyRow
+		if err := rows.Scan(
+			&i.BucketAt,
+			&i.Cpu,
+			&i.CpuSamples,
+			&i.OnlineClients,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listServers = `-- name: ListServers :many
 
 SELECT s.id, s.name, s.provider_type, s.base_url, s.tls_mode, s.cert_pin_sha256, s.region, s.remark,
@@ -235,6 +337,63 @@ func (q *Queries) ListServers(ctx context.Context) ([]ListServersRow, error) {
 		return nil, err
 	}
 	return items, nil
+}
+
+const listUnlocatedServerIDs = `-- name: ListUnlocatedServerIDs :many
+SELECT id FROM server WHERE NOT is_disabled AND region = '' ORDER BY id
+`
+
+// 位置未知的启用服务器，启动时补扫（Ruling-65）
+func (q *Queries) ListUnlocatedServerIDs(ctx context.Context) ([]int64, error) {
+	rows, err := q.db.Query(ctx, listUnlocatedServerIDs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []int64{}
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const purgeServerMetrics = `-- name: PurgeServerMetrics :execrows
+DELETE FROM server_metric WHERE bucket_at < $1
+`
+
+func (q *Queries) PurgeServerMetrics(ctx context.Context, bucketAt pgtype.Timestamptz) (int64, error) {
+	result, err := q.db.Exec(ctx, purgeServerMetrics, bucketAt)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const recordServerMetric = `-- name: RecordServerMetric :exec
+INSERT INTO server_metric (server_id, bucket_at, cpu, online_clients)
+SELECT s.id, date_bin('5 minutes', $1::timestamptz, TIMESTAMPTZ '2000-01-01 00:00:00+00'),
+       $2::double precision, s.online_clients
+FROM server s WHERE s.id = $3
+ON CONFLICT (server_id, bucket_at) DO UPDATE SET cpu = EXCLUDED.cpu, online_clients = EXCLUDED.online_clients
+`
+
+type RecordServerMetricParams struct {
+	SampledAt pgtype.Timestamptz
+	Cpu       pgtype.Float8
+	ServerID  int64
+}
+
+// 健康探测成功顺带记一条负载采样：对齐 5 分钟，同一时段覆盖为最新值，在线数取服务器缓存（Ruling-65）
+func (q *Queries) RecordServerMetric(ctx context.Context, arg RecordServerMetricParams) error {
+	_, err := q.db.Exec(ctx, recordServerMetric, arg.SampledAt, arg.Cpu, arg.ServerID)
+	return err
 }
 
 const setServerProbeResult = `-- name: SetServerProbeResult :exec

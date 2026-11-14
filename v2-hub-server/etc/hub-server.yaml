@@ -42,6 +42,11 @@ chain:
   # 每个用户发起出口延迟测试的频率（docs/03 §5.21）
   userTestLimit: 6
   userTestWindow: 1m
+# 服务器位置扫描用的在线 IP 库，语义见 docs/03 §5.1（Ruling-65）：{ip} 处替换成面板报出的公网 IP，响应取 JSON 的 country；
+# 写成 lookupUrl: "" 即关闭扫描。环境变量 HUB_GEOIP_LOOKUP_URL 可覆盖（联调用）
+geoip:
+  lookupUrl: https://api.country.is/{ip}
+  timeout: 5s
 # 终端用户会话，语义见 docs/03 §5.3；登录频控与 Cookie 的 Secure 沿用 auth 段
 portal:
   sessionIdleTimeout: 168h

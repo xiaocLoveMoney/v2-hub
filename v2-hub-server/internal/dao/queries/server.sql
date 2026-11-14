@@ -57,3 +57,36 @@ WHERE id = sqlc.arg(id);
 
 -- name: SetServerSynced :exec
 UPDATE server SET last_synced_at = now() WHERE id = $1;
+
+-- name: ListUnlocatedServerIDs :many
+-- 位置未知的启用服务器，启动时补扫（Ruling-65）
+SELECT id FROM server WHERE NOT is_disabled AND region = '' ORDER BY id;
+
+-- name: FillServerRegion :execrows
+-- 扫描结果只填进仍为空的位置，不覆盖管理员这期间的选择（Ruling-65）
+UPDATE server SET region = sqlc.arg(region)::varchar, updated_at = now() WHERE id = sqlc.arg(id) AND region = '';
+
+-- name: RecordServerMetric :exec
+-- 健康探测成功顺带记一条负载采样：对齐 5 分钟，同一时段覆盖为最新值，在线数取服务器缓存（Ruling-65）
+INSERT INTO server_metric (server_id, bucket_at, cpu, online_clients)
+SELECT s.id, date_bin('5 minutes', sqlc.arg(sampled_at)::timestamptz, TIMESTAMPTZ '2000-01-01 00:00:00+00'),
+       sqlc.narg(cpu)::double precision, s.online_clients
+FROM server s WHERE s.id = sqlc.arg(server_id)
+ON CONFLICT (server_id, bucket_at) DO UPDATE SET cpu = EXCLUDED.cpu, online_clients = EXCLUDED.online_clients;
+
+-- name: PurgeServerMetrics :execrows
+DELETE FROM server_metric WHERE bucket_at < $1;
+
+-- name: ListServerMetrics :many
+-- 5 分钟采样原值（近 24 小时趋势）
+SELECT bucket_at, cpu, online_clients FROM server_metric
+WHERE server_id = $1 AND bucket_at >= $2 ORDER BY bucket_at;
+
+-- name: ListServerMetricsHourly :many
+-- 按小时平均（近 7 天趋势）；cpu_samples 为 0 表示该小时 CPU 全为空（此时 cpu 无意义）
+SELECT date_bin('1 hour', bucket_at, TIMESTAMPTZ '2000-01-01 00:00:00+00')::timestamptz AS bucket_at,
+       coalesce(avg(cpu), 0)::double precision AS cpu, count(cpu) AS cpu_samples,
+       round(avg(online_clients))::integer AS online_clients
+FROM server_metric
+WHERE server_id = $1 AND bucket_at >= $2
+GROUP BY 1 ORDER BY 1;

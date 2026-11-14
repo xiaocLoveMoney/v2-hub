@@ -57,7 +57,6 @@ type NodeFilter struct {
 // NodeInput 是节点展示属性。
 type NodeInput struct {
 	DisplayName string
-	Region      string
 	Tags        []string
 	SortOrder   int
 	IsEnabled   bool
@@ -126,9 +125,6 @@ func validateNodeInput(in NodeInput) (NodeInput, error) {
 	if n := utf8.RuneCountInString(in.DisplayName); n < 1 || n > maxNodeNameLen {
 		return in, newError(CodeInvalidArgument, fmt.Sprintf("显示名长度须为 1–%d", maxNodeNameLen))
 	}
-	if utf8.RuneCountInString(in.Region) > maxRegionLen {
-		return in, newError(CodeInvalidArgument, "地区过长")
-	}
 	if len(in.Tags) > maxNodeTags {
 		return in, newError(CodeInvalidArgument, fmt.Sprintf("标签最多 %d 个", maxNodeTags))
 	}
@@ -168,7 +164,7 @@ func (s *PanelService) UpdateNode(ctx context.Context, actor *AdminPrincipal, id
 	}
 	return s.inTx(ctx, func(q *sqlcgen.Queries) error {
 		n, err := q.UpdateNode(ctx, sqlcgen.UpdateNodeParams{
-			ID: id, DisplayName: in.DisplayName, Region: in.Region, Tags: in.Tags, SortOrder: int32(in.SortOrder), IsEnabled: in.IsEnabled,
+			ID: id, DisplayName: in.DisplayName, Tags: in.Tags, SortOrder: int32(in.SortOrder), IsEnabled: in.IsEnabled,
 		})
 		if err != nil {
 			return fmt.Errorf("update node %d: %w", id, err)

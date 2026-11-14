@@ -152,6 +152,33 @@ func (q *Queries) GetUserSubToken(ctx context.Context, id int64) ([]byte, error)
 	return sub_token_enc, err
 }
 
+const getUserVisibleNodeServerID = `-- name: GetUserVisibleNodeServerID :one
+SELECT s.id
+FROM end_user u
+JOIN plan_node_group pg ON pg.plan_id = u.plan_id
+JOIN node_group_item gi ON gi.node_group_id = pg.node_group_id
+JOIN node n ON n.id = gi.node_id AND n.is_enabled
+JOIN inbound i ON i.id = n.inbound_id AND NOT i.is_missing AND i.is_enabled
+JOIN server s ON s.id = i.server_id AND NOT s.is_disabled
+LEFT JOIN endpoint e ON e.id = n.endpoint_id
+WHERE u.id = $1 AND u.deleted_at IS NULL AND n.id = $2
+  AND (e.id IS NULL OR (NOT e.is_missing AND NOT e.is_disabled))
+LIMIT 1
+`
+
+type GetUserVisibleNodeServerIDParams struct {
+	UserID int64
+	NodeID int64
+}
+
+// 节点在本人节点列表里时返回所在服务器（连接条件与 ListUserNodeGroups 一致），趋势图用（Ruling-65）
+func (q *Queries) GetUserVisibleNodeServerID(ctx context.Context, arg GetUserVisibleNodeServerIDParams) (int64, error) {
+	row := q.db.QueryRow(ctx, getUserVisibleNodeServerID, arg.UserID, arg.NodeID)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}
+
 const insertSubscribeLog = `-- name: InsertSubscribeLog :exec
 INSERT INTO subscribe_log (user_id, format, client_ip, user_agent) VALUES ($1, $2, $3, $4)
 `
@@ -259,7 +286,7 @@ func (q *Queries) ListSubscribeLogs(ctx context.Context, arg ListSubscribeLogsPa
 }
 
 const listUserNodeGroups = `-- name: ListUserNodeGroups :many
-SELECT g.id AS group_id, g.name AS group_name, n.id, n.display_name, n.region, n.sort_order, i.protocol,
+SELECT g.id AS group_id, g.name AS group_name, n.id, n.display_name, s.region, n.sort_order, i.protocol,
        (s.status = 'online')::boolean AS is_server_online, s.online_clients, s.status_snapshot
 FROM end_user u
 JOIN plan_node_group pg ON pg.plan_id = u.plan_id
@@ -349,7 +376,7 @@ func (q *Queries) ListUserProvisionLinks(ctx context.Context, userID int64) ([]L
 }
 
 const listUserSubNodes = `-- name: ListUserSubNodes :many
-SELECT DISTINCT n.id, n.display_name, n.region, n.sort_order, i.id AS inbound_id, i.server_id, i.port AS inbound_port, i.protocol,
+SELECT DISTINCT n.id, n.display_name, s.region, n.sort_order, i.id AS inbound_id, i.server_id, i.port AS inbound_port, i.protocol,
        (n.endpoint_id IS NULL)::boolean AS is_direct,
        coalesce(e.address, '')::text AS endpoint_address, coalesce(e.port, 0)::int AS endpoint_port, s.base_url
 FROM end_user u

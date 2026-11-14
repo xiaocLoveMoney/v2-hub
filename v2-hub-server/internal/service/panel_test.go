@@ -599,7 +599,7 @@ func TestNodeGroups(t *testing.T) {
 		t.Fatalf("nodes = %+v, %v", nodes, err)
 	}
 	first := nodes.Items[0].ID
-	if err := f.panels.UpdateNode(ctx, f.actor, first, NodeInput{DisplayName: "香港 01", Region: "HK", Tags: []string{"premium", " "}, IsEnabled: true}, nil); err != nil {
+	if err := f.panels.UpdateNode(ctx, f.actor, first, NodeInput{DisplayName: "香港 01", Tags: []string{"premium", " "}, IsEnabled: true}, nil); err != nil {
 		t.Fatalf("UpdateNode: %v", err)
 	}
 	g, err := f.panels.CreateNodeGroup(ctx, f.actor, NodeGroupInput{Name: "basic", NodeIDs: []int64{first, first}}, nil)

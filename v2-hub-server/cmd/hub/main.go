@@ -27,6 +27,7 @@ import (
 	"v2-hub-server/internal/job"
 	"v2-hub-server/internal/manager/crypto"
 	"v2-hub-server/internal/manager/mail"
+	"v2-hub-server/internal/manager/geoip"
 	"v2-hub-server/internal/manager/panel"
 	"v2-hub-server/internal/manager/panel/xui"
 	"v2-hub-server/internal/manager/pay"
@@ -54,6 +55,8 @@ const (
 	// Telegram 机器人只走环境变量（docs/03 §5.20，Ruling-42）；API 地址可换成联调用的模拟端
 	envTelegramToken   = "HUB_TELEGRAM_BOT_TOKEN"
 	envTelegramAPIBase = "HUB_TELEGRAM_API_BASE"
+	// envGeoIPLookupURL 覆盖配置里的 IP 库查询地址（联调指向模拟端；设为空串即关闭扫描，Ruling-65）
+	envGeoIPLookupURL = "HUB_GEOIP_LOOKUP_URL"
 	// telegramOutboxInterval 是 Telegram 发件箱任务的周期；opsInterval 是掉线告警与日报的检查周期。
 	telegramOutboxInterval = 10 * time.Second
 	opsInterval            = time.Minute
@@ -132,7 +135,11 @@ func runServer(args []string) error {
 
 	// 面板实现注册表：新增面板类型（如 S-UI）只在这里加一行（Ruling-8）
 	registry := panel.NewRegistry(map[string]panel.Factory{xui.ProviderType: xui.New})
-	panels := service.NewPanelService(pool, sealer, registry, service.PanelConfig{RequestTimeout: cfg.Panel.RequestTimeout}, nil)
+	locator, err := geoLocatorFromConfig(cfg.GeoIP)
+	if err != nil {
+		return err
+	}
+	panels := service.NewPanelService(pool, sealer, registry, service.PanelConfig{RequestTimeout: cfg.Panel.RequestTimeout, Locator: locator}, nil)
 	go job.RunPanelPolling(ctx, panels, job.PanelPollConfig{
 		ProbeInterval: cfg.Panel.ProbeInterval, SyncInterval: cfg.Panel.SyncInterval, Concurrency: cfg.Panel.Concurrency,
 	})
@@ -144,6 +151,9 @@ func runServer(args []string) error {
 		BaseURL: cfg.Subscription.BaseURL, Title: cfg.Subscription.Title, UpdateIntervalHours: cfg.Subscription.UpdateIntervalHours,
 		InfoNodes: cfg.Subscription.InfoNodes, LogRetention: cfg.Subscription.LogRetention,
 	}
+	go job.RunSessionCleanup(ctx, job.PurgeFunc(panels.PurgeServerMetrics), cfg.Auth.SessionCleanupInterval)
+	// 位置为空的服务器在后台补扫一次，不阻塞启动（Ruling-65）
+	go job.RunServerLocate(ctx, panels)
 	// 节点旧默认名去掉服务器名前缀（Ruling-63）
 	if _, err := panels.RenameLegacyNodes(ctx); err != nil {
 		return fmt.Errorf("rename legacy nodes: %w", err)
@@ -351,6 +361,23 @@ func telegramSenderFromEnv() (telegram.Sender, error) {
 		return nil, fmt.Errorf("init telegram (env %s / %s): %w", envTelegramToken, envTelegramAPIBase, err)
 	}
 	if client == nil {
+		return nil, nil
+	}
+	return client, nil
+}
+
+// geoLocatorFromConfig 按配置（环境变量可覆盖地址）创建 IP 库客户端；地址为空返回 nil，表示位置扫描关闭。
+func geoLocatorFromConfig(cfg config.GeoIPConfig) (geoip.Locator, error) {
+	lookupURL := cfg.LookupURL
+	if v, ok := os.LookupEnv(envGeoIPLookupURL); ok {
+		lookupURL = v
+	}
+	client, err := geoip.New(geoip.Config{LookupURL: lookupURL, Timeout: cfg.Timeout})
+	if err != nil {
+		return nil, err
+	}
+	if client == nil {
+		slog.Info("server location scan disabled")
 		return nil, nil
 	}
 	return client, nil
