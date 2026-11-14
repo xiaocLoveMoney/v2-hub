@@ -40,6 +40,9 @@ export const zh = {
   // 外壳
   'shell.appTitle': 'v2-hub 用户中心',
   'shell.slogan': '一个订阅，连通所有节点',
+  'auth.feature1': '一个订阅地址，自动同步所有可用节点',
+  'auth.feature2': '服务端、客户端两种链式代理，落地自由组合',
+  'auth.feature3': '流量、到期与在线设备一目了然',
   'shell.mainMenu': '主菜单',
   'shell.closeMenu': '收起菜单',
   'shell.toggleMenu': '展开或收起菜单',

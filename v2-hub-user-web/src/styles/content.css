@@ -1,13 +1,9 @@
 /*
- * M4 的内容类组件（docs/06 §5）：分屏页的附加行、Markdown 正文、分段 pills、共享账号条目、工单对话流。
+ * M4 的内容类组件（docs/06 §5）：登录外壳的附加行、Markdown 正文、分段 pills、共享账号条目、工单对话流。
  * 只用 tokens.css 的设计变量，不写字面色值。
  */
 
 /* ---- 登录 / 注册 / 找回密码 ---- */
-.hub-login-subtitle {
-  margin-bottom: 28px;
-}
-
 .hub-login-links {
   display: flex;
   justify-content: space-between;

@@ -162,67 +162,116 @@
 }
 
 /* 分屏登录页：左 1/3 表单，右 2/3 全高背景（docs/06 §5） */
-.hub-login {
-  display: grid;
-  grid-template-columns: minmax(360px, 1fr) 2fr;
-  min-height: 100vh;
-  background: var(--hub-surface);
-}
-
-.hub-login-form {
+.hub-auth {
   display: flex;
   flex-direction: column;
-  justify-content: center;
-  padding: 48px;
+  min-height: 100vh;
+  background-color: var(--hub-page-bg);
+  background-position: right center;
+  background-repeat: no-repeat;
+  background-size: cover;
 }
 
-.hub-login-form h1 {
+.hub-auth-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px clamp(16px, 4vw, 48px);
+}
+
+.hub-auth-brand {
+  display: inline-flex;
+  gap: 10px;
+  align-items: center;
+  font-size: 18px;
+  font-weight: 800;
+  color: var(--hub-heading);
+}
+
+.hub-auth-main {
+  display: flex;
+  flex: 1;
+  gap: clamp(32px, 5vw, 72px);
+  align-items: center;
+  padding: 24px clamp(16px, 9vw, 160px);
+}
+
+.hub-auth-card {
+  flex: none;
+  width: min(100%, 420px);
+  padding: 40px 40px 32px;
+  background: var(--hub-surface);
+  border-top: 3px solid var(--hub-primary);
+  border-radius: var(--hub-radius);
+  box-shadow: var(--hub-float-shadow);
+}
+
+.hub-auth-card h1 {
   margin-bottom: 6px;
-  font-size: 26px;
+  font-size: 24px;
   font-weight: 400;
 }
 
-.hub-login-form h1 strong {
+.hub-auth-card h1 strong {
   font-weight: 800;
 }
 
-.hub-login-art {
-  position: relative;
+.hub-auth-subtitle {
+  margin-bottom: 24px;
+}
+
+.hub-auth-pitch {
+  max-width: 440px;
+  padding: 28px 32px;
+  background: rgb(255 255 255 / 62%);
+  border: 1px solid rgb(255 255 255 / 70%);
+  border-radius: 12px;
+  box-shadow: 0 8px 32px rgb(103 119 239 / 12%);
+  backdrop-filter: blur(14px) saturate(140%);
+}
+
+.hub-auth-pitch h2 {
+  margin-bottom: 4px;
+  font-size: 30px;
+  font-weight: 800;
+  color: var(--hub-primary);
+}
+
+.hub-auth-slogan {
+  margin-bottom: 20px;
+  font-size: 26px;
+  font-weight: 700;
+  line-height: 1.35;
+  color: var(--hub-heading);
+}
+
+.hub-auth-features {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--hub-body);
+}
+
+.hub-auth-features li {
   display: flex;
-  align-items: flex-end;
-  padding: 48px;
-  overflow: hidden;
-  color: var(--hub-on-color);
-  background:
-    radial-gradient(circle at 20% 20%, rgb(255 255 255 / 18%), transparent 45%),
-    radial-gradient(circle at 80% 30%, var(--hub-info), transparent 55%),
-    linear-gradient(135deg, var(--hub-primary-hover), var(--hub-primary) 55%, var(--hub-primary-glow));
+  gap: 10px;
+  align-items: flex-start;
 }
 
-.hub-login-art::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(to top, rgb(0 0 0 / 55%), transparent 55%);
+.hub-auth-features svg {
+  flex: none;
+  margin-top: 3px;
+  color: var(--hub-primary);
 }
 
-.hub-login-art > * {
-  position: relative;
-  z-index: 1;
-}
-
-.hub-login-art .hub-login-art-mark {
-  display: block;
-  margin-bottom: 16px;
-  color: var(--hub-on-color);
-  filter: drop-shadow(0 4px 12px rgb(0 0 0 / 25%));
-}
-
-.hub-login-art h2 {
-  margin-bottom: 8px;
-  font-size: 40px;
-  font-weight: 800;
-  color: var(--hub-on-color);
+.hub-auth-footer {
+  padding: 16px;
+  font-size: 12px;
+  text-align: center;
+  color: var(--hub-muted);
 }
 
 /* 语言切换（docs/06 §5 M8 的做法）：页脚里的两个文字按钮，当前语言用主色 */
@@ -246,10 +295,6 @@
 .hub-locale-switch button.is-active {
   color: var(--hub-primary);
   font-weight: 700;
-}
-
-.hub-login-footer {
-  margin-top: 28px;
 }
 
 /* 客服入口：右下角固定的药丸按钮（Ruling-44） */
@@ -389,23 +434,21 @@
   }
 }
 
+/* 登录外壳：窄屏只留卡片，插画仍作背景 */
+@media (width < 900px) {
+  .hub-auth-main {
+    justify-content: center;
+    padding: 16px;
+  }
+
+  .hub-auth-pitch {
+    display: none;
+  }
+}
+
 @media (width <= 768px) {
-  .hub-login {
-    grid-template-columns: 1fr;
-  }
-
-  .hub-login-art {
-    order: -1;
-    min-height: 180px;
-    padding: 24px;
-  }
-
-  .hub-login-art h2 {
-    font-size: 26px;
-  }
-
-  .hub-login-form {
-    padding: 28px 20px;
+  .hub-auth-card {
+    padding: 28px 20px 24px;
   }
 
   .hub-topbar,

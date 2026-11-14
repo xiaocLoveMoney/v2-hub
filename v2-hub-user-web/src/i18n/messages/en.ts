@@ -35,6 +35,9 @@ export const en: Record<MessageKey, string> = {
 
   'shell.appTitle': 'v2-hub User Center',
   'shell.slogan': 'One subscription, every node',
+  'auth.feature1': 'One subscription URL that keeps every available node in sync',
+  'auth.feature2': 'Server-side and client-side chains with any exit you like',
+  'auth.feature3': 'Traffic, expiry and online devices at a glance',
   'shell.mainMenu': 'Main menu',
   'shell.closeMenu': 'Close menu',
   'shell.toggleMenu': 'Toggle menu',
