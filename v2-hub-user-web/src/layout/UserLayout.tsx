@@ -3,8 +3,9 @@ import { Fragment, useState } from 'react'
 import { NavLink, Navigate, Outlet, useLocation, useNavigate } from 'react-router'
 import { useSession } from '../auth/session-context'
 import { LocaleSwitch } from '../components/LocaleSwitch'
+import { revealChildren } from '../components/motion'
 import { SupportButton } from '../components/SupportButton'
-import { Alert, Button } from '../components/ui'
+import { Alert, Button, Loading } from '../components/ui'
 import { useI18n, type MessageKey } from '../i18n/i18n-context'
 import { LandingPage } from '../pages/LandingPage'
 import { ROUTES, visibleMenu, type MenuEntry } from '../menu'
@@ -41,7 +42,7 @@ export function UserLayout() {
   const [isCollapsedOnLarge, setIsCollapsedOnLarge] = useState(false)
 
   if (status === 'loading') {
-    return <div className="hub-empty">{t('common.loading')}</div>
+    return <Loading />
   }
   const isAnonymous = status === 'anonymous' || session === null
   if (isAnonymous && location.pathname === ROUTES.DASHBOARD && site.landing?.enabled === true) {
@@ -107,7 +108,7 @@ export function UserLayout() {
             </Button>
           </div>
         )}
-        <main className="hub-content">
+        <main className="hub-content" ref={revealChildren}>
           {isDisabled ? <Alert tone="danger">{t('shell.accountDisabled')}</Alert> : <Outlet />}
         </main>
         <footer className="hub-footer">

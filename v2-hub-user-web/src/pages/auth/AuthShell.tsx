@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 import { LocaleSwitch } from '../../components/LocaleSwitch'
+import { revealChildren, slideInFromRight } from '../../components/motion'
 import { SupportButton } from '../../components/SupportButton'
 import { useI18n } from '../../i18n/i18n-context'
 import { useSite } from '../../site/site-context'
@@ -17,7 +18,7 @@ export function AuthShell({ lead, subtitle, children }: AuthShellProps) {
   const { t } = useI18n()
   return (
     <div className="hub-login">
-      <section className="hub-login-form">
+      <section className="hub-login-form" ref={revealChildren}>
         <h1>
           {lead} <strong>{site.siteName}</strong>
         </h1>
@@ -27,7 +28,7 @@ export function AuthShell({ lead, subtitle, children }: AuthShellProps) {
           <LocaleSwitch />
         </div>
       </section>
-      <section className="hub-login-art" aria-hidden="true">
+      <section className="hub-login-art" aria-hidden="true" ref={slideInFromRight}>
         <div>
           <h2>{site.siteName}</h2>
           <p>{t('shell.slogan')}</p>

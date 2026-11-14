@@ -3,6 +3,7 @@ import { Button, Layout, Menu, Space, Spin, Typography, type MenuProps } from 'a
 import { useMemo } from 'react'
 import { Navigate, Outlet, useLocation, useNavigate } from 'react-router'
 import { useSession } from '../auth/session-context'
+import { revealChildren } from '../components/motion'
 import { ROUTES, visibleMenu, type MenuEntry } from '../menu'
 
 type MenuItem = Required<MenuProps>['items'][number]
@@ -72,7 +73,8 @@ export function AdminLayout() {
             </Button>
           </Space>
         </Layout.Header>
-        <Layout.Content className="admin-content">
+        {/* 页面根节点插入时进场（components/motion.ts）；不另包一层，样式里的 .admin-content:has(> .card-page) 要求页面是直接子元素 */}
+        <Layout.Content className="admin-content" ref={revealChildren}>
           <Outlet />
         </Layout.Content>
       </Layout>

@@ -3,6 +3,7 @@ import { Link } from 'react-router'
 import { api, type PublicPlan } from '../api/client'
 import { LocaleSwitch } from '../components/LocaleSwitch'
 import { Markdown } from '../components/Markdown'
+import { revealChildren } from '../components/motion'
 import { SupportButton } from '../components/SupportButton'
 import { useRemote } from '../hooks/use-remote'
 import { useI18n } from '../i18n/i18n-context'
@@ -72,7 +73,7 @@ export function LandingPage() {
   const items = plans.data ?? []
 
   return (
-    <div className="hub-landing">
+    <div className="hub-landing" ref={revealChildren}>
       <header className="hub-landing-nav">
         <span className="hub-brand">{site.siteName}</span>
         <span className="hub-actions">

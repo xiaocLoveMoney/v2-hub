@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Link } from 'react-router'
 import { api, type Shop, type ShopPlan, type ShopTrafficPack } from '../../api/client'
-import { Alert, Badge, Button, Card, Empty, PageHeader } from '../../components/ui'
+import { Alert, Badge, Button, Card, Empty, Loading, PageHeader } from '../../components/ui'
 import { formatBytes } from '../../format'
 import { useRemote } from '../../hooks/use-remote'
 import { useI18n } from '../../i18n/i18n-context'
@@ -77,7 +77,7 @@ export function ShopPage() {
     )
   }
   if (data === null) {
-    return <div className="hub-empty">{t('common.loading')}</div>
+    return <Loading />
   }
 
   const hasCurrent = data.plans.some((p) => p.isCurrent)

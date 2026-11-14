@@ -7,12 +7,15 @@ if (typeof globalThis.ResizeObserver === 'undefined') {
   }
 }
 
+const REDUCED_MOTION_FEATURE = 'prefers-reduced-motion'
+
 // jsdom 没有 matchMedia，antd 的响应式组件（Sider breakpoint、Grid）依赖它。
+// 对“减少动态效果”返回 true：测试里不做页面进场动画，元素渲染后立即可见（components/motion.ts）。
 if (typeof window !== 'undefined' && typeof window.matchMedia !== 'function') {
   Object.defineProperty(window, 'matchMedia', {
     writable: true,
     value: (query: string): MediaQueryList => ({
-      matches: false,
+      matches: query.includes(REDUCED_MOTION_FEATURE),
       media: query,
       onchange: null,
       addListener: () => undefined,

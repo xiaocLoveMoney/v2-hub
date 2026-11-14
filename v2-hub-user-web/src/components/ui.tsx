@@ -1,5 +1,7 @@
-import { useEffect, useId, type ButtonHTMLAttributes, type CSSProperties, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes } from 'react'
+import { useEffect, useId, useRef, useState, type ButtonHTMLAttributes, type CSSProperties, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes } from 'react'
+import { createPortal } from 'react-dom'
 import { useI18n } from '../i18n/i18n-context'
+import { EASE_ENTER, EASE_LEAVE, EASE_POP, MOTION_BASE, MOTION_FAST, gsap, isMotionEnabled, useGSAP } from './motion'
 
 /** 设计系统的基础组件（docs/06 §4）。只负责外观与无障碍语义，不含业务逻辑。 */
 
@@ -186,9 +188,38 @@ interface ModalProps {
   footer?: ReactNode
 }
 
-/** 模态框：点遮罩或按 Esc 关闭。关闭时不渲染，内部状态随之重置。 */
+/** 退场动画期间仍要显示的内容：关闭后父组件往往已清空数据，沿用最后一次打开时的内容。 */
+interface ModalView {
+  title: string
+  children: ReactNode
+  footer?: ReactNode
+}
+
+/** 弹窗进场时自下而上移动的距离（px）与起始缩放。 */
+const MODAL_OFFSET_PX = 24
+const MODAL_START_SCALE = 0.96
+
+/**
+ * 模态框：点遮罩或按 Esc 关闭，挂到 body 下以免被祖先的 transform 影响定位。
+ * 打开时遮罩淡入、对话框上浮；关闭时先播退场动画再卸载，卸载后内部状态随之重置。不做动画时（见 motion.ts）关闭即卸载。
+ */
 export function Modal({ title, isOpen, onClose, children, footer }: ModalProps) {
   const titleId = useId()
+  const maskRef = useRef<HTMLDivElement>(null)
+  const [isPresent, setIsPresent] = useState(isOpen)
+  // 记住打开期间最后一次的内容（React 文档“保存上一次渲染的信息”的写法），退场时沿用
+  const [shownView, setShownView] = useState<ModalView>({ title, children, footer })
+  const isViewStale = shownView.title !== title || shownView.children !== children || shownView.footer !== footer
+  if (isOpen && isViewStale) {
+    setShownView({ title, children, footer })
+  }
+  if (isOpen && !isPresent) {
+    setIsPresent(true)
+  }
+  if (!isOpen && isPresent && !isMotionEnabled()) {
+    setIsPresent(false)
+  }
+
   useEffect(() => {
     if (!isOpen) {
       return undefined
@@ -202,12 +233,36 @@ export function Modal({ title, isOpen, onClose, children, footer }: ModalProps) 
     return () => document.removeEventListener('keydown', onKey)
   }, [isOpen, onClose])
 
-  if (!isOpen) {
+  useGSAP(
+    () => {
+      const mask = maskRef.current
+      const dialog = mask?.firstElementChild ?? null
+      if (!isPresent || mask === null || dialog === null || !isMotionEnabled()) {
+        return
+      }
+      if (isOpen) {
+        gsap.fromTo(mask, { autoAlpha: 0 }, { autoAlpha: 1, duration: MOTION_BASE, ease: EASE_ENTER, overwrite: true })
+        gsap.fromTo(
+          dialog,
+          { y: MODAL_OFFSET_PX, scale: MODAL_START_SCALE },
+          { y: 0, scale: 1, duration: MOTION_BASE, ease: EASE_POP, overwrite: true, clearProps: 'transform' },
+        )
+        return
+      }
+      gsap.to(dialog, { y: MODAL_OFFSET_PX / 2, scale: MODAL_START_SCALE, duration: MOTION_FAST, ease: EASE_LEAVE, overwrite: true })
+      gsap.to(mask, { autoAlpha: 0, duration: MOTION_FAST, ease: EASE_LEAVE, overwrite: true, onComplete: () => setIsPresent(false) })
+    },
+    { dependencies: [isOpen, isPresent], scope: maskRef },
+  )
+
+  if (!isPresent) {
     return null
   }
-  return (
+  const view = isOpen ? { title, children, footer } : shownView
+  return createPortal(
     <div
-      className="hub-modal-mask"
+      ref={maskRef}
+      className={`hub-modal-mask${isOpen ? '' : ' is-leaving'}`}
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) {
           onClose()
@@ -216,12 +271,13 @@ export function Modal({ title, isOpen, onClose, children, footer }: ModalProps) 
     >
       <div className="hub-modal" role="dialog" aria-modal="true" aria-labelledby={titleId}>
         <header className="hub-modal-header">
-          <h4 id={titleId}>{title}</h4>
+          <h4 id={titleId}>{view.title}</h4>
         </header>
-        <div className="hub-modal-body">{children}</div>
-        {footer !== undefined && <footer className="hub-modal-footer">{footer}</footer>}
+        <div className="hub-modal-body">{view.children}</div>
+        {view.footer !== undefined && <footer className="hub-modal-footer">{view.footer}</footer>}
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }
 
@@ -272,4 +328,15 @@ export function PageHeader({ title, extra }: { title: string; extra?: ReactNode 
 /** 空状态。 */
 export function Empty({ children }: { children: ReactNode }) {
   return <div className="hub-empty">{children}</div>
+}
+
+/** 加载中：转圈 + 文字；inline 用于卡片、弹窗内的小块区域，默认占满内容区。 */
+export function Loading({ isInline = false }: { isInline?: boolean }) {
+  const { t } = useI18n()
+  return (
+    <div className={`hub-loading${isInline ? ' hub-loading-inline' : ''}`} role="status">
+      <span className="hub-spinner" aria-hidden="true" />
+      <span>{t('common.loading')}</span>
+    </div>
+  )
 }

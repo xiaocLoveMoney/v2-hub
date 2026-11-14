@@ -3,7 +3,7 @@ import { useState } from 'react'
 import { Link } from 'react-router'
 import { api, type Dashboard, type TrafficPoint } from '../api/client'
 import { Donut, HourBars } from '../components/charts'
-import { Alert, Card, PageHeader, StatCard } from '../components/ui'
+import { Alert, Card, Loading, PageHeader, StatCard } from '../components/ui'
 import { daysLeft, formatBytes, formatDate, formatTime, usedPercent } from '../format'
 import { useRemote } from '../hooks/use-remote'
 import { ROUTES } from '../menu'
@@ -69,7 +69,7 @@ export function DashboardPage() {
     )
   }
   if (d === null) {
-    return <div className="hub-empty">{t('common.loading')}</div>
+    return <Loading />
   }
 
   const hasPlan = d.planName !== ''
