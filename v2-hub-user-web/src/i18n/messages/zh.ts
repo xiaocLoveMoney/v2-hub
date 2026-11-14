@@ -577,6 +577,17 @@ export const zh = {
   'chain.note4': '状态“通畅”表示配置与授权成立，平台不探测连通性；能否连通以实际使用为准。',
   'chain.note5': '阻断的规则会保留但不生效，原因消除后（如续上支持的套餐、节点恢复）自动恢复。',
   'chain.note6': '落地是平台节点时，同一份流量在起飞与落地各计一次；落地是出口时只计起飞一侧。',
+  'chain.flowTitleServer': '链路示意 · 服务端链式',
+  'chain.flowTitleClient': '链路示意 · 客户端链式',
+  'chain.flowEmpty': '还没有规则；添加后这里会画出“设备 → 起飞节点 → 落地”的走向。',
+  'chain.flowDevice': '我的设备',
+  'chain.flowDeviceOnline': '在线 {n} 台',
+  'chain.flowDeviceUnknown': '在线数未知',
+  'chain.flowActive': '生效',
+  'chain.flowInactive': '未生效',
+  'chain.flowSummary': '链路示意：{entries} 个起飞节点、{exits} 个落地',
+  'chain.flowLegendActive': '实线：生效的链路',
+  'chain.flowLegendInactive': '虚线：未生效（阻断、停用、被覆盖等）',
 } as const
 
 /** 词条键。 */

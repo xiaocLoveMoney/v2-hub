@@ -3,6 +3,7 @@ import { api, type ChainKind, type ChainOverview } from '../../api/client'
 import { Alert, Card, PageHeader } from '../../components/ui'
 import { useRemote } from '../../hooks/use-remote'
 import { useI18n, type MessageKey } from '../../i18n/i18n-context'
+import { ChainFlowCard } from './ChainFlowCard'
 import { ExitsCard } from './ExitsCard'
 import { RouteList } from './RouteList'
 
@@ -40,13 +41,14 @@ function initialKind(overview: ChainOverview): ChainKind {
 
 interface ChainTabsProps {
   overview: ChainOverview
+  kind: ChainKind
+  onKindChange: (kind: ChainKind) => void
   onChanged: () => void
 }
 
 /** 两个页签：服务端链式、客户端链式，各是一张有序的规则列表。 */
-function ChainTabs({ overview, onChanged }: ChainTabsProps) {
+function ChainTabs({ overview, kind, onKindChange, onChanged }: ChainTabsProps) {
   const { t } = useI18n()
-  const [kind, setKind] = useState<ChainKind>(() => initialKind(overview))
   const tabs: { kind: ChainKind; label: string }[] = [
     { kind: KIND_SERVER, label: t('chain.tabServer', { count: overview.serverRoutes.length, max: overview.maxServerRoutes }) },
     { kind: KIND_CLIENT, label: t('chain.tabClient', { count: overview.clientRoutes.length, max: overview.maxClientRoutes }) },
@@ -61,7 +63,7 @@ function ChainTabs({ overview, onChanged }: ChainTabsProps) {
             role="tab"
             aria-selected={tab.kind === kind}
             className={`hub-seg-item${tab.kind === kind ? ' is-active' : ''}`}
-            onClick={() => setKind(tab.kind)}
+            onClick={() => onKindChange(tab.kind)}
           >
             {tab.label}
           </button>
@@ -94,15 +96,22 @@ export function ChainPage() {
       <PageHeader title={t('menu.chain')} />
       {chain.error !== null && <Alert tone="plain">{chain.error.message}</Alert>}
       {overview !== null && !overview.allowed && !overview.serverAllowed && <Alert tone="warning">{t('chain.planNotAllowed')}</Alert>}
-      {overview !== null && (
-        <>
-          <ChainTabs overview={overview} onChanged={reload} />
-          <div className="hub-grid-2">
-            <ExitsCard overview={overview} onChanged={reload} />
-            <NotesCard />
-          </div>
-        </>
-      )}
+      {overview !== null && <ChainBody overview={overview} onChanged={reload} />}
+    </>
+  )
+}
+
+/** 页签与规则列表、出口与说明、链路示意；页签选择由链路示意卡共用。 */
+function ChainBody({ overview, onChanged }: { overview: ChainOverview; onChanged: () => void }) {
+  const [kind, setKind] = useState<ChainKind>(() => initialKind(overview))
+  return (
+    <>
+      <ChainTabs overview={overview} kind={kind} onKindChange={setKind} onChanged={onChanged} />
+      <div className="hub-grid-2">
+        <ExitsCard overview={overview} onChanged={onChanged} />
+        <NotesCard />
+      </div>
+      <ChainFlowCard kind={kind} routes={kind === KIND_SERVER ? overview.serverRoutes : overview.clientRoutes} />
     </>
   )
 }
