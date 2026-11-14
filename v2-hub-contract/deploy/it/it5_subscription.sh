@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # IT-5 订阅与客户后台（docs/08，M3 DoD）：全新 3x-ui → 接入两个入站（VMess+WS、VLESS+Reality）→ 节点组 + 套餐 + 用户
 # → 终端用户登录客户后台 → 取订阅地址 → 四种格式分别用 base64 解码 / mihomo / sing-box / xray 校验
-# → 重置订阅后旧地址 404、连接凭据已轮换 → 自设连接密码（Ruling-58）→ 停用后订阅只剩说明节点、后台接口 403
+# → 重置订阅后旧地址 404、连接凭据已轮换 → 自设连接密码与 SS2022 密钥（Ruling-58、Ruling-60）→ 停用后订阅只剩说明节点、后台接口 403
 # → 订阅路径前缀（Ruling-59）。黑盒，只用 curl / jq / docker。
 # 注意：会重建 xui-a 容器（不挂数据卷，见 docker-compose.yml），不影响 PostgreSQL 与 MinIO。
 source "$(dirname "$0")/common.sh"
@@ -173,7 +173,7 @@ for _ in $(seq 1 "$ROTATE_WAIT_SECONDS"); do
 done
 [ -n "$rotated" ] || fail "重置后 ${ROTATE_WAIT_SECONDS}s 内连接凭据未轮换完：$(b64d < "$WORK/sub2.b64")"
 
-# ---- 6b. 自设连接密码（Ruling-58）：只换 Shadowsocks 等用 password 的链接，UUID 不变；写法不对 400；清空恢复随机 ----
+# ---- 6b. 自设连接密码（Ruling-58、Ruling-60）：写法不对 400；有 SS2022 的服务器沿用平台密钥；清空恢复随机 ----
 IDS_ROTATED="$(link_ids "$WORK/sub2.b64")"
 SS_ROTATED="$(ss_links "$WORK/sub2.b64")"
 [ "$(portal GET /api/user/subscription | jq -r .data.hasCustomPassword)" = "false" ] || fail "默认不应有自设密码：$(cat "$WORK/body")"
@@ -182,16 +182,10 @@ portal PUT /api/user/subscription/password '{"password":"short"}' >/dev/null; ex
 [ "$(portal PUT /api/user/subscription/password "$(jq -nc --arg p "$CONN_PASSWORD" '{password:$p}')" | jq -r .data.hasCustomPassword)" = "true" ] \
   || fail "设密码后应标记为自设：$(cat "$WORK/body")"
 [ "$(portal GET /api/user/subscription | jq -r .data.url)" = "$SUB_URL" ] || fail "设连接密码不应改变订阅地址"
-changed=""
-for _ in $(seq 1 "$ROTATE_WAIT_SECONDS"); do
-  hub POST "/api/admin/users/$USER_ID/reconcile" >/dev/null
-  if [ "$(fetch base64 "$WORK/sub5.b64")" = "200" ] && [ -n "$(ss_links "$WORK/sub5.b64")" ] && [ "$(ss_links "$WORK/sub5.b64")" != "$SS_ROTATED" ]; then
-    changed=1
-    break
-  fi
-  sleep 1
-done
-[ -n "$changed" ] || fail "设密码后 ${ROTATE_WAIT_SECONDS}s 内 Shadowsocks 链接未更新：$(b64d < "$WORK/sub5.b64")"
+# 这台服务器上有 SS2022 入站，password 一律写平台的 SS2022 密钥（Ruling-60）：对账后 SS2022 链接与 UUID 都不变
+hub POST "/api/admin/users/$USER_ID/reconcile" >/dev/null; expect_code 200 "设密码后对账"
+[ "$(fetch base64 "$WORK/sub5.b64")" = "200" ] || fail "设密码后订阅应为 200"
+[ "$(ss_links "$WORK/sub5.b64")" = "$SS_ROTATED" ] || fail "有 SS2022 的服务器上自设密码不应改动 SS2022 密钥：$(b64d < "$WORK/sub5.b64")"
 [ "$(link_ids "$WORK/sub5.b64")" = "$IDS_ROTATED" ] || fail "设连接密码不应改动 UUID"
 [ "$(portal PUT /api/user/subscription/password '{"password":""}' | jq -r .data.hasCustomPassword)" = "false" ] || fail "清空后应恢复随机：$(cat "$WORK/body")"
 
