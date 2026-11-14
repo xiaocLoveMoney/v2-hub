@@ -93,10 +93,10 @@ describe('TutorialsPage', () => {
 
 describe('SharedAccountsPage', () => {
   const account = { id: 5, name: '流媒体 A', category: '流媒体', account: 'share@example.com', remark: '', sortOrder: 0, isPublished: true, planIds: [3] }
-  /** 后端返回的共享口令（仅测试用）。 */
+  /** 后端返回的共享密码（仅测试用）。 */
   const revealed = 'shared-value-for-test'
 
-  it('口令默认不取，点“显示”才请求一次；限定套餐显示套餐名', async () => {
+  it('密码默认不取，点“显示”才请求一次；限定套餐显示套餐名', async () => {
     const calls = mockServer({
       'GET /api/admin/shared-accounts': () => ok([account]),
       'GET /api/admin/plans': () => ok([{ id: 3, name: '标准版' }]),
@@ -114,7 +114,7 @@ describe('SharedAccountsPage', () => {
     expect(screen.queryByText(revealed)).toBeNull()
   })
 
-  it('只有 content:read 时没有口令列，也不请求套餐', async () => {
+  it('只有 content:read 时没有密码列，也不请求套餐', async () => {
     const calls = mockServer({ 'GET /api/admin/shared-accounts': () => ok([account]) })
     renderWith([PERMISSIONS.CONTENT_READ], <SharedAccountsPage />)
     expect(await screen.findByText('share@example.com')).toBeDefined()

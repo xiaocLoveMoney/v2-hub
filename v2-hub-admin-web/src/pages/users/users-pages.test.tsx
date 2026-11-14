@@ -153,7 +153,7 @@ describe('UsersPage', () => {
     fireEvent.click(screen.getByRole('button', { name: /新建用户/ }))
     let dialog = await screen.findByRole('dialog')
     fireEvent.change(within(dialog).getByLabelText('用户名'), { target: { value: 'bob' } })
-    fireEvent.change(within(dialog).getByLabelText('初始口令'), { target: { value: 'correct-horse-battery' } })
+    fireEvent.change(within(dialog).getByLabelText('初始密码'), { target: { value: 'correct-horse-battery' } })
     fireEvent.click(within(dialog).getByRole('button', { name: /创\s*建/ }))
     await waitFor(() => expect(calls.some((c) => c.method === 'POST' && c.path === '/api/admin/users')).toBe(true))
     expect(calls.find((c) => c.path === '/api/admin/users' && c.method === 'POST')?.body).toMatchObject({ username: 'bob', remark: '' })

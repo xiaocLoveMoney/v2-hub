@@ -48,7 +48,7 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * 用户名口令登录，成功后 Set-Cookie hub_admin_session
+         * 用户名密码登录，成功后 Set-Cookie hub_admin_session
          * @description 失败一律 401“用户名或密码错误”；触发频控返回 429（docs/03 §4.2）。本接口不需要 CSRF 头。
          */
         post: operations["adminLogin"];
@@ -265,7 +265,7 @@ export interface paths {
             cookie?: never;
         };
         get?: never;
-        /** 重置管理员口令（admin:write；对方全部会话失效，R7） */
+        /** 重置管理员密码（admin:write；对方全部会话失效，R7） */
         put: operations["resetAdminPassword"];
         post?: never;
         delete?: never;
@@ -679,7 +679,7 @@ export interface paths {
             };
             cookie?: never;
         };
-        /** 从面板实时读取入站完整配置（含私钥与口令、不含 clients），供编辑表单使用；每次读取记审计（Ruling-16，node:write） */
+        /** 从面板实时读取入站完整配置（含私钥与密码、不含 clients），供编辑表单使用；每次读取记审计（Ruling-16，node:write） */
         get: operations["getInboundPanelConfig"];
         put?: never;
         post?: never;
@@ -992,7 +992,7 @@ export interface paths {
             cookie?: never;
         };
         get?: never;
-        /** 重置用户的客户后台登录口令（user:write） */
+        /** 重置用户的客户后台登录密码（user:write） */
         put: operations["resetUserPassword"];
         post?: never;
         delete?: never;
@@ -1312,7 +1312,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** 全部共享账号，不含口令（content:read） */
+        /** 全部共享账号，不含密码（content:read） */
         get: operations["listSharedAccounts"];
         put?: never;
         /** 新建共享账号（content:write） */
@@ -1352,7 +1352,7 @@ export interface paths {
             };
             cookie?: never;
         };
-        /** 读取共享账号口令，记审计（content:write） */
+        /** 读取共享账号密码，记审计（content:write） */
         get: operations["getSharedAccountCredential"];
         put?: never;
         post?: never;
@@ -1784,7 +1784,7 @@ export interface paths {
             cookie?: never;
         };
         get?: never;
-        /** 本人改口令（须提交旧口令）；成功后其余会话全部失效 */
+        /** 本人改密码（须提交旧密码）；成功后其余会话全部失效 */
         put: operations["userChangePassword"];
         post?: never;
         delete?: never;
@@ -2029,8 +2029,8 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * 发注册或找回口令的邮箱验证码（docs/03 §5.7）
-         * @description 找回口令对不存在的邮箱同样返回成功。邮件未配置、或用途为 register 而注册已关闭时返回 403 feature_disabled。
+         * 发注册或找回密码的邮箱验证码（docs/03 §5.7）
+         * @description 找回密码对不存在的邮箱同样返回成功。邮件未配置、或用途为 register 而注册已关闭时返回 403 feature_disabled。
          */
         post: operations["sendEmailCode"];
         delete?: never;
@@ -2068,7 +2068,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** 凭邮箱验证码重设口令，该用户全部会话失效；不关闭两步验证（Ruling-23） */
+        /** 凭邮箱验证码重设密码，该用户全部会话失效；不关闭两步验证（Ruling-23） */
         post: operations["resetOwnPassword"];
         delete?: never;
         options?: never;
@@ -2101,7 +2101,7 @@ export interface paths {
             cookie?: never;
         };
         get?: never;
-        /** 绑定或换绑邮箱：当前口令 + 新邮箱的验证码 */
+        /** 绑定或换绑邮箱：当前密码 + 新邮箱的验证码 */
         put: operations["bindEmail"];
         post?: never;
         delete?: never;
@@ -2119,7 +2119,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** 注销账号：当前口令（已开两步验证另须验证码）；按删除用户处理并清除会话 */
+        /** 注销账号：当前密码（已开两步验证另须验证码）；按删除用户处理并清除会话 */
         post: operations["deleteOwnAccount"];
         delete?: never;
         options?: never;
@@ -2202,7 +2202,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** 本人可见的共享账号，不含口令（docs/03 §5.9） */
+        /** 本人可见的共享账号，不含密码（docs/03 §5.9） */
         get: operations["listUserSharedAccounts"];
         put?: never;
         post?: never;
@@ -2221,7 +2221,7 @@ export interface paths {
             };
             cookie?: never;
         };
-        /** 读取一条共享账号的口令，记审计；不可见的条目返回 404 */
+        /** 读取一条共享账号的密码，记审计；不可见的条目返回 404 */
         get: operations["getUserSharedAccountCredential"];
         put?: never;
         post?: never;
@@ -3342,7 +3342,7 @@ export interface components {
             registerMode: components["schemas"]["RegisterMode"];
             /** @description 注册是否要先验证邮箱（设置为真且邮件可用） */
             emailVerifyRequired: boolean;
-            /** @description 邮件是否可用；为假时找回口令与换绑邮箱不可用 */
+            /** @description 邮件是否可用；为假时找回密码与换绑邮箱不可用 */
             mailEnabled: boolean;
             checkinEnabled: boolean;
             ticketEnabled: boolean;
@@ -4557,7 +4557,7 @@ export interface components {
             keyFile: string;
         };
         ChainExitInput: {
-            /** @description 分享链接（vless / vmess / trojan / ss），或代理地址 socks5:// http:// https://[用户名:口令@]地址:端口（http / https 自 0.6.0） */
+            /** @description 分享链接（vless / vmess / trojan / ss），或代理地址 socks5:// http:// https://[用户名:密码@]地址:端口（http / https 自 0.6.0） */
             link: string;
             /** @description 可选；省略或空串 = 取链接里的名称 */
             name?: string;
@@ -4702,7 +4702,7 @@ export interface components {
         };
         AdminChainExitInput: {
             name: string;
-            /** @description 分享链接（vless / vmess / trojan / ss），或代理地址 socks5:// http:// https://[用户名:口令@]地址:端口（http / https 自 0.6.0） */
+            /** @description 分享链接（vless / vmess / trojan / ss），或代理地址 socks5:// http:// https://[用户名:密码@]地址:端口（http / https 自 0.6.0） */
             link: string;
             /** @default  */
             remark: string;
@@ -4926,7 +4926,7 @@ export interface operations {
                 };
             };
             400: components["responses"]["InvalidArgument"];
-            /** @description unauthenticated（用户名或口令错误）或 totp_required（需再提交验证码） */
+            /** @description unauthenticated（用户名或密码错误）或 totp_required（需再提交验证码） */
             401: {
                 headers: {
                     [name: string]: unknown;
@@ -7450,7 +7450,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description 全部共享账号，不含口令 */
+            /** @description 全部共享账号，不含密码 */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -7560,7 +7560,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description 读取共享账号口令，记审计 */
+            /** @description 读取共享账号密码，记审计 */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -8338,7 +8338,7 @@ export interface operations {
                 };
             };
             400: components["responses"]["InvalidArgument"];
-            /** @description unauthenticated（用户名或口令错误）或 totp_required（需再提交验证码） */
+            /** @description unauthenticated（用户名或密码错误）或 totp_required（需再提交验证码） */
             401: {
                 headers: {
                     [name: string]: unknown;
@@ -8839,7 +8839,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description 绑定或换绑邮箱：当前口令 + 新邮箱的验证码 */
+            /** @description 绑定或换绑邮箱：当前密码 + 新邮箱的验证码 */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -8991,7 +8991,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description 本人可见的共享账号，不含口令 */
+            /** @description 本人可见的共享账号，不含密码 */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -9017,7 +9017,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description 读取一条共享账号的口令，记审计；不可见的条目返回 404 */
+            /** @description 读取一条共享账号的密码，记审计；不可见的条目返回 404 */
             200: {
                 headers: {
                     [name: string]: unknown;

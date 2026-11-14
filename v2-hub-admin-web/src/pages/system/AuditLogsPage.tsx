@@ -13,7 +13,7 @@ const ACTION_LABELS: Record<string, string> = {
   'admin.logout': '登出',
   'admin.create': '新建管理员',
   'admin.update': '修改管理员',
-  'admin.password_reset': '重置口令',
+  'admin.password_reset': '重置密码',
   'role.create': '新建角色',
   'role.update': '修改角色',
   'role.delete': '删除角色',

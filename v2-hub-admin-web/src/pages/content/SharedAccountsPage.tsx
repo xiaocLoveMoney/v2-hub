@@ -31,7 +31,7 @@ function formOf(a: SharedAccount | null): SharedAccountInput {
   }
 }
 
-/** 共享账号（content:read 查看，content:write 增改删与查看口令；docs/03 §5.9）。口令只写，查看时单独取一次并记审计。 */
+/** 共享账号（content:read 查看，content:write 增改删与查看密码；docs/03 §5.9）。密码只写，查看时单独取一次并记审计。 */
 export function SharedAccountsPage() {
   const { can } = useSession()
   const canWrite = can(PERMISSIONS.CONTENT_WRITE)
@@ -104,7 +104,7 @@ function AccountTable({ accounts, isLoading, plans, canWrite, onEdit, onDelete }
     { title: '备注', dataIndex: 'remark', render: (v: string) => v || '—' },
   ]
   if (canWrite) {
-    columns.splice(3, 0, { title: '口令', key: 'credential', render: (_: unknown, a: SharedAccount) => <CredentialCell accountId={a.id} /> })
+    columns.splice(3, 0, { title: '密码', key: 'credential', render: (_: unknown, a: SharedAccount) => <CredentialCell accountId={a.id} /> })
     columns.push({
       title: '操作',
       key: 'actions',
@@ -125,7 +125,7 @@ function AccountTable({ accounts, isLoading, plans, canWrite, onEdit, onDelete }
   return <Table<SharedAccount> rowKey="id" scroll={TABLE_SCROLL} loading={isLoading} columns={columns} dataSource={accounts} pagination={false} />
 }
 
-/** 口令默认不显示；点“显示”才向后端取一次（记审计），只留在本组件的内存里。 */
+/** 密码默认不显示；点“显示”才向后端取一次（记审计），只留在本组件的内存里。 */
 function CredentialCell({ accountId }: { accountId: number }) {
   const { message } = App.useApp()
   const [credential, setCredential] = useState<string | null>(null)
@@ -193,7 +193,7 @@ function AccountForm({ account, plans, onSaved }: Pick<AccountModalProps, 'accou
       name: v.name,
       category: v.category,
       account: v.account,
-      // 修改时留空表示沿用原口令
+      // 修改时留空表示沿用原密码
       credential: v.credential || undefined,
       remark: v.remark ?? '',
       sortOrder: v.sortOrder ?? 0,
@@ -221,9 +221,9 @@ function AccountForm({ account, plans, onSaved }: Pick<AccountModalProps, 'accou
         </Form.Item>
         <Form.Item
           name="credential"
-          label="口令"
-          extra={isNew ? '加密存储，列表里不显示' : '留空表示沿用原口令'}
-          rules={[{ required: isNew, max: MAX_TEXT_LEN, message: isNew ? '请输入口令' : `不超过 ${MAX_TEXT_LEN} 个字符` }]}
+          label="密码"
+          extra={isNew ? '加密存储，列表里不显示' : '留空表示沿用原密码'}
+          rules={[{ required: isNew, max: MAX_TEXT_LEN, message: isNew ? '请输入密码' : `不超过 ${MAX_TEXT_LEN} 个字符` }]}
         >
           <Input.Password autoComplete="new-password" />
         </Form.Item>

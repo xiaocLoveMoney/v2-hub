@@ -88,7 +88,7 @@ describe('管理端登录流程', () => {
     expect(await screen.findByText('用户名或密码错误')).toBeDefined()
   })
 
-  it('开启两步验证的账号：口令通过后显示验证码框，带验证码再次登录成功', async () => {
+  it('开启两步验证的账号：密码通过后显示验证码框，带验证码再次登录成功', async () => {
     let isLoggedIn = false
     let loginHasCode = false
     const calls = mockServer({

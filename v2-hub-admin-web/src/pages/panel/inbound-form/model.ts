@@ -175,7 +175,7 @@ export function randomPort(): number {
   return PORT_MIN_RANDOM + (((hi << BYTE_BITS) | lo) % PORT_SPAN_RANDOM)
 }
 
-/** SS2022 的服务端密钥是指定长度随机字节的 Base64；老算法用随机口令。 */
+/** SS2022 的服务端密钥是指定长度随机字节的 Base64；老算法用随机密码。 */
 export function ssServerKey(method: string): string {
   if (!isSS2022(method)) {
     return randomAlphanum(SS_LEGACY_SECRET_LEN)

@@ -221,7 +221,7 @@ export function UsersPage() {
                 编辑
               </Button>
               <Button size="small" onClick={() => open('credential', u)}>
-                重置口令
+                重置密码
               </Button>
               <Button size="small" onClick={() => resetSubscription(u)}>
                 重置订阅

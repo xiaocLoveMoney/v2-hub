@@ -18,7 +18,7 @@ interface LocationState {
 
 const TOTP_PATTERN = /^\d{6}$/
 
-/** 管理员登录页（管理门户入口）。账号开启两步验证时，口令通过后再显示验证码输入框。 */
+/** 管理员登录页（管理门户入口）。账号开启两步验证时，密码通过后再显示验证码输入框。 */
 export function LoginPage() {
   const { status, login } = useSession()
   const navigate = useNavigate()

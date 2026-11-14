@@ -11,7 +11,7 @@ import { RolesPage } from './RolesPage'
 
 const CSRF = 'csrf-test-token'
 const SELF_ID = 1
-/** 表单里输入的初始口令（仅测试用）。 */
+/** 表单里输入的初始密码（仅测试用）。 */
 const typed = 'long-enough-value'
 const ok = (data: unknown) => Response.json({ code: '0', message: 'ok', data })
 
@@ -91,7 +91,7 @@ describe('AdminsPage', () => {
     fireEvent.click(screen.getByRole('button', { name: /新建管理员/ }))
     const dialog = await screen.findByRole('dialog')
     fireEvent.change(within(dialog).getByLabelText('用户名'), { target: { value: 'newbie' } })
-    fireEvent.change(within(dialog).getByLabelText('初始口令'), { target: { value: typed } })
+    fireEvent.change(within(dialog).getByLabelText('初始密码'), { target: { value: typed } })
     fireEvent.click(within(dialog).getByRole('button', { name: /创\s*建/ }))
 
     await waitFor(() => expect(calls.some((c) => c.method === 'POST')).toBe(true))
