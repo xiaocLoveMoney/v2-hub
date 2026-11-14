@@ -22,7 +22,7 @@ function groupByCategory(accounts: SharedAccount[]): { category: string; items: 
   return groups
 }
 
-/** 一条共享账号：口令属于凭据，默认不取，点“显示”才单独请求一次（后端记审计），只留在本组件内存里。 */
+/** 一条共享账号：密码属于凭据，默认不取，点“显示”才单独请求一次（后端记审计），只留在本组件内存里。 */
 function AccountRow({ account }: { account: SharedAccount }) {
   const { t } = useI18n()
   const toast = useToast()

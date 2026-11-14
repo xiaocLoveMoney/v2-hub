@@ -14,7 +14,7 @@ import { useI18n } from '../i18n/i18n-context'
 const sendBindCode = (email: string): Promise<ApiError | null> =>
   mutate(() => api.POST('/api/user/account/email-code', { params: csrfHeader(), body: { email } }))
 
-/** 绑定 / 换绑邮箱（docs/03 §5.8）：当前口令 + 新邮箱收到的验证码。邮件不可用时只能找管理员改。 */
+/** 绑定 / 换绑邮箱（docs/03 §5.8）：当前密码 + 新邮箱收到的验证码。邮件不可用时只能找管理员改。 */
 export function EmailCard() {
   const { t } = useI18n()
   const site = useSite()
@@ -89,7 +89,7 @@ export function EmailCard() {
   )
 }
 
-/** 注销账号（docs/03 §5.8）：须提交当前口令，开了两步验证的另须验证码；按删除用户处理，不可恢复。 */
+/** 注销账号（docs/03 §5.8）：须提交当前密码，开了两步验证的另须验证码；按删除用户处理，不可恢复。 */
 export function DeleteAccountCard() {
   const { t } = useI18n()
   const toast = useToast()

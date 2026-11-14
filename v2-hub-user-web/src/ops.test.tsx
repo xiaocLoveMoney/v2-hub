@@ -7,7 +7,7 @@ import { zh } from './i18n/messages/zh'
 import { fail, mockServer, ok, renderApp } from './test/harness'
 
 const GIB = 1024 ** 3
-/** 表单里输入的口令（仅测试用）。 */
+/** 表单里输入的密码（仅测试用）。 */
 const typed = 'correct-horse-battery'
 const PLACEHOLDER = /\{(\w+)\}/g
 const SUPPORT_URL = 'https://chat.example.com/room'
@@ -108,13 +108,13 @@ describe('中英双语', () => {
     mockServer({
       'GET /api/user/site': () => ok(site),
       'GET /api/user/auth/me': anonymous,
-      'POST /api/user/auth/login': () => fail(400, 'invalid_argument', '用户名或口令错误'),
+      'POST /api/user/auth/login': () => fail(400, 'invalid_argument', '用户名或密码错误'),
     })
     renderApp('/login', 'en')
     fireEvent.change(await screen.findByLabelText('Username'), { target: { value: 'alice' } })
     fireEvent.change(screen.getByLabelText('Password'), { target: { value: typed } })
     fireEvent.click(screen.getByRole('button', { name: 'Sign in' }))
-    await waitFor(() => expect(screen.getByText('Invalid input (用户名或口令错误)')).toBeDefined())
+    await waitFor(() => expect(screen.getByText('Invalid input (用户名或密码错误)')).toBeDefined())
   })
 
   it('错误说明：中文原样，英文未知错误码用通用说明，网络错误不重复附中文', () => {

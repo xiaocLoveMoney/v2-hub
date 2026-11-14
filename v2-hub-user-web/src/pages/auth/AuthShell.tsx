@@ -11,7 +11,7 @@ interface AuthShellProps {
   children: ReactNode
 }
 
-/** 登录、注册、找回口令共用的分屏外壳（docs/06 §5）：左侧表单，右侧全高背景与标语。 */
+/** 登录、注册、找回密码共用的分屏外壳（docs/06 §5）：左侧表单，右侧全高背景与标语。 */
 export function AuthShell({ lead, subtitle, children }: AuthShellProps) {
   const site = useSite()
   const { t } = useI18n()

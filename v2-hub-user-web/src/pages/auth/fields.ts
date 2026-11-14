@@ -1,4 +1,4 @@
-/** 登录、注册、找回口令与账号页共用的输入约束（取值与 hub-api.yaml 一致）。 */
+/** 登录、注册、找回密码与账号页共用的输入约束（取值与 hub-api.yaml 一致）。 */
 
 /** 邮箱验证码是 6 位数字（docs/03 §5.7）。 */
 export const EMAIL_CODE_LENGTH = 6

@@ -532,7 +532,7 @@ export const en: Record<MessageKey, string> = {
   'chain.testFailTimeout': 'Connection timed out',
   'chain.testFailTimeoutHint': 'The address is unreachable, or the exit firewall does not allow the entry server.',
   'chain.testFailProxyRejected': 'Proxy request rejected',
-  'chain.testFailProxyRejectedHint': 'The port is open, but the request did not go through with the chosen protocol. Common causes: wrong username or password, wrong protocol type (it may really be SOCKS5), or a proxy without CONNECT support.',
+  'chain.testFailProxyRejectedHint': 'The port is open, but the proxy dropped the request. Common causes: the entry server IP is not on the proxy allowlist, wrong username or password, wrong protocol type (it may really be SOCKS5), or a proxy without CONNECT support.',
   'chain.testFailProxyNoResponse': 'No response from proxy',
   'chain.testFailProxyNoResponseHint': 'The port is open, but the request never got a reply. Common causes: the entry server IP is not on the proxy allowlist, or the proxy itself cannot reach the internet.',
   'chain.testFailBadStatus': 'Unexpected status from test URL',

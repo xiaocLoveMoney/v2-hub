@@ -15,7 +15,7 @@ const sendResetCode = (email: string): Promise<ApiError | null> =>
   mutate(() => api.POST('/api/user/auth/email-code', { body: { email, purpose: 'reset' } }))
 
 /**
- * 找回口令（docs/03 §5.8）：邮箱 + 验证码 + 新口令。成功后全部会话失效，回登录页重新登录；
+ * 找回密码（docs/03 §5.8）：邮箱 + 验证码 + 新密码。成功后全部会话失效，回登录页重新登录；
  * 两步验证不因此关闭（Ruling-23）。邮件不可用时只能找管理员重置。
  */
 export function ResetPage() {

@@ -83,7 +83,7 @@ describe('format helpers', () => {
 })
 
 describe('登录', () => {
-  it('未登录跳到登录页；口令通过后要求两步验证码，带验证码再次提交后进入仪表盘', async () => {
+  it('未登录跳到登录页；密码通过后要求两步验证码，带验证码再次提交后进入仪表盘', async () => {
     let attempts = 0
     const calls = mockServer({
       'GET /api/user/auth/me': () => fail(401, 'unauthenticated', '请先登录'),
@@ -109,7 +109,7 @@ describe('登录', () => {
     expect(calls.filter((c) => c.path === '/api/user/auth/login')[1]?.body).toMatchObject({ username: 'alice', totpCode: '123456' })
   })
 
-  it('口令错误时显示后端给的提示，不进入后台', async () => {
+  it('密码错误时显示后端给的提示，不进入后台', async () => {
     mockServer({
       'GET /api/user/auth/me': () => fail(401, 'unauthenticated', '请先登录'),
       'POST /api/user/auth/login': () => fail(401, 'unauthenticated', '用户名或密码错误'),
@@ -193,7 +193,7 @@ describe('节点列表', () => {
 })
 
 describe('我的账号', () => {
-  it('两次新口令不一致不能提交；一致后带旧口令提交', async () => {
+  it('两次新密码不一致不能提交；一致后带旧密码提交', async () => {
     const calls = mockServer({
       'GET /api/user/auth/me': () => ok(session),
       'GET /api/user/login-logs': () => ok([{ clientIp: '203.0.113.9', isSuccess: true, createdAt: '2026-11-13T00:00:00Z' }]),
@@ -201,13 +201,13 @@ describe('我的账号', () => {
     })
     renderApp('/account')
     expect(await screen.findByText('203.0.113.9')).toBeDefined()
-    fireEvent.change(screen.getByLabelText('当前口令'), { target: { value: 'correct-horse-battery' } })
-    fireEvent.change(screen.getByLabelText('新口令'), { target: { value: 'another-horse-staple' } })
-    fireEvent.change(screen.getByLabelText('再输一次新口令'), { target: { value: 'another-horse' } })
+    fireEvent.change(screen.getByLabelText('当前密码'), { target: { value: 'correct-horse-battery' } })
+    fireEvent.change(screen.getByLabelText('新密码'), { target: { value: 'another-horse-staple' } })
+    fireEvent.change(screen.getByLabelText('再输一次新密码'), { target: { value: 'another-horse' } })
     expect(screen.getByText('两次输入不一致')).toBeDefined()
     expect((screen.getByRole('button', { name: '保存' }) as HTMLButtonElement).disabled).toBe(true)
 
-    fireEvent.change(screen.getByLabelText('再输一次新口令'), { target: { value: 'another-horse-staple' } })
+    fireEvent.change(screen.getByLabelText('再输一次新密码'), { target: { value: 'another-horse-staple' } })
     fireEvent.click(screen.getByRole('button', { name: '保存' }))
     await waitFor(() => expect(calls.some((c) => c.method === 'PUT')).toBe(true))
     const put = calls.find((c) => c.method === 'PUT')

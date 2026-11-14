@@ -17,7 +17,7 @@ interface LocationState {
 
 /**
  * 分屏登录页（docs/06 §5）：左侧表单，右侧全高背景与标语。
- * 口令通过但账号开启了两步验证时，在同一表单内展开验证码框，不跳页（docs/03 §5.3）。
+ * 密码通过但账号开启了两步验证时，在同一表单内展开验证码框，不跳页（docs/03 §5.3）。
  */
 export function LoginPage() {
   const { status, login } = useSession()

@@ -20,7 +20,7 @@ import { TicketDetailPage } from './pages/TicketDetailPage'
 import { TicketsPage } from './pages/TicketsPage'
 import { TutorialsPage } from './pages/TutorialsPage'
 
-/** 路由表：登录、注册、找回口令独立，其余都在已登录的外壳里。 */
+/** 路由表：登录、注册、找回密码独立，其余都在已登录的外壳里。 */
 export const routes: RouteObject[] = [
   { path: ROUTES.LOGIN, element: <LoginPage /> },
   { path: ROUTES.REGISTER, element: <RegisterPage /> },
