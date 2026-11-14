@@ -5,7 +5,7 @@
 # → 客户端规则进订阅，Mihomo / sing-box / Xray JSON 各自通过配置检查
 # → 延迟测试：公网出口三种方式都拿到结果（连得上连不上都算）；回环地址的出口 400；别人的出口 404；管理员测平台出口带错误原文字段；
 #   连续测试触发 429
-# → 取面板网页证书路径返回两个字段。
+# → 取面板网页证书路径返回两个字段 → REALITY 目标扫描：公网目标拿到结论，网段与网址 400，回环地址只标记不探测。
 # 黑盒，只用 curl / jq / docker。延迟测试由 xui-a 容器去连出口：出口用公网 IP 字面量，容器没有外网时结果是“不通”，用例照样通过。
 # 注意：会重建 xui-a 容器（不挂数据卷），不影响 PostgreSQL 与 MinIO。hub-server 用缩短了下发间隔的临时配置启动。
 source "$(dirname "$0")/common.sh"
@@ -226,7 +226,23 @@ expect_code 200 "取面板证书路径"
 hub GET /api/admin/servers/999999/web-cert >/dev/null; expect_code 404 "取不存在的服务器的证书路径"
 portal GET "/api/admin/servers/$SERVER_A/web-cert" >/dev/null; expect_code 401 "终端用户取面板证书路径"
 
-# ---- 11. 收尾：删除用户后面板上的平台条目清空 ----
+# ---- 11. REALITY 目标扫描（Ruling-54）：由面板去探测；网段与网址 400，内网目标不探测，数量上限 20 ----
+scan_one() { hub POST "/api/admin/servers/$SERVER_A/reality-scan" "$(jq -nc --arg t "$1" '{target:$t}')"; }
+res="$(scan_one www.cloudflare.com:443)"; expect_code 200 "扫描一个公网目标"
+printf '%s' "$res" | jq -e '.data | .target == "www.cloudflare.com:443" and (.feasible | type == "boolean") and (.serverNames | type == "array")
+  and (.latencyMs | type == "number") and .privateTarget == false' >/dev/null || fail "扫描结果的形状不对：$res"
+echo "  扫描 www.cloudflare.com:443：$(printf '%s' "$res" | jq -c '.data | {feasible, latencyMs, tlsVersion, reason}')"
+scan_one 104.16.0.0/24 >/dev/null; expect_code 400 "扫描网段"
+scan_one https://www.cloudflare.com >/dev/null; expect_code 400 "把网址当目标"
+res="$(scan_one 127.0.0.1:443)"; expect_code 200 "扫描回环地址（面板不探测，只标记）"
+printf '%s' "$res" | jq -e '.data | .privateTarget == true and .feasible == false' >/dev/null || fail "回环地址应标为内网目标且不可用：$res"
+res="$(hub POST "/api/admin/servers/$SERVER_A/reality-targets" '{"targets":["www.cloudflare.com","www.microsoft.com:443"]}')"; expect_code 200 "探测一组候选"
+[ "$(printf '%s' "$res" | jq '.data | length')" = "2" ] || fail "两个候选应返回两条结果：$res"
+hub POST "/api/admin/servers/$SERVER_A/reality-targets" "$(jq -nc '{targets: [range(21) | "t\(.).example.com"]}')" >/dev/null; expect_code 400 "一次超过 20 个候选"
+hub POST /api/admin/servers/999999/reality-scan '{"target":"www.cloudflare.com"}' >/dev/null; expect_code 404 "在不存在的服务器上扫描"
+portal POST "/api/admin/servers/$SERVER_A/reality-scan" '{"target":"www.cloudflare.com"}' >/dev/null; expect_code 401 "终端用户扫描目标"
+
+# ---- 12. 收尾：删除用户后面板上的平台条目清空 ----
 hub DELETE "/api/admin/users/$USER_ID" >/dev/null; expect_code 200 "删除用户"
 hub DELETE "/api/admin/users/$OTHER_ID" >/dev/null; expect_code 200 "删除另一用户"
 for _ in $(seq 1 "$APPLY_WAIT_SECONDS"); do
