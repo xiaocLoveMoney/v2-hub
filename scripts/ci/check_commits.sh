@@ -22,6 +22,10 @@ while IFS= read -r line; do
 done < <(git log --format=%s "$base..HEAD" 2>/dev/null || git log --format=%s -1)
 
 branch="${GITHUB_HEAD_REF:-${GITHUB_REF_NAME:-}}"
+# tag 推送不是分支，不校验名字（工作流已只监听分支，这里兜底）
+if [ "${GITHUB_REF_TYPE:-branch}" = "tag" ] && [ -z "${GITHUB_HEAD_REF:-}" ]; then
+  branch=""
+fi
 if [ -n "$branch" ] && [ "$branch" != "main" ]; then
   if ! printf '%s' "$branch" | grep -qE '^(feat|fix|docs|chore|refactor|test|ci)/[a-z0-9]+-[a-z0-9-]+$'; then
     echo "分支名不合规: $branch（应为 <type>/<模块>-<主题>）"
