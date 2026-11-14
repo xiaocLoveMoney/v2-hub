@@ -58,7 +58,8 @@ type fixture struct {
 func newFixture(t *testing.T) *fixture {
 	t.Helper()
 	pool := daotest.NewPool(t)
-	clock := &testClock{t: time.Now()}
+	// 截到微秒：PostgreSQL 只存微秒，Linux 的 time.Now 带纳秒，不截断时读回的时间与期望值 Equal 不上（macOS 时钟本身只到微秒，本机测不出）
+	clock := &testClock{t: time.Now().Truncate(time.Microsecond)}
 	auth, err := NewAuthService(pool, testAuthConfig(), testSealer(t), clock.now)
 	if err != nil {
 		t.Fatalf("NewAuthService: %v", err)
