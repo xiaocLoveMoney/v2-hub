@@ -54,6 +54,7 @@ const (
 	maxRebatePercent    = 100
 	maxNotifyExpireDays = 30
 	maxNotifyTrafficPct = 50
+	maxMenuKeys         = 64
 
 	defaultCurrency = "CNY"
 
@@ -89,6 +90,9 @@ const (
 // telegramChatPattern 是 Telegram 会话 id：数字（群组为负数）或 @频道用户名；空串表示不发。
 var telegramChatPattern = regexp.MustCompile(`^(-?[0-9]{1,20}|@[A-Za-z][A-Za-z0-9_]{4,31})?$`)
 
+// menuKeyPattern 是菜单键的写法（docs/03 §5.6 菜单顺序，Ruling-57）：小写字母开头，1–32 位小写字母、数字、-。
+var menuKeyPattern = regexp.MustCompile(`^[a-z][a-z0-9-]{0,31}$`)
+
 var domainPattern = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$`)
 
 // Settings 是全部系统设置的当前值，字段与 hub-api.yaml 的 Settings 一一对应。
@@ -110,6 +114,14 @@ type Settings struct {
 	Landing      LandingSettings
 	Support      SupportSettings
 	Routing      RoutingSettings
+	Menu         MenuSettings
+}
+
+// MenuSettings 是侧栏菜单顺序（docs/03 §5.6 菜单顺序，Ruling-57）：菜单键按期望顺序排成的列表，空 = 默认顺序。
+// 后端只校验写法，不认菜单目录（菜单表归前端）。
+type MenuSettings struct {
+	Admin []string
+	User  []string
 }
 
 // RoutingSettings 是服务器 Xray 模板里的平台条目（docs/03 §5.19）：BlockRule 为真时下发平台拦截规则（Ruling-55）。
@@ -330,6 +342,24 @@ func validSupportURL(v string) bool {
 	}
 	u, err := url.Parse(v)
 	return err == nil && len(v) <= maxSupportURLLen && u.Scheme == httpsScheme && u.Host != "" && u.User == nil
+}
+
+// validMenuOrder：不超过 64 个、每个键合乎写法、不重复。nil（JSON null）不合法，要恢复默认请传空列表。
+func validMenuOrder(v []string) bool {
+	if v == nil || len(v) > maxMenuKeys {
+		return false
+	}
+	seen := make(map[string]struct{}, len(v))
+	for _, k := range v {
+		if !menuKeyPattern.MatchString(k) {
+			return false
+		}
+		if _, dup := seen[k]; dup {
+			return false
+		}
+		seen[k] = struct{}{}
+	}
+	return true
 }
 
 func validIntro(v string) bool {
@@ -598,6 +628,18 @@ var settingDefs = map[string]settingDef{
 			return decodeSetting(raw, nil, func(v bool) { s.Routing.BlockRule = v })
 		},
 	},
+	"menu.admin": {
+		get: func(s *Settings) any { return s.Menu.Admin },
+		set: func(s *Settings, raw json.RawMessage) error {
+			return decodeSetting(raw, validMenuOrder, func(v []string) { s.Menu.Admin = v })
+		},
+	},
+	"menu.user": {
+		get: func(s *Settings) any { return s.Menu.User },
+		set: func(s *Settings, raw json.RawMessage) error {
+			return decodeSetting(raw, validMenuOrder, func(v []string) { s.Menu.User = v })
+		},
+	},
 	"subscription.logRetentionDays": {
 		get: func(s *Settings) any { return s.Subscription.LogRetentionDays },
 		set: func(s *Settings, raw json.RawMessage) error {
@@ -651,6 +693,7 @@ func defaultSettings(sub SubscriptionConfig) Settings {
 		Report:   ReportSettings{DailyHour: defaultReportDailyHour},
 		Support:  SupportSettings{Label: defaultSupportLabel},
 		Routing:  RoutingSettings{BlockRule: true},
+		Menu:     MenuSettings{Admin: []string{}, User: []string{}},
 		Subscription: SubscriptionSettings{
 			BaseURL: strings.TrimRight(sub.BaseURL, "/"), Title: title, UpdateIntervalHours: interval, InfoNodes: sub.InfoNodes, LogRetentionDays: retention,
 		},
@@ -682,6 +725,7 @@ func (s *SettingsService) load(ctx context.Context, q *sqlcgen.Queries) (Setting
 	cur.Register.EmailAllow = slices.Clone(s.defaults.Register.EmailAllow)
 	cur.Register.EmailBlock = slices.Clone(s.defaults.Register.EmailBlock)
 	cur.Alert.Emails = slices.Clone(s.defaults.Alert.Emails)
+	cur.Menu = MenuSettings{Admin: slices.Clone(s.defaults.Menu.Admin), User: slices.Clone(s.defaults.Menu.User)}
 	for _, row := range rows {
 		def, ok := settingDefs[row.Key]
 		if !ok {

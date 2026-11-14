@@ -4,13 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strings"
 	"testing"
 
 	"v2-hub-server/internal/service"
 )
 
 // publicSiteKeys 是 /api/user/site 允许暴露的字段数，多一个都算泄露设置。
-const publicSiteKeys = 11
+const publicSiteKeys = 12
 
 func TestSettingsEndpoints(t *testing.T) {
 	srv, rbac := newAPIServer(t)
@@ -62,6 +63,22 @@ func TestSettingsEndpoints(t *testing.T) {
 	expectStatus(t, viewer.do(http.MethodPut, "/api/admin/settings", map[string]any{"site": map[string]any{"name": "x"}}),
 		http.StatusForbidden, string(service.CodePermissionDenied))
 	expectStatus(t, viewer.do(http.MethodGet, "/api/admin/mail-outbox", nil), http.StatusForbidden, string(service.CodePermissionDenied))
+
+	// 菜单顺序（Ruling-57）：没有设置权限的管理员也从会话信息拿到管理端顺序；客户门户顺序在公开站点信息里
+	expectStatus(t, root.do(http.MethodPut, "/api/admin/settings", map[string]any{
+		"menu": map[string]any{"admin": []string{"users", "dashboard"}, "user": []string{"nodes"}},
+	}), http.StatusOK, codeOK)
+	me := viewer.do(http.MethodGet, "/api/admin/auth/me", nil)
+	expectStatus(t, me, http.StatusOK, codeOK)
+	var session sessionVO
+	if err := json.Unmarshal(me.Data, &session); err != nil || strings.Join(session.MenuOrder, ",") != "users,dashboard" {
+		t.Fatalf("session menu order = %v, %v", session.MenuOrder, err)
+	}
+	site := newClient(t, srv.URL).do(http.MethodGet, "/api/user/site", nil)
+	var info siteInfoVO
+	if err := json.Unmarshal(site.Data, &info); err != nil || strings.Join(info.MenuOrder, ",") != "nodes" {
+		t.Fatalf("site menu order = %v, %v", info.MenuOrder, err)
+	}
 }
 
 func TestPublicSiteInfoAndEmailCode(t *testing.T) {
@@ -80,7 +97,7 @@ func TestPublicSiteInfoAndEmailCode(t *testing.T) {
 	if site.SiteName == "" || site.RegisterMode != service.RegisterInvite || site.MailEnabled || site.EmailVerifyRequired {
 		t.Fatalf("site info = %+v", site)
 	}
-	// 公开子集之外的设置不出现在响应里（docs/03 §5.6 公开子集：0.4.0 起多了商店开关与显示币种，0.4.3 起多了落地页与客服入口）
+	// 公开子集之外的设置不出现在响应里（docs/03 §5.6 公开子集：0.4.0 起多了商店开关与显示币种，0.4.3 起多了落地页与客服入口，0.7.3 起多了菜单顺序）
 	var raw map[string]any
 	if err := json.Unmarshal(got.Data, &raw); err != nil || len(raw) != publicSiteKeys {
 		t.Fatalf("site info keys = %v, %v; want exactly the %d public ones", raw, err, publicSiteKeys)

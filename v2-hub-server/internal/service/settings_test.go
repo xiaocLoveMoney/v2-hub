@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -105,6 +106,10 @@ func TestSettingsUpdateRejectsWholePatchOnAnyBadItem(t *testing.T) {
 		"bad notify email":     {"site.name": "ok", "ticket.notifyEmail": "nobody"},
 		"min greater than max": {"site.name": "ok", "checkin.minMb": 600},
 		"plan does not exist":  {"site.name": "ok", "register.planId": 999},
+		"bad menu key":         {"site.name": "ok", "menu.user": []string{"Nodes"}},
+		"duplicate menu key":   {"site.name": "ok", "menu.admin": []string{"users", "users"}},
+		"null menu order":      {"site.name": "ok", "menu.user": nil},
+		"too many menu keys":   {"site.name": "ok", "menu.user": manyMenuKeys(maxMenuKeys + 1)},
 	}
 	for name, patch := range cases {
 		if _, err := f.update(t, patch); !errors.Is(err, ErrInvalidArgument) {
@@ -160,5 +165,34 @@ func TestSubscriptionFollowsSettings(t *testing.T) {
 	}
 	if nodes := decodeBase64Sub(t, res.Body); len(nodes) != 2 {
 		t.Fatalf("nodes = %d, want 2 real nodes and no info nodes", len(nodes))
+	}
+}
+
+func manyMenuKeys(n int) []string {
+	keys := make([]string, 0, n)
+	for i := range n {
+		keys = append(keys, fmt.Sprintf("item-%d", i))
+	}
+	return keys
+}
+
+// 菜单顺序（Ruling-57）：默认空列表；保存后原样读回，空列表即恢复默认；客户门户的顺序进公开站点信息。
+func TestSettingsMenuOrder(t *testing.T) {
+	f := newSettingsFixture(t)
+	cur, err := f.settings.Current(context.Background())
+	if err != nil || cur.Menu.Admin == nil || cur.Menu.User == nil || len(cur.Menu.Admin)+len(cur.Menu.User) != 0 {
+		t.Fatalf("default menu = %+v, %v", cur.Menu, err)
+	}
+	next, err := f.update(t, map[string]any{"menu.admin": []string{"users", "dashboard"}, "menu.user": manyMenuKeys(maxMenuKeys)})
+	if err != nil || strings.Join(next.Menu.Admin, ",") != "users,dashboard" || len(next.Menu.User) != maxMenuKeys {
+		t.Fatalf("updated menu = %+v, %v", next.Menu, err)
+	}
+	reloaded, err := f.settings.load(context.Background(), f.settings.q)
+	if err != nil || strings.Join(reloaded.Menu.Admin, ",") != "users,dashboard" {
+		t.Fatalf("reloaded menu = %+v, %v", reloaded.Menu, err)
+	}
+	reset, err := f.update(t, map[string]any{"menu.admin": []string{}})
+	if err != nil || reset.Menu.Admin == nil || len(reset.Menu.Admin) != 0 {
+		t.Fatalf("reset menu = %+v, %v", reset.Menu, err)
 	}
 }
