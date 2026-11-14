@@ -1,13 +1,14 @@
-import { Copy, Globe } from 'lucide-react'
+import { Copy } from 'lucide-react'
 import { QRCodeSVG } from 'qrcode.react'
 import { useState } from 'react'
 import { api, toApiError, type UserNode, type UserNodeGroup } from '../api/client'
 import { useSession } from '../auth/session-context'
 import { Alert, Badge, Button, Card, Empty, Loading, Modal, PageHeader } from '../components/ui'
-import { regionFlag } from '../format'
 import { useCopy } from '../hooks/use-copy'
 import { useRemote } from '../hooks/use-remote'
 import { useI18n } from '../i18n/i18n-context'
+import { Flag } from '../components/Flag'
+import { NodeMetricsCharts } from './NodeMetricsCharts'
 
 const QR_SIZE = 200
 const STATUS_ACTIVE = 'active'
@@ -22,19 +23,17 @@ interface LinkState {
 
 function NodeCard({ node, canOpen, onOpen }: { node: UserNode; canOpen: boolean; onOpen: (n: UserNode) => void }) {
   const { t } = useI18n()
-  const flag = regionFlag(node.region)
   return (
     <Card>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
         <div style={{ minWidth: 0 }}>
           <div style={{ fontWeight: 700, color: 'var(--hub-heading)', fontSize: 15 }}>
             <span className={`hub-dot${node.isServerOnline ? ' hub-dot-on' : ''}`} title={t(node.isServerOnline ? 'nodes.online' : 'nodes.offline')} />
-            {flag === '' ? <Globe size={14} style={{ marginRight: 6, verticalAlign: -2 }} /> : <span style={{ marginRight: 6 }}>{flag}</span>}
+            <Flag code={node.region} />
             {node.name}
           </div>
           <div className="hub-actions" style={{ marginTop: 10 }}>
             <Badge tone="light">{node.protocol}</Badge>
-            {node.region !== '' && <Badge>{node.region}</Badge>}
             <span className="hub-muted">{t('nodes.onlineClients', { n: node.onlineClients })}</span>
             <span className="hub-muted">{t('nodes.load', { value: node.serverLoad === null || node.serverLoad === undefined ? t('common.dash') : `${node.serverLoad.toFixed(0)}%` })}</span>
           </div>
@@ -49,7 +48,7 @@ function NodeCard({ node, canOpen, onOpen }: { node: UserNode; canOpen: boolean;
   )
 }
 
-/** 节点列表（docs/06 §5）：按节点组分段；点"查看"取该节点的分享链接与二维码（凭据，按需加载）。 */
+/** 节点列表（docs/06 §5）：按节点组分段，卡片显示所在服务器的国旗；点"查看"取该节点的分享链接与二维码（凭据，按需加载）与服务器趋势图。 */
 export function NodesPage() {
   const { t } = useI18n()
   const { session } = useSession()
@@ -111,6 +110,7 @@ export function NodesPage() {
             <p className="hub-field-hint">{t('nodes.linkHint')}</p>
           </>
         )}
+        {detail !== null && <NodeMetricsCharts key={detail.node.id} nodeId={detail.node.id} />}
       </Modal>
     </>
   )

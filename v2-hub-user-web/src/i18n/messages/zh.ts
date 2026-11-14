@@ -227,6 +227,9 @@ export const zh = {
   'checkout.noExpiry': '不过期，或首次使用后开始计时',
   'checkout.trafficAfter': '购买后的流量额度',
   'chart.hoursUsage': '最近 {hours} 小时用量 {amount}',
+  'chart.upload': '上行',
+  'chart.download': '下行',
+  'chart.loadFailed': '图表加载失败，请刷新重试',
 
   // 仪表盘、订阅卡、签到、公告卡
   'dash.expired': '套餐已到期，节点已停用。请联系管理员续费。',
@@ -362,6 +365,12 @@ export const zh = {
   'nodes.onlineClients': '在线 {n}',
   'nodes.load': '负载 {value}',
   'nodes.view': '查看',
+  'nodes.metrics': '服务器趋势',
+  'nodes.range24h': '近 24 小时',
+  'nodes.range7d': '近 7 天',
+  'nodes.noMetrics': '这段时间没有数据',
+  'nodes.chartOnline': '在线人数',
+  'nodes.chartLoad': '负载（CPU）',
   'nodes.empty': '当前套餐没有可用节点',
   'nodes.link': '节点链接',
   'nodes.linkCopied': '已复制节点链接',

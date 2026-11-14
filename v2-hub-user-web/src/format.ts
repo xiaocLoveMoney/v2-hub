@@ -3,9 +3,6 @@
 const BYTES_PER_KB = 1024
 const BYTE_UNITS = ['B', 'KB', 'MB', 'GB', 'TB'] as const
 const MS_PER_DAY = 86_400_000
-const REGION_CODE = /^[A-Za-z]{2}$/
-/** 区域指示符 A 的码点与字母 A 的差值，用来把两位地区码拼成国旗 emoji。 */
-const REGIONAL_INDICATOR_OFFSET = 0x1f1e6 - 'A'.charCodeAt(0)
 const PERCENT_FULL = 100
 const DEFAULT_TAG = 'zh-CN'
 
@@ -46,10 +43,15 @@ export function usedPercent(used: number, limit: number): number {
   return Math.min(Math.round((used / limit) * PERCENT_FULL), PERCENT_FULL)
 }
 
-/** 两位地区码转国旗 emoji；不是两位字母时返回空串。 */
-export function regionFlag(region: string): string {
-  if (!REGION_CODE.test(region)) {
-    return ''
+/** 国家码的本地化名称；不认识的码原样返回。 */
+export function countryName(code: string, localeTag: string): string {
+  try {
+    return new Intl.DisplayNames([localeTag], { type: 'region', fallback: 'code' }).of(code) ?? code
+  } catch (err) {
+    // 非法的码会抛 RangeError：按原样显示即可
+    if (err instanceof RangeError) {
+      return code
+    }
+    throw err
   }
-  return [...region.toUpperCase()].map((ch) => String.fromCodePoint(ch.charCodeAt(0) + REGIONAL_INDICATOR_OFFSET)).join('')
 }

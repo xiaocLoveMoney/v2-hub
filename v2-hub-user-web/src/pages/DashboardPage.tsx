@@ -2,7 +2,7 @@ import { CalendarClock, Gauge, MonitorSmartphone, Server, Wallet } from 'lucide-
 import { useState } from 'react'
 import { Link } from 'react-router'
 import { api, type Dashboard, type TrafficPoint } from '../api/client'
-import { Donut, HourBars } from '../components/charts'
+import { Donut, HourBubbles } from '../components/charts'
 import { Alert, Card, Loading, PageHeader, StatCard } from '../components/ui'
 import { daysLeft, formatBytes, formatDate, formatTime, usedPercent } from '../format'
 import { useRemote } from '../hooks/use-remote'
@@ -138,7 +138,7 @@ export function DashboardPage() {
           <Card title={t('dash.recentUsage', { hours: TRAFFIC_HOURS })}>
             {traffic.error !== null && <Alert tone="plain">{traffic.error.message}</Alert>}
             {traffic.data !== null && traffic.data.length === 0 && <div className="hub-empty">{t('dash.noUsage')}</div>}
-            {traffic.data !== null && traffic.data.length > 0 && <HourBars points={traffic.data} hours={TRAFFIC_HOURS} now={now} />}
+            {traffic.data !== null && traffic.data.length > 0 && <HourBubbles points={traffic.data} hours={TRAFFIC_HOURS} now={now} />}
           </Card>
           {hasPlan && <SubscriptionCard />}
         </div>
