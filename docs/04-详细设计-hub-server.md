@@ -88,8 +88,9 @@ M9 链式改造（docs/03 §5.18、§5.19、§5.21）在 `internal/service` 里�
 
 M10 的做法（Ruling-51 – Ruling-53）：`manager/panel` 加两个可选能力接口——`OutboundTester`（在面板上测一个出站）与 `CertLocator`（面板自己的网页证书路径），
 业务层用类型断言判断面板支不支持，3x-ui 实现分别对应 `/panel/api/xray/testOutbound` 与 `/panel/api/server/getWebCertFiles`。
-出口测试在 `service/chain_test_exit.go`：先做归属与地址限制（复用 `chain_guard.go`），再按用户频控、按服务器互斥，出站 JSON 由 `render.XrayOutbound` 生成；
+出口测试在 `service/chain_exit_test_run.go`：先做归属与地址限制（复用 `chain_guard.go`），再按用户频控、按服务器互斥，出站 JSON 由 `render.XrayOutbound` 生成；
 本文件不写日志（出站含凭据）。HTTP / HTTPS 出口只是 `manager/render` 多一个协议。
+不通的原因大类（Ruling-56）分两层：`manager/panel` 的 `OutboundTestResult.Failure` 是面板适配层对一次探测的归类（连接被拒、超时、被断开、其他），3x-ui 实现按面板返回的错误文本归类（文本是面板的，只能匹配，关键字集中在 `xui/probe.go` 的常量里）；`service` 把它与方式、HTTP 状态合成对外的 `reason`，`http` / `real` 不通且没有 HTTP 状态时在同一把服务器锁里补一次 `tcp` 探测。
 REALITY 目标扫描（Ruling-54）是第三个可选能力 `RealityScanner`，3x-ui 实现对应 `/panel/api/server/scanRealityTarget(s)`；目标的形状在 service 层校验（不收网段），从不带 `allowPrivate`。
 平台拦截规则（Ruling-55）的条目由 `manager/chain` 生成（`BlockTag = "hub-block"`，域名表是包内常量），`ChainApplier` 读设置 `routing.blockRule` 决定期望里带不带它；开着时 `ListChainApplyServerIDs` 返回全部启用中的服务器，关掉后有下发记录的服务器照常检查一轮以撤掉条目。
 
