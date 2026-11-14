@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, useState, type ButtonHTMLAttributes, type CSS
 import { createPortal } from 'react-dom'
 import { useI18n } from '../i18n/i18n-context'
 import { EASE_ENTER, EASE_LEAVE, EASE_POP, MOTION_BASE, MOTION_FAST, gsap, isMotionEnabled, useGSAP } from './motion'
+import { BrandMark } from './BrandMark'
 
 /** 设计系统的基础组件（docs/06 §4）。只负责外观与无障碍语义，不含业务逻辑。 */
 
@@ -330,12 +331,15 @@ export function Empty({ children }: { children: ReactNode }) {
   return <div className="hub-empty">{children}</div>
 }
 
-/** 加载中：转圈 + 文字；inline 用于卡片、弹窗内的小块区域，默认占满内容区。 */
+const LOADING_MARK_BLOCK = 40
+const LOADING_MARK_INLINE = 18
+
+/** 加载中：图标步进旋转 + 文字（docs/06 §4 图标动效）；inline 用于卡片、弹窗内的小块区域，默认占满内容区。 */
 export function Loading({ isInline = false }: { isInline?: boolean }) {
   const { t } = useI18n()
   return (
     <div className={`hub-loading${isInline ? ' hub-loading-inline' : ''}`} role="status">
-      <span className="hub-spinner" aria-hidden="true" />
+      <BrandMark size={isInline ? LOADING_MARK_INLINE : LOADING_MARK_BLOCK} motion="spin" />
       <span>{t('common.loading')}</span>
     </div>
   )

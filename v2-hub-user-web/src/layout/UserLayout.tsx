@@ -2,6 +2,7 @@ import { LogOut, Menu as MenuIcon } from 'lucide-react'
 import { Fragment, useState } from 'react'
 import { NavLink, Navigate, Outlet, useLocation, useNavigate } from 'react-router'
 import { useSession } from '../auth/session-context'
+import { BrandMark } from '../components/BrandMark'
 import { LocaleSwitch } from '../components/LocaleSwitch'
 import { revealChildren } from '../components/motion'
 import { SupportButton } from '../components/SupportButton'
@@ -12,6 +13,8 @@ import { ROUTES, visibleMenu, type MenuEntry } from '../menu'
 import { useSite } from '../site/site-context'
 
 const STATUS_DISABLED = 'disabled'
+/** 侧栏品牌位的图标尺寸（像素）。 */
+const BRAND_MARK_SIZE = 26
 
 /** 把菜单表按分组切开，保持表内顺序。 */
 function groupMenu(entries: readonly MenuEntry[]): { title: MessageKey | undefined; items: MenuEntry[] }[] {
@@ -66,7 +69,10 @@ export function UserLayout() {
   return (
     <div className={shellClass}>
       <aside className="hub-sider">
-        <div className="hub-brand">{site.siteName}</div>
+        <div className="hub-brand">
+          <BrandMark size={BRAND_MARK_SIZE} motion="intro" hasHoverTurn />
+          <span>{site.siteName}</span>
+        </div>
         <nav aria-label={t('shell.mainMenu')}>
           <ul className="hub-menu">
             {groupMenu(visibleMenu(site, session.features)).map((g) => (

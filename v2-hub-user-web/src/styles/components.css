@@ -377,17 +377,6 @@
 }
 
 /* ---- 加载态 ---- */
-.hub-spinner {
-  display: inline-block;
-  flex: none;
-  width: 22px;
-  height: 22px;
-  border: 2px solid var(--hub-primary-light);
-  border-top-color: var(--hub-primary);
-  border-radius: 50%;
-  animation: hub-spin 0.7s linear infinite;
-}
-
 .hub-loading {
   display: flex;
   flex-direction: column;
@@ -405,11 +394,6 @@
   min-height: 0;
   padding: 24px 0;
   gap: 10px;
-}
-
-.hub-loading-inline .hub-spinner {
-  width: 16px;
-  height: 16px;
 }
 
 /* 忙碌中的按钮前面加一个小转圈；文字不变，无障碍名称不受影响 */
@@ -573,7 +557,6 @@
     animation: none;
   }
 
-  .hub-spinner,
   .hub-btn[aria-busy='true']::before {
     animation-duration: 1.6s;
   }
@@ -709,5 +692,103 @@
   .hub-flow-pulse {
     animation: none;
     stroke-dasharray: none;
+  }
+}
+
+/* ---- 平台图标（docs/06 §4 平台图标、图标动效）：变换以图形中心（viewBox 原点）为基准 ---- */
+.hub-mark {
+  flex: none;
+  overflow: visible;
+  color: var(--hub-primary);
+}
+
+.hub-mark-turn,
+.hub-mark-core,
+.hub-mark-blade,
+.hub-mark-diamond {
+  transform-box: view-box;
+  transform-origin: 0 0;
+}
+
+/* 步进旋转：0.8s 转 120° 后停顿，三重对称所以能无缝循环 */
+.hub-mark-spin .hub-mark-turn {
+  animation: hub-mark-step 0.8s cubic-bezier(0.6, 0, 0.2, 1) infinite;
+}
+
+.hub-mark-hover:hover .hub-mark-turn,
+:hover > .hub-mark-hover .hub-mark-turn {
+  animation: hub-mark-step 0.8s cubic-bezier(0.6, 0, 0.2, 1) 1;
+}
+
+@keyframes hub-mark-step {
+  0% {
+    transform: rotate(0);
+  }
+
+  75%,
+  100% {
+    transform: rotate(120deg);
+  }
+}
+
+/* 出场：三刃从外侧依次飞入，整组从 -200° 转正，中心菱形最后弹出 */
+.hub-mark-intro .hub-mark-core {
+  animation: hub-mark-settle 0.95s cubic-bezier(0.2, 0.9, 0.25, 1.15) both;
+}
+
+.hub-mark-intro .hub-mark-blade {
+  animation: hub-mark-fly 0.6s cubic-bezier(0.2, 0.9, 0.25, 1.15) both;
+}
+
+.hub-mark-intro .hub-mark-blade-1 {
+  animation-delay: 0.1s;
+}
+
+.hub-mark-intro .hub-mark-blade-2 {
+  animation-delay: 0.2s;
+}
+
+.hub-mark-intro .hub-mark-diamond {
+  animation: hub-mark-pop 0.5s cubic-bezier(0.2, 0.9, 0.25, 1.15) 0.7s both;
+}
+
+@keyframes hub-mark-settle {
+  from {
+    transform: rotate(-200deg) scale(0.6);
+  }
+
+  to {
+    transform: none;
+  }
+}
+
+@keyframes hub-mark-fly {
+  from {
+    opacity: 0;
+    transform: translateY(-46px);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes hub-mark-pop {
+  from {
+    transform: scale(0);
+  }
+
+  to {
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hub-mark .hub-mark-turn,
+  .hub-mark .hub-mark-core,
+  .hub-mark .hub-mark-blade,
+  .hub-mark .hub-mark-diamond {
+    animation: none !important; /* 悬停规则选择器更具体，统一在这里关掉 */
   }
 }
