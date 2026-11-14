@@ -6,6 +6,7 @@ import { mutate } from '../../../hooks/use-remote'
 import type { Binder } from './fields'
 import { PROTOCOLS, fromPanelConfig, isKnownProtocol, newDraft, setAt, toConfig, withProtocol, wireguardKeypair, type InboundDraft, type JsonObject, type Path } from './model'
 import { ProtocolTab, type KeyGen } from './protocol-tab'
+import type { RealityScanApi } from './reality-scan'
 import { SecurityTab, SniffingTab, type WebCertFetch } from './security-tab'
 import { TransportTab } from './transport-tab'
 
@@ -139,6 +140,34 @@ function InboundFormBody({ serverId, serverDomain, inbound, onClose, onSaved }: 
     }
   }, [serverId, message])
 
+  /** REALITY 目标扫描（Ruling-54）：由这台服务器的面板去探测；失败时提示并返回 null。 */
+  const realityScan: RealityScanApi = useMemo(() => {
+    const fail = (err: unknown) => {
+      void message.error(toApiError(err).message)
+      return null
+    }
+    return {
+      scanOne: async (target, sni, xver) => {
+        try {
+          const res = await api.POST('/api/admin/servers/{id}/reality-scan', { params: { ...csrfHeader(), path: { id: serverId } }, body: { target, sni, xver } })
+          return res.error !== undefined || res.data?.data === undefined ? fail(res.error) : res.data.data
+        } catch (err) {
+          reportError(err)
+          return fail(err)
+        }
+      },
+      scanMany: async (targets) => {
+        try {
+          const res = await api.POST('/api/admin/servers/{id}/reality-targets', { params: { ...csrfHeader(), path: { id: serverId } }, body: { targets } })
+          return res.error !== undefined || res.data?.data === undefined ? fail(res.error) : res.data.data
+        } catch (err) {
+          reportError(err)
+          return fail(err)
+        }
+      },
+    }
+  }, [serverId, message])
+
   // 只在新建时预填；编辑已有入站时照面板上的配置来，不动它
   const hints = useMemo(() => (isEdit ? null : { domain: serverDomain }), [isEdit, serverDomain])
 
@@ -255,7 +284,7 @@ function InboundFormBody({ serverId, serverDomain, inbound, onClose, onSaved }: 
         { key: 'basic', label: '基础配置', children: basic },
         { key: 'protocol', label: '协议', children: <ProtocolTab b={b} keygen={keygen} /> },
         { key: 'transport', label: '传输', children: <TransportTab b={b} /> },
-        { key: 'security', label: '安全', children: <SecurityTab b={b} keygen={keygen} fetchWebCert={fetchWebCert} /> },
+        { key: 'security', label: '安全', children: <SecurityTab b={b} keygen={keygen} fetchWebCert={fetchWebCert} realityScan={realityScan} /> },
         { key: 'sniffing', label: '嗅探', children: <SniffingTab b={b} /> },
         { key: 'advanced', label: '高级配置', children: advanced },
       ]

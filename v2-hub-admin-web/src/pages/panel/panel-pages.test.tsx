@@ -212,6 +212,55 @@ describe('ServerDetailPage', () => {
     })
   })
 
+  it('REALITY 目标：“扫描”测当前目标并显示结论；“查找目标”列出候选，选用后回填目标与 SNI（Ruling-54）', async () => {
+    const scanOf = (target: string, patch: Record<string, unknown> = {}) => ({
+      target, host: target.replace(/:\d+$/, ''), port: 443, ip: '198.51.100.7', feasible: true, reason: '', latencyMs: 42, tlsVersion: '1.3', alpn: 'h2',
+      certValid: true, certSubject: 'example.org', certIssuer: 'Example CA', serverNames: ['*.example.org', 'www.example.org'], privateTarget: false, ...patch,
+    })
+    const calls = mockServer({
+      'GET /api/admin/servers/1': () => ok({ ...server, status: 'online', lastError: '' }),
+      'GET /api/admin/servers/1/inbounds': () => ok([]),
+      'POST /api/admin/servers/1/keys': () => ok({ privateKey: 'PANEL-PRIV', publicKey: 'PANEL-PUB' }),
+      'POST /api/admin/servers/1/reality-scan': () => ok(scanOf('bad.example.net:443', { feasible: false, reason: 'no TLS 1.3', latencyMs: 0, tlsVersion: '1.2' })),
+      'POST /api/admin/servers/1/reality-targets': () => ok([scanOf('www.example.org:443'), scanOf('slow.example.net:443', { feasible: false, reason: 'no h2' })]),
+      'POST /api/admin/servers/1/inbounds': () => ok({}),
+    })
+    renderWith(<ServerDetailPage />, '/servers/1', '/servers/:id')
+    fireEvent.click(await screen.findByRole('button', { name: /新建入站/ }))
+    const dialog = await screen.findByRole('dialog')
+    fireEvent.change(within(dialog).getByLabelText('备注'), { target: { value: 'scan-reality' } })
+    fireEvent.click(within(dialog).getByRole('tab', { name: '安全' }))
+    fireEvent.click(await within(dialog).findByRole('radio', { name: 'Reality' }))
+    await waitFor(() => expect((within(dialog).getByLabelText('私钥') as HTMLInputElement).value).toBe('PANEL-PRIV'))
+
+    // 扫描当前填的目标：带上表单里的第一个 SNI 与 Xver；不可用时给出原因
+    fireEvent.change(within(dialog).getByLabelText('目标'), { target: { value: 'bad.example.net:443' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: /扫\s*描/ }))
+    expect(await within(dialog).findByText('不可用')).toBeDefined()
+    expect(within(dialog).getByText(/no TLS 1\.3/)).toBeDefined()
+    const one = calls.find((c) => c.path === '/api/admin/servers/1/reality-scan')
+    expect(one?.csrf).toBe(CSRF)
+    expect(one?.body).toMatchObject({ target: 'bad.example.net:443', xver: 0 })
+
+    // 查找目标：自定义候选原样提交；只有可用的能选用，选用后目标与 SNI 换成它的（通配符域名不进 SNI）
+    fireEvent.click(within(dialog).getByRole('button', { name: '查找目标' }))
+    const finder = (await screen.findAllByRole('dialog')).at(-1) as HTMLElement
+    fireEvent.change(within(finder).getByLabelText('自定义候选'), { target: { value: 'www.example.org:443\nslow.example.net:443' } })
+    fireEvent.click(within(finder).getByRole('button', { name: '开始扫描' }))
+    expect(await within(finder).findByText('www.example.org:443')).toBeDefined()
+    expect(calls.find((c) => c.path === '/api/admin/servers/1/reality-targets')?.body).toEqual({ targets: ['www.example.org:443', 'slow.example.net:443'] })
+    expect(within(finder).getByRole('button', { name: '选用 slow.example.net:443' })).toHaveProperty('disabled', true)
+    fireEvent.click(within(finder).getByRole('button', { name: '选用 www.example.org:443' }))
+    await waitFor(() => expect((within(dialog).getByLabelText('目标') as HTMLInputElement).value).toBe('www.example.org:443'))
+    expect(within(dialog).getByText('可用')).toBeDefined()
+
+    fireEvent.click(within(dialog).getByRole('button', { name: /创\s*建/ }))
+    await waitFor(() => expect(calls.some((c) => c.path === '/api/admin/servers/1/inbounds' && c.method === 'POST')).toBe(true))
+    expect(calls.find((c) => c.path === '/api/admin/servers/1/inbounds' && c.method === 'POST')?.body).toMatchObject({
+      config: { streamSettings: { security: 'reality', realitySettings: { target: 'www.example.org:443', serverNames: ['www.example.org'] } } },
+    })
+  })
+
   it('面板没配网页证书时证书路径留空并提示；编辑已有入站不预填、不取证书', async () => {
     const inbound = {
       id: 10, serverId: 1, remoteRef: '3', protocol: 'vless', port: 443, listen: '', tag: 't', remark: 'old', isEnabled: true,

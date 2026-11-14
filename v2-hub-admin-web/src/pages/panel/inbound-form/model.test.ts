@@ -10,9 +10,11 @@ import {
   fromPanelConfig,
   getAt,
   newDraft,
+  parseRealityTargets,
   prefillNetwork,
   prefillSecurity,
   REALITY_TARGET_CANDIDATES,
+  realityServerNames,
   securityOf,
   serverDomainOf,
   setAt,
@@ -178,5 +180,18 @@ describe('新建入站的预填（Ruling-53）', () => {
     expect(withWebCert(typed, '/root/cert/fullchain.pem', '/root/cert/privkey.pem')).toEqual({ draft: typed, isFilled: false })
     const inline = setAt(tls, [...certs, 0, 'useFile'], false)
     expect(withWebCert(inline, '/a', '/b').isFilled).toBe(false)
+  })
+})
+
+describe('REALITY 目标扫描的结果处理（Ruling-54）', () => {
+  it('SNI 取证书里的域名，去掉通配符与重复；没有时退回目标的域名，目标是 IP 就没有', () => {
+    expect(realityServerNames({ host: 'www.example.com', serverNames: ['*.example.com', 'example.com', ' www.example.com ', 'example.com', ''] })).toEqual(['example.com', 'www.example.com'])
+    expect(realityServerNames({ host: 'WWW.Example.com', serverNames: ['*.example.com'] })).toEqual(['www.example.com'])
+    expect(realityServerNames({ host: '203.0.114.9', serverNames: [] })).toEqual([])
+  })
+
+  it('候选目标按行、逗号或空格拆开，去掉空项与重复', () => {
+    expect(parseRealityTargets(' www.a.com:443\n\nwww.b.com, 203.0.114.9:8443  www.a.com:443 ')).toEqual(['www.a.com:443', 'www.b.com', '203.0.114.9:8443'])
+    expect(parseRealityTargets('  \n ')).toEqual([])
   })
 })

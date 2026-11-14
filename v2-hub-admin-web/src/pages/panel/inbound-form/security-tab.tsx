@@ -4,6 +4,7 @@ import { useState } from 'react'
 import type { ServerWebCert } from '../../../api/client'
 import { LinesField, NumberField, SelectField, SwitchField, TagsField, TextField, type Binder } from './fields'
 import type { KeyGen } from './protocol-tab'
+import { RealityTargetField, type RealityScanApi } from './reality-scan'
 import {
   ALPN_VALUES,
   CERT_USAGES,
@@ -131,7 +132,7 @@ function TlsFields({ b, fetchWebCert }: { b: Binder; fetchWebCert: WebCertFetch 
   )
 }
 
-function RealityFields({ b, keygen }: { b: Binder; keygen: KeyGen }) {
+function RealityFields({ b, keygen, realityScan }: { b: Binder; keygen: KeyGen; realityScan: RealityScanApi }) {
   const [busy, setBusy] = useState<'' | 'x25519' | 'mldsa65'>('')
   const genX25519 = async () => {
     setBusy('x25519')
@@ -156,7 +157,7 @@ function RealityFields({ b, keygen }: { b: Binder; keygen: KeyGen }) {
       <SwitchField b={b} path={[...REALITY_BASE, 'show']} label="调试日志" />
       <NumberField b={b} path={[...REALITY_BASE, 'xver']} label="Xver" min={0} />
       <SelectField b={b} path={[...REALITY_BASE, 'settings', 'fingerprint']} label="uTLS 指纹" options={UTLS_FINGERPRINTS} />
-      <TextField b={b} path={[...REALITY_BASE, 'target']} label="目标" placeholder="www.cloudflare.com:443" extra="被伪装的网站，域名:端口" />
+      <RealityTargetField b={b} scan={realityScan} />
       <TagsField b={b} path={[...REALITY_BASE, 'serverNames']} label="SNI" extra="回车添加多个，留空则取目标的域名" />
       <TextField b={b} path={[...REALITY_BASE, 'settings', 'serverName']} label="分享链接 SNI" />
       <TextField b={b} path={[...REALITY_BASE, 'privateKey']} label="私钥" />
@@ -196,7 +197,14 @@ function RealityFields({ b, keygen }: { b: Binder; keygen: KeyGen }) {
 }
 
 /** 安全页：无 / TLS / Reality，可选项随协议与传输变化（对照 3x-ui）。 */
-export function SecurityTab({ b, keygen, fetchWebCert }: { b: Binder; keygen: KeyGen; fetchWebCert: WebCertFetch }) {
+interface SecurityTabProps {
+  b: Binder
+  keygen: KeyGen
+  fetchWebCert: WebCertFetch
+  realityScan: RealityScanApi
+}
+
+export function SecurityTab({ b, keygen, fetchWebCert, realityScan }: SecurityTabProps) {
   const { message } = App.useApp()
   const { protocol } = b.draft
   const network = networkOf(b.draft)
@@ -240,7 +248,7 @@ export function SecurityTab({ b, keygen, fetchWebCert }: { b: Binder; keygen: Ke
         <Radio.Group optionType="button" value={security} options={options} onChange={(e) => void onChange(e.target.value as Security)} />
       </Form.Item>
       {security === SECURITY_TLS && <TlsFields b={b} fetchWebCert={fetchWebCert} />}
-      {security === SECURITY_REALITY && <RealityFields b={b} keygen={keygen} />}
+      {security === SECURITY_REALITY && <RealityFields b={b} keygen={keygen} realityScan={realityScan} />}
     </>
   )
 }
