@@ -16,7 +16,7 @@
 
 ```bash
 cd deploy
-bash init_env.sh                                   # 生成 .env（随机口令）
+bash init_env.sh                                   # 生成 .env（随机密码）
 docker compose -f docker-compose.yml up -d --wait  # PostgreSQL :15432、MinIO :19000/:19001
 bash reset_db.sh                                   # 重置库到 init.sql
 cd it && bash run_all.sh                           # 联调回归（会重置库）

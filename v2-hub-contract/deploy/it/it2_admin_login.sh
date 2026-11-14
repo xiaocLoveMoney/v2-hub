@@ -43,7 +43,7 @@ ROOT_LOGIN="$(login_body "$ROOT_USER" "$CRED")"
 VIEWER_LOGIN="$(login_body "$VIEWER_USER" "$CRED")"
 
 out="$(api "$JAR_ROOT" GET /api/admin/auth/me)";                    expect 401 "$out" "未登录访问 me"
-out="$(api "$JAR_ROOT" POST /api/admin/auth/login "$WRONG_LOGIN")"; expect 401 "$out" "错误口令登录"
+out="$(api "$JAR_ROOT" POST /api/admin/auth/login "$WRONG_LOGIN")"; expect 401 "$out" "错误密码登录"
 out="$(api "$JAR_ROOT" POST /api/admin/auth/login "$ROOT_LOGIN")";  expect 200 "$out" "超管登录"
 CSRF="$(printf '%s' "$out" | csrf_of)"
 [ -n "$CSRF" ] || { echo "IT-2: 登录响应缺 csrfToken"; exit 1; }

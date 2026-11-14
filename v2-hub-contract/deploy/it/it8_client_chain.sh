@@ -58,7 +58,7 @@ XUI_TOKEN="$(curl -s -b "$XUI_JAR" -c "$XUI_JAR" -X POST "$XUI_URL/panel/api/set
 printf '%s\n' "$CRED" | (cd "$REPO_ROOT/v2-hub-server" && make -s admin-create USERNAME="$ROOT_USER") >/tmp/it-admin-create.log 2>&1 || fail "admin-create 失败"
 start_module v2-hub-server 8080
 HUB_JAR="$WORK/hub.jar"
-# login_body_of <用户名> <口令>
+# login_body_of <用户名> <密码>
 login_body_of() { jq -nc --arg u "$1" --arg p "$2" '{username:$u,password:$p}'; }
 CSRF="$(curl -s -b "$HUB_JAR" -c "$HUB_JAR" -X POST "$BASE/api/admin/auth/login" -H 'Content-Type: application/json' --data "$(login_body_of "$ROOT_USER" "$CRED")" \
   | jq -r '.data.csrfToken // empty')"
@@ -93,7 +93,7 @@ plan_body() {
 }
 CHAIN_PLAN="$(hub POST /api/admin/plans "$(plan_body it8-chain true)" | jq -r .data.id)"; expect_code 200 "新建开链式的套餐"
 PLAIN_PLAN="$(hub POST /api/admin/plans "$(plan_body it8-plain false)" | jq -r .data.id)"; expect_code 200 "新建不开链式的套餐"
-# new_user <用户名> <口令> → 打印用户 id
+# new_user <用户名> <密码> → 打印用户 id
 new_user() {
   local id
   id="$(hub POST /api/admin/users "$(login_body_of "$1" "$2" | jq -c --argjson plan "$CHAIN_PLAN" '. + {planId:$plan}')" | jq -r '.data.id // empty')"
@@ -105,7 +105,7 @@ USER_ID="$(new_user "$END_USER" "$USER_CRED")"
 OTHER_ID="$(new_user "$OTHER_USER" "$OTHER_CRED")"
 
 # ---- 4. 终端用户登录；会话带链式开关，概览给出可选节点 ----
-# portal_login <cookie jar> <用户名> <口令> → 打印 CSRF token
+# portal_login <cookie jar> <用户名> <密码> → 打印 CSRF token
 portal_login() { call "$1" "" POST /api/user/auth/login "$(login_body_of "$2" "$3")" | jq -r '.data.csrfToken // empty'; }
 USER_JAR="$WORK/user.jar"
 USER_CSRF="$(portal_login "$USER_JAR" "$END_USER" "$USER_CRED")"

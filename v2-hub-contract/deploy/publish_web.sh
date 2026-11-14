@@ -22,7 +22,7 @@ set -a && . ./.env && set +a
 minio_container="$(docker compose -f "$COMPOSE_FILE" ps -q minio)"
 [ -n "$minio_container" ] || { echo "publish_web: minio 容器未运行"; exit 1; }
 
-# 口令经环境变量传给容器（-e 只写变量名），不出现在命令行参数里。
+# 密码经环境变量传给容器（-e 只写变量名），不出现在命令行参数里。
 export MC_HOST_hub="http://${MINIO_ROOT_USER}:${MINIO_ROOT_PASSWORD}@127.0.0.1:9000"
 docker run --rm --network "container:$minio_container" -e MC_HOST_hub \
   -v "$DIST_DIR:/dist:ro" --entrypoint sh "$MC_IMAGE" -c "

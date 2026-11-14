@@ -229,7 +229,7 @@ CREATE TABLE end_user (
     is_disabled           BOOLEAN      NOT NULL DEFAULT FALSE,
     status                VARCHAR(16)  NOT NULL DEFAULT 'active', -- active / limited / expired / disabled（docs/03 §2）
     email_code            VARCHAR(6)   NOT NULL,             -- 面板 client email 的随机短码：u{id}-{code}（docs/03 §6）
-    client_cred_enc       BYTEA        NOT NULL,             -- 面板凭据（UUID、口令）AES-256-GCM，关联数据 end_user:<id>:client
+    client_cred_enc       BYTEA        NOT NULL,             -- 面板凭据（UUID、密码）AES-256-GCM，关联数据 end_user:<id>:client
     deleted_at            TIMESTAMPTZ,                       -- 非空 = 待删除：各面板 client 删完后才删记录
     totp_secret_enc       BYTEA,                             -- AES-GCM；NULL = 未启用两步验证（docs/03 §5.3）
     totp_pending_enc      BYTEA,                             -- 开启流程中待确认的密钥
@@ -439,7 +439,7 @@ CREATE TABLE tutorial (
 );
 CREATE INDEX idx_tutorial_platform ON tutorial (platform, sort_order);
 
--- 共享账号（docs/03 §5.9）：口令 AES-GCM，关联数据 shared_account:<id>。
+-- 共享账号（docs/03 §5.9）：密码 AES-GCM，关联数据 shared_account:<id>。
 CREATE TABLE shared_account (
     id             BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     name           VARCHAR(64)  NOT NULL,

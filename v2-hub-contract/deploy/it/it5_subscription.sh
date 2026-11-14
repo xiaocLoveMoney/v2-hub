@@ -53,7 +53,7 @@ XUI_TOKEN="$(curl -s -b "$XUI_JAR" -c "$XUI_JAR" -X POST "$XUI_URL/panel/api/set
 printf '%s\n' "$CRED" | (cd "$REPO_ROOT/v2-hub-server" && make -s admin-create USERNAME="$ROOT_USER") >/tmp/it-admin-create.log 2>&1 || fail "admin-create 失败"
 start_module v2-hub-server 8080
 HUB_JAR="$WORK/hub.jar"
-# login_body_of <用户名> <口令>
+# login_body_of <用户名> <密码>
 login_body_of() { jq -nc --arg u "$1" --arg p "$2" '{username:$u,password:$p}'; }
 CSRF="$(curl -s -b "$HUB_JAR" -c "$HUB_JAR" -X POST "$BASE/api/admin/auth/login" -H 'Content-Type: application/json' --data "$(login_body_of "$ROOT_USER" "$CRED")" \
   | jq -r '.data.csrfToken // empty')"
@@ -88,9 +88,9 @@ expect_code 200 "新建用户"
 USER_ID="$(printf '%s' "$user" | jq -r .data.id)"
 hub POST "/api/admin/users/$USER_ID/reconcile" >/dev/null; expect_code 200 "对账"
 
-# ---- 4. 终端用户登录客户后台（docs/03 §5.3）：口令错 401，未登录 401，登录后只凭会话取本人数据 ----
+# ---- 4. 终端用户登录客户后台（docs/03 §5.3）：密码错 401，未登录 401，登录后只凭会话取本人数据 ----
 USER_JAR="$WORK/user.jar"
-call "$USER_JAR" "" POST /api/user/auth/login "$(login_body_of "$END_USER" "$BAD_CRED")" >/dev/null; expect_code 401 "口令错误登录"
+call "$USER_JAR" "" POST /api/user/auth/login "$(login_body_of "$END_USER" "$BAD_CRED")" >/dev/null; expect_code 401 "密码错误登录"
 call "$USER_JAR" "" GET /api/user/subscription >/dev/null; expect_code 401 "未登录取订阅"
 USER_CSRF="$(call "$USER_JAR" "" POST /api/user/auth/login "$(login_body_of "$END_USER" "$USER_CRED")" | jq -r '.data.csrfToken // empty')"
 [ -n "$USER_CSRF" ] || fail "终端用户登录失败：$(cat "$WORK/body")"
