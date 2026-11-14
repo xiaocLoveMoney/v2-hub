@@ -16,7 +16,7 @@ function sessionWith(permissions: string[]): SessionContextValue {
   const granted = new Set(permissions)
   return {
     status: 'authenticated',
-    session: { admin: { id: SELF_ID, username: 'root' }, permissions, csrfToken: TEST_CSRF, totpEnabled: false },
+    session: { admin: { id: SELF_ID, username: 'root' }, permissions, csrfToken: TEST_CSRF, totpEnabled: false, menuOrder: [] },
     login: async () => null,
     logout: async () => undefined,
     refresh: async () => undefined,

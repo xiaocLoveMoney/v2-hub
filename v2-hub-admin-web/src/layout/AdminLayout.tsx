@@ -36,7 +36,8 @@ export function AdminLayout() {
   const { status, session, can, logout } = useSession()
   const location = useLocation()
   const navigate = useNavigate()
-  const items = useMemo(() => toMenuItems(visibleMenu(can)), [can])
+  const menuOrder = session?.menuOrder
+  const items = useMemo(() => toMenuItems(visibleMenu(can, menuOrder)), [can, menuOrder])
 
   if (status === 'loading') {
     return <Spin fullscreen />

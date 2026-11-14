@@ -49,7 +49,7 @@ function renderWith(node: ReactNode, path = '/', routePath = '/', permissions: s
   const granted = new Set<string>(permissions)
   const value: SessionContextValue = {
     status: 'authenticated',
-    session: { admin: { id: 1, username: 'root' }, permissions, csrfToken: CSRF, totpEnabled: false },
+    session: { admin: { id: 1, username: 'root' }, permissions, csrfToken: CSRF, totpEnabled: false, menuOrder: [] },
     login: async () => null,
     logout: async () => undefined,
     refresh: async () => undefined,

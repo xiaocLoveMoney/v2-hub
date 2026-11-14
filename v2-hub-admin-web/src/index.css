@@ -161,13 +161,81 @@ body {
   max-width: 320px;
 }
 
-.settings-card {
-  max-width: 720px;
-  margin-bottom: 16px;
+.settings-card .ant-card-body > :last-child {
+  margin-bottom: 0;
 }
 
-.settings-card-extra {
+/* 卡片式页面（照客户后台仪表盘）：去掉外层白色内容框，标题栏单独一张卡，卡片在灰底上按宽度自动分栏 */
+.admin-content:has(> .card-page) {
+  padding: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.card-page-header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 24px;
+  padding: 16px 24px;
+  background: var(--hub-surface);
+  border-radius: var(--hub-radius);
+  box-shadow: var(--hub-card-shadow);
+}
+
+.card-page-header .card-page-title {
+  margin: 0;
+  color: var(--hub-heading);
+}
+
+.card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 420px), 1fr));
+  gap: 24px;
+  align-items: stretch;
+}
+
+.card-grid > .ant-card {
+  border: none;
+  box-shadow: var(--hub-card-shadow);
+}
+
+.card-grid-follow {
   margin-top: 24px;
+}
+
+.menu-order-group + .menu-order-group {
+  margin-top: 16px;
+}
+
+.menu-order-group-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 8px;
+  background: var(--hub-page-bg);
+  border-radius: var(--hub-radius);
+}
+
+.menu-order-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.menu-order-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 8px 6px 20px;
+  border-bottom: 1px solid var(--hub-divider);
+}
+
+.menu-order-tag {
+  margin-inline-start: 8px;
+  font-weight: 400;
 }
 
 .link-url-input {
@@ -216,6 +284,15 @@ body {
   .admin-content {
     margin: 10px 12px 16px;
     padding: 16px;
+  }
+
+  .card-grid {
+    gap: 16px;
+  }
+
+  .card-page-header {
+    margin-bottom: 16px;
+    padding: 12px 16px;
   }
 }
 

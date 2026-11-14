@@ -1,6 +1,7 @@
-import { Alert, Button, Card, Form, Input, InputNumber, Select, Space, Switch, Tag, Typography } from 'antd'
+import { Alert, Button, Card, Form, Input, InputNumber, Select, Space, Switch, Tag } from 'antd'
 import { api, csrfHeader, type Plan, type RegisterMode, type Settings } from '../../api/client'
 import { useSession } from '../../auth/session-context'
+import { CardPage } from '../../components/CardPage'
 import { ErrorAlert } from '../../components/ErrorAlert'
 import { useRemote } from '../../hooks/use-remote'
 import { useSubmit } from '../../hooks/use-submit'
@@ -44,8 +45,9 @@ const REGISTER_MODE_OPTIONS: { value: RegisterMode; label: string }[] = [
   { value: 'closed', label: '关闭注册' },
 ]
 
-/** 表单值：与 Settings 同形，去掉只读的 mailEnabled、telegramEnabled。 */
-type SettingsForm = Omit<Settings, 'mailEnabled' | 'telegramEnabled'>
+/** 表单值：与 Settings 同形，去掉只读的 mailEnabled、telegramEnabled 与另有页面编辑的菜单顺序。 */
+type SettingsForm = Omit<Settings, 'mailEnabled' | 'telegramEnabled' | 'menu'>
+const PAGE_TITLE = '系统设置'
 
 const loadSettings = (signal: AbortSignal) => api.GET('/api/admin/settings', { signal })
 const loadPlans = (signal: AbortSignal) => api.GET('/api/admin/plans', { signal })
@@ -65,20 +67,14 @@ const domainListRules = [
 export function SettingsPage() {
   const { can } = useSession()
   const settings = useRemote<Settings>(loadSettings)
-  return (
-    <>
-      <Typography.Title level={3}>系统设置</Typography.Title>
-      <ErrorAlert error={settings.error} />
-      {settings.data !== null && (
-        <SettingsFormBody
-          settings={settings.data}
-          canWrite={can(PERMISSIONS.SETTING_WRITE)}
-          canReadPlans={can(PERMISSIONS.PLAN_READ)}
-          onSaved={settings.reload}
-        />
-      )}
-    </>
-  )
+  if (settings.data === null) {
+    return (
+      <CardPage title={PAGE_TITLE}>
+        <ErrorAlert error={settings.error} />
+      </CardPage>
+    )
+  }
+  return <SettingsFormBody settings={settings.data} canWrite={can(PERMISSIONS.SETTING_WRITE)} canReadPlans={can(PERMISSIONS.PLAN_READ)} onSaved={settings.reload} />
 }
 
 interface SettingsFormBodyProps {
@@ -89,14 +85,20 @@ interface SettingsFormBodyProps {
 }
 
 function SettingsFormBody({ settings, canWrite, canReadPlans, onSaved }: SettingsFormBodyProps) {
+  const [form] = Form.useForm<SettingsForm>()
   const { error, isBusy, run } = useSubmit('已保存', onSaved)
-  const { mailEnabled, telegramEnabled, ...initialValues } = settings
+  const { mailEnabled, telegramEnabled, menu: _menu, ...initialValues } = settings
   const submit = (v: SettingsForm) => run(() => api.PUT('/api/admin/settings', { params: csrfHeader(), body: v }))
+  const saveButton = canWrite && (
+    <Button type="primary" loading={isBusy} onClick={() => form.submit()}>
+      保存全部设置
+    </Button>
+  )
 
   return (
-    <>
+    <CardPage title={PAGE_TITLE} extra={saveButton}>
       <ErrorAlert error={error} />
-      <Form<SettingsForm> layout="vertical" initialValues={initialValues} disabled={!canWrite} onFinish={(v) => void submit(v)}>
+      <Form<SettingsForm> form={form} layout="vertical" className="card-grid" initialValues={initialValues} disabled={!canWrite} onFinish={(v) => void submit(v)}>
         <Card title="站点" className="settings-card">
           <Form.Item name={['site', 'name']} label="站点名称" rules={[{ required: true, max: MAX_SITE_NAME_LEN, message: `1–${MAX_SITE_NAME_LEN} 个字符` }]}>
             <Input autoComplete="off" />
@@ -257,16 +259,14 @@ function SettingsFormBody({ settings, canWrite, canReadPlans, onSaved }: Setting
         </Card>
 
         <OpsSettingsCards isTelegramEnabled={telegramEnabled} />
-
-        {canWrite && (
-          <Button type="primary" htmlType="submit" loading={isBusy}>
-            保存全部设置
-          </Button>
-        )}
       </Form>
-      {canWrite && <TestMailCard isMailEnabled={mailEnabled} />}
-      {canWrite && <TestTelegramCard isTelegramEnabled={telegramEnabled} />}
-    </>
+      {canWrite && (
+        <div className="card-grid card-grid-follow">
+          <TestMailCard isMailEnabled={mailEnabled} />
+          <TestTelegramCard isTelegramEnabled={telegramEnabled} />
+        </div>
+      )}
+    </CardPage>
   )
 }
 
@@ -298,7 +298,7 @@ function TestMailCard({ isMailEnabled }: { isMailEnabled: boolean }) {
   const { error, isBusy, run } = useSubmit('测试邮件已发出', () => form.resetFields())
   const submit = (v: { to: string }) => run(() => api.POST('/api/admin/settings/test-mail', { params: csrfHeader(), body: { to: v.to } }))
   return (
-    <Card title="发测试邮件" className="settings-card settings-card-extra">
+    <Card title="发测试邮件" className="settings-card">
       <ErrorAlert error={error} />
       <Form form={form} layout="inline" disabled={!isMailEnabled} onFinish={(v) => void submit(v)}>
         <Form.Item name="to" rules={[{ required: true, type: 'email', max: MAX_EMAIL_LEN, message: '请输入收件邮箱' }]}>
