@@ -15,7 +15,7 @@ v2-hub-server/
 │   │   ├── panel/               # Provider 接口、Capabilities、中立模型、注册表（M1）
 │   │   ├── panel/xui/           # 3x-ui 实现（M1）
 │   │   ├── render/              # 分享链接解析 → ProxyNode → 各订阅格式（M3）
-│   │   ├── chain/               # 服务端链式的面板配置变更（M7）；客户端链式的渲染在 render/（M6）
+│   │   ├── chain/               # 服务端链式的面板配置变更（M7）；客户端链式的渲染在 render/（M6）；M9 起一条规则可带多个入站
 │   │   └── crypto/              # AES-GCM、argon2id、token 生成（M0）
 │   ├── dao/                     # PostgreSQL 访问（sqlc 生成，参数化）
 │   ├── domain/{entity,dto,vo}/  # 领域模型分层
@@ -58,6 +58,11 @@ type CoreConfigurator interface { GetCoreTemplate / SetCoreTemplate / RestartCor
 2. 面板 token、用户凭据入库前 AES-GCM 加密，密钥来自环境变量；日志不打印分享链接与 token。
 3. 批量禁用 / 删除 client 合并成一次调用：3x-ui 默认禁用 client 会重启 Xray。
 4. 所有写面板的操作写审计日志。
+
+M9 链式改造（docs/03 §5.18、§5.19、§5.21）在 `internal/service` 里的分工：`chain.go` 管规则与用户出口的增删改与调顺序，
+`chain_resolve.go` 是生效计算的纯函数（哪条规则在哪个起飞入站上生效），`chain_guard.go` 管用户出口用于服务端链式的防护
+（公网地址判定、域名解析与固定 IP、字段白名单、防环；DNS 解析走可注入的接口，单测不发真实查询），
+`chain_exit_admin.go` 是管理端的出口管理，`chain_apply.go` 的期望条目改由生效计算的结果生成并带失败隔离。
 
 ## 4. 与其它模块的握手
 
