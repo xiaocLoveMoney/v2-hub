@@ -3400,6 +3400,11 @@ export interface components {
                 url: string;
                 label: string;
             };
+            /** @description 服务器 Xray 模板里的平台条目（0.7.1，docs/03 §5.19 拦截规则） */
+            routing: {
+                /** @description 在每台已接入服务器的模板里加平台拦截规则 hub-block（Ruling-55），默认开 */
+                blockRule: boolean;
+            };
             site: {
                 name: string;
                 /** @description IANA 时区名 */
@@ -3514,6 +3519,9 @@ export interface components {
                 [key: string]: unknown;
             };
             support?: {
+                [key: string]: unknown;
+            };
+            routing?: {
                 [key: string]: unknown;
             };
         };
