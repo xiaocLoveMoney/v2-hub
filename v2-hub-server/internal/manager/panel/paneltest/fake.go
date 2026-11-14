@@ -31,6 +31,9 @@ type Fake struct {
 	testResult panel.OutboundTestResult
 	tests      []OutboundTest
 	webCert    panel.CertFiles
+	// REALITY 目标扫描：预设的结果（按目标索引）与收到的目标
+	scans       map[string]panel.RealityScan
+	scanTargets [][]string
 	// Calls 记录调用的方法名，便于断言。
 	Calls []string
 }

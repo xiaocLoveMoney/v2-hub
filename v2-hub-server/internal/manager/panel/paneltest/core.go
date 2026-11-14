@@ -173,3 +173,59 @@ func (f *Fake) WebCertFiles(context.Context) (panel.CertFiles, error) {
 	}
 	return f.webCert, nil
 }
+
+// FakeRealityCandidate 是假面板自己的候选站点（不带目标的批量扫描返回它）。
+const FakeRealityCandidate = "www.example.org:443"
+
+// SetRealityScan 设定某个目标的扫描结果；没设过的目标返回“不可用”。
+func (f *Fake) SetRealityScan(r panel.RealityScan) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.scans == nil {
+		f.scans = make(map[string]panel.RealityScan, 4)
+	}
+	f.scans[r.Target] = r
+}
+
+// RealityScanTargets 返回假面板收到过的每次扫描的目标列表。
+func (f *Fake) RealityScanTargets() [][]string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([][]string(nil), f.scanTargets...)
+}
+
+func (f *Fake) scanOf(target string) panel.RealityScan {
+	if r, ok := f.scans[target]; ok {
+		return r
+	}
+	return panel.RealityScan{Target: target, Reason: "no tls 1.3"}
+}
+
+// ScanRealityTarget 实现 panel.RealityScanner。
+func (f *Fake) ScanRealityTarget(_ context.Context, target, _ string, _ int) (panel.RealityScan, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.enter("ScanRealityTarget"); err != nil {
+		return panel.RealityScan{}, err
+	}
+	f.scanTargets = append(f.scanTargets, []string{target})
+	return f.scanOf(target), nil
+}
+
+// ScanRealityTargets 实现 panel.RealityScanner；不带目标时返回假面板自己的候选站点。
+func (f *Fake) ScanRealityTargets(_ context.Context, targets []string) ([]panel.RealityScan, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.enter("ScanRealityTargets"); err != nil {
+		return nil, err
+	}
+	f.scanTargets = append(f.scanTargets, append([]string(nil), targets...))
+	if len(targets) == 0 {
+		targets = []string{FakeRealityCandidate}
+	}
+	out := make([]panel.RealityScan, 0, len(targets))
+	for _, t := range targets {
+		out = append(out, f.scanOf(t))
+	}
+	return out, nil
+}

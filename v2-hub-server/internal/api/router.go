@@ -161,6 +161,8 @@ func NewRouter(deps Deps) http.Handler {
 	mux.HandleFunc("GET /api/admin/inbounds/{id}/panel-config", h.requireAdmin(service.PermNodeWrite, h.getInboundPanelConfig))
 	mux.HandleFunc("POST /api/admin/servers/{id}/keys", h.requireAdmin(service.PermNodeWrite, h.generatePanelKeys))
 	mux.HandleFunc("GET /api/admin/servers/{id}/web-cert", h.requireAdmin(service.PermNodeWrite, h.getServerWebCert))
+	mux.HandleFunc("POST /api/admin/servers/{id}/reality-scan", h.requireAdmin(service.PermNodeWrite, h.scanRealityTarget))
+	mux.HandleFunc("POST /api/admin/servers/{id}/reality-targets", h.requireAdmin(service.PermNodeWrite, h.scanRealityTargets))
 
 	mux.HandleFunc("GET /api/admin/plans", h.requireAdmin(service.PermPlanRead, h.listPlans))
 	mux.HandleFunc("POST /api/admin/plans", h.requireAdmin(service.PermPlanWrite, h.createPlan))

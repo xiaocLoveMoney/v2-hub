@@ -33,6 +33,8 @@ type PanelManager interface {
 	GetInboundPanelConfig(ctx context.Context, actor *service.AdminPrincipal, id int64, ip *netip.Addr) (*service.InboundPanelConfig, error)
 	GeneratePanelKeys(ctx context.Context, actor *service.AdminPrincipal, serverID int64, kind string, ip *netip.Addr) (json.RawMessage, error)
 	WebCertFiles(ctx context.Context, serverID int64) (panel.CertFiles, error)
+	ScanRealityTarget(ctx context.Context, serverID int64, target, sni string, xver int) (*panel.RealityScan, error)
+	ScanRealityTargets(ctx context.Context, serverID int64, targets []string) ([]panel.RealityScan, error)
 	DeleteInbound(ctx context.Context, actor *service.AdminPrincipal, id int64, ip *netip.Addr) error
 	CreateEndpoints(ctx context.Context, actor *service.AdminPrincipal, serverID int64, in service.EndpointInput, ip *netip.Addr) error
 	DeleteEndpoint(ctx context.Context, actor *service.AdminPrincipal, id int64, ip *netip.Addr) error
@@ -523,6 +525,90 @@ func (h *handlers) getServerWebCert(w http.ResponseWriter, r *http.Request, _ *s
 		return
 	}
 	writeOK(w, serverWebCertVO{CertFile: files.CertFile, KeyFile: files.KeyFile})
+}
+
+// realityScanRequest 对应 hub-api.yaml RealityScanInput。
+type realityScanRequest struct {
+	Target string `json:"target"`
+	SNI    string `json:"sni"`
+	Xver   int    `json:"xver"`
+}
+
+// realityTargetsRequest 对应 hub-api.yaml RealityTargetsInput。
+type realityTargetsRequest struct {
+	Targets []string `json:"targets"`
+}
+
+// realityScanVO 对应 hub-api.yaml RealityScanResult。
+type realityScanVO struct {
+	Target        string   `json:"target"`
+	Host          string   `json:"host"`
+	Port          int      `json:"port"`
+	IP            string   `json:"ip"`
+	Feasible      bool     `json:"feasible"`
+	Reason        string   `json:"reason"`
+	LatencyMs     int64    `json:"latencyMs"`
+	TLSVersion    string   `json:"tlsVersion"`
+	ALPN          string   `json:"alpn"`
+	CertValid     bool     `json:"certValid"`
+	CertSubject   string   `json:"certSubject"`
+	CertIssuer    string   `json:"certIssuer"`
+	ServerNames   []string `json:"serverNames"`
+	PrivateTarget bool     `json:"privateTarget"`
+}
+
+func toRealityScanVO(r panel.RealityScan) realityScanVO {
+	names := r.ServerNames
+	if names == nil {
+		names = []string{}
+	}
+	return realityScanVO{
+		Target: r.Target, Host: r.Host, Port: r.Port, IP: r.IP, Feasible: r.Feasible, Reason: r.Reason, LatencyMs: r.LatencyMs,
+		TLSVersion: r.TLSVersion, ALPN: r.ALPN, CertValid: r.CertValid, CertSubject: r.CertSubject, CertIssuer: r.CertIssuer,
+		ServerNames: names, PrivateTarget: r.PrivateTarget,
+	}
+}
+
+func (h *handlers) scanRealityTarget(w http.ResponseWriter, r *http.Request, _ *service.AdminPrincipal) {
+	id, err := pathID(r)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	var req realityScanRequest
+	if err := decodeJSON(w, r, &req); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	res, err := h.panels.ScanRealityTarget(r.Context(), id, req.Target, req.SNI, req.Xver)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeOK(w, toRealityScanVO(*res))
+}
+
+func (h *handlers) scanRealityTargets(w http.ResponseWriter, r *http.Request, _ *service.AdminPrincipal) {
+	id, err := pathID(r)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	var req realityTargetsRequest
+	if err := decodeJSON(w, r, &req); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	res, err := h.panels.ScanRealityTargets(r.Context(), id, req.Targets)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	out := make([]realityScanVO, 0, len(res))
+	for _, item := range res {
+		out = append(out, toRealityScanVO(item))
+	}
+	writeOK(w, out)
 }
 
 func (h *handlers) deleteInbound(w http.ResponseWriter, r *http.Request, p *service.AdminPrincipal) {
