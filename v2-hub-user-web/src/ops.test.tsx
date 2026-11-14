@@ -13,7 +13,7 @@ const PLACEHOLDER = /\{(\w+)\}/g
 const SUPPORT_URL = 'https://chat.example.com/room'
 
 const site = {
-  siteName: '测试站', registerMode: 'open', emailVerifyRequired: false, mailEnabled: false, checkinEnabled: false, ticketEnabled: false, sharedEnabled: false,
+  siteName: '测试站', menuOrder: [], registerMode: 'open', emailVerifyRequired: false, mailEnabled: false, checkinEnabled: false, ticketEnabled: false, sharedEnabled: false,
   shopEnabled: true, currency: 'CNY',
   landing: { enabled: true, headline: '快速稳定的线路', intro: '## 多地区节点\n\n[了解更多](https://example.com/about)' },
   support: { url: SUPPORT_URL, label: '联系我们' },

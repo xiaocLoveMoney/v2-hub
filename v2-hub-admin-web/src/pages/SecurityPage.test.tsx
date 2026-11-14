@@ -13,7 +13,7 @@ const ok = (data: unknown) => Response.json({ code: '0', message: 'ok', data })
 function renderPage(totpEnabled: boolean, refresh: () => Promise<void>) {
   const value: SessionContextValue = {
     status: 'authenticated',
-    session: { admin: { id: 1, username: 'root' }, permissions: [], csrfToken: CSRF, totpEnabled },
+    session: { admin: { id: 1, username: 'root' }, permissions: [], csrfToken: CSRF, totpEnabled, menuOrder: [] },
     login: async () => null,
     logout: async () => undefined,
     refresh,

@@ -14,6 +14,7 @@ export const DEFAULT_SITE: SiteInfo = {
   sharedEnabled: false,
   shopEnabled: false,
   currency: DEFAULT_CURRENCY,
+  menuOrder: [],
 }
 
 export const SiteContext = createContext<SiteInfo>(DEFAULT_SITE)

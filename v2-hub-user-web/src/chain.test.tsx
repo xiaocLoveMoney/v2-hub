@@ -7,7 +7,7 @@ import { TEST_CSRF, enT, mockServer, ok, renderApp, zhT } from './test/harness'
 const NOW = '2026-11-14T00:00:00Z'
 const ROUTES_PATH = '/api/user/chain/routes'
 const site = {
-  siteName: '测试站', registerMode: 'invite', emailVerifyRequired: false, mailEnabled: false, checkinEnabled: false, ticketEnabled: false, sharedEnabled: false,
+  siteName: '测试站', menuOrder: [], registerMode: 'invite', emailVerifyRequired: false, mailEnabled: false, checkinEnabled: false, ticketEnabled: false, sharedEnabled: false,
   shopEnabled: false, currency: 'CNY',
 }
 const features = { clientChain: true, customNode: true, serverChain: true }
@@ -91,6 +91,10 @@ describe('链式代理文案与菜单', () => {
     expect(labels({ clientChain: false, customNode: true, serverChain: false })).not.toContain('链式代理')
     expect(labels({ clientChain: false, customNode: false, serverChain: true })).toContain('链式代理')
     expect(labels()).not.toContain('链式代理')
+    // 菜单顺序（Ruling-57）：“使用”组因 nodes 排第一而整组提前，组内 chain 次之；没列到的按默认顺序在后；不认识的键忽略
+    const ordered = visibleMenu({ ...site, menuOrder: ['nodes', 'unknown', 'chain', 'account'] } as never, features).map((m) => m.key)
+    expect(ordered.slice(0, 3)).toEqual(['nodes', 'chain', 'tutorials'])
+    expect(ordered.slice(-4)).toEqual(['account', 'invite', 'dashboard', 'announcements'])
   })
 })
 

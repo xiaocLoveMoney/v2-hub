@@ -7,7 +7,7 @@ import { TEST_CSRF, enT, fail, mockServer, ok, renderApp, zhT } from './test/har
 const NOW = '2026-11-13T00:00:00Z'
 const GIB = 1024 ** 3
 const site = {
-  siteName: '测试站', registerMode: 'invite', emailVerifyRequired: false, mailEnabled: false, checkinEnabled: false, ticketEnabled: false, sharedEnabled: false,
+  siteName: '测试站', menuOrder: [], registerMode: 'invite', emailVerifyRequired: false, mailEnabled: false, checkinEnabled: false, ticketEnabled: false, sharedEnabled: false,
   shopEnabled: true, currency: 'CNY',
 }
 const session = { user: { id: 7, username: 'alice', status: 'active', email: null, isEmailVerified: false }, csrfToken: TEST_CSRF, totpEnabled: false, impersonated: false }

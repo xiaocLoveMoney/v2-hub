@@ -4,12 +4,12 @@ import { RouterProvider, createMemoryRouter } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { routes } from './routes'
 import { SessionProvider } from './auth/SessionProvider'
-import { PERMISSIONS, ROUTES, visibleMenu } from './menu'
+import { MENU, PERMISSIONS, ROUTES, visibleMenu } from './menu'
 
 const CSRF = 'csrf-from-server'
 
 function sessionBody(permissions: string[]) {
-  return { code: '0', message: 'ok', data: { admin: { id: 2, username: 'viewer1' }, permissions, csrfToken: CSRF, totpEnabled: false } }
+  return { code: '0', message: 'ok', data: { admin: { id: 2, username: 'viewer1' }, permissions, csrfToken: CSRF, totpEnabled: false, menuOrder: [] } }
 }
 
 const unauthenticated = { code: 'unauthenticated', message: '请先登录' }
@@ -47,6 +47,18 @@ describe('visibleMenu', () => {
   it('按权限码过滤菜单，无权限要求的项始终可见', () => {
     const paths = visibleMenu((p) => p === PERMISSIONS.NODE_READ).map((e) => e.path)
     expect(paths).toEqual([ROUTES.DASHBOARD, ROUTES.NODES, ROUTES.CHAIN_EXITS, ROUTES.SECURITY])
+  })
+
+  it('按菜单顺序设置排：列到的在前，没列到的按默认顺序在后，分组跟着组内最靠前的项走，不认识的键忽略（Ruling-57）', () => {
+    const all = () => true
+    const order = ['security', 'nope', 'chain-exits', 'servers', 'tickets']
+    const keys = visibleMenu(all, order).map((e) => e.key)
+    // 系统组因 security 排第一而整组提前；节点组次之，组内 chain-exits、servers 在前；我的组第三，tickets 在组内最前
+    expect(keys.slice(0, 8)).toEqual(['security', 'admins', 'roles', 'audit-logs', 'settings', 'menu-order', 'mail-outbox', 'chain-exits'])
+    expect(keys.slice(8, 11)).toEqual(['servers', 'nodes', 'chain-routes'])
+    expect(keys.slice(11, 16)).toEqual(['tickets', 'dashboard', 'announcements', 'tutorials', 'shared-accounts'])
+    expect(keys).toHaveLength(MENU.length)
+    expect(visibleMenu(all).map((e) => e.key)).toEqual(MENU.map((e) => e.key))
   })
 })
 

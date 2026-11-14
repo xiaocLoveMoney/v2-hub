@@ -2762,6 +2762,8 @@ export interface components {
         Session: {
             admin: components["schemas"]["AdminBrief"];
             totpEnabled: boolean;
+            /** @description 管理端侧栏菜单顺序（系统设置 menu.admin，0.7.3，Ruling-57）；空数组 = 默认顺序 */
+            menuOrder: components["schemas"]["MenuOrder"];
             /** @description 有效权限码（super_admin 返回全部） */
             permissions: string[];
             csrfToken: string;
@@ -3339,6 +3341,8 @@ export interface components {
         RegisterMode: "open" | "invite" | "closed";
         SiteInfo: {
             siteName: string;
+            /** @description 客户门户侧栏菜单顺序（系统设置 menu.user，0.7.3，Ruling-57）；空数组 = 默认顺序 */
+            menuOrder: components["schemas"]["MenuOrder"];
             registerMode: components["schemas"]["RegisterMode"];
             /** @description 注册是否要先验证邮箱（设置为真且邮件可用） */
             emailVerifyRequired: boolean;
@@ -3404,6 +3408,11 @@ export interface components {
             routing: {
                 /** @description 在每台已接入服务器的模板里加平台拦截规则 hub-block（Ruling-55），默认开 */
                 blockRule: boolean;
+            };
+            /** @description 侧栏菜单顺序（0.7.3，docs/03 §5.6 菜单顺序，Ruling-57）；空数组 = 默认顺序 */
+            menu: {
+                admin: components["schemas"]["MenuOrder"];
+                user: components["schemas"]["MenuOrder"];
             };
             site: {
                 name: string;
@@ -3524,7 +3533,12 @@ export interface components {
             routing?: {
                 [key: string]: unknown;
             };
+            menu?: {
+                [key: string]: unknown;
+            };
         };
+        /** @description 菜单键按期望顺序排成的列表（docs/03 §5.6 菜单键目录）；后端只校验格式，前端忽略不认识的键，没列到的项按默认顺序排在后面 */
+        MenuOrder: string[];
         TestMailInput: {
             to: components["schemas"]["Email"];
         };

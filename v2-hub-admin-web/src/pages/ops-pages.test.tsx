@@ -31,13 +31,16 @@ describe('DashboardPage（docs/03 §5.20）', () => {
     expect(screen.getByRole('link', { name: 'jp-1' }).getAttribute('href')).toBe('/servers/2')
     expect(screen.getByRole('img', { name: '近 7 日流量' })).toBeDefined()
     expect(screen.getByText('待回复工单')).toBeDefined()
+    expect(screen.getByRole('link', { name: '去处理 →' }).getAttribute('href')).toBe('/tickets')
+    expect(screen.getByText('今日充值 ¥50.00')).toBeDefined()
     cleanup()
 
-    mockServer({ 'GET /api/admin/dashboard': () => ok({ users: null, traffic: null, servers: dashboard.servers, finance: null, tickets: null }) })
+    mockServer({ 'GET /api/admin/dashboard': () => ok({ users: null, traffic: null, servers: { ...dashboard.servers, online: 3, offline: [] }, finance: null, tickets: null }) })
     renderWith([PERMISSIONS.SERVER_READ], <MemoryRouter><DashboardPage /></MemoryRouter>)
     expect(await screen.findByText('服务器在线')).toBeDefined()
     expect(screen.queryByText('用户总数')).toBeNull()
-    expect(screen.queryByText('本月消费 / 充值')).toBeNull()
+    expect(screen.queryByText('本月消费')).toBeNull()
+    expect(screen.getByText('全部 3 台服务器在线')).toBeDefined()
   })
 })
 

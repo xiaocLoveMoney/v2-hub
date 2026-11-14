@@ -17,6 +17,7 @@ import { TrafficPacksPage } from './pages/shop/TrafficPacksPage'
 import { AdminsPage } from './pages/system/AdminsPage'
 import { AuditLogsPage } from './pages/system/AuditLogsPage'
 import { MailOutboxPage } from './pages/system/MailOutboxPage'
+import { MenuOrderPage } from './pages/system/MenuOrderPage'
 import { RolesPage } from './pages/system/RolesPage'
 import { SettingsPage } from './pages/system/SettingsPage'
 import { SecurityPage } from './pages/SecurityPage'
@@ -56,6 +57,7 @@ const PAGE_BY_PATH: Record<string, ReactNode> = {
   [ROUTES.ROLES]: <RolesPage />,
   [ROUTES.AUDIT_LOGS]: <AuditLogsPage />,
   [ROUTES.SETTINGS]: <SettingsPage />,
+  [ROUTES.MENU_ORDER]: <MenuOrderPage />,
   [ROUTES.MAIL_OUTBOX]: <MailOutboxPage />,
   [ROUTES.SECURITY]: <SecurityPage />,
 }

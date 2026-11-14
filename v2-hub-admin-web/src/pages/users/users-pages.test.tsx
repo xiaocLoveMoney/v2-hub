@@ -40,7 +40,7 @@ function renderWith(node: ReactNode) {
   const granted = new Set<string>(ALL)
   const value: SessionContextValue = {
     status: 'authenticated',
-    session: { admin: { id: 1, username: 'root' }, permissions: ALL, csrfToken: CSRF, totpEnabled: false },
+    session: { admin: { id: 1, username: 'root' }, permissions: ALL, csrfToken: CSRF, totpEnabled: false, menuOrder: [] },
     login: async () => null,
     logout: async () => undefined,
     refresh: async () => undefined,
@@ -168,7 +168,7 @@ describe('UsersPage', () => {
 
   it('重置订阅与清除两步验证都要二次确认后才提交', async () => {
     const calls = mockServer({
-      'GET /api/admin/users': () => ok({ items: [{ ...user, status: 'active', totpEnabled: true }], total: 1 }),
+      'GET /api/admin/users': () => ok({ items: [{ ...user, status: 'active', totpEnabled: true, menuOrder: [] }], total: 1 }),
       'GET /api/admin/plans': () => ok([plan]),
       'POST /api/admin/users/9/subscription/reset': () => ok(null),
       'DELETE /api/admin/users/9/totp': () => ok(null),

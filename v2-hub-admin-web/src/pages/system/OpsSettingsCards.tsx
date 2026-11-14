@@ -130,7 +130,7 @@ export function TestTelegramCard({ isTelegramEnabled }: { isTelegramEnabled: boo
   const { error, isBusy, run } = useSubmit('测试消息已发出', noop)
   const send = () => run(() => api.POST('/api/admin/settings/test-telegram', { params: csrfHeader() }))
   return (
-    <Card title="发 Telegram 测试消息" className="settings-card settings-card-extra">
+    <Card title="发 Telegram 测试消息" className="settings-card">
       <ErrorAlert error={error} />
       <Button onClick={() => void send()} loading={isBusy} disabled={!isTelegramEnabled}>
         发送到已保存的会话
