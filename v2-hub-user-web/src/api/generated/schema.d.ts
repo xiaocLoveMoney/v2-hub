@@ -424,15 +424,103 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/admin/server-chain-rules": {
+    "/api/admin/chain-routes": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        /** 全站服务端链式规则分页，按 id 倒序（server:read；只读，Ruling-41；0.4.2） */
-        get: operations["listServerChainRules"];
+        /** 全站链式规则分页，按 id 倒序（server:read；只读，Ruling-41；0.5.0 取代 server-chain-rules） */
+        get: operations["listChainRoutes"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/chain-exits": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 全部链式出口分页，按 id 倒序（node:read；docs/03 §5.21，0.5.0） */
+        get: operations["listChainExits"];
+        put?: never;
+        /**
+         * 添加一个平台出口（node:write；0.5.0）
+         * @description 链接解析不了或协议不支持返回 400；与已有平台出口同名返回 409。写审计，不记链接。
+         */
+        post: operations["createPlatformChainExit"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/chain-exits/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * 改平台出口（node:write；0.5.0）
+         * @description 只能改平台出口；对用户出口调用返回 400（用户出口只能停用 / 启用与删除，Ruling-50）。写审计。
+         */
+        put: operations["updatePlatformChainExit"];
+        post?: never;
+        /** 删除出口（平台出口或用户出口），引用它的规则一并删除（node:write；0.5.0） */
+        delete: operations["deleteChainExit"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/chain-exits/{id}/enabled": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * 停用或启用出口，平台出口与用户出口都可以（node:write；0.5.0）
+         * @description 停用后引用它的规则阻断（原因 exit），不删除。写审计。
+         */
+        put: operations["setChainExitEnabled"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/chain-exits/{id}/link": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        /**
+         * 取平台出口的原链接（凭据）（node:write；0.5.0）
+         * @description 只对平台出口有效；用户出口的凭据管理员不能查看，返回 404（Ruling-50）。写审计。
+         */
+        get: operations["getPlatformChainExitLink"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2356,8 +2444,8 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * 链式代理总览：开关、上限、规则、自有落地节点与可选节点（docs/03 §5.18）
-         * @description 套餐没开链式时照常返回（allowed 为 false，已有规则状态为阻断），页面据此说明原因。
+         * 链式代理总览：开关、上限、两类规则、我的出口与可选的节点 / 平台出口（docs/03 §5.18、§5.19、§5.21）
+         * @description 套餐没开链式时照常返回（开关为 false，已有规则状态为阻断），页面据此说明原因。
          */
         get: operations["getChainOverview"];
         put?: never;
@@ -2368,7 +2456,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/user/chain/rules": {
+    "/api/user/chain/routes": {
         parameters: {
             query?: never;
             header?: never;
@@ -2378,19 +2466,42 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * 新建一条链式规则
-         * @description 入口与落地（平台节点时）必须是本人当前可用的节点；落地二选一。
-         *     套餐没开链式、或落地是自有节点而套餐没开自有落地时返回 403 feature_disabled；
-         *     落地是 hysteria2、入口与落地相同、超过上限返回 400；同一（入口，落地）已有规则返回 409。
+         * 新建一条链式规则，排在同类型的最后（0.5.0）
+         * @description 起飞节点必须是本人当前可用的节点；落地三选一：平台节点、平台出口、我的出口，都必须在本人权限范围内。
+         *     套餐没开对应的链式、或落地是我的出口而套餐没开自有落地时返回 403 feature_disabled。
+         *     超过上限、落地是 hysteria2、落地同时是起飞节点返回 400。
+         *     服务端链式另有：起飞节点所在面板须支持改内核配置；落地节点不能是本人任何服务端规则的起飞节点、反之亦然（防环）；
+         *     我的出口须是公网地址且不指向平台自己的服务器（Ruling-48、Ruling-49），不满足返回 400；写操作超过频率返回 429。
          */
-        post: operations["createChainRule"];
+        post: operations["createChainRoute"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/api/user/chain/rules/{id}": {
+    "/api/user/chain/routes/order": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * 调整某一类型规则的顺序，越靠前优先级越高（Ruling-46；0.5.0）
+         * @description ids 必须恰好是本人该类型全部规则的一个排列，否则返回 400。套餐没开对应的链式返回 403 feature_disabled；
+         *     服务端链式的调序计入写操作频率。
+         */
+        put: operations["reorderChainRoutes"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/user/chain/routes/{id}": {
         parameters: {
             query?: never;
             header?: never;
@@ -2401,19 +2512,19 @@ export interface paths {
         };
         get?: never;
         /**
-         * 改规则的名称与启用开关；他人的返回 404（R8）
-         * @description 入口与落地不能改，要换线路请删除后新建。套餐没开链式时返回 403 feature_disabled。
+         * 改规则的起飞节点、落地、名称与启用开关；他人的返回 404（R8）（0.5.0）
+         * @description 类型不能改。校验与新建相同；套餐没开对应的链式时返回 403 feature_disabled。
          */
-        put: operations["updateChainRule"];
+        put: operations["updateChainRoute"];
         post?: never;
-        /** 删除规则；套餐没开链式时也允许；他人的返回 404（R8） */
-        delete: operations["deleteChainRule"];
+        /** 删除规则；套餐没开链式时也允许；他人的返回 404（R8）（0.5.0） */
+        delete: operations["deleteChainRoute"];
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/api/user/chain/custom-nodes": {
+    "/api/user/chain/exits": {
         parameters: {
             query?: never;
             header?: never;
@@ -2423,79 +2534,18 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * 添加一个自有落地节点
+         * 添加一个我的出口（原自有落地节点；0.5.0）
          * @description 链接保存时解析校验，解析不了或协议不支持返回 400；套餐没开自有落地返回 403 feature_disabled；
          *     超过上限返回 400；同名返回 409。平台不向该地址发起任何连接（Ruling-38）。
          */
-        post: operations["createCustomNode"];
+        post: operations["createChainExit"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/api/user/chain/custom-nodes/{id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                id: components["parameters"]["IdPath"];
-            };
-            cookie?: never;
-        };
-        get?: never;
-        /** 改自有落地节点的名称或链接；他人的返回 404（R8） */
-        put: operations["updateCustomNode"];
-        post?: never;
-        /** 删除自有落地节点，引用它的规则一并删除；他人的返回 404（R8） */
-        delete: operations["deleteCustomNode"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/user/chain/custom-nodes/{id}/link": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                id: components["parameters"]["IdPath"];
-            };
-            cookie?: never;
-        };
-        /** 取自有落地节点的原链接（凭据）；他人的返回 404（R8） */
-        get: operations["getCustomNodeLink"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/user/chain/server-rules": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * 新建一条服务端链式规则（docs/03 §5.19，0.4.2）
-         * @description 入口与落地都必须是本人当前可用的平台节点，入口所在面板须支持改内核配置；落地不能是 hysteria2、不能与入口相同。
-         *     套餐没开服务端链式返回 403 feature_disabled；超过上限或节点不合要求返回 400；同一入口已有服务端规则返回 409。
-         *     规则保存后由后台下发到入口面板，状态见 applyStatus。
-         */
-        post: operations["createServerChainRule"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/user/chain/server-rules/{id}": {
+    "/api/user/chain/exits/{id}": {
         parameters: {
             query?: never;
             header?: never;
@@ -2506,13 +2556,32 @@ export interface paths {
         };
         get?: never;
         /**
-         * 启用或停用服务端规则；他人的返回 404（R8）（0.4.2）
-         * @description 入口与落地不能改，要换线路请删除后新建。套餐没开服务端链式时返回 403 feature_disabled。
+         * 改我的出口的名称或链接；他人的返回 404（R8）（0.5.0）
+         * @description 出口被服务端规则引用时，换链接要重新通过地址限制（不通过返回 400），并计入服务端链式的写操作频率（超出 429）。
          */
-        put: operations["updateServerChainRule"];
+        put: operations["updateChainExit"];
         post?: never;
-        /** 删除服务端规则；套餐没开时也允许；他人的返回 404（R8）（0.4.2） */
-        delete: operations["deleteServerChainRule"];
+        /** 删除我的出口，引用它的规则一并删除；他人的返回 404（R8）（0.5.0） */
+        delete: operations["deleteChainExit"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/user/chain/exits/{id}/link": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        /** 取我的出口的原链接（凭据）；他人的与平台出口返回 404（R8）（0.5.0） */
+        get: operations["getChainExitLink"];
+        put?: never;
+        post?: never;
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -4146,21 +4215,34 @@ export interface components {
             balance: number;
         };
         /**
-         * @description ok = 通畅（配置与授权成立，平台不探测连通性，Ruling-38）；blocked = 阻断，不进订阅
+         * @description client = 客户端链式（只在订阅里表达），server = 服务端链式（改起飞面板的 Xray 配置）
+         * @enum {string}
+         */
+        ChainKind: "client" | "server";
+        /**
+         * @description ok = 通畅（配置与授权成立，平台不探测连通性，Ruling-38）；blocked = 阻断，不进订阅、不下发
          * @enum {string}
          */
         ChainStatus: "ok" | "blocked";
         /**
-         * @description 阻断原因；plan = 套餐不支持，entry = 入口节点当前不可用，exit = 落地节点当前不可用；通畅时为空串
+         * @description 阻断原因，通畅时为空串。plan = 套餐不支持；exit = 落地当前不可用（节点不可用，平台出口未授权 / 停用 / 不允许该类型，我的出口被管理员停用）；
+         *     unsafe = 我的出口没通过服务端链式的地址限制或字段校验（Ruling-48）；quarantined = 下发失败后被隔离，改规则或出口后解除（Ruling-49）
          * @enum {string}
          */
-        ChainBlockedReason: "" | "plan" | "entry" | "exit";
+        ChainBlockedReason: "" | "plan" | "exit" | "unsafe" | "quarantined";
         /**
-         * @description node = 平台节点，custom = 自有落地节点
+         * @description node = 平台节点，platform = 平台出口（管理员添加），own = 我的出口（用户自己添加）
          * @enum {string}
          */
-        ChainExitKind: "node" | "custom";
-        /** @description 新建规则时可选的平台节点（本人当前可用） */
+        ChainExitKind: "node" | "platform" | "own";
+        /**
+         * @description 规则里每个起飞节点的状态（docs/03 §5.18、§5.19）。inactive = 规则阻断或停用；unavailable = 该节点当前不可用。
+         *     客户端链式：ok = 进订阅，duplicate = 同一（起飞，落地）组合已在更靠前的规则里输出。
+         *     服务端链式：shadowed = 被更靠前的规则覆盖（见 coveredBy），applied = 已在面板生效，pending = 下发中，failed = 该服务器最近一次下发被回滚。
+         * @enum {string}
+         */
+        ChainEntryState: "inactive" | "ok" | "unavailable" | "duplicate" | "shadowed" | "applied" | "pending" | "failed";
+        /** @description 可选的平台节点（本人当前可用） */
         ChainNodeOption: {
             /** Format: int64 */
             id: number;
@@ -4169,56 +4251,81 @@ export interface components {
             protocol: string;
             /** @description 能否作落地；hysteria2 不能 */
             canBeExit: boolean;
-            /** @description 能否作服务端链式的入口：所在面板支持改内核配置（0.4.2） */
+            /** @description 能否作服务端链式的起飞节点：所在面板支持改内核配置 */
             canBeServerEntry: boolean;
         };
-        ChainRule: {
+        /** @description 本人可用的平台出口；地址与链接不返回 */
+        ChainPlatformExitOption: {
             /** Format: int64 */
             id: number;
+            name: string;
+            protocol: string;
+            /** @description 可用于服务端链式 */
+            allowServer: boolean;
+            /** @description 可用于客户端链式 */
+            allowClient: boolean;
+        };
+        ChainRouteEntry: {
+            /** Format: int64 */
+            nodeId: number;
+            name: string;
+            state: components["schemas"]["ChainEntryState"];
+            /** @description state 为 shadowed 或 duplicate 时，覆盖它的规则的序号（从 1 起）；否则为 0 */
+            coveredBy: number;
+        };
+        ChainRouteExit: {
+            kind: components["schemas"]["ChainExitKind"];
+            /**
+             * Format: int64
+             * @description 平台节点 id 或出口 id，取决于 kind
+             */
+            id: number;
+            name: string;
+            protocol: string;
+        };
+        ChainRoute: {
+            /** Format: int64 */
+            id: number;
+            kind: components["schemas"]["ChainKind"];
+            /** @description 在本人同类型规则里的序号，从 1 起连续；越小越优先（Ruling-46） */
+            position: number;
             /** @description 用户起的名称，没起为空串 */
             name: string;
-            /** @description 订阅里显示的节点名；没起名称时为“入口名 → 落地名” */
+            /** @description 显示用的名称；没起名称时为落地的名称 */
             displayName: string;
-            entry: {
-                /** Format: int64 */
-                nodeId: number;
-                name: string;
-            };
-            exit: {
-                kind: components["schemas"]["ChainExitKind"];
-                /**
-                 * Format: int64
-                 * @description 平台节点 id 或自有落地节点 id，取决于 kind
-                 */
-                id: number;
-                name: string;
-                protocol: string;
-            };
+            entries: components["schemas"]["ChainRouteEntry"][];
+            exit: components["schemas"]["ChainRouteExit"];
             isEnabled: boolean;
             status: components["schemas"]["ChainStatus"];
             blockedReason: components["schemas"]["ChainBlockedReason"];
             /** Format: date-time */
             createdAt: string;
         };
-        /** @description exitNodeId 与 exitCustomNodeId 必须恰好给一个 */
-        ChainRuleInput: {
+        ChainRouteInput: {
+            kind: components["schemas"]["ChainKind"];
+            entryNodeIds: number[];
+            exitKind: components["schemas"]["ChainExitKind"];
             /** Format: int64 */
-            entryNodeId: number;
-            /** Format: int64 */
-            exitNodeId?: number;
-            /** Format: int64 */
-            exitCustomNodeId?: number;
-            /** @description 可选；省略或空串 = 用“入口名 → 落地名” */
+            exitId: number;
+            /** @description 可选；省略或空串 = 用落地的名称 */
             name?: string;
             /** @default true */
             isEnabled: boolean;
         };
-        ChainRuleUpdateInput: {
+        ChainRouteUpdateInput: {
+            entryNodeIds: number[];
+            exitKind: components["schemas"]["ChainExitKind"];
+            /** Format: int64 */
+            exitId: number;
             name: string;
             isEnabled: boolean;
         };
-        /** @description 自有落地节点；原链接属于凭据，不在这里返回 */
-        CustomNode: {
+        ChainRouteOrderInput: {
+            kind: components["schemas"]["ChainKind"];
+            ids: number[];
+        };
+        /** @description 我的出口（用户自己添加）；原链接属于凭据，不在这里返回 */
+        ChainExit: {
             /** Format: int64 */
             id: number;
             name: string;
@@ -4226,18 +4333,20 @@ export interface components {
             protocol: "vless" | "vmess" | "trojan" | "shadowsocks" | "socks";
             address: string;
             port: number;
+            /** @description false = 已被管理员停用，引用它的规则阻断 */
+            isEnabled: boolean;
             /** @description 引用它的规则数；删除前据此提示 */
-            ruleCount: number;
+            routeCount: number;
             /** Format: date-time */
             createdAt: string;
         };
-        CustomNodeInput: {
+        ChainExitInput: {
             /** @description 分享链接（vless / vmess / trojan / ss）或 socks5://[用户名:口令@]地址:端口 */
             link: string;
             /** @description 可选；省略或空串 = 取链接里的名称 */
             name?: string;
         };
-        CustomNodeUpdateInput: {
+        ChainExitUpdateInput: {
             name: string;
             /** @description 省略 = 不改链接 */
             link?: string;
@@ -4245,69 +4354,35 @@ export interface components {
         ChainOverview: {
             /** @description 套餐是否允许客户端链式 */
             allowed: boolean;
-            /** @description 套餐是否允许自有落地节点 */
-            customNodeAllowed: boolean;
-            /** @description 套餐是否允许服务端链式（0.4.2） */
+            /** @description 套餐是否允许添加我的出口（allow_custom_node） */
+            exitAllowed: boolean;
+            /** @description 套餐是否允许服务端链式 */
             serverAllowed: boolean;
-            maxRules: number;
-            maxCustomNodes: number;
-            /** @description 0.4.2 */
-            maxServerRules: number;
-            rules: components["schemas"]["ChainRule"][];
-            customNodes: components["schemas"]["CustomNode"][];
-            /** @description 0.4.2 */
-            serverRules: components["schemas"]["ServerChainRule"][];
+            maxClientRoutes: number;
+            maxServerRoutes: number;
+            /** @description 一条规则最多几个起飞节点 */
+            maxRouteEntries: number;
+            maxExits: number;
+            /** @description 按顺序 */
+            clientRoutes: components["schemas"]["ChainRoute"][];
+            /** @description 按顺序 */
+            serverRoutes: components["schemas"]["ChainRoute"][];
+            exits: components["schemas"]["ChainExit"][];
+            platformExits: components["schemas"]["ChainPlatformExitOption"][];
             nodes: components["schemas"]["ChainNodeOption"][];
         };
         /**
-         * @description 服务端规则的下发情况（docs/03 §5.19）；applied = 已在入口面板生效，pending = 下发中，failed = 入口服务器最近一次下发被回滚；规则阻断或停用时为空串
-         * @enum {string}
-         */
-        ServerChainApplyState: "" | "applied" | "pending" | "failed";
-        ServerChainRule: {
-            /** Format: int64 */
-            id: number;
-            entry: {
-                /** Format: int64 */
-                nodeId: number;
-                name: string;
-            };
-            exit: {
-                /** Format: int64 */
-                nodeId: number;
-                name: string;
-                protocol: string;
-            };
-            isEnabled: boolean;
-            status: components["schemas"]["ChainStatus"];
-            blockedReason: components["schemas"]["ChainBlockedReason"];
-            applyStatus: components["schemas"]["ServerChainApplyState"];
-            /** Format: date-time */
-            createdAt: string;
-        };
-        ServerChainRuleInput: {
-            /** Format: int64 */
-            entryNodeId: number;
-            /** Format: int64 */
-            exitNodeId: number;
-            /** @default true */
-            isEnabled: boolean;
-        };
-        ServerChainRuleUpdateInput: {
-            isEnabled: boolean;
-        };
-        /**
-         * @description 入口服务器的下发状态（docs/03 §3 C1–C5）；none = 从未有过服务端规则
+         * @description 起飞服务器的下发状态（docs/03 §3 C1–C5）；none = 从未有过服务端规则
          * @enum {string}
          */
         ChainApplyStatus: "none" | "pending" | "applied" | "failed";
         ChainApply: {
             /** Format: int64 */
             serverId: number;
-            /** @description 面板是否支持改内核配置；不支持时不会有服务端规则以它为入口 */
+            /** @description 面板是否支持改内核配置；不支持时不会有服务端规则以它为起飞 */
             isSupported: boolean;
             status: components["schemas"]["ChainApplyStatus"];
-            /** @description 期望生效的规则数（不阻断、启用且落地凭据已就绪） */
+            /** @description 期望在这台服务器上生效的规则数 */
             ruleCount: number;
             /** @description 当前面板上生效的规则数 */
             appliedRuleCount: number;
@@ -4327,7 +4402,17 @@ export interface components {
             /** Format: date-time */
             appliedAt: string | null;
         };
-        AdminServerChainRule: {
+        AdminChainRouteEntry: {
+            /** Format: int64 */
+            nodeId: number;
+            name: string;
+            /** Format: int64 */
+            serverId: number;
+            serverName: string;
+            state: components["schemas"]["ChainEntryState"];
+            coveredBy: number;
+        };
+        AdminChainRoute: {
             /** Format: int64 */
             id: number;
             user: {
@@ -4335,30 +4420,91 @@ export interface components {
                 id: number;
                 username: string;
             };
-            entry: {
-                /** Format: int64 */
-                nodeId: number;
-                name: string;
-                /** Format: int64 */
-                serverId: number;
-                serverName: string;
-            };
-            exit: {
-                /** Format: int64 */
-                nodeId: number;
-                name: string;
-            };
+            kind: components["schemas"]["ChainKind"];
+            position: number;
+            name: string;
+            entries: components["schemas"]["AdminChainRouteEntry"][];
+            exit: components["schemas"]["ChainRouteExit"];
             isEnabled: boolean;
             status: components["schemas"]["ChainStatus"];
             blockedReason: components["schemas"]["ChainBlockedReason"];
-            applyStatus: components["schemas"]["ServerChainApplyState"];
             /** Format: date-time */
             createdAt: string;
         };
-        AdminServerChainRulePage: {
-            items: components["schemas"]["AdminServerChainRule"][];
+        AdminChainRoutePage: {
+            items: components["schemas"]["AdminChainRoute"][];
             /** Format: int64 */
             total: number;
+        };
+        /**
+         * @description platform = 平台出口（管理员添加），user = 用户出口
+         * @enum {string}
+         */
+        ChainExitOwner: "platform" | "user";
+        /** @description 管理端看到的出口；原链接不在这里返回，用户出口的链接管理员始终不能查看（Ruling-50） */
+        AdminChainExit: {
+            /** Format: int64 */
+            id: number;
+            owner: components["schemas"]["ChainExitOwner"];
+            /** @description 用户出口的所有者；平台出口为 null */
+            user: {
+                /** Format: int64 */
+                id: number;
+                username: string;
+            } | null;
+            name: string;
+            /** @enum {string} */
+            protocol: "vless" | "vmess" | "trojan" | "shadowsocks" | "socks";
+            address: string;
+            port: number;
+            remark: string;
+            isEnabled: boolean;
+            /** @description 可用于服务端链式；只对平台出口有意义 */
+            allowServer: boolean;
+            /** @description 可用于客户端链式（凭据会进用户的订阅）；只对平台出口有意义 */
+            allowClient: boolean;
+            /** @description 平台出口所属的节点组；用户出口为空数组 */
+            nodeGroups: {
+                /** Format: int64 */
+                id: number;
+                name: string;
+            }[];
+            /** @description 引用它的规则数 */
+            routeCount: number;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+        };
+        AdminChainExitPage: {
+            items: components["schemas"]["AdminChainExit"][];
+            /** Format: int64 */
+            total: number;
+        };
+        AdminChainExitInput: {
+            name: string;
+            /** @description 分享链接（vless / vmess / trojan / ss）或 socks5://[用户名:口令@]地址:端口 */
+            link: string;
+            /** @default  */
+            remark: string;
+            /** @default true */
+            isEnabled: boolean;
+            allowServer: boolean;
+            allowClient: boolean;
+            nodeGroupIds: number[];
+        };
+        AdminChainExitUpdateInput: {
+            name: string;
+            /** @description 省略 = 不改链接 */
+            link?: string;
+            remark: string;
+            isEnabled: boolean;
+            allowServer: boolean;
+            allowClient: boolean;
+            nodeGroupIds: number[];
+        };
+        ChainExitEnabledInput: {
+            isEnabled: boolean;
         };
     };
     responses: {
@@ -5267,13 +5413,14 @@ export interface operations {
             404: components["responses"]["NotFound"];
         };
     };
-    listServerChainRules: {
+    listChainRoutes: {
         parameters: {
             query?: {
                 page?: components["parameters"]["Page"];
                 pageSize?: components["parameters"]["PageSize"];
+                kind?: components["schemas"]["ChainKind"];
                 userId?: number;
-                /** @description 入口所在服务器 */
+                /** @description 有起飞节点在这台服务器上的规则 */
                 serverId?: number;
             };
             header?: never;
@@ -5289,13 +5436,194 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Envelope"] & {
-                        data?: components["schemas"]["AdminServerChainRulePage"];
+                        data?: components["schemas"]["AdminChainRoutePage"];
                     };
                 };
             };
             400: components["responses"]["InvalidArgument"];
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["PermissionDenied"];
+        };
+    };
+    listChainExits: {
+        parameters: {
+            query?: {
+                page?: components["parameters"]["Page"];
+                pageSize?: components["parameters"]["PageSize"];
+                /** @description 归属；省略 = 全部 */
+                owner?: components["schemas"]["ChainExitOwner"];
+                /** @description 只看这个用户的出口 */
+                userId?: number;
+                /** @description 按名称或地址模糊查找 */
+                keyword?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 出口分页 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["AdminChainExitPage"];
+                    };
+                };
+            };
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+        };
+    };
+    createPlatformChainExit: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminChainExitInput"];
+            };
+        };
+        responses: {
+            /** @description 新建的平台出口 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["AdminChainExit"];
+                    };
+                };
+            };
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    updatePlatformChainExit: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminChainExitUpdateInput"];
+            };
+        };
+        responses: {
+            /** @description 改后的平台出口 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["AdminChainExit"];
+                    };
+                };
+            };
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    deleteChainExit: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["Ok"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    setChainExitEnabled: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ChainExitEnabledInput"];
+            };
+        };
+        responses: {
+            /** @description 改后的出口 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["AdminChainExit"];
+                    };
+                };
+            };
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    getPlatformChainExitLink: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 原链接 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["NodeLink"];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
         };
     };
     syncServer: {
@@ -8905,7 +9233,7 @@ export interface operations {
             403: components["responses"]["UserForbidden"];
         };
     };
-    createChainRule: {
+    createChainRoute: {
         parameters: {
             query?: never;
             header: {
@@ -8916,7 +9244,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["ChainRuleInput"];
+                "application/json": components["schemas"]["ChainRouteInput"];
             };
         };
         responses: {
@@ -8927,78 +9255,17 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Envelope"] & {
-                        data?: components["schemas"]["ChainRule"];
+                        data?: components["schemas"]["ChainRoute"];
                     };
                 };
             };
             400: components["responses"]["InvalidArgument"];
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["UserForbidden"];
-            409: components["responses"]["Conflict"];
+            429: components["responses"]["RateLimited"];
         };
     };
-    updateChainRule: {
-        parameters: {
-            query?: never;
-            header: {
-                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
-            };
-            path: {
-                id: components["parameters"]["IdPath"];
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ChainRuleUpdateInput"];
-            };
-        };
-        responses: {
-            /** @description 改后的规则 */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Envelope"] & {
-                        data?: components["schemas"]["ChainRule"];
-                    };
-                };
-            };
-            400: components["responses"]["InvalidArgument"];
-            401: components["responses"]["Unauthenticated"];
-            403: components["responses"]["UserForbidden"];
-            404: components["responses"]["NotFound"];
-        };
-    };
-    deleteChainRule: {
-        parameters: {
-            query?: never;
-            header: {
-                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
-            };
-            path: {
-                id: components["parameters"]["IdPath"];
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description 已删除 */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Envelope"];
-                };
-            };
-            401: components["responses"]["Unauthenticated"];
-            403: components["responses"]["UserForbidden"];
-            404: components["responses"]["NotFound"];
-        };
-    };
-    createCustomNode: {
+    reorderChainRoutes: {
         parameters: {
             query?: never;
             header: {
@@ -9009,28 +9276,28 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["CustomNodeInput"];
+                "application/json": components["schemas"]["ChainRouteOrderInput"];
             };
         };
         responses: {
-            /** @description 新建的自有落地节点 */
+            /** @description 调整后该类型的全部规则，按新顺序 */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["Envelope"] & {
-                        data?: components["schemas"]["CustomNode"];
+                        data?: components["schemas"]["ChainRoute"][];
                     };
                 };
             };
             400: components["responses"]["InvalidArgument"];
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["UserForbidden"];
-            409: components["responses"]["Conflict"];
+            429: components["responses"]["RateLimited"];
         };
     };
-    updateCustomNode: {
+    updateChainRoute: {
         parameters: {
             query?: never;
             header: {
@@ -9043,18 +9310,113 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["CustomNodeUpdateInput"];
+                "application/json": components["schemas"]["ChainRouteUpdateInput"];
             };
         };
         responses: {
-            /** @description 改后的自有落地节点 */
+            /** @description 改后的规则 */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["Envelope"] & {
-                        data?: components["schemas"]["CustomNode"];
+                        data?: components["schemas"]["ChainRoute"];
+                    };
+                };
+            };
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["UserForbidden"];
+            404: components["responses"]["NotFound"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    deleteChainRoute: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 已删除 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["UserForbidden"];
+            404: components["responses"]["NotFound"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    createChainExit: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ChainExitInput"];
+            };
+        };
+        responses: {
+            /** @description 新建的出口 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["ChainExit"];
+                    };
+                };
+            };
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["UserForbidden"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    updateChainExit: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ChainExitUpdateInput"];
+            };
+        };
+        responses: {
+            /** @description 改后的出口 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["ChainExit"];
                     };
                 };
             };
@@ -9063,9 +9425,10 @@ export interface operations {
             403: components["responses"]["UserForbidden"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
+            429: components["responses"]["RateLimited"];
         };
     };
-    deleteCustomNode: {
+    deleteChainExit: {
         parameters: {
             query?: never;
             header: {
@@ -9092,7 +9455,7 @@ export interface operations {
             404: components["responses"]["NotFound"];
         };
     };
-    getCustomNodeLink: {
+    getChainExitLink: {
         parameters: {
             query?: never;
             header?: never;
@@ -9112,99 +9475,6 @@ export interface operations {
                     "application/json": components["schemas"]["Envelope"] & {
                         data?: components["schemas"]["NodeLink"];
                     };
-                };
-            };
-            401: components["responses"]["Unauthenticated"];
-            403: components["responses"]["UserForbidden"];
-            404: components["responses"]["NotFound"];
-        };
-    };
-    createServerChainRule: {
-        parameters: {
-            query?: never;
-            header: {
-                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ServerChainRuleInput"];
-            };
-        };
-        responses: {
-            /** @description 新建的规则 */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Envelope"] & {
-                        data?: components["schemas"]["ServerChainRule"];
-                    };
-                };
-            };
-            400: components["responses"]["InvalidArgument"];
-            401: components["responses"]["Unauthenticated"];
-            403: components["responses"]["UserForbidden"];
-            409: components["responses"]["Conflict"];
-        };
-    };
-    updateServerChainRule: {
-        parameters: {
-            query?: never;
-            header: {
-                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
-            };
-            path: {
-                id: components["parameters"]["IdPath"];
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ServerChainRuleUpdateInput"];
-            };
-        };
-        responses: {
-            /** @description 改后的规则 */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Envelope"] & {
-                        data?: components["schemas"]["ServerChainRule"];
-                    };
-                };
-            };
-            400: components["responses"]["InvalidArgument"];
-            401: components["responses"]["Unauthenticated"];
-            403: components["responses"]["UserForbidden"];
-            404: components["responses"]["NotFound"];
-        };
-    };
-    deleteServerChainRule: {
-        parameters: {
-            query?: never;
-            header: {
-                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
-            };
-            path: {
-                id: components["parameters"]["IdPath"];
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description 已删除 */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Envelope"];
                 };
             };
             401: components["responses"]["Unauthenticated"];
