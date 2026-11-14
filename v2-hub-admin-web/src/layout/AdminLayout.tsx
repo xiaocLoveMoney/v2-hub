@@ -3,6 +3,7 @@ import { Button, Layout, Menu, Space, Spin, Typography, type MenuProps } from 'a
 import { useMemo } from 'react'
 import { Navigate, Outlet, useLocation, useNavigate } from 'react-router'
 import { useSession } from '../auth/session-context'
+import { revealChildren } from '../components/motion'
 import { ROUTES, visibleMenu, type MenuEntry } from '../menu'
 
 type MenuItem = Required<MenuProps>['items'][number]
@@ -72,7 +73,10 @@ export function AdminLayout() {
           </Space>
         </Layout.Header>
         <Layout.Content className="admin-content">
-          <Outlet />
+          {/* 切换页面或页面里的块插入时依次进场（components/motion.ts） */}
+          <div ref={revealChildren}>
+            <Outlet />
+          </div>
         </Layout.Content>
       </Layout>
     </Layout>

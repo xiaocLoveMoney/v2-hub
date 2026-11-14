@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { Navigate, useLocation, useNavigate } from 'react-router'
 import { CODE_TOTP_REQUIRED } from '../api/client'
 import { useSession } from '../auth/session-context'
+import { revealChildren } from '../components/motion'
 import { ROUTES } from '../menu'
 
 interface LoginForm {
@@ -49,7 +50,7 @@ export function LoginPage() {
   }
 
   return (
-    <main className="login-page">
+    <main className="login-page" ref={revealChildren}>
       <Card className="login-card">
         <Typography.Title level={3}>v2-hub 管理端</Typography.Title>
         {errorMessage !== null && <Alert type="error" title={errorMessage} showIcon className="login-alert" />}
