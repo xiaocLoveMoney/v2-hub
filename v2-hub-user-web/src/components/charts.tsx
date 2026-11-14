@@ -1,8 +1,12 @@
+import { useMemo } from 'react'
 import type { TrafficPoint } from '../api/client'
 import { formatBytes } from '../format'
 import { useI18n } from '../i18n/i18n-context'
+import { LOCALE_TAG } from '../i18n/locale'
+import { cssColor } from './css-color'
+import { EChart } from './EChart'
 
-/** 轻量图表：环形图与按小时柱状图，直接画 SVG，不引入图表库。 */
+/** 图表：环形图直接画 SVG；按小时用量的气泡图用 ECharts（按需加载）。 */
 
 const DONUT_SIZE = 180
 const DONUT_STROKE = 22
@@ -70,46 +74,51 @@ export function Donut({ segments, centerTitle, centerValue }: DonutProps) {
   )
 }
 
-const BARS_WIDTH = 720
-const BARS_HEIGHT = 180
-const BARS_PADDING_BOTTOM = 4
-const BAR_GAP_RATIO = 0.25
-const MIN_BAR_HEIGHT = 1
 const MS_PER_HOUR = 3_600_000
+const BUBBLE_CHART_HEIGHT = 200
+const BUBBLE_MIN_SIZE = 6
+const BUBBLE_MAX_SIZE = 30
+const BUBBLE_OPACITY = 0.72
+const AXIS_LABEL_WIDTH = 64
 
-interface HourBarsProps {
+interface HourBubblesProps {
   points: TrafficPoint[]
   hours: number
   /** 当前时刻（毫秒），由调用方传入便于测试。 */
   now: number
 }
 
-/** 最近 hours 小时的用量柱状图；没有用量的小时留空。 */
-export function HourBars({ points, hours, now }: HourBarsProps) {
-  const { t } = useI18n()
-  const currentHour = Math.floor(now / MS_PER_HOUR)
-  const byHour = new Map(points.map((p) => [Math.floor(new Date(p.hour).getTime() / MS_PER_HOUR), p.up + p.down]))
-  const values = Array.from({ length: hours }, (_, i) => byHour.get(currentHour - (hours - 1 - i)) ?? 0)
-  const peak = Math.max(...values, 0)
-  const slot = BARS_WIDTH / hours
-  const barWidth = slot * (1 - BAR_GAP_RATIO)
-  const usable = BARS_HEIGHT - BARS_PADDING_BOTTOM
-  const total = values.reduce((sum, v) => sum + v, 0)
-  return (
-    <svg className="hub-bars" viewBox={`0 0 ${BARS_WIDTH} ${BARS_HEIGHT}`} preserveAspectRatio="none" role="img" aria-label={t('chart.hoursUsage', { hours, amount: formatBytes(total) })}>
-      <line x1="0" y1={usable} x2={BARS_WIDTH} y2={usable} stroke="var(--hub-border)" strokeWidth="1" />
-      {values.map((v, i) => {
-        if (v === 0 || peak === 0) {
-          return null
-        }
-        const h = Math.max((v / peak) * (usable - MIN_BAR_HEIGHT), MIN_BAR_HEIGHT)
-        const hourStart = (currentHour - (hours - 1 - i)) * MS_PER_HOUR
-        return (
-          <rect key={hourStart} x={i * slot + (slot - barWidth) / 2} y={usable - h} width={barWidth} height={h} rx="1" fill="var(--hub-primary)">
-            <title>{`${new Date(hourStart).toLocaleString('zh-CN', { hour12: false })}  ${formatBytes(v)}`}</title>
-          </rect>
-        )
-      })}
-    </svg>
-  )
+/** 最近 hours 小时的用量散点气泡图：上行、下行各一组，纵轴与气泡大小都表示用量；没有用量的小时不画点。 */
+export function HourBubbles({ points, hours, now }: HourBubblesProps) {
+  const { t, locale } = useI18n()
+  const option = useMemo(() => {
+    const start = (Math.floor(now / MS_PER_HOUR) - hours + 1) * MS_PER_HOUR
+    const inRange = points.filter((p) => new Date(p.hour).getTime() >= start)
+    const peak = Math.max(...inRange.map((p) => Math.max(p.up, p.down)), 0)
+    const bubbleSize = (value: number) => (peak === 0 ? BUBBLE_MIN_SIZE : BUBBLE_MIN_SIZE + (BUBBLE_MAX_SIZE - BUBBLE_MIN_SIZE) * Math.sqrt(value / peak))
+    const seriesOf = (name: string, color: string, pick: (p: TrafficPoint) => number) => ({
+      name,
+      type: 'scatter',
+      data: inRange.filter((p) => pick(p) > 0).map((p) => [new Date(p.hour).getTime(), pick(p)]),
+      symbolSize: (value: number[]) => bubbleSize(value[1] ?? 0),
+      itemStyle: { color, opacity: BUBBLE_OPACITY },
+    })
+    const timeText = (ms: number) => new Date(ms).toLocaleString(LOCALE_TAG[locale], { hour12: false, month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+    return {
+      grid: { left: AXIS_LABEL_WIDTH, right: 16, top: 36, bottom: 28 },
+      legend: { top: 0, right: 0, textStyle: { color: cssColor('--hub-muted', '#98a6ad') } },
+      tooltip: {
+        trigger: 'item',
+        formatter: (p: { seriesName: string; value: number[] }) => `${p.seriesName}<br/>${timeText(p.value[0] ?? 0)}  ${formatBytes(p.value[1] ?? 0)}`,
+      },
+      xAxis: { type: 'time', min: start, max: now, splitLine: { show: false } },
+      yAxis: { type: 'value', axisLabel: { formatter: (v: number) => formatBytes(v) }, splitLine: { lineStyle: { type: 'dashed', color: cssColor('--hub-divider', '#f1f3f6') } } },
+      series: [
+        seriesOf(t('chart.upload'), cssColor('--hub-primary', '#6777ef'), (p) => p.up),
+        seriesOf(t('chart.download'), cssColor('--hub-info', '#3abaf4'), (p) => p.down),
+      ],
+    }
+  }, [points, hours, now, t, locale])
+  const total = points.reduce((sum, p) => sum + p.up + p.down, 0)
+  return <EChart option={option} height={BUBBLE_CHART_HEIGHT} ariaLabel={t('chart.hoursUsage', { hours, amount: formatBytes(total) })} />
 }

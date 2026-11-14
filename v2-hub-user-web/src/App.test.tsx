@@ -4,7 +4,7 @@ import { RouterProvider, createMemoryRouter } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { SessionProvider } from './auth/SessionProvider'
 import { ToastProvider } from './components/ToastProvider'
-import { daysLeft, formatBytes, regionFlag, usedPercent } from './format'
+import { daysLeft, formatBytes, usedPercent } from './format'
 import { maskSecretUrl } from './pages/subscription'
 import { routes } from './routes'
 
@@ -16,6 +16,7 @@ const fail = (status: number, code: string, message: string) => Response.json({ 
 interface Recorded {
   method: string
   path: string
+  search: string
   csrf: string | null
   body: unknown
 }
@@ -26,9 +27,9 @@ function mockServer(handlers: Record<string, () => Response>) {
   vi.stubGlobal(
     'fetch',
     vi.fn(async (req: Request) => {
-      const path = new URL(req.url).pathname
+      const { pathname: path, search } = new URL(req.url)
       const text = await req.clone().text()
-      calls.push({ method: req.method, path, csrf: req.headers.get('X-CSRF-Token'), body: text === '' ? null : JSON.parse(text) })
+      calls.push({ method: req.method, path, search, csrf: req.headers.get('X-CSRF-Token'), body: text === '' ? null : JSON.parse(text) })
       const handler = handlers[`${req.method} ${path}`]
       return handler === undefined ? fail(404, 'not_found', '不存在') : handler()
     }),
@@ -73,8 +74,6 @@ describe('format helpers', () => {
     expect(usedPercent(5, 0)).toBe(0)
     expect(daysLeft('2026-01-11T00:00:00Z', Date.parse('2026-01-01T12:00:00Z'))).toBe(10)
     expect(daysLeft('2020-01-01T00:00:00Z', Date.parse('2026-01-01T00:00:00Z'))).toBe(0)
-    expect(regionFlag('us')).toBe('🇺🇸')
-    expect(regionFlag('Hong Kong')).toBe('')
     const masked = maskSecretUrl(subUrl)
     expect(masked.startsWith('https://user.example.com/sub/')).toBe(true)
     expect(masked.endsWith('012345')).toBe(true)
@@ -189,6 +188,40 @@ describe('节点列表', () => {
     fireEvent.click(screen.getByRole('button', { name: '查看' }))
     const link = (await screen.findByLabelText('节点链接')) as HTMLInputElement
     expect(link.value).toContain('hk.example.com')
+  })
+
+  it('卡片按服务器位置显示国旗，未知显示地球；详情里的趋势图可切换 24 小时 / 7 天（Ruling-65）', async () => {
+    const point = { at: '2026-11-15T10:00:00Z', onlineClients: 3, load: 20.5 }
+    const calls = mockServer({
+      'GET /api/user/auth/me': () => ok(session),
+      'GET /api/user/nodes': () =>
+        ok([
+          {
+            id: 1,
+            name: '美国组',
+            nodes: [
+              { id: 11, name: 'US 01', region: 'US', protocol: 'vless', isServerOnline: true, serverLoad: 9, onlineClients: 0 },
+              { id: 12, name: 'XX 02', region: '', protocol: 'trojan', isServerOnline: true, serverLoad: null, onlineClients: 0 },
+            ],
+          },
+        ]),
+      'GET /api/user/nodes/11/link': () => ok({ link: 'vless://sample-uuid@us.example.com:443#US%2001' }),
+      'GET /api/user/nodes/11/metrics': () => ok({ range: '24h', points: [point] }),
+    })
+    renderApp('/nodes')
+    const flag = (await screen.findByAltText('美国')) as HTMLImageElement
+    expect(flag.src).toContain('us.svg')
+    expect(screen.getAllByRole('img', { name: '美国' })).toHaveLength(1)
+
+    fireEvent.click(screen.getAllByRole('button', { name: '查看' })[0])
+    await waitFor(() => expect(calls.some((c) => c.path === '/api/user/nodes/11/metrics')).toBe(true))
+    expect(calls.find((c) => c.path === '/api/user/nodes/11/metrics')?.search).toBe('?range=24h')
+    expect(await screen.findByRole('img', { name: '在线人数' })).toBeDefined()
+    expect(screen.getByRole('img', { name: '负载（CPU）' })).toBeDefined()
+
+    fireEvent.click(screen.getByRole('button', { name: '近 7 天' }))
+    await waitFor(() => expect(calls.some((c) => c.search === '?range=7d')).toBe(true))
+    expect(screen.getByRole('button', { name: '近 7 天' }).getAttribute('aria-pressed')).toBe('true')
   })
 })
 
