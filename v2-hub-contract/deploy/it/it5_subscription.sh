@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # IT-5 订阅与客户后台（docs/08，M3 DoD）：全新 3x-ui → 接入两个入站（VMess+WS、VLESS+Reality）→ 节点组 + 套餐 + 用户
 # → 终端用户登录客户后台 → 取订阅地址 → 四种格式分别用 base64 解码 / mihomo / sing-box / xray 校验
-# → 重置订阅后旧地址 404、连接凭据已轮换 → 停用后订阅只剩说明节点、后台接口 403。黑盒，只用 curl / jq / docker。
+# → 重置订阅后旧地址 404、连接凭据已轮换 → 自设连接密码（Ruling-58）→ 停用后订阅只剩说明节点、后台接口 403
+# → 订阅路径前缀（Ruling-59）。黑盒，只用 curl / jq / docker。
 # 注意：会重建 xui-a 容器（不挂数据卷，见 docker-compose.yml），不影响 PostgreSQL 与 MinIO。
 source "$(dirname "$0")/common.sh"
 set -e
@@ -18,7 +19,12 @@ BAD_CRED="it-$(openssl rand -hex 12)"
 GIB=1073741824
 WS_PORT=24701
 REALITY_PORT=24702
-NODE_COUNT=2
+SS_PORT=24703
+NODE_COUNT=3       # VMess、VLESS、SS2022 各一个直连节点
+UUID_NODE_COUNT=2  # 链接里带 UUID 的节点（VMess、VLESS）
+CONN_PASSWORD="it5-Pass_$(openssl rand -hex 4)"
+NEW_SUB_PATH="it5path$(openssl rand -hex 4)"
+LEGACY_SUB_PATH=sub
 FORMAT_COUNT=4
 ROTATE_WAIT_SECONDS=20
 SINGBOX_IMAGE="${IT_SINGBOX_IMAGE:-ghcr.io/sagernet/sing-box:latest}"
@@ -77,6 +83,8 @@ expect_code 200 "新建 VMess 入站"
 hub POST "/api/admin/servers/$SERVER_ID/inbounds" \
   "$(jq -nc --argjson p "$REALITY_PORT" '{remark:"it5-reality",port:$p,template:"vless-reality",templateParams:{target:"www.cloudflare.com:443"}}')" >/dev/null
 expect_code 200 "新建 Reality 入站"
+hub POST "/api/admin/servers/$SERVER_ID/inbounds" "$(jq -nc --argjson p "$SS_PORT" '{remark:"it5-ss",port:$p,template:"shadowsocks-2022"}')" >/dev/null
+expect_code 200 "新建 Shadowsocks 入站"
 node_ids="$(hub GET "/api/admin/nodes?pageSize=100" | jq -c --argjson s "$SERVER_ID" '[.data.items[] | select(.serverId == $s) | .id]')"
 [ "$(printf '%s' "$node_ids" | jq length)" = "$NODE_COUNT" ] || fail "应有 $NODE_COUNT 个直连节点：$node_ids"
 group="$(hub POST /api/admin/node-groups "$(jq -nc --argjson ids "$node_ids" '{name:"it5-group",nodeIds:$ids}')")"; expect_code 200 "新建节点组"
@@ -114,13 +122,16 @@ link_ids() {
     esac
   done | sort
 }
-# id_count <base64 订阅文件>：带凭据的节点数
+# id_count <base64 订阅文件>：带 UUID 的节点数
 id_count() { link_ids "$1" | grep -c . || true; }
+# ss_links <base64 订阅文件>：Shadowsocks 链接（含用户密钥），排序后一行一个
+ss_links() { b64d < "$1" | grep '^ss://' | sort || true; }
 [ "$(fetch base64 "$WORK/sub.b64")" = "200" ] || fail "base64 订阅应为 200"
 grep -qi '^subscription-userinfo: .*total=' "$WORK/headers" || fail "缺 Subscription-Userinfo 响应头：$(cat "$WORK/headers")"
 grep -qi '^profile-update-interval:' "$WORK/headers" || fail "缺 Profile-Update-Interval 响应头"
 IDS_BEFORE="$(link_ids "$WORK/sub.b64")"
-[ "$(id_count "$WORK/sub.b64")" = "$NODE_COUNT" ] || fail "base64 订阅应有 $NODE_COUNT 个带凭据的节点：$(b64d < "$WORK/sub.b64")"
+[ "$(id_count "$WORK/sub.b64")" = "$UUID_NODE_COUNT" ] || fail "base64 订阅应有 $UUID_NODE_COUNT 个带 UUID 的节点：$(b64d < "$WORK/sub.b64")"
+[ -n "$(ss_links "$WORK/sub.b64")" ] || fail "base64 订阅应有 Shadowsocks 节点：$(b64d < "$WORK/sub.b64")"
 
 mkdir -p "$WORK/cfg"
 [ "$(fetch mihomo "$WORK/cfg/mihomo.yaml")" = "200" ] || fail "mihomo 订阅应为 200"
@@ -153,7 +164,7 @@ rotated=""
 for _ in $(seq 1 "$ROTATE_WAIT_SECONDS"); do
   hub POST "/api/admin/users/$USER_ID/reconcile" >/dev/null
   # 两个节点的凭据都换了才算轮换完成：新旧两组没有交集
-  if [ "$(fetch base64 "$WORK/sub2.b64")" = "200" ] && [ "$(id_count "$WORK/sub2.b64")" = "$NODE_COUNT" ] \
+  if [ "$(fetch base64 "$WORK/sub2.b64")" = "200" ] && [ "$(id_count "$WORK/sub2.b64")" = "$UUID_NODE_COUNT" ] \
     && [ -z "$(comm -12 <(printf '%s\n' "$IDS_BEFORE") <(link_ids "$WORK/sub2.b64"))" ]; then
     rotated=1
     break
@@ -161,6 +172,28 @@ for _ in $(seq 1 "$ROTATE_WAIT_SECONDS"); do
   sleep 1
 done
 [ -n "$rotated" ] || fail "重置后 ${ROTATE_WAIT_SECONDS}s 内连接凭据未轮换完：$(b64d < "$WORK/sub2.b64")"
+
+# ---- 6b. 自设连接密码（Ruling-58）：只换 Shadowsocks 等用 password 的链接，UUID 不变；写法不对 400；清空恢复随机 ----
+IDS_ROTATED="$(link_ids "$WORK/sub2.b64")"
+SS_ROTATED="$(ss_links "$WORK/sub2.b64")"
+[ "$(portal GET /api/user/subscription | jq -r .data.hasCustomPassword)" = "false" ] || fail "默认不应有自设密码：$(cat "$WORK/body")"
+portal PUT /api/user/subscription/password '{"password":"bad pass"}' >/dev/null; expect_code 400 "连接密码含空格"
+portal PUT /api/user/subscription/password '{"password":"short"}' >/dev/null; expect_code 400 "连接密码太短"
+[ "$(portal PUT /api/user/subscription/password "$(jq -nc --arg p "$CONN_PASSWORD" '{password:$p}')" | jq -r .data.hasCustomPassword)" = "true" ] \
+  || fail "设密码后应标记为自设：$(cat "$WORK/body")"
+[ "$(portal GET /api/user/subscription | jq -r .data.url)" = "$SUB_URL" ] || fail "设连接密码不应改变订阅地址"
+changed=""
+for _ in $(seq 1 "$ROTATE_WAIT_SECONDS"); do
+  hub POST "/api/admin/users/$USER_ID/reconcile" >/dev/null
+  if [ "$(fetch base64 "$WORK/sub5.b64")" = "200" ] && [ -n "$(ss_links "$WORK/sub5.b64")" ] && [ "$(ss_links "$WORK/sub5.b64")" != "$SS_ROTATED" ]; then
+    changed=1
+    break
+  fi
+  sleep 1
+done
+[ -n "$changed" ] || fail "设密码后 ${ROTATE_WAIT_SECONDS}s 内 Shadowsocks 链接未更新：$(b64d < "$WORK/sub5.b64")"
+[ "$(link_ids "$WORK/sub5.b64")" = "$IDS_ROTATED" ] || fail "设连接密码不应改动 UUID"
+[ "$(portal PUT /api/user/subscription/password '{"password":""}' | jq -r .data.hasCustomPassword)" = "false" ] || fail "清空后应恢复随机：$(cat "$WORK/body")"
 
 # ---- 7. 停用：订阅仍 200 但没有可用节点，客户后台 403 account_disabled；恢复后回来 ----
 hub PUT "/api/admin/users/$USER_ID" '{"remark":"","isDisabled":true}' >/dev/null; expect_code 200 "停用用户"
@@ -171,7 +204,24 @@ expect_code 403 "停用后取订阅地址"
 portal GET /api/user/auth/me >/dev/null; expect_code 200 "停用后仍可查看本人会话"
 hub PUT "/api/admin/users/$USER_ID" '{"remark":"","isDisabled":false}' >/dev/null; expect_code 200 "启用用户"
 [ "$(fetch base64 "$WORK/sub4.b64")" = "200" ] || fail "启用后订阅应为 200"
-[ "$(id_count "$WORK/sub4.b64")" = "$NODE_COUNT" ] || fail "启用后订阅应恢复 $NODE_COUNT 个节点"
+[ "$(id_count "$WORK/sub4.b64")" = "$UUID_NODE_COUNT" ] || fail "启用后订阅应恢复 $UUID_NODE_COUNT 个带 UUID 的节点"
+
+# ---- 7b. 订阅路径（Ruling-59）：随机前缀；全新库的旧前缀是 sub，过渡期内可用；改前缀且过渡期为 0 时旧前缀立即 404 ----
+SUB_PATH="$(printf '%s' "$SUB_URL" | sed -E 's#^https?://[^/]+/([^/]+)/.*#\1#')"
+SUB_TOKEN="${SUB_URL##*/}"
+[ "$SUB_PATH" != "$LEGACY_SUB_PATH" ] && printf '%s' "$SUB_PATH" | grep -Eq '^[a-z0-9]{10,32}$' || fail "订阅前缀应是随机串：$SUB_URL"
+settings="$(hub GET /api/admin/settings)"
+[ "$(printf '%s' "$settings" | jq -r '.data.subscription.path + "," + .data.subscription.oldPath')" = "$SUB_PATH,$LEGACY_SUB_PATH" ] || fail "设置里的前缀不符：$settings"
+[ "$(curl -s -o /dev/null -w '%{http_code}' "$BASE/$LEGACY_SUB_PATH/$SUB_TOKEN")" = "200" ] || fail "过渡期内旧前缀 /sub/ 应可用"
+[ "$(curl -s -o /dev/null -w '%{http_code}' "$BASE/zzzzzzzzzz9/$SUB_TOKEN")" = "404" ] || fail "不认识的前缀应为 404"
+hub PUT /api/admin/settings '{"subscription":{"path":"Bad_Path"}}' >/dev/null; expect_code 400 "前缀写法不对"
+hub PUT /api/admin/settings "$(jq -nc --arg p "$NEW_SUB_PATH" '{subscription:{path:$p,pathGraceDays:0}}')" >/dev/null; expect_code 200 "改订阅前缀"
+NEW_URL="$(portal GET /api/user/subscription | jq -r .data.url)"
+[ "$NEW_URL" = "$BASE/$NEW_SUB_PATH/$SUB_TOKEN" ] || fail "订阅地址应换成新前缀：$NEW_URL"
+[ "$(curl -s -o /dev/null -w '%{http_code}' "$NEW_URL")" = "200" ] || fail "新前缀应可用"
+[ "$(curl -s -o /dev/null -w '%{http_code}' "$SUB_URL")" = "404" ] || fail "过渡期为 0 时旧前缀应立即 404"
+[ "$(curl -s -o /dev/null -w '%{http_code}' "$BASE/$LEGACY_SUB_PATH/$SUB_TOKEN")" = "404" ] || fail "更早的旧前缀应失效"
+SUB_URL="$NEW_URL"
 
 # ---- 8. 清理：删除用户后订阅地址 404 ----
 hub DELETE "/api/admin/users/$USER_ID" >/dev/null; expect_code 200 "删除用户"
