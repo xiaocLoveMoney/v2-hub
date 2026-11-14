@@ -394,7 +394,7 @@ export const en: Record<MessageKey, string> = {
   'subLogs.colClient': 'Client',
   'subLogs.empty': 'No subscription fetches yet',
   'connPassword.title': 'Connection password',
-  'connPassword.intro': 'Used by Trojan, Shadowsocks, TUIC and MASQUE nodes. VLESS, VMess, Hysteria and WireGuard are not affected.',
+  'connPassword.intro': 'Used by Trojan, Shadowsocks, TUIC and MASQUE nodes. VLESS, VMess, Hysteria and WireGuard are not affected. On servers that also run Shadowsocks 2022, these nodes use a platform-generated key instead, because SS2022 only accepts such keys.',
   'connPassword.statusCustom': 'Custom',
   'connPassword.statusRandom': 'Randomly generated',
   'connPassword.new': 'New connection password',
