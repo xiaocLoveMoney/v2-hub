@@ -12,6 +12,7 @@
 | `deploy/docker-compose.yml` | 开发 | PostgreSQL、MinIO；`--profile xui` 另起两台 3x-ui |
 | `deploy/compose.deploy.yml` + `deploy/caddy/Caddyfile` | 生产 | hub-server + Caddy + PostgreSQL + MinIO |
 | `deploy/publish_web.sh` | 前端 → MinIO | 发布前端构建产物到 `web-admin` / `web-user` 桶 |
+| `deploy/deploy_prod.sh` | 生产部署 | 自托管 Runner 在 `main` 检查全绿后执行：本地构建、迁移、compose 更新、发布前端、健康检查（Ruling-62） |
 | `deploy/it/` | 黑盒联调 | `run_all.sh` 汇总 IT-N 用例 |
 
 ```bash
