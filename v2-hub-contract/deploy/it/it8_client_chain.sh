@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # IT-8 客户端链式（docs/08，M6 DoD，docs/03 §5.18）：全新 3x-ui → 两个入站（VMess+WS、VLESS+Reality）→ 开了链式的套餐与不开的套餐
-# → 用户添加自有落地节点（SOCKS5）并配置“A 入口 → B 落地”“B 入口 → 自有落地”两条规则 → Mihomo / sing-box / Xray JSON 带链路且过真实客户端校验、
+# → 用户添加我的出口（SOCKS5）并配置“A 入口 → B 落地”“B 入口 → 自有落地”两条规则 → Mihomo / sing-box / Xray JSON 带链路且过真实客户端校验、
 # Base64 不带 → 换到不开链式的套餐后规则阻断、写操作 403、订阅不再带链路 → 换回后自动恢复 → 他人的规则与节点 404。
 # 黑盒，只用 curl / jq / docker。自有落地地址用文档保留网段（RFC 5737），平台不连接它（Ruling-38）。
 # 注意：会重建 xui-a 容器（不挂数据卷，见 docker-compose.yml），不影响 PostgreSQL 与 MinIO。
@@ -113,24 +113,27 @@ USER_CSRF="$(portal_login "$USER_JAR" "$END_USER" "$USER_CRED")"
 portal() { call "$USER_JAR" "$USER_CSRF" "$@"; }
 [ "$(portal GET /api/user/auth/me | jq -c '.data.features | {clientChain, customNode}')" = '{"clientChain":true,"customNode":true}' ] || fail "会话应带链式开关：$(cat "$WORK/body")"
 overview="$(portal GET /api/user/chain)"; expect_code 200 "取链式概览"
-[ "$(printf '%s' "$overview" | jq '.data.allowed and .data.customNodeAllowed')" = "true" ] || fail "概览应允许链式：$overview"
+[ "$(printf '%s' "$overview" | jq '.data.allowed and .data.exitAllowed')" = "true" ] || fail "概览应允许链式：$overview"
 [ "$(printf '%s' "$overview" | jq '.data.nodes | length')" = "$NODE_COUNT" ] || fail "概览应给出 $NODE_COUNT 个可选节点：$overview"
 NODE_A="$(printf '%s' "$overview" | jq -r '.data.nodes[0].id')"
 NODE_B="$(printf '%s' "$overview" | jq -r '.data.nodes[1].id')"
 
-# ---- 5. 自有落地节点与两条规则；坏链接 400、重复规则 409、入口等于落地 400 ----
-portal POST /api/user/chain/custom-nodes '{"link":"http://203.0.113.8:1080"}' >/dev/null; expect_code 400 "不支持的链接"
-custom="$(portal POST /api/user/chain/custom-nodes "$(jq -nc --arg l "$CUSTOM_LINK" '{link:$l}')")"; expect_code 200 "添加自有落地节点"
+# ---- 5. 我的出口与两条规则；坏链接 400、重复的组合标为 duplicate、起飞等于落地 400 ----
+portal POST /api/user/chain/exits '{"link":"http://203.0.113.8:1080"}' >/dev/null; expect_code 400 "不支持的链接"
+custom="$(portal POST /api/user/chain/exits "$(jq -nc --arg l "$CUSTOM_LINK" '{link:$l}')")"; expect_code 200 "添加我的出口"
 CUSTOM_ID="$(printf '%s' "$custom" | jq -r .data.id)"
-[ "$(printf '%s' "$custom" | jq -r '.data.name + " " + .data.protocol')" = "$CUSTOM_NAME socks" ] || fail "自有节点名称与协议不对：$custom"
-printf '%s' "$custom" | jq -e '.data | has("link") | not' >/dev/null || fail "自有节点列表不应返回原链接"
-[ "$(portal GET "/api/user/chain/custom-nodes/$CUSTOM_ID/link" | jq -r .data.link)" = "$CUSTOM_LINK" ] || fail "查看链接应返回原链接"
-rule_body() { jq -nc --argjson e "$1" --argjson x "$2" '{entryNodeId:$e,exitNodeId:$x,isEnabled:true}'; }
-RULE_AB="$(portal POST /api/user/chain/rules "$(rule_body "$NODE_A" "$NODE_B")" | jq -r .data.id)"; expect_code 200 "新建 A → B"
-portal POST /api/user/chain/rules "$(rule_body "$NODE_A" "$NODE_B")" >/dev/null; expect_code 409 "重复规则"
-portal POST /api/user/chain/rules "$(rule_body "$NODE_A" "$NODE_A")" >/dev/null; expect_code 400 "入口等于落地"
-home="$(portal POST /api/user/chain/rules "$(jq -nc --argjson e "$NODE_B" --argjson c "$CUSTOM_ID" --arg n "$HOME_RULE" '{entryNodeId:$e,exitCustomNodeId:$c,name:$n,isEnabled:true}')")"
-expect_code 200 "新建 B → 自有落地"
+[ "$(printf '%s' "$custom" | jq -r '.data.name + " " + .data.protocol')" = "$CUSTOM_NAME socks" ] || fail "出口名称与协议不对：$custom"
+printf '%s' "$custom" | jq -e '.data | has("link") | not' >/dev/null || fail "出口列表不应返回原链接"
+[ "$(portal GET "/api/user/chain/exits/$CUSTOM_ID/link" | jq -r .data.link)" = "$CUSTOM_LINK" ] || fail "查看链接应返回原链接"
+# rule_body <起飞节点> <落地节点> [是否启用]：客户端规则，落地是平台节点
+rule_body() { jq -nc --argjson e "$1" --argjson x "$2" --argjson on "${3:-true}" '{kind:"client",entryNodeIds:[$e],exitKind:"node",exitId:$x,name:"",isEnabled:$on}'; }
+RULE_AB="$(portal POST /api/user/chain/routes "$(rule_body "$NODE_A" "$NODE_B")" | jq -r .data.id)"; expect_code 200 "新建 A → B"
+dup="$(portal POST /api/user/chain/routes "$(rule_body "$NODE_A" "$NODE_B")")"; expect_code 200 "重复的组合可以保存"
+[ "$(printf '%s' "$dup" | jq -r '.data.entries[0].state + ":" + (.data.entries[0].coveredBy | tostring)')" = "duplicate:1" ] || fail "重复的组合应标为 duplicate 并指向第 1 条：$dup"
+portal DELETE "/api/user/chain/routes/$(printf '%s' "$dup" | jq -r .data.id)" >/dev/null; expect_code 200 "删除重复的规则"
+portal POST /api/user/chain/routes "$(rule_body "$NODE_A" "$NODE_A")" >/dev/null; expect_code 400 "起飞等于落地"
+home="$(portal POST /api/user/chain/routes "$(jq -nc --argjson e "$NODE_B" --argjson c "$CUSTOM_ID" --arg n "$HOME_RULE" '{kind:"client",entryNodeIds:[$e],exitKind:"own",exitId:$c,name:$n,isEnabled:true}')")"
+expect_code 200 "新建 B → 我的出口"
 [ "$(printf '%s' "$home" | jq -r .data.status)" = "ok" ] || fail "新规则应通畅：$home"
 
 # ---- 6. 订阅：三种格式带链路并过真实客户端校验，Base64 不带 ----
@@ -171,43 +174,43 @@ check_chains() {
 }
 check_chains "$CHAIN_COUNT" "$ARROW" "$HOME_RULE"
 [ "$(fetch base64 "$WORK/sub.b64")" = "200" ] || fail "base64 订阅应为 200"
-if b64d < "$WORK/sub.b64" | grep -q "$ARROW\|socks5://"; then fail "base64 订阅不应带链路或自有节点"; fi
+if b64d < "$WORK/sub.b64" | grep -q "$ARROW\|socks5://"; then fail "base64 订阅不应带链路或出口"; fi
 
-# ---- 7. 他人的规则与自有节点一律 404（R8） ----
+# ---- 7. 他人的规则与出口一律 404（R8）；引用别人的出口与引用不存在的出口同样 400 ----
 OTHER_JAR="$WORK/other.jar"
 OTHER_CSRF="$(portal_login "$OTHER_JAR" "$OTHER_USER" "$OTHER_CRED")"
 [ -n "$OTHER_CSRF" ] || fail "另一用户登录失败"
 other() { call "$OTHER_JAR" "$OTHER_CSRF" "$@"; }
-[ "$(other GET /api/user/chain | jq '(.data.rules | length) + (.data.customNodes | length)')" = "0" ] || fail "另一用户不应看到别人的规则与节点"
-other PUT "/api/user/chain/rules/$RULE_AB" '{"name":"x","isEnabled":false}' >/dev/null; expect_code 404 "改别人的规则"
-other DELETE "/api/user/chain/rules/$RULE_AB" >/dev/null; expect_code 404 "删别人的规则"
-other GET "/api/user/chain/custom-nodes/$CUSTOM_ID/link" >/dev/null; expect_code 404 "看别人的自有节点链接"
-other POST /api/user/chain/rules "$(jq -nc --argjson e "$NODE_A" --argjson c "$CUSTOM_ID" '{entryNodeId:$e,exitCustomNodeId:$c,isEnabled:true}')" >/dev/null
-expect_code 404 "用别人的自有节点作落地"
+[ "$(other GET /api/user/chain | jq '(.data.clientRoutes | length) + (.data.exits | length)')" = "0" ] || fail "另一用户不应看到别人的规则与出口"
+other PUT "/api/user/chain/routes/$RULE_AB" "$(rule_body "$NODE_A" "$NODE_B" false)" >/dev/null; expect_code 404 "改别人的规则"
+other DELETE "/api/user/chain/routes/$RULE_AB" >/dev/null; expect_code 404 "删别人的规则"
+other GET "/api/user/chain/exits/$CUSTOM_ID/link" >/dev/null; expect_code 404 "看别人的出口链接"
+other POST /api/user/chain/routes "$(jq -nc --argjson e "$NODE_A" --argjson c "$CUSTOM_ID" '{kind:"client",entryNodeIds:[$e],exitKind:"own",exitId:$c,isEnabled:true}')" >/dev/null
+expect_code 400 "用别人的出口作落地"
 
 # ---- 8. 停用一条：订阅少一条链路 ----
-portal PUT "/api/user/chain/rules/$RULE_AB" '{"name":"","isEnabled":false}' >/dev/null; expect_code 200 "停用 A → B"
+portal PUT "/api/user/chain/routes/$RULE_AB" "$(rule_body "$NODE_A" "$NODE_B" false)" >/dev/null; expect_code 200 "停用 A → B"
 check_chains 1 "$HOME_RULE"
-portal PUT "/api/user/chain/rules/$RULE_AB" '{"name":"","isEnabled":true}' >/dev/null; expect_code 200 "启用 A → B"
+portal PUT "/api/user/chain/routes/$RULE_AB" "$(rule_body "$NODE_A" "$NODE_B")" >/dev/null; expect_code 200 "启用 A → B"
 
 # ---- 9. 换到不开链式的套餐：规则阻断（原因 plan）、写操作 403、删除仍可、订阅不带链路 ----
 hub POST "/api/admin/users/$USER_ID/plan" "$(jq -nc --argjson p "$PLAIN_PLAN" '{planId:$p}')" >/dev/null; expect_code 200 "换到不开链式的套餐"
 [ "$(portal GET /api/user/auth/me | jq -c '.data.features | {clientChain, customNode}')" = '{"clientChain":false,"customNode":false}' ] || fail "换套餐后会话开关应关闭：$(cat "$WORK/body")"
 blocked="$(portal GET /api/user/chain)"
-[ "$(printf '%s' "$blocked" | jq -r '[.data.rules[] | .status + ":" + .blockedReason] | unique | join(",")')" = "blocked:plan" ] || fail "规则应因套餐阻断：$blocked"
-portal POST /api/user/chain/rules "$(rule_body "$NODE_B" "$NODE_A")" >/dev/null; expect_code 403 "套餐不允许时新建规则"
+[ "$(printf '%s' "$blocked" | jq -r '[.data.clientRoutes[] | .status + ":" + .blockedReason] | unique | join(",")')" = "blocked:plan" ] || fail "规则应因套餐阻断：$blocked"
+portal POST /api/user/chain/routes "$(rule_body "$NODE_B" "$NODE_A")" >/dev/null; expect_code 403 "套餐不允许时新建规则"
 [ "$(jq -r .code "$WORK/body")" = "feature_disabled" ] || fail "错误码应为 feature_disabled：$(cat "$WORK/body")"
-portal POST /api/user/chain/custom-nodes "$(jq -nc --arg l "$CUSTOM_LINK" '{link:$l, name:"it8-two"}')" >/dev/null; expect_code 403 "套餐不允许时添加自有节点"
+portal POST /api/user/chain/exits "$(jq -nc --arg l "$CUSTOM_LINK" '{link:$l, name:"it8-two"}')" >/dev/null; expect_code 403 "套餐不允许时添加出口"
 check_chains 0
 
 # ---- 10. 换回开链式的套餐：规则自动恢复通畅 ----
 hub POST "/api/admin/users/$USER_ID/plan" "$(jq -nc --argjson p "$CHAIN_PLAN" '{planId:$p}')" >/dev/null; expect_code 200 "换回开链式的套餐"
-[ "$(portal GET /api/user/chain | jq -r '[.data.rules[].status] | unique | join(",")')" = "ok" ] || fail "换回后规则应自动通畅：$(cat "$WORK/body")"
+[ "$(portal GET /api/user/chain | jq -r '[.data.clientRoutes[].status] | unique | join(",")')" = "ok" ] || fail "换回后规则应自动通畅：$(cat "$WORK/body")"
 check_chains "$CHAIN_COUNT" "$ARROW" "$HOME_RULE"
 
-# ---- 11. 删除自有节点连带删除引用它的规则；删除用户后订阅 404 ----
-portal DELETE "/api/user/chain/custom-nodes/$CUSTOM_ID" >/dev/null; expect_code 200 "删除自有节点"
-[ "$(portal GET /api/user/chain | jq '.data.rules | length')" = "1" ] || fail "删除自有节点后应只剩 1 条规则：$(cat "$WORK/body")"
+# ---- 11. 删除出口连带删除引用它的规则；删除用户后订阅 404 ----
+portal DELETE "/api/user/chain/exits/$CUSTOM_ID" >/dev/null; expect_code 200 "删除出口"
+[ "$(portal GET /api/user/chain | jq '.data.clientRoutes | length')" = "1" ] || fail "删除出口后应只剩 1 条规则：$(cat "$WORK/body")"
 check_chains 1 "$ARROW"
 hub DELETE "/api/admin/users/$USER_ID" >/dev/null; expect_code 200 "删除用户"
 hub DELETE "/api/admin/users/$OTHER_ID" >/dev/null; expect_code 200 "删除另一用户"

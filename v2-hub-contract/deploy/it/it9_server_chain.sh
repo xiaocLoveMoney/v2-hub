@@ -120,25 +120,29 @@ EMAIL_A="$(printf '%s' "$provisions" | jq -r --argjson s "$SERVER_A" '.data[] | 
 EMAIL_B="$(printf '%s' "$provisions" | jq -r --argjson s "$SERVER_B" '.data[] | select(.serverId == $s) | .email')"
 [ -n "$EMAIL_A" ] && [ -n "$EMAIL_B" ] || fail "用户在两台面板上都应有 client：$provisions"
 
-# ---- 4. 用户新建服务端规则；同一入口再建 409；他人 404 ----
+# ---- 4. 用户新建服务端规则；同一起飞节点再建一条会被靠前的覆盖；他人 404 ----
 portal_login() { call "$1" "" POST /api/user/auth/login "$(login_body_of "$2" "$3")" | jq -r '.data.csrfToken // empty'; }
 USER_JAR="$WORK/user.jar"
 USER_CSRF="$(portal_login "$USER_JAR" "$END_USER" "$USER_CRED")"; [ -n "$USER_CSRF" ] || fail "终端用户登录失败"
 portal() { call "$USER_JAR" "$USER_CSRF" "$@"; }
 [ "$(portal GET /api/user/auth/me | jq -r .data.features.serverChain)" = "true" ] || fail "会话应带服务端链式开关"
 [ "$(portal GET /api/user/chain | jq --argjson id "$ENTRY_NODE" '.data.nodes[] | select(.id == $id) | .canBeServerEntry')" = "true" ] || fail "入口节点应可作服务端入口"
-rule_body="$(jq -nc --argjson e "$ENTRY_NODE" --argjson x "$EXIT_NODE" '{entryNodeId:$e,exitNodeId:$x}')"
-RULE_ID="$(portal POST /api/user/chain/server-rules "$rule_body" | jq -r '.data.id // empty')"; expect_code 200 "新建服务端规则"
-portal POST /api/user/chain/server-rules "$rule_body" >/dev/null; expect_code 409 "同一入口再建"
+rule_body="$(jq -nc --argjson e "$ENTRY_NODE" --argjson x "$EXIT_NODE" '{kind:"server",entryNodeIds:[$e],exitKind:"node",exitId:$x}')"
+RULE_ID="$(portal POST /api/user/chain/routes "$rule_body" | jq -r '.data.id // empty')"; expect_code 200 "新建服务端规则"
+later="$(portal POST /api/user/chain/routes "$rule_body")"; expect_code 200 "同一起飞节点再建一条"
+[ "$(printf '%s' "$later" | jq -r '.data.entries[0].state + ":" + (.data.entries[0].coveredBy | tostring)')" = "shadowed:1" ] || fail "靠后的规则应被第 1 条覆盖：$later"
+portal DELETE "/api/user/chain/routes/$(printf '%s' "$later" | jq -r .data.id)" >/dev/null; expect_code 200 "删除被覆盖的规则"
+portal POST /api/user/chain/routes "$(jq -nc --argjson e "$EXIT_NODE" --argjson x "$ENTRY_NODE" '{kind:"server",entryNodeIds:[$e],exitKind:"node",exitId:$x}')" >/dev/null
+expect_code 400 "反向再建一条会成环"
 OTHER_JAR="$WORK/other.jar"
 OTHER_CSRF="$(portal_login "$OTHER_JAR" "$OTHER_USER" "$OTHER_CRED")"
-call "$OTHER_JAR" "$OTHER_CSRF" DELETE "/api/user/chain/server-rules/$RULE_ID" >/dev/null; expect_code 404 "删别人的规则"
+call "$OTHER_JAR" "$OTHER_CSRF" DELETE "/api/user/chain/routes/$RULE_ID" >/dev/null; expect_code 404 "删别人的规则"
 
-# wait_apply <期望下发情况> <期望平台条目数>：轮询到规则状态与入口模板都符合
+# wait_apply <期望的“规则状态:起飞节点状态”> <期望平台条目数>：轮询到规则状态与入口模板都符合
 wait_apply() {
   local want="$1" entries="$2" got=""
   for _ in $(seq 1 "$APPLY_WAIT_SECONDS"); do
-    got="$(portal GET /api/user/chain | jq -r '[.data.serverRules[] | .status + ":" + .applyStatus] | join(",")')"
+    got="$(portal GET /api/user/chain | jq -r '[.data.serverRoutes[] | .status + ":" + .entries[0].state] | join(",")')"
     if [ "$got" = "$want" ] && [ "$(hub_entries)" = "$entries" ]; then
       return 0
     fi
@@ -158,7 +162,7 @@ rule="$(printf '%s' "$tpl" | jq -c --arg t "$TAG" '.routing.rules[] | select(.ru
 [ "$(printf '%s' "$tpl" | jq -r '[.routing.rules[] | (.ruleTag // .outboundTag)] | .[0:2] | join(",")')" = "api,$TAG" ] || fail "平台路由应紧跟 api 规则"
 [ "$(panel_api "$XUI_A_URL" "$TOKEN_A" GET /server/status | jq -r .obj.xray.state)" = "running" ] || fail "入口 Xray 应在运行"
 [ "$(hub GET "/api/admin/servers/$SERVER_A/chain-apply" | jq -r '.data.status + ":" + (.data.appliedRuleCount | tostring)')" = "applied:1" ] || fail "管理端下发状态不对：$(cat "$WORK/body")"
-[ "$(hub GET "/api/admin/server-chain-rules?serverId=$SERVER_A" | jq -r .data.total)" = "1" ] || fail "全站规则列表应有 1 条"
+[ "$(hub GET "/api/admin/chain-routes?kind=server&serverId=$SERVER_A" | jq -r '(.data.total | tostring) + ":" + .data.items[0].entries[0].state')" = "1:applied" ] || fail "全站规则列表应有 1 条已生效的规则：$(cat "$WORK/body")"
 
 # ---- 6. 真实流量：在入口容器里用本人的 Xray JSON 订阅起客户端发请求，落地面板上本人的流量增加 ----
 b_traffic() { panel_api "$XUI_B_URL" "$TOKEN_B" GET /clients/list | jq -r --arg e "$EMAIL_B" '[.obj[] | select(.email == $e) | ((.traffic.up // 0) + (.traffic.down // 0))] | add // 0'; }
@@ -181,13 +185,13 @@ done
 
 # ---- 7. 换到不开的套餐：阻断（plan），条目被清掉；换回后恢复 ----
 hub POST "/api/admin/users/$USER_ID/plan" "$(jq -nc --argjson p "$PLAIN_PLAN" '{planId:$p}')" >/dev/null; expect_code 200 "换到不开的套餐"
-portal POST /api/user/chain/server-rules "$rule_body" >/dev/null; expect_code 403 "套餐不允许时新建"
-wait_apply "blocked:" 0
+portal POST /api/user/chain/routes "$rule_body" >/dev/null; expect_code 403 "套餐不允许时新建"
+wait_apply "blocked:inactive" 0
 hub POST "/api/admin/users/$USER_ID/plan" "$(jq -nc --argjson p "$RELAY_PLAN" '{planId:$p}')" >/dev/null; expect_code 200 "换回开的套餐"
 wait_apply "ok:applied" 1
 
 # ---- 8. 删除规则：条目被清掉，Xray 仍在运行；删除用户 ----
-portal DELETE "/api/user/chain/server-rules/$RULE_ID" >/dev/null; expect_code 200 "删除服务端规则"
+portal DELETE "/api/user/chain/routes/$RULE_ID" >/dev/null; expect_code 200 "删除服务端规则"
 for _ in $(seq 1 "$APPLY_WAIT_SECONDS"); do
   [ "$(hub_entries)" = "0" ] && break
   sleep 1

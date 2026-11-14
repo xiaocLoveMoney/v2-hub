@@ -31,6 +31,7 @@ run_case IT-7 it7_shop.sh
 run_case IT-8 it8_client_chain.sh
 run_case IT-9 it9_server_chain.sh
 run_case IT-10 it10_ops.sh
+run_case IT-11 it11_chain_routes.sh
 # 新用例登记在这里，并在 docs/08-联调与测试方案.md 用例库加一行
 
 echo
