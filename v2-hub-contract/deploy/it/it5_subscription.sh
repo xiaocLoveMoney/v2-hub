@@ -21,7 +21,6 @@ REALITY_PORT=24702
 NODE_COUNT=2
 FORMAT_COUNT=4
 ROTATE_WAIT_SECONDS=20
-MIHOMO_IMAGE="${IT_MIHOMO_IMAGE:-metacubex/mihomo:latest}"
 SINGBOX_IMAGE="${IT_SINGBOX_IMAGE:-ghcr.io/sagernet/sing-box:latest}"
 # 配置文件要挂进校验容器；macOS 上 mktemp 的默认目录不在 docker 的共享目录里，所以固定放 /tmp
 WORK="$(mktemp -d /tmp/it5.XXXXXX)"
@@ -128,7 +127,7 @@ mkdir -p "$WORK/cfg"
 [ "$(fetch singbox "$WORK/cfg/singbox.json")" = "200" ] || fail "sing-box 订阅应为 200"
 [ "$(fetch xray "$WORK/cfg/xray.json")" = "200" ] || fail "xray 订阅应为 200"
 chmod -R a+rX "$WORK"
-docker run --rm -v "$WORK/cfg:/cfg:ro" "$MIHOMO_IMAGE" -t -f /cfg/mihomo.yaml -d /tmp >"$WORK/mihomo.log" 2>&1 || fail "mihomo -t 未通过：$(tail -5 "$WORK/mihomo.log")"
+mihomo_test "$WORK/cfg/mihomo.yaml" "$WORK/mihomo.log" "$WORK/mihomo-home" || fail "mihomo -t 未通过：$(tail -5 "$WORK/mihomo.log")"
 docker run --rm -v "$WORK/cfg:/cfg:ro" "$SINGBOX_IMAGE" check -c /cfg/singbox.json >"$WORK/singbox.log" 2>&1 || fail "sing-box check 未通过：$(tail -5 "$WORK/singbox.log")"
 # Xray JSON 是“每个节点一份完整配置”的数组，逐份经标准输入交给面板容器里的 xray 校验；
 # 必须写 -c stdin:，否则 xray 会去读工作目录里面板自己的 config.json，校验形同虚设

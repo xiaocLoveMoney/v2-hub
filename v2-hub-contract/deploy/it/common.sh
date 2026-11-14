@@ -36,6 +36,34 @@ stop_all() {
 }
 trap stop_all EXIT
 
+# mihomo 配置检查（IT-5 / IT-8 / IT-12）：订阅带 GEOIP 规则，mihomo -t 要先有 GeoIP 库，容器里自己去 GitHub 下载常超时。
+# 改为在宿主机上下载一次并缓存（curl 读 https_proxy 等环境变量，即走系统代理），每次复制进容器的工作目录。
+MIHOMO_IMAGE="${IT_MIHOMO_IMAGE:-metacubex/mihomo:latest}"
+MIHOMO_GEOIP_URL="${IT_MIHOMO_GEOIP_URL:-https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/geoip.metadb}"
+MIHOMO_GEOIP_FILE="geoip.metadb"
+IT_CACHE_DIR="${IT_CACHE_DIR:-$HOME/.cache/v2-hub-it}"
+GEOIP_DOWNLOAD_TIMEOUT=180
+
+# mihomo_geoip：打印缓存的 GeoIP 库路径，缓存里没有就先下载
+mihomo_geoip() {
+  local file="$IT_CACHE_DIR/$MIHOMO_GEOIP_FILE"
+  if [ ! -s "$file" ]; then
+    mkdir -p "$IT_CACHE_DIR" || return 1
+    curl -sSfL -m "$GEOIP_DOWNLOAD_TIMEOUT" -o "$file.part" "$MIHOMO_GEOIP_URL" || { rm -f "$file.part"; return 1; }
+    mv "$file.part" "$file" || return 1
+  fi
+  printf '%s' "$file"
+}
+
+# mihomo_test <配置文件> <日志文件> <工作目录>：在容器里 mihomo -t 检查配置；工作目录由调用方清理
+mihomo_test() {
+  local cfg="$1" log="$2" home="$3" geoip
+  geoip="$(mihomo_geoip)" || { echo "下载 GeoIP 库失败：$MIHOMO_GEOIP_URL" >"$log"; return 1; }
+  mkdir -p "$home" && cp "$geoip" "$home/$MIHOMO_GEOIP_FILE" || return 1
+  docker run --rm -v "$(dirname "$cfg"):/cfg:ro" -v "$home:/hub-home" "$MIHOMO_IMAGE" \
+    -t -f "/cfg/$(basename "$cfg")" -d /hub-home >"$log" 2>&1
+}
+
 # assert_http <url> <期望状态码> [期望 body 子串]
 assert_http() {
   local url="$1" want="$2" sub="${3:-}"

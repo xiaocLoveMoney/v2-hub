@@ -26,7 +26,6 @@ CUSTOM_LINK="socks5://203.0.113.8:1080#it8-home"
 CUSTOM_NAME=it8-home
 HOME_RULE=it8-回家
 ARROW="→"
-MIHOMO_IMAGE="${IT_MIHOMO_IMAGE:-metacubex/mihomo:latest}"
 SINGBOX_IMAGE="${IT_SINGBOX_IMAGE:-ghcr.io/sagernet/sing-box:latest}"
 # 配置文件要挂进校验容器；macOS 上 mktemp 的默认目录不在 docker 的共享目录里，所以固定放 /tmp
 WORK="$(mktemp -d /tmp/it8.XXXXXX)"
@@ -162,7 +161,7 @@ check_chains() {
     grep -q -- "$name" "$dir/mihomo.yaml" || fail "mihomo 里应有链路节点“$name”：$(grep -n 'name:' "$dir/mihomo.yaml" | head -20)"
   done
   chmod -R a+rX "$dir"
-  docker run --rm -v "$dir:/cfg:ro" "$MIHOMO_IMAGE" -t -f /cfg/mihomo.yaml -d /tmp >"$WORK/mihomo.log" 2>&1 || fail "mihomo -t 未通过：$(tail -5 "$WORK/mihomo.log")"
+  mihomo_test "$dir/mihomo.yaml" "$WORK/mihomo.log" "$WORK/mihomo-home" || fail "mihomo -t 未通过：$(tail -5 "$WORK/mihomo.log")"
   docker run --rm -v "$dir:/cfg:ro" "$SINGBOX_IMAGE" check -c /cfg/singbox.json >"$WORK/singbox.log" 2>&1 || fail "sing-box check 未通过：$(tail -5 "$WORK/singbox.log")"
   local xray_bin n
   xray_bin="$("${COMPOSE[@]}" exec -T xui-a sh -c 'ls /app/bin/xray-linux-* | head -1' | tr -d '\r')"
