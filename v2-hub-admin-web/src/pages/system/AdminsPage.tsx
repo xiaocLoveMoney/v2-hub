@@ -31,8 +31,8 @@ interface ResetForm {
 const loadRoles = (signal: AbortSignal) => api.GET('/api/admin/roles', { signal })
 
 const credentialRules = [
-  { required: true, message: '请输入口令' },
-  { min: MIN_CREDENTIAL_LEN, max: MAX_CREDENTIAL_LEN, message: `口令长度须为 ${MIN_CREDENTIAL_LEN}–${MAX_CREDENTIAL_LEN} 个字符` },
+  { required: true, message: '请输入密码' },
+  { min: MIN_CREDENTIAL_LEN, max: MAX_CREDENTIAL_LEN, message: `密码长度须为 ${MIN_CREDENTIAL_LEN}–${MAX_CREDENTIAL_LEN} 个字符` },
 ]
 
 /** 管理员管理（admin:read 查看，admin:write 增改；越权规则由后端按 docs/03 R2–R5 执行）。 */
@@ -100,7 +100,7 @@ export function AdminsPage() {
     const err = await mutate(() =>
       api.PUT('/api/admin/admins/{id}/password', { params: { ...csrfHeader(), path: { id } }, body: { password: pw } }),
     )
-    finish(err, '口令已重置，对方需重新登录')
+    finish(err, '密码已重置，对方需重新登录')
   }
 
   const handleResetTotp = async (admin: Admin) => {
@@ -139,7 +139,7 @@ export function AdminsPage() {
               编辑
             </Button>
             <Button size="small" onClick={() => setResetting(admin)}>
-              重置口令
+              重置密码
             </Button>
             {admin.totpEnabled && !isSelf && (
               <Popconfirm
@@ -190,7 +190,7 @@ export function AdminsPage() {
           <Form.Item name="username" label="用户名" rules={[{ required: true, pattern: USERNAME_PATTERN, message: '3–64 位字母、数字或 _ . -' }]}>
             <Input autoComplete="off" />
           </Form.Item>
-          <Form.Item name="credential" label="初始口令" rules={credentialRules}>
+          <Form.Item name="credential" label="初始密码" rules={credentialRules}>
             <Input.Password autoComplete="new-password" />
           </Form.Item>
           <Form.Item name="roles" label="角色">
@@ -217,10 +217,10 @@ export function AdminsPage() {
         </Form>
       </Modal>
 
-      <Modal title={`重置口令：${resetting?.username ?? ''}`} open={resetting !== null} onCancel={closeModals} footer={null} destroyOnHidden>
+      <Modal title={`重置密码：${resetting?.username ?? ''}`} open={resetting !== null} onCancel={closeModals} footer={null} destroyOnHidden>
         {formError !== null && <Alert type="error" title={formError.message} showIcon className="page-alert" />}
         <Form<ResetForm> layout="vertical" onFinish={handleReset}>
-          <Form.Item name="credential" label="新口令" rules={credentialRules}>
+          <Form.Item name="credential" label="新密码" rules={credentialRules}>
             <Input.Password autoComplete="new-password" />
           </Form.Item>
           <Button type="primary" htmlType="submit" block>

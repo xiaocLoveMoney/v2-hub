@@ -19,7 +19,7 @@ const REASON_TEXT: Record<AdminChainExitTestResult['reason'], string> = {
   unknown: '',
   refused: '出口拒绝连接：端口没有开放，或地址、端口不对',
   timeout: '连接出口超时：地址不通，或出口的防火墙没有放行这台服务器',
-  proxy_rejected: '端口能连上，但代理请求被断开：常见是账号或口令不对、协议类型不对、代理不支持 CONNECT',
+  proxy_rejected: '端口能连上，但代理请求被断开：常见是这台服务器的 IP 不在代理的白名单里、账号或密码不对、协议类型不对、代理不支持 CONNECT',
   proxy_no_response: '端口能连上，但代理请求一直没有回应：常见是这台服务器的 IP 不在代理的白名单里，或代理自己出不了网',
   bad_status: '请求已经过出口发出去，但测试地址返回了异常状态',
 }

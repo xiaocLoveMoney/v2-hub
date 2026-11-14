@@ -574,7 +574,7 @@ describe('链式出口', () => {
     expect(calls.filter((c) => c.path === '/api/admin/servers').length).toBe(before)
   })
 
-  it('平台出口选 HTTPS 代理：只填地址、端口、用户名与口令，提交 https:// 地址', async () => {
+  it('平台出口选 HTTPS 代理：只填地址、端口、用户名与密码，提交 https:// 地址', async () => {
     const calls = mockServer({ ...handlers(), 'POST /api/admin/chain-exits': () => ok(platform) })
     renderWith(<ChainExitsPage />)
     await screen.findByText('东京出口')

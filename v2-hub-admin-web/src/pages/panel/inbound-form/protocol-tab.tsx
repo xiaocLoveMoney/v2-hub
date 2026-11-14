@@ -26,12 +26,12 @@ const FALLBACK_COLUMNS = [
 ]
 const ACCOUNT_COLUMNS = [
   { key: 'user', label: '用户名' },
-  { key: 'pass', label: '口令' },
+  { key: 'pass', label: '密码' },
 ]
 const ACCOUNT_USER_LEN = 8
 const ACCOUNT_SECRET_LEN = 12
 const MIXED_AUTHS = [
-  { value: 'password', label: '用户名口令' },
+  { value: 'password', label: '用户名密码' },
   { value: 'noauth', label: '无需认证' },
 ]
 

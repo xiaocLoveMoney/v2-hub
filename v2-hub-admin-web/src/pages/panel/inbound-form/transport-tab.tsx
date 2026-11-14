@@ -171,7 +171,7 @@ function HysteriaFields({ b }: { b: Binder }) {
   const type = String(getAt(b.draft, [...masq, 'type']) ?? '')
   return (
     <>
-      <TextField b={b} path={[...base, 'auth']} label="混淆口令" extra="留空表示不混淆" />
+      <TextField b={b} path={[...base, 'auth']} label="混淆密码" extra="留空表示不混淆" />
       <NumberField b={b} path={[...base, 'udpIdleTimeout']} label="UDP 空闲超时（秒）" min={2} max={600} />
       <SelectField b={b} path={[...masq, 'type']} label="伪装" options={MASQUERADE_TYPES} onChange={(t) => b.set(masq, t === '' ? undefined : { type: t, url: '', dir: '', content: '', rewriteHost: false, insecure: false, headers: {}, statusCode: 0 })} />
       {type === 'proxy' && (

@@ -10,7 +10,7 @@ import { TABLE_SCROLL, formatTime } from '../system/format'
 import { RenewResetFields, type RenewResetForm } from './quota-fields'
 import { bytesToGb, describeRenew, describeReset, formatBytes, gbToBytes, renewFieldsOf, renewModeOf, renewValueOf } from './quota'
 
-// 终端用户口令 8–128 位（docs/03 §5.3；管理员口令是 12 位起）
+// 终端用户密码 8–128 位（docs/03 §5.3；管理员密码是 12 位起）
 const MIN_CREDENTIAL_LEN = 8
 const MAX_CREDENTIAL_LEN = 128
 const MAX_REMARK_LEN = 255
@@ -22,8 +22,8 @@ const MAX_EMAIL_LEN = 254
 const emailRules = [{ type: 'email' as const, max: MAX_EMAIL_LEN, message: '邮箱格式不对' }]
 
 const credentialRules = [
-  { required: true, message: '请输入口令' },
-  { min: MIN_CREDENTIAL_LEN, max: MAX_CREDENTIAL_LEN, message: `口令长度须为 ${MIN_CREDENTIAL_LEN}–${MAX_CREDENTIAL_LEN} 个字符` },
+  { required: true, message: '请输入密码' },
+  { min: MIN_CREDENTIAL_LEN, max: MAX_CREDENTIAL_LEN, message: `密码长度须为 ${MIN_CREDENTIAL_LEN}–${MAX_CREDENTIAL_LEN} 个字符` },
 ]
 
 // ---- 新建 -------------------------------------------------------------------------
@@ -66,10 +66,10 @@ function CreateUserForm({ plans, onSaved }: { plans: Plan[]; onSaved: () => void
         <Form.Item name="username" label="用户名" extra="登录客户后台用" rules={[{ required: true, pattern: USERNAME_PATTERN, message: '3–64 位字母、数字或 _ . -' }]}>
           <Input autoComplete="off" />
         </Form.Item>
-        <Form.Item name="email" label="邮箱" extra="可选；填了即视为已验证，可用来登录与找回口令" rules={emailRules}>
+        <Form.Item name="email" label="邮箱" extra="可选；填了即视为已验证，可用来登录与找回密码" rules={emailRules}>
           <Input autoComplete="off" />
         </Form.Item>
-        <Form.Item name="credential" label="初始口令" rules={credentialRules}>
+        <Form.Item name="credential" label="初始密码" rules={credentialRules}>
           <Input.Password autoComplete="new-password" />
         </Form.Item>
         <Form.Item name="planId" label="套餐" extra="不选则暂无可用节点，之后可在“续费”里分配">
@@ -252,20 +252,20 @@ function QuotaForm({ user, onSaved }: { user: EndUser; onSaved: () => void }) {
   )
 }
 
-// ---- 重置口令 -----------------------------------------------------------------------
+// ---- 重置密码 -----------------------------------------------------------------------
 
-/** 重置客户后台登录口令。 */
+/** 重置客户后台登录密码。 */
 export function ResetUserCredentialModal({ user, onClose, onSaved }: UserModalProps) {
   const generation = useOpenGeneration(user !== null)
   return (
-    <Modal title={`重置口令：${user?.username ?? ''}`} open={user !== null} onCancel={onClose} footer={null} destroyOnHidden>
+    <Modal title={`重置密码：${user?.username ?? ''}`} open={user !== null} onCancel={onClose} footer={null} destroyOnHidden>
       {user !== null && <ResetCredentialForm key={generation} user={user} onSaved={onSaved} />}
     </Modal>
   )
 }
 
 function ResetCredentialForm({ user, onSaved }: { user: EndUser; onSaved: () => void }) {
-  const { error, isBusy, run } = useSubmit('口令已重置', onSaved)
+  const { error, isBusy, run } = useSubmit('密码已重置', onSaved)
   const submit = (v: { credential: string }) => {
     const pw = v.credential
     return run(() => api.PUT('/api/admin/users/{id}/password', { params: { ...csrfHeader(), path: { id: user.id } }, body: { password: pw } }))
@@ -274,7 +274,7 @@ function ResetCredentialForm({ user, onSaved }: { user: EndUser; onSaved: () => 
     <>
       <ErrorAlert error={error} />
       <Form layout="vertical" onFinish={(v) => void submit(v)}>
-        <Form.Item name="credential" label="新口令" rules={credentialRules}>
+        <Form.Item name="credential" label="新密码" rules={credentialRules}>
           <Input.Password autoComplete="new-password" />
         </Form.Item>
         <Button type="primary" htmlType="submit" block loading={isBusy}>

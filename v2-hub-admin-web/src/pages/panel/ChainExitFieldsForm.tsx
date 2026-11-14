@@ -135,7 +135,7 @@ export function ChainExitFieldsForm({ fields, onChange, problems, shouldShowProb
         </Form.Item>
       )}
       {(protocol === 'trojan' || protocol === 'shadowsocks' || isPlainProxy(protocol)) && (
-        <Form.Item label="口令" {...row('passphrase', !isPlainProxy(protocol))}>
+        <Form.Item label="密码" {...row('passphrase', !isPlainProxy(protocol))}>
           <Input {...text('passphrase', MAX_CREDENTIAL_LEN)} placeholder={isPlainProxy(protocol) ? '可选' : undefined} />
         </Form.Item>
       )}

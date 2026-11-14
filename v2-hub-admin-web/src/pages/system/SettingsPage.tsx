@@ -248,7 +248,7 @@ function SettingsFormBody({ settings, canWrite, canReadPlans, onSaved }: Setting
               type="info"
               showIcon
               className="page-alert"
-              title="SMTP 只能经环境变量 HUB_SMTP_* 配置；未配置时注册验证码、找回口令、换绑邮箱、公告群发与工单通知整体关闭"
+              title="SMTP 只能经环境变量 HUB_SMTP_* 配置；未配置时注册验证码、找回密码、换绑邮箱、公告群发与工单通知整体关闭"
             />
           )}
           <Form.Item name={['mail', 'ratePerMinute']} label="每分钟最多发送封数" rules={required}>

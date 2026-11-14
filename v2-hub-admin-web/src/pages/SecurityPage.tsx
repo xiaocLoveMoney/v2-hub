@@ -81,7 +81,7 @@ export function SecurityPage() {
 
         {!isEnabled && pending === null && (
           <>
-            <Typography.Paragraph>开启后，登录除了口令还需要验证器 App（如 Google Authenticator、1Password）生成的验证码。</Typography.Paragraph>
+            <Typography.Paragraph>开启后，登录除了密码还需要验证器 App（如 Google Authenticator、1Password）生成的验证码。</Typography.Paragraph>
             <Button type="primary" onClick={() => void handleSetup()} loading={isBusy}>
               开启两步验证
             </Button>

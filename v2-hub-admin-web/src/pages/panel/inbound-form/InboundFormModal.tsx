@@ -297,7 +297,7 @@ function InboundFormBody({ serverId, serverDomain, inbound, onClose, onSaved }: 
     <>
       {error !== null && <Alert type="error" title={error.message} showIcon className="page-alert" />}
       {!isFormCovered && <Alert type="warning" showIcon className="page-alert" title={`表单未覆盖 ${panelProtocol} 协议，请在“高级配置”里编辑`} />}
-      {isEdit && <Alert type="info" showIcon className="page-alert" title="以下为面板上的实时配置（含私钥与口令）；入站上的用户由平台维护，保存时保持不变" />}
+      {isEdit && <Alert type="info" showIcon className="page-alert" title="以下为面板上的实时配置（含私钥与密码）；入站上的用户由平台维护，保存时保持不变" />}
       <Form layout="horizontal" labelCol={LABEL_COL} labelWrap colon={false}>
         <Tabs items={items} />
       </Form>

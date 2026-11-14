@@ -202,7 +202,7 @@ function ExitForm({ exit, groups, onSaved }: Pick<ChainExitModalProps, 'exit' | 
             {mode === MODE_FORM ? (
               <ChainExitFieldsForm fields={fields} onChange={setFields} problems={problems} shouldShowProblems={shouldShowProblems} />
             ) : (
-              <Form.Item label="链接" htmlFor="chain-exit-link" required extra="分享链接（vless / vmess / trojan / ss），或代理地址 socks5:// http:// https://[用户名:口令@]地址:端口">
+              <Form.Item label="链接" htmlFor="chain-exit-link" required extra="分享链接（vless / vmess / trojan / ss），或代理地址 socks5:// http:// https://[用户名:密码@]地址:端口">
                 <Input.TextArea
                   id="chain-exit-link"
                   rows={LINK_ROWS}
