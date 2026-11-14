@@ -9,20 +9,20 @@ import (
 	"v2-hub-server/internal/service"
 )
 
-// ChainManager 是链式代理接口需要的能力（由 service.ChainService 实现）；身份只取自会话（R8）。
+// 用户侧链式代理接口（docs/03 §5.18、§5.19、§5.21）：有序的链式规则与我的出口。身份只取自会话（R8）。
+
+// ChainManager 是链式代理接口需要的能力（由 service.ChainService 实现）。
 type ChainManager interface {
 	Features(ctx context.Context, userID int64) (service.ChainFlags, error)
 	Overview(ctx context.Context, p *service.UserPrincipal) (*service.ChainOverview, error)
-	CreateRule(ctx context.Context, p *service.UserPrincipal, in service.ChainRuleInput) (*service.ChainRule, error)
-	UpdateRule(ctx context.Context, p *service.UserPrincipal, id int64, name string, enabled bool) (*service.ChainRule, error)
-	DeleteRule(ctx context.Context, p *service.UserPrincipal, id int64) error
-	CreateCustomNode(ctx context.Context, p *service.UserPrincipal, link, name string) (*service.CustomNode, error)
-	UpdateCustomNode(ctx context.Context, p *service.UserPrincipal, id int64, name, link string) (*service.CustomNode, error)
-	DeleteCustomNode(ctx context.Context, p *service.UserPrincipal, id int64) error
-	CustomNodeLink(ctx context.Context, p *service.UserPrincipal, id int64) (string, error)
-	CreateServerRule(ctx context.Context, p *service.UserPrincipal, in service.ServerChainRuleInput) (*service.ServerChainRule, error)
-	UpdateServerRule(ctx context.Context, p *service.UserPrincipal, id int64, enabled bool) (*service.ServerChainRule, error)
-	DeleteServerRule(ctx context.Context, p *service.UserPrincipal, id int64) error
+	CreateRoute(ctx context.Context, p *service.UserPrincipal, in service.ChainRouteInput) (*service.ChainRoute, error)
+	UpdateRoute(ctx context.Context, p *service.UserPrincipal, id int64, in service.ChainRouteInput) (*service.ChainRoute, error)
+	DeleteRoute(ctx context.Context, p *service.UserPrincipal, id int64) error
+	ReorderRoutes(ctx context.Context, p *service.UserPrincipal, kind string, ids []int64) ([]service.ChainRoute, error)
+	CreateExit(ctx context.Context, p *service.UserPrincipal, link, name string) (*service.ChainExit, error)
+	UpdateExit(ctx context.Context, p *service.UserPrincipal, id int64, name, link string) (*service.ChainExit, error)
+	DeleteExit(ctx context.Context, p *service.UserPrincipal, id int64) error
+	ExitLink(ctx context.Context, p *service.UserPrincipal, id int64) (string, error)
 }
 
 // userFeaturesVO 对应 hub-api.yaml UserSession.features：当前套餐开了哪些功能，决定菜单显隐。
@@ -55,85 +55,123 @@ type chainNodeOptionVO struct {
 	CanBeServerEntry bool   `json:"canBeServerEntry"`
 }
 
-type chainEntryVO struct {
-	NodeID int64  `json:"nodeId"`
-	Name   string `json:"name"`
+// chainPlatformExitOptionVO 对应 hub-api.yaml ChainPlatformExitOption；地址与链接不对用户返回。
+type chainPlatformExitOptionVO struct {
+	ID          int64  `json:"id"`
+	Name        string `json:"name"`
+	Protocol    string `json:"protocol"`
+	AllowServer bool   `json:"allowServer"`
+	AllowClient bool   `json:"allowClient"`
 }
 
-type chainExitVO struct {
+// chainRouteEntryVO 对应 hub-api.yaml ChainRouteEntry。
+type chainRouteEntryVO struct {
+	NodeID    int64  `json:"nodeId"`
+	Name      string `json:"name"`
+	State     string `json:"state"`
+	CoveredBy int    `json:"coveredBy"`
+}
+
+// chainRouteExitVO 对应 hub-api.yaml ChainRouteExit。
+type chainRouteExitVO struct {
 	Kind     string `json:"kind"`
 	ID       int64  `json:"id"`
 	Name     string `json:"name"`
 	Protocol string `json:"protocol"`
 }
 
-// chainRuleVO 对应 hub-api.yaml ChainRule。
-type chainRuleVO struct {
-	ID            int64        `json:"id"`
-	Name          string       `json:"name"`
-	DisplayName   string       `json:"displayName"`
-	Entry         chainEntryVO `json:"entry"`
-	Exit          chainExitVO  `json:"exit"`
-	IsEnabled     bool         `json:"isEnabled"`
-	Status        string       `json:"status"`
-	BlockedReason string       `json:"blockedReason"`
-	CreatedAt     time.Time    `json:"createdAt"`
+// chainRouteVO 对应 hub-api.yaml ChainRoute。
+type chainRouteVO struct {
+	ID            int64               `json:"id"`
+	Kind          string              `json:"kind"`
+	Position      int                 `json:"position"`
+	Name          string              `json:"name"`
+	DisplayName   string              `json:"displayName"`
+	Entries       []chainRouteEntryVO `json:"entries"`
+	Exit          chainRouteExitVO    `json:"exit"`
+	IsEnabled     bool                `json:"isEnabled"`
+	Status        string              `json:"status"`
+	BlockedReason string              `json:"blockedReason"`
+	CreatedAt     time.Time           `json:"createdAt"`
 }
 
-func toChainRuleVO(r service.ChainRule) chainRuleVO {
-	return chainRuleVO{
-		ID: r.ID, Name: r.Name, DisplayName: r.DisplayName, IsEnabled: r.Enabled, Status: r.Status, BlockedReason: r.BlockedReason, CreatedAt: r.CreatedAt,
-		Entry: chainEntryVO{NodeID: r.EntryNodeID, Name: r.EntryName},
-		Exit:  chainExitVO{Kind: r.ExitKind, ID: r.ExitID, Name: r.ExitName, Protocol: r.ExitProtocol},
+func toChainRouteExitVO(e service.ChainRouteExit) chainRouteExitVO {
+	return chainRouteExitVO{Kind: e.Kind, ID: e.ID, Name: e.Name, Protocol: e.Protocol}
+}
+
+func toChainRouteVO(r service.ChainRoute) chainRouteVO {
+	return chainRouteVO{
+		ID: r.ID, Kind: r.Kind, Position: r.Position, Name: r.Name, DisplayName: r.DisplayName, IsEnabled: r.Enabled,
+		Status: r.Status, BlockedReason: r.BlockedReason, CreatedAt: r.CreatedAt, Exit: toChainRouteExitVO(r.Exit),
+		Entries: mapSlice(r.Entries, func(e service.ChainRouteEntry) chainRouteEntryVO {
+			return chainRouteEntryVO{NodeID: e.NodeID, Name: e.Name, State: e.State, CoveredBy: e.CoveredBy}
+		}),
 	}
 }
 
-// customNodeVO 对应 hub-api.yaml CustomNode；原链接属于凭据，不在这里返回。
-type customNodeVO struct {
-	ID        int64     `json:"id"`
-	Name      string    `json:"name"`
-	Protocol  string    `json:"protocol"`
-	Address   string    `json:"address"`
-	Port      int       `json:"port"`
-	RuleCount int       `json:"ruleCount"`
-	CreatedAt time.Time `json:"createdAt"`
+// chainExitVO 对应 hub-api.yaml ChainExit；原链接属于凭据，不在这里返回。
+type chainExitVO struct {
+	ID         int64     `json:"id"`
+	Name       string    `json:"name"`
+	Protocol   string    `json:"protocol"`
+	Address    string    `json:"address"`
+	Port       int       `json:"port"`
+	IsEnabled  bool      `json:"isEnabled"`
+	RouteCount int       `json:"routeCount"`
+	CreatedAt  time.Time `json:"createdAt"`
 }
 
-func toCustomNodeVO(n service.CustomNode) customNodeVO {
-	return customNodeVO{ID: n.ID, Name: n.Name, Protocol: n.Protocol, Address: n.Address, Port: n.Port, RuleCount: n.RuleCount, CreatedAt: n.CreatedAt}
+func toChainExitVO(e service.ChainExit) chainExitVO {
+	return chainExitVO{
+		ID: e.ID, Name: e.Name, Protocol: e.Protocol, Address: e.Address, Port: e.Port, IsEnabled: e.Enabled,
+		RouteCount: e.RouteCount, CreatedAt: e.CreatedAt,
+	}
 }
 
 // chainOverviewVO 对应 hub-api.yaml ChainOverview。
 type chainOverviewVO struct {
-	Allowed           bool                `json:"allowed"`
-	CustomNodeAllowed bool                `json:"customNodeAllowed"`
-	ServerAllowed     bool                `json:"serverAllowed"`
-	MaxRules          int                 `json:"maxRules"`
-	MaxCustomNodes    int                 `json:"maxCustomNodes"`
-	MaxServerRules    int                 `json:"maxServerRules"`
-	Rules             []chainRuleVO       `json:"rules"`
-	CustomNodes       []customNodeVO      `json:"customNodes"`
-	ServerRules       []serverChainRuleVO `json:"serverRules"`
-	Nodes             []chainNodeOptionVO `json:"nodes"`
+	Allowed         bool                        `json:"allowed"`
+	ExitAllowed     bool                        `json:"exitAllowed"`
+	ServerAllowed   bool                        `json:"serverAllowed"`
+	MaxClientRoutes int                         `json:"maxClientRoutes"`
+	MaxServerRoutes int                         `json:"maxServerRoutes"`
+	MaxRouteEntries int                         `json:"maxRouteEntries"`
+	MaxExits        int                         `json:"maxExits"`
+	ClientRoutes    []chainRouteVO              `json:"clientRoutes"`
+	ServerRoutes    []chainRouteVO              `json:"serverRoutes"`
+	Exits           []chainExitVO               `json:"exits"`
+	PlatformExits   []chainPlatformExitOptionVO `json:"platformExits"`
+	Nodes           []chainNodeOptionVO         `json:"nodes"`
 }
 
-// chainRuleCreateRequest 对应 hub-api.yaml ChainRuleInput；isEnabled 省略按启用。
-type chainRuleCreateRequest struct {
-	EntryNodeID      int64  `json:"entryNodeId"`
-	ExitNodeID       int64  `json:"exitNodeId"`
-	ExitCustomNodeID int64  `json:"exitCustomNodeId"`
-	Name             string `json:"name"`
-	IsEnabled        *bool  `json:"isEnabled"`
+// chainRouteRequest 对应 hub-api.yaml ChainRouteInput / ChainRouteUpdateInput；新建时 isEnabled 省略按启用，修改时 kind 被忽略。
+type chainRouteRequest struct {
+	Kind         string  `json:"kind"`
+	EntryNodeIDs []int64 `json:"entryNodeIds"`
+	ExitKind     string  `json:"exitKind"`
+	ExitID       int64   `json:"exitId"`
+	Name         string  `json:"name"`
+	IsEnabled    *bool   `json:"isEnabled"`
 }
 
-// chainRuleUpdateRequest 对应 hub-api.yaml ChainRuleUpdateInput。
-type chainRuleUpdateRequest struct {
-	Name      string `json:"name"`
-	IsEnabled bool   `json:"isEnabled"`
+func (req chainRouteRequest) toInput() service.ChainRouteInput {
+	in := service.ChainRouteInput{
+		Kind: req.Kind, EntryNodeIDs: req.EntryNodeIDs, ExitKind: req.ExitKind, ExitID: req.ExitID, Name: req.Name, Enabled: true,
+	}
+	if req.IsEnabled != nil {
+		in.Enabled = *req.IsEnabled
+	}
+	return in
 }
 
-// customNodeRequest 对应 hub-api.yaml CustomNodeInput / CustomNodeUpdateInput；link 属于凭据，不得写日志。
-type customNodeRequest struct {
+// chainRouteOrderRequest 对应 hub-api.yaml ChainRouteOrderInput。
+type chainRouteOrderRequest struct {
+	Kind string  `json:"kind"`
+	IDs  []int64 `json:"ids"`
+}
+
+// chainExitRequest 对应 hub-api.yaml ChainExitInput / ChainExitUpdateInput；link 属于凭据，不得写日志。
+type chainExitRequest struct {
 	Link string `json:"link"`
 	Name string `json:"name"`
 }
@@ -144,129 +182,134 @@ func (h *handlers) getChainOverview(w http.ResponseWriter, r *http.Request, p *s
 		writeError(w, r, err)
 		return
 	}
-	vo := chainOverviewVO{
-		Allowed: o.Flags.Chain, CustomNodeAllowed: o.Flags.CustomNode, ServerAllowed: o.Flags.ServerChain,
-		MaxRules: service.MaxChainRules, MaxCustomNodes: service.MaxCustomNodes, MaxServerRules: service.MaxServerChainRules,
-		Rules: make([]chainRuleVO, 0, len(o.Rules)), CustomNodes: make([]customNodeVO, 0, len(o.CustomNodes)),
-		ServerRules: mapSlice(o.ServerRules, toServerChainRuleVO), Nodes: make([]chainNodeOptionVO, 0, len(o.Nodes)),
-	}
-	for _, rule := range o.Rules {
-		vo.Rules = append(vo.Rules, toChainRuleVO(rule))
-	}
-	for _, n := range o.CustomNodes {
-		vo.CustomNodes = append(vo.CustomNodes, toCustomNodeVO(n))
-	}
-	for _, n := range o.Nodes {
-		vo.Nodes = append(vo.Nodes, chainNodeOptionVO{
-			ID: n.ID, Name: n.Name, Region: n.Region, Protocol: n.Protocol, CanBeExit: n.CanBeExit, CanBeServerEntry: n.CanBeServerEntry,
-		})
-	}
-	writeOK(w, vo)
+	writeOK(w, chainOverviewVO{
+		Allowed: o.Flags.Chain, ExitAllowed: o.Flags.CustomNode, ServerAllowed: o.Flags.ServerChain,
+		MaxClientRoutes: service.MaxClientRoutes, MaxServerRoutes: service.MaxServerRoutes,
+		MaxRouteEntries: service.MaxRouteEntries, MaxExits: service.MaxChainExits,
+		ClientRoutes: mapSlice(o.ClientRoutes, toChainRouteVO), ServerRoutes: mapSlice(o.ServerRoutes, toChainRouteVO),
+		Exits: mapSlice(o.Exits, toChainExitVO),
+		PlatformExits: mapSlice(o.PlatformExits, func(x service.ChainPlatformExitOption) chainPlatformExitOptionVO {
+			return chainPlatformExitOptionVO{ID: x.ID, Name: x.Name, Protocol: x.Protocol, AllowServer: x.AllowServer, AllowClient: x.AllowClient}
+		}),
+		Nodes: mapSlice(o.Nodes, func(n service.ChainNodeOption) chainNodeOptionVO {
+			return chainNodeOptionVO{ID: n.ID, Name: n.Name, Region: n.Region, Protocol: n.Protocol, CanBeExit: n.CanBeExit, CanBeServerEntry: n.CanBeServerEntry}
+		}),
+	})
 }
 
-func (h *handlers) createChainRule(w http.ResponseWriter, r *http.Request, p *service.UserPrincipal) {
-	var req chainRuleCreateRequest
+func (h *handlers) createChainRoute(w http.ResponseWriter, r *http.Request, p *service.UserPrincipal) {
+	var req chainRouteRequest
 	if err := decodeJSON(w, r, &req); err != nil {
 		writeError(w, r, err)
 		return
 	}
-	in := service.ChainRuleInput{EntryNodeID: req.EntryNodeID, ExitNodeID: req.ExitNodeID, ExitCustomNodeID: req.ExitCustomNodeID, Name: req.Name, Enabled: true}
-	if req.IsEnabled != nil {
-		in.Enabled = *req.IsEnabled
-	}
-	rule, err := h.chain.CreateRule(r.Context(), p, in)
+	route, err := h.chain.CreateRoute(r.Context(), p, req.toInput())
 	if err != nil {
 		writeError(w, r, err)
 		return
 	}
-	writeOK(w, toChainRuleVO(*rule))
+	writeOK(w, toChainRouteVO(*route))
 }
 
-func (h *handlers) updateChainRule(w http.ResponseWriter, r *http.Request, p *service.UserPrincipal) {
+func (h *handlers) updateChainRoute(w http.ResponseWriter, r *http.Request, p *service.UserPrincipal) {
 	id, err := pathID(r)
 	if err != nil {
 		writeError(w, r, err)
 		return
 	}
-	var req chainRuleUpdateRequest
+	var req chainRouteRequest
 	if err := decodeJSON(w, r, &req); err != nil {
 		writeError(w, r, err)
 		return
 	}
-	rule, err := h.chain.UpdateRule(r.Context(), p, id, req.Name, req.IsEnabled)
+	route, err := h.chain.UpdateRoute(r.Context(), p, id, req.toInput())
 	if err != nil {
 		writeError(w, r, err)
 		return
 	}
-	writeOK(w, toChainRuleVO(*rule))
+	writeOK(w, toChainRouteVO(*route))
 }
 
-func (h *handlers) deleteChainRule(w http.ResponseWriter, r *http.Request, p *service.UserPrincipal) {
+func (h *handlers) deleteChainRoute(w http.ResponseWriter, r *http.Request, p *service.UserPrincipal) {
 	id, err := pathID(r)
 	if err != nil {
 		writeError(w, r, err)
 		return
 	}
-	if err := h.chain.DeleteRule(r.Context(), p, id); err != nil {
+	if err := h.chain.DeleteRoute(r.Context(), p, id); err != nil {
 		writeError(w, r, err)
 		return
 	}
 	writeOK(w, nil)
 }
 
-func (h *handlers) createCustomNode(w http.ResponseWriter, r *http.Request, p *service.UserPrincipal) {
-	var req customNodeRequest
+func (h *handlers) reorderChainRoutes(w http.ResponseWriter, r *http.Request, p *service.UserPrincipal) {
+	var req chainRouteOrderRequest
 	if err := decodeJSON(w, r, &req); err != nil {
 		writeError(w, r, err)
 		return
 	}
-	n, err := h.chain.CreateCustomNode(r.Context(), p, req.Link, req.Name)
+	routes, err := h.chain.ReorderRoutes(r.Context(), p, req.Kind, req.IDs)
 	if err != nil {
 		writeError(w, r, err)
 		return
 	}
-	writeOK(w, toCustomNodeVO(*n))
+	writeOK(w, mapSlice(routes, toChainRouteVO))
 }
 
-func (h *handlers) updateCustomNode(w http.ResponseWriter, r *http.Request, p *service.UserPrincipal) {
+func (h *handlers) createChainExit(w http.ResponseWriter, r *http.Request, p *service.UserPrincipal) {
+	var req chainExitRequest
+	if err := decodeJSON(w, r, &req); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	e, err := h.chain.CreateExit(r.Context(), p, req.Link, req.Name)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeOK(w, toChainExitVO(*e))
+}
+
+func (h *handlers) updateChainExit(w http.ResponseWriter, r *http.Request, p *service.UserPrincipal) {
 	id, err := pathID(r)
 	if err != nil {
 		writeError(w, r, err)
 		return
 	}
-	var req customNodeRequest
+	var req chainExitRequest
 	if err := decodeJSON(w, r, &req); err != nil {
 		writeError(w, r, err)
 		return
 	}
-	n, err := h.chain.UpdateCustomNode(r.Context(), p, id, req.Name, req.Link)
+	e, err := h.chain.UpdateExit(r.Context(), p, id, req.Name, req.Link)
 	if err != nil {
 		writeError(w, r, err)
 		return
 	}
-	writeOK(w, toCustomNodeVO(*n))
+	writeOK(w, toChainExitVO(*e))
 }
 
-func (h *handlers) deleteCustomNode(w http.ResponseWriter, r *http.Request, p *service.UserPrincipal) {
+func (h *handlers) deleteChainExit(w http.ResponseWriter, r *http.Request, p *service.UserPrincipal) {
 	id, err := pathID(r)
 	if err != nil {
 		writeError(w, r, err)
 		return
 	}
-	if err := h.chain.DeleteCustomNode(r.Context(), p, id); err != nil {
+	if err := h.chain.DeleteExit(r.Context(), p, id); err != nil {
 		writeError(w, r, err)
 		return
 	}
 	writeOK(w, nil)
 }
 
-func (h *handlers) getCustomNodeLink(w http.ResponseWriter, r *http.Request, p *service.UserPrincipal) {
+func (h *handlers) getChainExitLink(w http.ResponseWriter, r *http.Request, p *service.UserPrincipal) {
 	id, err := pathID(r)
 	if err != nil {
 		writeError(w, r, err)
 		return
 	}
-	link, err := h.chain.CustomNodeLink(r.Context(), p, id)
+	link, err := h.chain.ExitLink(r.Context(), p, id)
 	if err != nil {
 		writeError(w, r, err)
 		return

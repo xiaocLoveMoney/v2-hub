@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/netip"
+	"slices"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -19,8 +20,8 @@ import (
 	"v2-hub-server/internal/manager/render"
 )
 
-// 服务端链式下发（docs/03 §5.19、§3 C1–C5，Ruling-40）：以入口服务器为单位，把面板内核模板里的平台条目整体对齐到期望；
-// 写入前加密备份整份模板，重启后内核未运行即写回备份并记失败。
+// 服务端链式下发（docs/03 §5.19、§3 C1–C5，Ruling-40）：以起飞服务器为单位，把面板内核模板里的平台条目整体对齐到期望；
+// 写入前加密备份整份模板，重启后内核未运行即写回备份并记失败。期望条目由生效计算（chain_resolve.go）的结果生成。
 
 // 下发状态（chain_apply.status，与 hub-api.yaml 的 ChainApplyStatus 对应；none 表示没有记录）。
 const (
@@ -39,6 +40,7 @@ const (
 	ActionChainApplyRetry  = "chain.apply_retry"
 
 	msgChainCoreNotRunning = "重启后 Xray 未能运行，已回滚"
+	msgChainBadTemplate    = "面板上的内核模板不是预期的 JSON"
 	msgChainInternal       = "下发时发生内部错误，详见服务端日志"
 )
 
@@ -55,7 +57,12 @@ type ChainApplyConfig struct {
 	// MaxFailures 是同一期望连续失败多少次后停止自动重试；Backoff 是第 n 次失败后的退避。
 	MaxFailures int
 	Backoff     []time.Duration
+	// Resolver 解析用户出口的域名（定期复查固定的地址）；nil 用系统解析器。
+	Resolver Resolver
 }
+
+// errChainCoreDown 表示写入新模板并重启后内核没能运行（配置有问题的信号，用于失败隔离）。
+var errChainCoreDown = errors.New("core not running after restart")
 
 var defaultChainBackoff = []time.Duration{time.Minute, 5 * time.Minute, 15 * time.Minute}
 
@@ -92,7 +99,7 @@ func DefaultChainApplyConfig() ChainApplyConfig {
 	return ChainApplyConfig{ConfirmDelay: defaultChainConfirmDelay, StablePause: defaultChainStablePause}.withDefaults()
 }
 
-// ChainApply 是一台入口服务器的下发状态（管理端展示）。
+// ChainApply 是一台起飞服务器的下发状态（管理端展示）。
 type ChainApply struct {
 	ServerID         int64
 	Supported        bool
@@ -107,26 +114,13 @@ type ChainApply struct {
 	AppliedAt        *time.Time
 }
 
-// AdminServerChainRule 是管理端全站列表里的一条服务端规则。
-type AdminServerChainRule struct {
-	ServerChainRule
-	UserID          int64
-	Username        string
-	EntryServerName string
-}
-
-// ServerChainRuleFilter 是全站列表的筛选条件；0 表示不限。
-type ServerChainRuleFilter struct {
-	UserID   int64
-	ServerID int64
-}
-
-// ChainApplier 负责把服务端规则下发到入口面板。并发安全：后台任务串行处理各服务器，接口只读状态或触发一轮。
+// ChainApplier 负责把服务端规则下发到起飞面板。并发安全：后台任务串行处理各服务器，接口只读状态或触发一轮。
 type ChainApplier struct {
 	store
 	sealer *crypto.Sealer
 	users  *UserService
 	panels *PanelService
+	guard  *chainGuard
 	cfg    ChainApplyConfig
 	now    func() time.Time
 	kicks  chan struct{}
@@ -138,7 +132,7 @@ func NewChainApplier(pool *pgxpool.Pool, sealer *crypto.Sealer, users *UserServi
 		now = time.Now
 	}
 	return &ChainApplier{
-		store: newStore(pool), sealer: sealer, users: users, panels: panels,
+		store: newStore(pool), sealer: sealer, users: users, panels: panels, guard: newChainGuard(cfg.Resolver),
 		cfg: cfg.withDefaults(), now: now, kicks: make(chan struct{}, 1),
 	}
 }
@@ -169,71 +163,204 @@ func (a *ChainApplier) ListServerIDs(ctx context.Context) ([]int64, error) {
 	return ids, nil
 }
 
-// chainUserCtx 是计算期望时某个用户的缓存：开关、可用节点、各节点参数、在这台服务器上的 client email。
-type chainUserCtx struct {
-	flags     ChainFlags
-	available map[int64]sqlcgen.ListUserSubNodesRow
-	nodes     map[int64]render.ProxyNode
-	email     string
+// desiredSet 是一台服务器上应有的平台条目及其来历。
+type desiredSet struct {
+	section  chain.Section
+	included []int64
+	// changedAt 是纳入的各规则（或其出口）最近一次改动的时间；ownRoutes 是其中落地为用户出口的规则及其内容指纹
+	changedAt map[int64]time.Time
+	ownRoutes map[int64]string
 }
 
-func (a *ChainApplier) loadUserCtx(ctx context.Context, userID, serverID int64) (chainUserCtx, error) {
-	flags, err := chainFlags(ctx, a.q, userID)
+// latestChange 返回纳入的规则里最近一次改动的时间。
+func (d desiredSet) latestChange() time.Time {
+	var latest time.Time
+	for _, id := range d.included {
+		if at := d.changedAt[id]; at.Compare(latest) > 0 {
+			latest = at
+		}
+	}
+	return latest
+}
+
+// repinStale 复查一个用户的服务端规则引用的用户出口：固定的地址超过复查周期的重新解析（docs/03 §5.19 用户出口的地址限制）。
+// 仍在解析结果里就不变；解析结果里有非公网地址或指向平台自己的服务器则作废（规则随之阻断）；暂时解析不了保持原样。
+// 返回是否有出口的固定地址变了（调用方需要重读状态）。
+func (a *ChainApplier) repinStale(ctx context.Context, st *chainState) (bool, error) {
+	now := a.now()
+	isChanged := false
+	isChecked := make(map[int64]bool, len(st.exits))
+	for _, r := range st.routes {
+		isOwnServer := r.Kind == ChainKindServer && r.Exit.Kind == ChainExitOwn
+		if !isOwnServer || isChecked[r.Exit.ID] {
+			continue
+		}
+		isChecked[r.Exit.ID] = true
+		sec := st.exits[r.Exit.ID]
+		if !sec.isParsed || sec.pinned == nil || now.Sub(sec.resolvedAt) < chainRepinAfter {
+			continue
+		}
+		if _, err := netip.ParseAddr(sec.node.Address); err == nil {
+			continue
+		}
+		next, err := a.repinExit(ctx, sec)
+		if errors.Is(err, errExitResolve) {
+			next = sec.pinned
+		}
+		if next == nil || *next != *sec.pinned {
+			isChanged = true
+		}
+		err = a.q.SetChainExitResolved(ctx, sqlcgen.SetChainExitResolvedParams{ID: r.Exit.ID, ResolvedIp: next, ResolvedAt: timestamptz(now)})
+		if err != nil {
+			return false, fmt.Errorf("repin chain exit %d: %w", r.Exit.ID, err)
+		}
+	}
+	return isChanged, nil
+}
+
+// repinExit 重新解析一个出口：返回新固定的地址；不再安全时返回 nil；暂时解析不了返回 errExitResolve。
+func (a *ChainApplier) repinExit(ctx context.Context, sec exitSecret) (*netip.Addr, error) {
+	ip, err := a.guard.pin(ctx, sec.node.Address, sec.pinned)
+	if errors.Is(err, errExitResolve) {
+		return nil, err
+	}
 	if err != nil {
-		return chainUserCtx{}, err
+		return nil, nil
 	}
-	_, available, err := availableNodes(ctx, a.q, userID)
+	hosts, err := a.q.ListPlatformHosts(ctx)
 	if err != nil {
-		return chainUserCtx{}, err
+		return nil, fmt.Errorf("list platform hosts: %w", err)
 	}
-	items, err := a.users.loadSubItems(ctx, userID)
-	if err != nil {
-		return chainUserCtx{}, err
+	lookupCtx, cancel := context.WithTimeout(ctx, platformLookupTimeout)
+	defer cancel()
+	if a.guard.platformAddrs(lookupCtx, hosts)[ip] {
+		return nil, nil
 	}
-	nodes := make(map[int64]render.ProxyNode, len(items))
-	for _, it := range items {
-		nodes[it.nodeID] = it.node
+	return &ip, nil
+}
+
+// exitNodeFor 返回一条规则的落地写进面板时用的参数；平台节点取本人在落地面板上的参数（与订阅同源），还没同步到时返回 false。
+func (a *ChainApplier) exitNodeFor(ctx context.Context, st *chainState, r ChainRoute, userID int64, subNodes *map[int64]render.ProxyNode) (render.ProxyNode, bool, error) {
+	if r.Exit.Kind != ChainExitNode {
+		node, ok := st.exits[r.Exit.ID].serverNode()
+		return node, ok, nil
 	}
+	if *subNodes == nil {
+		items, err := a.users.loadSubItems(ctx, userID)
+		if err != nil {
+			return render.ProxyNode{}, false, err
+		}
+		nodes := make(map[int64]render.ProxyNode, len(items))
+		for _, it := range items {
+			nodes[it.nodeID] = it.node
+		}
+		*subNodes = nodes
+	}
+	node, ok := (*subNodes)[r.Exit.ID]
+	return node, ok, nil
+}
+
+// userEntries 生成一个用户在这台服务器上的条目：每条有起飞入站在这里生效的规则一条（docs/03 §5.19 下发单位）。
+func (a *ChainApplier) userEntries(ctx context.Context, serverID, userID int64, coreServers map[int64]bool, isRepinAllowed bool, set *desiredSet) ([]chain.Entry, error) {
 	email, err := a.q.GetProvisionEmail(ctx, sqlcgen.GetProvisionEmailParams{UserID: userID, ServerID: serverID})
-	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-		return chainUserCtx{}, fmt.Errorf("get provision email of user %d on server %d: %w", userID, serverID, err)
+	if errors.Is(err, pgx.ErrNoRows) || (err == nil && email == "") {
+		return nil, nil
 	}
-	return chainUserCtx{flags: flags, available: available, nodes: nodes, email: email}, nil
+	if err != nil {
+		return nil, fmt.Errorf("get provision email of user %d on server %d: %w", userID, serverID, err)
+	}
+	st, err := loadChainState(ctx, a.q, a.sealer, coreServers, userID)
+	if err != nil {
+		return nil, err
+	}
+	if isRepinAllowed {
+		isChanged, err := a.repinStale(ctx, st)
+		if err != nil {
+			return nil, err
+		}
+		if isChanged {
+			if st, err = loadChainState(ctx, a.q, a.sealer, coreServers, userID); err != nil {
+				return nil, err
+			}
+		}
+	}
+	var subNodes map[int64]render.ProxyNode
+	out := make([]chain.Entry, 0, len(st.routes))
+	for _, r := range st.routes {
+		if r.Kind != ChainKindServer {
+			continue
+		}
+		tags := make([]string, 0, len(r.Entries))
+		for _, e := range r.Entries {
+			isHere := e.ServerID == serverID && isEffectiveEntry(e.State) && e.InboundTag != ""
+			if isHere && !slices.Contains(tags, e.InboundTag) {
+				tags = append(tags, e.InboundTag)
+			}
+		}
+		if len(tags) == 0 {
+			continue
+		}
+		exit, ok, err := a.exitNodeFor(ctx, st, r, userID, &subNodes)
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			continue
+		}
+		out = append(out, chain.Entry{RuleID: r.ID, InboundTags: tags, UserEmail: email, Exit: exit})
+		set.changedAt[r.ID] = r.changedAt
+		if r.Exit.Kind == ChainExitOwn {
+			set.ownRoutes[r.ID] = routeFingerprint(r.ID, st.exits[r.Exit.ID])
+		}
+	}
+	return out, nil
 }
 
-// desired 计算这台服务器上应有的平台条目：不阻断、启用、落地凭据与入口 client 都已就绪的规则（docs/03 §5.19 下发单位）。
-func (a *ChainApplier) desired(ctx context.Context, serverID int64) (chain.Section, []int64, error) {
-	rows, err := a.q.ListServerChainRulesOnServer(ctx, serverID)
+// desired 计算这台服务器上应有的平台条目。isRepinAllowed 为真时顺带复查用户出口固定的地址（要做 DNS 查询，只在后台下发时开）。
+func (a *ChainApplier) desired(ctx context.Context, serverID int64, isRepinAllowed bool) (desiredSet, error) {
+	set := desiredSet{changedAt: map[int64]time.Time{}, ownRoutes: map[int64]string{}}
+	userIDs, err := a.q.ListServerRouteUsersOnServer(ctx, serverID)
 	if err != nil {
-		return chain.Section{}, nil, fmt.Errorf("list server chain rules on server %d: %w", serverID, err)
+		return set, fmt.Errorf("list server route users on server %d: %w", serverID, err)
 	}
 	coreServers, err := coreConfigServers(ctx, a.q, a)
 	if err != nil {
-		return chain.Section{}, nil, err
+		return set, err
 	}
-	users := make(map[int64]chainUserCtx, len(rows))
-	entries := make([]chain.Entry, 0, len(rows))
-	for _, r := range rows {
-		if !r.IsEnabled {
-			continue
+	entries := make([]chain.Entry, 0, len(userIDs))
+	for _, userID := range userIDs {
+		more, err := a.userEntries(ctx, serverID, userID, coreServers, isRepinAllowed, &set)
+		if err != nil {
+			return set, err
 		}
-		u, ok := users[r.UserID]
-		if !ok {
-			if u, err = a.loadUserCtx(ctx, r.UserID, serverID); err != nil {
-				return chain.Section{}, nil, err
-			}
-			users[r.UserID] = u
-		}
-		if serverRuleBlockedReason(u.flags, u.available, coreServers, r.EntryNodeID, r.ExitNodeID) != ChainReasonNone {
-			continue
-		}
-		exit, hasExit := u.nodes[r.ExitNodeID]
-		if !hasExit || u.email == "" || r.InboundTag == "" {
-			continue
-		}
-		entries = append(entries, chain.Entry{RuleID: r.ID, InboundTag: r.InboundTag, UserEmail: u.email, Exit: exit})
+		entries = append(entries, more...)
 	}
-	return chain.Build(entries)
+	if set.section, set.included, err = chain.Build(entries); err != nil {
+		return set, err
+	}
+	return set, nil
+}
+
+// quarantine 失败隔离（docs/03 §5.19，Ruling-49）：把本次相对上次成功新增或有变、且落地为用户出口的规则记为隔离，
+// 下一轮不带它们重新下发。返回隔离了几条。
+func (a *ChainApplier) quarantine(ctx context.Context, rec applyRecord, set desiredSet) (int, error) {
+	count := 0
+	for _, id := range set.included {
+		fingerprint, isOwn := set.ownRoutes[id]
+		if !isOwn || fingerprint == "" {
+			continue
+		}
+		isNew := !slices.Contains(rec.applied, id)
+		isChanged := !rec.appliedAt.Valid || set.changedAt[id].Compare(rec.appliedAt.Time) > 0
+		if !isNew && !isChanged {
+			continue
+		}
+		if err := a.q.SetChainRouteQuarantine(ctx, sqlcgen.SetChainRouteQuarantineParams{ID: id, QuarantineHash: fingerprint}); err != nil {
+			return count, fmt.Errorf("quarantine chain route %d: %w", id, err)
+		}
+		count++
+	}
+	return count, nil
 }
 
 // applyRecord 是 chain_apply 一行的内存形态。
@@ -304,17 +431,23 @@ func (a *ChainApplier) ApplyServer(ctx context.Context, serverID int64) error {
 	if err != nil {
 		return err
 	}
-	sec, included, err := a.desired(ctx, serverID)
+	// 先取数据库时间再算期望：之后才发生的改动，时间一定晚于它，不会被误当成已下发
+	checkedAt, err := a.q.GetDBNow(ctx)
+	if err != nil {
+		return fmt.Errorf("get db time: %w", err)
+	}
+	set, err := a.desired(ctx, serverID, true)
 	if err != nil {
 		return err
 	}
-	hash, err := sec.Hash()
+	hash, err := set.section.Hash()
 	if err != nil {
 		return err
 	}
+	run := applyRun{serverID: serverID, set: set, hash: hash, checkedAt: checkedAt}
 	prov, _, err := a.panels.openEnabledProvider(ctx, serverID)
 	if err != nil {
-		return a.markPending(ctx, serverID, rec, hash, included, errorMessage(serverID, err))
+		return a.markPending(ctx, run, rec, errorMessage(serverID, err))
 	}
 	cc, ok := prov.(panel.CoreConfigurator)
 	if !ok || !prov.Capabilities().CoreConfig {
@@ -322,55 +455,66 @@ func (a *ChainApplier) ApplyServer(ctx context.Context, serverID int64) error {
 	}
 	tpl, err := cc.GetCoreTemplate(ctx)
 	if err != nil {
-		return a.markPending(ctx, serverID, rec, hash, included, errorMessage(serverID, err))
+		return a.markPending(ctx, run, rec, errorMessage(serverID, err))
 	}
 	current, err := chain.Extract(tpl.Config)
 	if err != nil {
-		return a.markPending(ctx, serverID, rec, hash, included, "面板上的内核模板不是预期的 JSON")
+		return a.markPending(ctx, run, rec, msgChainBadTemplate)
 	}
 	currentHash, err := current.Hash()
 	if err != nil {
 		return err
 	}
 	if currentHash == hash {
-		return a.markConsistent(ctx, serverID, rec, hash, included)
+		return a.markConsistent(ctx, run, rec)
 	}
-	return a.applyChange(ctx, serverID, rec, cc, tpl, sec, hash, included)
+	return a.applyChange(ctx, run, rec, cc, tpl)
+}
+
+// applyRun 是一轮检查里不变的东西：哪台服务器、期望条目及其哈希、开始检查时的数据库时间。
+type applyRun struct {
+	serverID  int64
+	set       desiredSet
+	hash      string
+	checkedAt pgtype.Timestamptz
 }
 
 // markPending 记下“待下发”及原因（面板离线、读不到模板等，不算一次失败）；从没有过记录且没有要下发的规则时不建记录。
-func (a *ChainApplier) markPending(ctx context.Context, serverID int64, rec applyRecord, hash string, included []int64, reason string) error {
-	if !rec.exists && len(included) == 0 {
+func (a *ChainApplier) markPending(ctx context.Context, run applyRun, rec applyRecord, reason string) error {
+	if !rec.exists && len(run.set.included) == 0 {
 		return nil
 	}
-	if rec.desiredHash != hash {
+	if rec.desiredHash != run.hash {
 		rec.failCount, rec.nextAttemptAt = 0, pgtype.Timestamptz{}
 	}
-	if rec.status != chainApplyFailed || rec.desiredHash != hash {
+	if rec.status != chainApplyFailed || rec.desiredHash != run.hash {
 		rec.status = chainApplyPending
 	}
-	rec.desiredHash, rec.lastError = hash, reason
-	return a.saveRecord(ctx, serverID, rec)
+	rec.desiredHash, rec.lastError = run.hash, reason
+	return a.saveRecord(ctx, run.serverID, rec)
 }
 
 // markConsistent 面板现状与期望一致（C5，或被别处改成了期望的样子）。
-func (a *ChainApplier) markConsistent(ctx context.Context, serverID int64, rec applyRecord, hash string, included []int64) error {
+// 条目没变但有规则在上次记录之后改动过（如只改了名称）时也要刷新时间，否则那条规则会一直显示下发中。
+func (a *ChainApplier) markConsistent(ctx context.Context, run applyRun, rec applyRecord) error {
+	included := run.set.included
 	if !rec.exists && len(included) == 0 {
 		return nil
 	}
-	unchanged := rec.status == chainApplyApplied && rec.desiredHash == hash && len(rec.applied) == len(included)
-	if unchanged {
+	isSame := rec.status == chainApplyApplied && rec.desiredHash == run.hash && len(rec.applied) == len(included)
+	isStale := !rec.appliedAt.Valid || run.set.latestChange().Compare(rec.appliedAt.Time) > 0
+	if isSame && !isStale {
 		return nil
 	}
-	rec.status, rec.desiredHash, rec.applied = chainApplyApplied, hash, included
+	rec.status, rec.desiredHash, rec.applied = chainApplyApplied, run.hash, included
 	rec.failCount, rec.lastError, rec.nextAttemptAt = 0, "", pgtype.Timestamptz{}
-	rec.appliedAt = timestamptz(a.now())
-	return a.saveRecord(ctx, serverID, rec)
+	rec.appliedAt = run.checkedAt
+	return a.saveRecord(ctx, run.serverID, rec)
 }
 
 // applyChange 面板现状与期望不同：在间隔、退避与失败上限允许时写入并确认，失败则回滚（C1–C4）。
-func (a *ChainApplier) applyChange(ctx context.Context, serverID int64, rec applyRecord, cc panel.CoreConfigurator,
-	tpl panel.CoreTemplate, sec chain.Section, hash string, included []int64) error {
+func (a *ChainApplier) applyChange(ctx context.Context, run applyRun, rec applyRecord, cc panel.CoreConfigurator, tpl panel.CoreTemplate) error {
+	serverID, hash, included := run.serverID, run.hash, run.set.included
 	now := a.now()
 	sameDesired := rec.exists && rec.desiredHash == hash
 	if !sameDesired {
@@ -394,9 +538,9 @@ func (a *ChainApplier) applyChange(ctx context.Context, serverID int64, rec appl
 	if err != nil {
 		return fmt.Errorf("seal core template backup of server %d: %w", serverID, err)
 	}
-	merged, err := chain.Merge(tpl.Config, sec)
+	merged, err := chain.Merge(tpl.Config, run.set.section)
 	if err != nil {
-		return a.markPending(ctx, serverID, rec, hash, included, "面板上的内核模板不是预期的 JSON")
+		return a.markPending(ctx, run, rec, msgChainBadTemplate)
 	}
 	rec.status, rec.desiredHash, rec.lastAttemptAt, rec.backupEnc = chainApplyPending, hash, timestamptz(now), backup
 	if err := a.saveRecord(ctx, serverID, rec); err != nil {
@@ -405,26 +549,46 @@ func (a *ChainApplier) applyChange(ctx context.Context, serverID int64, rec appl
 
 	written, writeErr := a.writeAndConfirm(ctx, cc, panel.CoreTemplate{Config: merged, Extra: tpl.Extra})
 	if writeErr != nil {
-		// 写入被面板拒绝时模板没变（3x-ui 保存前会校验），不必回滚，也不该为此再重启一次
-		if written {
-			a.rollback(ctx, serverID, cc, tpl)
-		}
-		rec.failCount++
-		backoff := a.cfg.Backoff[min(rec.failCount, len(a.cfg.Backoff))-1]
-		rec.status, rec.lastError, rec.nextAttemptAt = chainApplyFailed, errorMessage(serverID, writeErr), timestamptz(a.now().Add(backoff))
-		if err := a.saveRecord(ctx, serverID, rec); err != nil {
-			return err
-		}
-		return writeAudit(ctx, a.q, AuditEntry{ActorType: ActorSystem, Action: ActionChainApplyFailed, TargetType: targetServer,
-			TargetID: fmt.Sprint(serverID), Detail: map[string]any{"ruleCount": len(included), "failCount": rec.failCount, "error": rec.lastError}})
+		return a.recordFailure(ctx, run, rec, cc, tpl, written, writeErr)
 	}
-	rec.status, rec.applied, rec.appliedAt = chainApplyApplied, included, timestamptz(a.now())
+	rec.status, rec.applied, rec.appliedAt = chainApplyApplied, included, run.checkedAt
 	rec.failCount, rec.lastError, rec.nextAttemptAt = 0, "", pgtype.Timestamptz{}
 	if err := a.saveRecord(ctx, serverID, rec); err != nil {
 		return err
 	}
 	return writeAudit(ctx, a.q, AuditEntry{ActorType: ActorSystem, Action: ActionChainApply, TargetType: targetServer,
 		TargetID: fmt.Sprint(serverID), Detail: map[string]any{"ruleCount": len(included)}})
+}
+
+// recordFailure 处理一次下发失败（C3）：必要时回滚，记失败与退避；配置被面板拒绝或内核起不来时做失败隔离。
+func (a *ChainApplier) recordFailure(ctx context.Context, run applyRun, rec applyRecord, cc panel.CoreConfigurator,
+	original panel.CoreTemplate, written bool, writeErr error) error {
+	serverID := run.serverID
+	// 写入被面板拒绝时模板没变（3x-ui 保存前会校验），不必回滚，也不该为此再重启一次
+	if written {
+		a.rollback(ctx, serverID, cc, original)
+	}
+	quarantined := 0
+	isConfigFault := errors.Is(writeErr, panel.ErrRejected) || errors.Is(writeErr, errChainCoreDown)
+	if isConfigFault {
+		var err error
+		if quarantined, err = a.quarantine(ctx, rec, run.set); err != nil {
+			return err
+		}
+	}
+	rec.failCount++
+	backoff := a.cfg.Backoff[min(rec.failCount, len(a.cfg.Backoff))-1]
+	rec.status, rec.lastError, rec.nextAttemptAt = chainApplyFailed, errorMessage(serverID, writeErr), timestamptz(a.now().Add(backoff))
+	if err := a.saveRecord(ctx, serverID, rec); err != nil {
+		return err
+	}
+	if quarantined > 0 {
+		// 隔离后期望变了，不必等退避，尽快带着剩下的规则再下发
+		a.Kick()
+	}
+	return writeAudit(ctx, a.q, AuditEntry{ActorType: ActorSystem, Action: ActionChainApplyFailed, TargetType: targetServer,
+		TargetID: fmt.Sprint(serverID), Detail: map[string]any{
+			"ruleCount": len(run.set.included), "failCount": rec.failCount, "error": rec.lastError, "quarantined": quarantined}})
 }
 
 // writeAndConfirm 写入模板、重启内核，并确认内核稳定运行；written 表示模板已写进面板（失败时需要回滚）。
@@ -475,7 +639,7 @@ func (a *ChainApplier) confirmRunning(ctx context.Context, cc panel.CoreConfigur
 	if lastMessage != "" {
 		msg += "：" + lastMessage
 	}
-	return newError(CodeUpstream, msg)
+	return fmt.Errorf("%w: %w", errChainCoreDown, newError(CodeUpstream, msg))
 }
 
 // rollback 写回写入前的模板并重启；失败只能记日志，下发记录里已标为失败，下一轮会重新对账。
@@ -517,7 +681,7 @@ func (a *ChainApplier) serverProviderType(ctx context.Context, serverID int64) (
 	return "", newError(CodeNotFound, msgServerNotFound)
 }
 
-// Status 返回一台服务器作为入口的下发状态（管理端，server:read）。
+// Status 返回一台服务器作为起飞服务器的下发状态（管理端，server:read）。
 func (a *ChainApplier) Status(ctx context.Context, serverID int64) (*ChainApply, error) {
 	providerType, err := a.serverProviderType(ctx, serverID)
 	if err != nil {
@@ -527,10 +691,11 @@ func (a *ChainApplier) Status(ctx context.Context, serverID int64) (*ChainApply,
 	if err != nil {
 		return nil, err
 	}
-	_, included, err := a.desired(ctx, serverID)
+	set, err := a.desired(ctx, serverID, false)
 	if err != nil {
 		return nil, err
 	}
+	included := set.included
 	return &ChainApply{
 		ServerID: serverID, Supported: a.panels.SupportsCoreConfig(providerType), Status: rec.status,
 		RuleCount: len(included), AppliedRuleCount: len(rec.applied), FailCount: rec.failCount,
@@ -556,67 +721,4 @@ func (a *ChainApplier) Retry(ctx context.Context, actor *AdminPrincipal, serverI
 	}
 	a.Kick()
 	return a.Status(ctx, serverID)
-}
-
-// ListServerRules 返回全站服务端规则（管理端只读，Ruling-41），按 id 倒序分页。
-func (a *ChainApplier) ListServerRules(ctx context.Context, f ServerChainRuleFilter, pq PageQuery) (*Page[AdminServerChainRule], error) {
-	limit, offset, err := pq.normalize()
-	if err != nil {
-		return nil, err
-	}
-	userArg := pgtype.Int8{Int64: f.UserID, Valid: f.UserID > 0}
-	serverArg := pgtype.Int8{Int64: f.ServerID, Valid: f.ServerID > 0}
-	total, err := a.q.CountAdminServerChainRules(ctx, sqlcgen.CountAdminServerChainRulesParams{UserID: userArg, ServerID: serverArg})
-	if err != nil {
-		return nil, fmt.Errorf("count admin server chain rules: %w", err)
-	}
-	if total == 0 {
-		return &Page[AdminServerChainRule]{Items: []AdminServerChainRule{}}, nil
-	}
-	rows, err := a.q.ListAdminServerChainRules(ctx, sqlcgen.ListAdminServerChainRulesParams{
-		UserID: userArg, ServerID: serverArg, RowLimit: limit, RowOffset: offset,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("list admin server chain rules: %w", err)
-	}
-	coreServers, err := coreConfigServers(ctx, a.q, a)
-	if err != nil {
-		return nil, err
-	}
-	serverIDs := make([]int64, 0, len(rows))
-	for _, r := range rows {
-		serverIDs = append(serverIDs, r.EntryServerID)
-	}
-	views, err := applyViews(ctx, a.q, serverIDs)
-	if err != nil {
-		return nil, err
-	}
-	type userState struct {
-		flags     ChainFlags
-		available map[int64]sqlcgen.ListUserSubNodesRow
-	}
-	states := make(map[int64]userState, len(rows))
-	items := make([]AdminServerChainRule, 0, len(rows))
-	for _, r := range rows {
-		st, ok := states[r.UserID]
-		if !ok {
-			if st.flags, err = chainFlags(ctx, a.q, r.UserID); err != nil {
-				return nil, err
-			}
-			if _, st.available, err = availableNodes(ctx, a.q, r.UserID); err != nil {
-				return nil, err
-			}
-			states[r.UserID] = st
-		}
-		item := AdminServerChainRule{
-			ServerChainRule: ServerChainRule{
-				ID: r.ID, EntryNodeID: r.EntryNodeID, EntryName: r.EntryName, EntryServerID: r.EntryServerID,
-				ExitNodeID: r.ExitNodeID, ExitName: r.ExitName, Enabled: r.IsEnabled, CreatedAt: r.CreatedAt.Time,
-			},
-			UserID: r.UserID, Username: r.Username, EntryServerName: r.EntryServerName,
-		}
-		finishServerRule(&item.ServerChainRule, serverRuleBlockedReason(st.flags, st.available, coreServers, r.EntryNodeID, r.ExitNodeID), views)
-		items = append(items, item)
-	}
-	return &Page[AdminServerChainRule]{Items: items, Total: total}, nil
 }
