@@ -176,7 +176,7 @@ describe('我的出口：添加与编辑弹窗', () => {
     expect(within(dialog).getByRole('button', { name: '分享链接' }).getAttribute('aria-pressed')).toBe('true')
     fireEvent.click(within(dialog).getByRole('button', { name: '保存' }))
     await waitFor(() => expect(calls.some((c) => c.method === 'POST')).toBe(true))
-    expect((calls.find((c) => c.method === 'POST')?.body as { link: string }).link).toBe(hysteria)
+    expect(calls.find((c) => c.method === 'POST')?.body).toMatchObject({ link: hysteria })
   })
 
   it('编辑：默认不动连接参数，只改名时不带链接也不取链接', async () => {
