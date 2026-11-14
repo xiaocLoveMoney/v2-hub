@@ -164,6 +164,19 @@ func TestAdminChainExitEndpoints(t *testing.T) {
 		t.Fatalf("decode own exit: %v", err)
 	}
 	ownPath := fmt.Sprintf("%s/%d", adminExitsPath, own.ID)
+
+	// 延迟测试（Ruling-52）：这里只验校验、归属与权限，真正跑测试由 service 层的假面板用例覆盖
+	const missingID = 999999
+	ownTestPath := fmt.Sprintf("%s/%d/test", chainExitsPath, own.ID)
+	expectStatus(t, alice.do(http.MethodPost, ownTestPath, map[string]any{"nodeId": 1, "mode": "icmp"}), http.StatusBadRequest, string(service.CodeInvalidArgument))
+	expectStatus(t, alice.do(http.MethodPost, ownTestPath, map[string]any{"nodeId": missingID, "mode": "tcp"}), http.StatusBadRequest, string(service.CodeInvalidArgument))
+	expectStatus(t, alice.do(http.MethodPost, fmt.Sprintf("%s/%d/test", chainExitsPath, exit.ID), map[string]any{"nodeId": 1, "mode": "tcp"}),
+		http.StatusNotFound, string(service.CodeNotFound))
+	expectStatus(t, root.do(http.MethodPost, exitPath+"/test", map[string]any{"serverId": missingID, "mode": "icmp"}), http.StatusBadRequest, string(service.CodeInvalidArgument))
+	expectStatus(t, root.do(http.MethodPost, exitPath+"/test", map[string]any{"serverId": missingID, "mode": "tcp"}), http.StatusNotFound, string(service.CodeNotFound))
+	expectStatus(t, root.do(http.MethodPost, fmt.Sprintf("%s/%d/test", adminExitsPath, missingID), map[string]any{"serverId": 1, "mode": "tcp"}),
+		http.StatusNotFound, string(service.CodeNotFound))
+	expectStatus(t, alice.do(http.MethodPost, exitPath+"/test", map[string]any{"serverId": 1, "mode": "tcp"}), http.StatusUnauthorized, string(service.CodeUnauthenticated))
 	expectStatus(t, root.do(http.MethodGet, ownPath+"/link", nil), http.StatusNotFound, string(service.CodeNotFound))
 	expectStatus(t, root.do(http.MethodPut, ownPath, map[string]any{
 		"name": "x", "remark": "", "isEnabled": true, "allowServer": true, "allowClient": true, "nodeGroupIds": []int64{},
@@ -202,6 +215,7 @@ func TestAdminChainExitEndpoints(t *testing.T) {
 	expectStatus(t, viewer.do(http.MethodGet, exitPath+"/link", nil), http.StatusForbidden, string(service.CodePermissionDenied))
 	expectStatus(t, viewer.do(http.MethodPut, ownPath+"/enabled", map[string]any{"isEnabled": true}), http.StatusForbidden, string(service.CodePermissionDenied))
 	expectStatus(t, viewer.do(http.MethodDelete, exitPath, nil), http.StatusForbidden, string(service.CodePermissionDenied))
+	expectStatus(t, viewer.do(http.MethodPost, exitPath+"/test", map[string]any{"serverId": 1, "mode": "tcp"}), http.StatusForbidden, string(service.CodePermissionDenied))
 	expectStatus(t, viewer.do(http.MethodGet, adminRoutesPath, nil), http.StatusForbidden, string(service.CodePermissionDenied))
 
 	// 删除：用户出口与平台出口都可以

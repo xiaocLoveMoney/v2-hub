@@ -129,6 +129,9 @@ type ChainOptions struct {
 	// ServerWriteLimit / ServerWriteWindow 是每个用户对服务端规则的写操作频率。
 	ServerWriteLimit  int
 	ServerWriteWindow time.Duration
+	// ExitTestLimit / ExitTestWindow 是每个用户发起出口延迟测试的频率（Ruling-52）。
+	ExitTestLimit  int
+	ExitTestWindow time.Duration
 	// Now 取当前时间；nil 用系统时间。
 	Now func() time.Time
 }
@@ -140,6 +143,8 @@ type ChainService struct {
 	applier      *ChainApplier
 	guard        *chainGuard
 	serverWrites *ratelimit.FailureGuard
+	exitTests    *ratelimit.FailureGuard
+	testing      *exitTestLocks
 	now          func() time.Time
 }
 
@@ -152,14 +157,24 @@ func NewChainService(pool *pgxpool.Pool, sealer *crypto.Sealer, applier *ChainAp
 	if opts.ServerWriteWindow <= 0 {
 		opts.ServerWriteWindow = defaultServerWriteWindow
 	}
+	if opts.ExitTestLimit <= 0 {
+		opts.ExitTestLimit = defaultExitTestLimit
+	}
+	if opts.ExitTestWindow <= 0 {
+		opts.ExitTestWindow = defaultExitTestWindow
+	}
 	if opts.Now == nil {
 		opts.Now = time.Now
 	}
+	tests := ratelimit.NewFailureGuard(ratelimit.FailureGuardConfig{
+		MaxFailures: opts.ExitTestLimit, Window: opts.ExitTestWindow, Lockout: opts.ExitTestWindow, MaxKeys: chainGuardMaxKeys,
+	}, opts.Now)
 	writes := ratelimit.NewFailureGuard(ratelimit.FailureGuardConfig{
 		MaxFailures: opts.ServerWriteLimit, Window: opts.ServerWriteWindow, Lockout: opts.ServerWriteWindow, MaxKeys: chainGuardMaxKeys,
 	}, opts.Now)
 	return &ChainService{
-		store: newStore(pool), sealer: sealer, applier: applier, guard: newChainGuard(opts.Resolver), serverWrites: writes, now: opts.Now,
+		store: newStore(pool), sealer: sealer, applier: applier, guard: newChainGuard(opts.Resolver), serverWrites: writes,
+		exitTests: tests, testing: newExitTestLocks(), now: opts.Now,
 	}
 }
 
@@ -236,6 +251,7 @@ type exitSecret struct {
 	isParsed   bool
 	pinned     *netip.Addr
 	resolvedAt time.Time
+	enabled    bool
 }
 
 // loadExitSecrets 解密并解析这些出口；解不开或解析不了的标为未解析并留痕，不让一个坏出口拖垮整体。节点名用出口的名称。
@@ -249,7 +265,7 @@ func loadExitSecrets(ctx context.Context, q *sqlcgen.Queries, sealer *crypto.Sea
 		return nil, fmt.Errorf("list chain exit secrets: %w", err)
 	}
 	for _, r := range rows {
-		sec := exitSecret{ownerID: r.OwnerID, linkEnc: r.LinkEnc, pinned: r.ResolvedIp, resolvedAt: r.ResolvedAt.Time}
+		sec := exitSecret{ownerID: r.OwnerID, linkEnc: r.LinkEnc, pinned: r.ResolvedIp, resolvedAt: r.ResolvedAt.Time, enabled: r.IsEnabled}
 		plain, err := sealer.Open(r.LinkEnc, exitLinkAAD(r.ID))
 		if err != nil {
 			slog.Error("open link of chain exit", "exit_id", r.ID, "err", err)

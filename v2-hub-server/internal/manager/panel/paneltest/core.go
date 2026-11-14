@@ -121,3 +121,55 @@ func (f *Fake) CoreState(context.Context) (panel.CoreState, error) {
 	}
 	return panel.CoreState{State: "error", Message: "failed to start: fake config error"}, nil
 }
+
+// OutboundTest 记录假面板收到的一次出站测试。
+type OutboundTest struct {
+	Outbound json.RawMessage
+	Mode     panel.OutboundTestMode
+}
+
+// SetOutboundTestResult 设定之后出站测试返回的结果。
+func (f *Fake) SetOutboundTestResult(r panel.OutboundTestResult) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.testResult = r
+}
+
+// OutboundTests 返回假面板收到过的出站测试。
+func (f *Fake) OutboundTests() []OutboundTest {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]OutboundTest(nil), f.tests...)
+}
+
+// SetWebCert 设定假面板的网页证书路径。
+func (f *Fake) SetWebCert(files panel.CertFiles) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.webCert = files
+}
+
+// TestOutbound 实现 panel.OutboundTester：记下请求，返回预设的结果（Mode 缺省取请求的方式）。
+func (f *Fake) TestOutbound(_ context.Context, outbound json.RawMessage, mode panel.OutboundTestMode) (panel.OutboundTestResult, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.enter("TestOutbound"); err != nil {
+		return panel.OutboundTestResult{}, err
+	}
+	f.tests = append(f.tests, OutboundTest{Outbound: append(json.RawMessage(nil), outbound...), Mode: mode})
+	out := f.testResult
+	if out.Mode == "" {
+		out.Mode = mode
+	}
+	return out, nil
+}
+
+// WebCertFiles 实现 panel.CertLocator。
+func (f *Fake) WebCertFiles(context.Context) (panel.CertFiles, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.enter("WebCertFiles"); err != nil {
+		return panel.CertFiles{}, err
+	}
+	return f.webCert, nil
+}

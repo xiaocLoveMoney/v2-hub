@@ -88,6 +88,13 @@ func xrayOutbound(n ProxyNode, tag string) map[string]any {
 		}
 		o["protocol"] = "socks"
 		o["settings"] = map[string]any{"servers": []map[string]any{server}}
+	case ProtoHTTP:
+		server := map[string]any{"address": n.Address, "port": n.Port}
+		if n.Username != "" {
+			server["users"] = []map[string]any{{"user": n.Username, "pass": n.Password}}
+		}
+		o["protocol"] = "http"
+		o["settings"] = map[string]any{"servers": []map[string]any{server}}
 	default:
 		// xraySupports 已排除其余协议
 	}

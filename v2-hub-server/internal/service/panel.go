@@ -30,13 +30,14 @@ const (
 )
 
 const (
-	maxServerNameLen  = 64
-	maxRegionLen      = 64
-	maxRemarkLen      = 255
-	maxTokenLen       = 512
-	maxLastErrorLen   = 255
-	msgServerNotFound = "服务器不存在"
-	msgServerDisabled = "服务器已停用，请先启用"
+	maxServerNameLen      = 64
+	maxRegionLen          = 64
+	maxRemarkLen          = 255
+	maxTokenLen           = 512
+	maxLastErrorLen       = 255
+	msgServerNotFound     = "服务器不存在"
+	msgServerDisabled     = "服务器已停用，请先启用"
+	msgWebCertUnsupported = "这台服务器的面板不支持读取证书路径"
 
 	ActionServerCreate = "server.create"
 	ActionServerUpdate = "server.update"

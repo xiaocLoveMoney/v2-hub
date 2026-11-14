@@ -276,3 +276,45 @@ type CoreConfigurator interface {
 	RestartCore(ctx context.Context) error
 	CoreState(ctx context.Context) (CoreState, error)
 }
+
+// OutboundTestMode 是出站测试的方式（docs/03 §5.21 延迟测试，Ruling-52）。
+type OutboundTestMode string
+
+// 出站测试的三种方式。
+const (
+	// OutboundTestTCP 只做 TCP 连接。
+	OutboundTestTCP OutboundTestMode = "tcp"
+	// OutboundTestHTTP 经出站发一次 HTTP 请求，报热连接的往返时间，并带出口 IP。
+	OutboundTestHTTP OutboundTestMode = "http"
+	// OutboundTestReal 是真实延迟：含建立隧道在内的整次请求耗时。
+	OutboundTestReal OutboundTestMode = "real"
+)
+
+// OutboundTestResult 是一次出站测试的结果。连不上不算调用失败：OK 为 false，Message 是面板给出的原因（可能含地址，只给管理员看）。
+type OutboundTestResult struct {
+	OK bool
+	// Mode 是面板实际采用的方式（UDP 类出站在 tcp 方式下会被面板改走 http）。
+	Mode         OutboundTestMode
+	DelayMs      int64
+	HTTPStatus   int
+	EgressIP     string
+	EgressRegion string
+	Message      string
+}
+
+// OutboundTester 是可选能力：让面板所在的机器去连一个出站并报告延迟。业务层用类型断言判断面板支不支持。
+// outbound 是一个完整的内核出站配置（含凭据，不得写日志），必须带 tag。
+type OutboundTester interface {
+	TestOutbound(ctx context.Context, outbound json.RawMessage, mode OutboundTestMode) (OutboundTestResult, error)
+}
+
+// CertFiles 是面板所在机器上的一对证书 / 私钥文件路径；没配时为空串。
+type CertFiles struct {
+	CertFile string
+	KeyFile  string
+}
+
+// CertLocator 是可选能力：取面板自己的网页证书路径，供新建入站的 TLS 证书预填（Ruling-53）。只有路径，没有证书内容。
+type CertLocator interface {
+	WebCertFiles(ctx context.Context) (CertFiles, error)
+}

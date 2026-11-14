@@ -183,6 +183,7 @@ func runServer(args []string) error {
 	go job.RunChainApply(ctx, chainApplier, cfg.Chain.ApplyInterval)
 	chains := service.NewChainService(pool, sealer, chainApplier, service.ChainOptions{
 		ServerWriteLimit: cfg.Chain.UserWriteLimit, ServerWriteWindow: cfg.Chain.UserWriteWindow,
+		ExitTestLimit: cfg.Chain.UserTestLimit, ExitTestWindow: cfg.Chain.UserTestWindow,
 	})
 
 	srv := &http.Server{

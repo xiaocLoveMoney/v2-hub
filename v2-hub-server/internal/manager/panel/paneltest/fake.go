@@ -27,6 +27,10 @@ type Fake struct {
 	nextGroup int
 	failWith  error
 	core      fakeCore
+	// 出站测试：预设的结果与收到的请求；网页证书路径
+	testResult panel.OutboundTestResult
+	tests      []OutboundTest
+	webCert    panel.CertFiles
 	// Calls 记录调用的方法名，便于断言。
 	Calls []string
 }

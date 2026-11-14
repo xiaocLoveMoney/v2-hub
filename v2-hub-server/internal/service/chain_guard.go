@@ -215,7 +215,7 @@ func validateExitCredential(n render.ProxyNode) error {
 		if !validSSKey(n.Method, n.Password) {
 			return badExitField("口令")
 		}
-	case render.ProtoSocks:
+	case render.ProtoSocks, render.ProtoHTTP:
 		if !validExitText(n.Username, maxExitSecretLen) || !validExitText(n.Password, maxExitSecretLen) {
 			return badExitField("用户名或口令")
 		}

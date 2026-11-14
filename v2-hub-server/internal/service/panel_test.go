@@ -587,3 +587,29 @@ func TestNodeGroups(t *testing.T) {
 		t.Fatalf("delete twice err = %v", err)
 	}
 }
+
+// TestPanelWebCertFiles：取面板自己的网页证书路径（Ruling-53）；没配时是两个空串，服务器不存在 404，面板连不上 502 类错误。
+func TestPanelWebCertFiles(t *testing.T) {
+	f := newPanelFixture(t)
+	ctx := context.Background()
+	fake := f.fleet.get(fakeBase)
+	srv, err := f.panels.CreateServer(ctx, f.actor, serverInput("hk-1"), nil)
+	if err != nil {
+		t.Fatalf("CreateServer: %v", err)
+	}
+	if files, err := f.panels.WebCertFiles(ctx, srv.ID); err != nil || files != (panel.CertFiles{}) {
+		t.Fatalf("no cert configured: %+v, %v", files, err)
+	}
+	want := panel.CertFiles{CertFile: "/root/cert/fullchain.pem", KeyFile: "/root/cert/privkey.pem"}
+	fake.SetWebCert(want)
+	if files, err := f.panels.WebCertFiles(ctx, srv.ID); err != nil || files != want {
+		t.Fatalf("WebCertFiles = %+v, %v", files, err)
+	}
+	if _, err := f.panels.WebCertFiles(ctx, srv.ID+999); !errors.Is(err, ErrNotFound) {
+		t.Errorf("missing server: err = %v, want ErrNotFound", err)
+	}
+	fake.FailWith(panel.ErrUnreachable)
+	if _, err := f.panels.WebCertFiles(ctx, srv.ID); !errors.Is(err, ErrUpstream) {
+		t.Errorf("unreachable panel: err = %v, want ErrUpstream", err)
+	}
+}
