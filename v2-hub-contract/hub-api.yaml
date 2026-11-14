@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: v2-hub API
-  version: 0.6.0
+  version: 0.7.0
   description: |
     v2-hub 对外接口契约（hub-server 提供，v2-hub-admin-web / v2-hub-user-web 消费）。
     - 管理端接口前缀 /api/admin，客户端接口前缀 /api/user，订阅端点前缀 /sub。
@@ -1121,6 +1121,70 @@ paths:
                         type: object
                         additionalProperties: true
                         description: x25519 → {privateKey, publicKey}；mldsa65 → {seed, verify}；vlessenc → {auths:[{label, decryption, encryption}]}
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "502": { $ref: "#/components/responses/UpstreamUnavailable" }
+  /api/admin/servers/{id}/reality-scan:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    post:
+      tags: [admin-panel]
+      operationId: scanRealityTarget
+      summary: 让该服务器的面板探测一个 REALITY 目标是否可用（Ruling-54，node:write；0.7.0）
+      description: 由面板所在机器对目标做一次 TLS 1.3 探测。目标是“域名或 IP[:端口]”，不接受网段；面板判定为内网地址的不探测，结果的 privateTarget 为 true。面板类型不支持时返回 409。不记审计。
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RealityScanInput" }
+      responses:
+        "200":
+          description: 探测结果（目标不可用也是 200，feasible 为 false）
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/RealityScanResult" }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "502": { $ref: "#/components/responses/UpstreamUnavailable" }
+  /api/admin/servers/{id}/reality-targets:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    post:
+      tags: [admin-panel]
+      operationId: scanRealityTargets
+      summary: 让该服务器的面板探测一组 REALITY 候选目标并排序（Ruling-54，node:write；0.7.0）
+      description: targets 为空时探测面板自己的候选站点；否则最多 20 个，每个是“域名或 IP[:端口]”，不接受网段。结果按可用优先、延迟从低到高排。
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RealityTargetsInput" }
+      responses:
+        "200":
+          description: 探测结果（目标不可用也是 200，feasible 为 false）
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { type: array, items: { $ref: "#/components/schemas/RealityScanResult" } }
         "400": { $ref: "#/components/responses/InvalidArgument" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "403": { $ref: "#/components/responses/PermissionDenied" }
@@ -5918,6 +5982,39 @@ components:
           required: [error]
           properties:
             error: { type: string, description: 面板返回的错误原文（已截断）；连通时为空串 }
+    RealityScanInput:
+      type: object
+      required: [target]
+      properties:
+        target: { type: string, minLength: 1, maxLength: 255, description: "域名或 IP，可带端口（缺省 443），如 www.cloudflare.com:443" }
+        sni: { type: string, maxLength: 255, description: 握手时用的 SNI；省略或空串 = 用目标的域名 }
+        xver: { type: integer, minimum: 0, maximum: 2, description: 目标期望的 PROXY 协议版本，与入站的 Xver 一致；省略 = 0 }
+    RealityTargetsInput:
+      type: object
+      properties:
+        targets:
+          type: array
+          maxItems: 20
+          items: { type: string, minLength: 1, maxLength: 255 }
+          description: 省略或空数组 = 探测面板自己的候选站点
+    RealityScanResult:
+      type: object
+      required: [target, host, port, ip, feasible, reason, latencyMs, tlsVersion, alpn, certValid, certSubject, certIssuer, serverNames, privateTarget]
+      properties:
+        target: { type: string, description: 归一化后的目标，域名或 IP 加端口 }
+        host: { type: string }
+        port: { type: integer }
+        ip: { type: string, description: 实际探测的 IP；没有解析到为空串 }
+        feasible: { type: boolean, description: 是否适合作 REALITY 目标（TLS 1.3 + h2 + X25519 + 可信证书） }
+        reason: { type: string, description: 不可用的原因（面板给出的原文）；可用时为空串 }
+        latencyMs: { type: integer, description: 握手耗时，毫秒 }
+        tlsVersion: { type: string }
+        alpn: { type: string }
+        certValid: { type: boolean, description: 证书对这个 SNI 是否有效 }
+        certSubject: { type: string }
+        certIssuer: { type: string }
+        serverNames: { type: array, items: { type: string }, description: 证书里可作 SNI 的域名；可能为空 }
+        privateTarget: { type: boolean, description: 目标解析到内网 / 回环地址，没有探测 }
     ServerWebCert:
       type: object
       required: [certFile, keyFile]
