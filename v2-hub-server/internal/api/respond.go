@@ -24,7 +24,9 @@ const (
 	queryPage         = "page"
 	queryPageSize     = "pageSize"
 	pathParamID       = "id"
-	subPathPrefix     = "/sub/"
+	pathSeparator     = "/"
+	// tokenMaskForLog 在日志里顶替订阅地址的 token。
+	tokenMaskForLog = "***"
 )
 
 // envelope 是业务接口统一响应信封（hub-api.yaml components.schemas.Envelope）。
@@ -79,12 +81,13 @@ func plainError(r *http.Request, err error) (int, string) {
 	return http.StatusInternalServerError, string(service.CodeInternal)
 }
 
-// pathForLog 返回可写进日志的路径：订阅地址里的 token 是凭据，只留前缀。
+// pathForLog 返回可写进日志的路径：订阅地址里的 token 是凭据（docs/03 §5.4 凭据处理），只留前缀。
+// 按路由的路径参数认订阅地址，不认固定前缀——前缀是随机且可改的（Ruling-59）。
 func pathForLog(r *http.Request) string {
-	if strings.HasPrefix(r.URL.Path, subPathPrefix) {
-		return subPathPrefix + "***"
+	if r.PathValue(pathParamToken) == "" {
+		return r.URL.Path
 	}
-	return r.URL.Path
+	return pathSeparator + r.PathValue(pathParamSubPath) + pathSeparator + tokenMaskForLog
 }
 
 // writeBody 写出响应体；状态码已写出，失败只能记录（常见原因是客户端提前断开）。
