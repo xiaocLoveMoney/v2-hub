@@ -94,6 +94,14 @@ M10 的做法（Ruling-51 – Ruling-53）：`manager/panel` 加两个可选能�
 REALITY 目标扫描（Ruling-54）是第三个可选能力 `RealityScanner`，3x-ui 实现对应 `/panel/api/server/scanRealityTarget(s)`；目标的形状在 service 层校验（不收网段），从不带 `allowPrivate`。
 平台拦截规则（Ruling-55）的条目由 `manager/chain` 生成（`BlockTag = "hub-block"`，域名表是包内常量），`ChainApplier` 读设置 `routing.blockRule` 决定期望里带不带它；开着时 `ListChainApplyServerIDs` 返回全部启用中的服务器，关掉后有下发记录的服务器照常检查一轮以撤掉条目。
 
+服务器位置与负载采样（Ruling-65）：`panel.PanelInfo` 加 `PublicIP`（面板自报的公网 IP，3x-ui 取 `/server/status` 的 `publicIP`，优先 IPv4，`N/A` 视为没有）；
+IP 换国家在 `internal/manager/geoip`：`Locator` 接口 + HTTP 实现，查询地址是配置 `geoip.lookupURL`（含 `{ip}` 占位，默认 `https://api.country.is/{ip}`，留空即关闭扫描），
+响应取 JSON 的 `country`，只认 ISO 3166-1 两位码（码表是包内常量，`geoip.IsCountryCode` 同时供 service 校验管理员的选择）；只把公网单播地址发出去。
+`PanelService.LocateServer` 经 Provider 探测拿 IP 再查库，新建服务器时位置留空就用接入探测拿到的 IP 顺手查一次（失败不影响接入），
+启动时 `job.RunServerLocate` 在后台对位置为空的启用服务器各扫一次（单次、自带 recover）。
+健康探测成功后 `ProbeServer` 写一条 `server_metric`（`date_bin` 对齐 5 分钟，冲突时覆盖为最新值，在线数取 `server.online_clients`），过期采样由清理任务按 7 天删除；
+用户端趋势图走 `UserService.ListNodeMetrics`：先按本人节点列表的同一套连接条件确认节点可见，再按范围取 5 分钟原值或按小时平均。
+
 ## 7. 接口待补 / 契约缺口
 
 - 见《任务与边界》契约缺口节。
