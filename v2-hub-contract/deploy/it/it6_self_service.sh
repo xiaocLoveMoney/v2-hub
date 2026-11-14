@@ -153,4 +153,14 @@ first POST /api/user/tickets '{"subject":"关闭后","content":"x"}' >/dev/null;
 first POST "/api/user/tickets/$TICKET_ID/messages" '{"content":"x"}' >/dev/null; expect_error 403 feature_disabled "工单关闭后回复"
 first GET "/api/user/tickets/$TICKET_ID" >/dev/null; expect_code 200 "工单关闭后仍可查看"
 call "$WORK/third.jar" "" POST /api/user/auth/register "$(register_body_of "$THIRD_USER" "$USER_CODE")" >/dev/null; expect_error 403 feature_disabled "注册关闭后注册"
+
+# ---- 9. 菜单顺序（docs/03 §5.6，Ruling-57）：默认空；写入后公开站点信息与管理员会话带回同样的顺序；写法不对或重复 400 ----
+[ "$(call "$ANON_JAR" "" GET /api/user/site | jq -c .data.menuOrder)" = "[]" ] || fail "默认菜单顺序应为空：$(cat "$WORK/body")"
+hub PUT /api/admin/settings '{"menu":{"user":["Nodes"]}}' >/dev/null; expect_code 400 "菜单键写法不对"
+hub PUT /api/admin/settings '{"menu":{"user":["nodes","nodes"]}}' >/dev/null; expect_code 400 "菜单键重复"
+USER_MENU='["nodes","dashboard","account"]'
+ADMIN_MENU='["users","dashboard"]'
+hub PUT /api/admin/settings "$(jq -nc --argjson u "$USER_MENU" --argjson a "$ADMIN_MENU" '{menu:{user:$u,admin:$a}}')" >/dev/null; expect_code 200 "保存菜单顺序"
+[ "$(call "$ANON_JAR" "" GET /api/user/site | jq -c .data.menuOrder)" = "$USER_MENU" ] || fail "站点信息应带客户门户菜单顺序：$(cat "$WORK/body")"
+[ "$(hub GET /api/admin/auth/me | jq -c .data.menuOrder)" = "$ADMIN_MENU" ] || fail "管理员会话应带管理端菜单顺序：$(cat "$WORK/body")"
 echo "IT-6 PASS"
