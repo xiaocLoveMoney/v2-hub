@@ -65,10 +65,12 @@ type Deps struct {
 	Finance FinanceManager
 	// Pay 提供在线充值单与支付回调（docs/03 §5.15）。
 	Pay PayManager
-	// Chain 提供链式规则与自有落地节点（docs/03 §5.18）。
+	// Chain 提供用户侧的链式规则与出口（docs/03 §5.18、§5.19、§5.21）。
 	Chain ChainManager
-	// ChainApply 提供服务端链式的下发状态、重试与全站规则（docs/03 §5.19）。
+	// ChainApply 提供服务端链式的下发状态与重试（docs/03 §5.19）。
 	ChainApply ChainApplyManager
+	// ChainAdmin 提供管理端的全站规则列表与出口管理（docs/03 §5.21）。
+	ChainAdmin ChainAdminManager
 	// Telegram 提供 Telegram 测试消息，Ops 提供管理端总览（docs/03 §5.20）。
 	Telegram TelegramManager
 	Ops      OpsManager
@@ -96,6 +98,7 @@ type handlers struct {
 	pay            PayManager
 	chain          ChainManager
 	chainApply     ChainApplyManager
+	chainAdmin     ChainAdminManager
 	telegram       TelegramManager
 	ops            OpsManager
 	cookie         CookieConfig
@@ -105,7 +108,7 @@ type handlers struct {
 // NewRouter 返回注册好全部路由的 http.Handler。路由与 hub-api.yaml 的 paths 逐条对应。
 func NewRouter(deps Deps) http.Handler {
 	h := &handlers{auth: deps.Auth, rbac: deps.RBAC, panels: deps.Panels, users: deps.Users, portalAuth: deps.PortalAuth, portal: deps.Portal,
-		settings: deps.Settings, mail: deps.Mail, account: deps.Account, content: deps.Content, tickets: deps.Tickets, wallet: deps.Wallet, shop: deps.Shop, finance: deps.Finance, pay: deps.Pay, chain: deps.Chain, chainApply: deps.ChainApply, telegram: deps.Telegram, ops: deps.Ops, cookie: deps.Cookie, trustedProxies: deps.TrustedProxies}
+		settings: deps.Settings, mail: deps.Mail, account: deps.Account, content: deps.Content, tickets: deps.Tickets, wallet: deps.Wallet, shop: deps.Shop, finance: deps.Finance, pay: deps.Pay, chain: deps.Chain, chainApply: deps.ChainApply, chainAdmin: deps.ChainAdmin, telegram: deps.Telegram, ops: deps.Ops, cookie: deps.Cookie, trustedProxies: deps.TrustedProxies}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", handleHealthz)
 	mux.HandleFunc("GET /readyz", newReadyzHandler(deps.Database, deps.PingTimeout))
@@ -139,7 +142,13 @@ func NewRouter(deps Deps) http.Handler {
 	mux.HandleFunc("POST /api/admin/servers/{id}/sync", h.requireAdmin(service.PermServerWrite, h.syncServer))
 	mux.HandleFunc("GET /api/admin/servers/{id}/chain-apply", h.requireAdmin(service.PermServerRead, h.getServerChainApply))
 	mux.HandleFunc("POST /api/admin/servers/{id}/chain-apply/retry", h.requireAdmin(service.PermServerWrite, h.retryServerChainApply))
-	mux.HandleFunc("GET /api/admin/server-chain-rules", h.requireAdmin(service.PermServerRead, h.listServerChainRules))
+	mux.HandleFunc("GET /api/admin/chain-routes", h.requireAdmin(service.PermServerRead, h.listChainRoutes))
+	mux.HandleFunc("GET /api/admin/chain-exits", h.requireAdmin(service.PermNodeRead, h.listChainExits))
+	mux.HandleFunc("POST /api/admin/chain-exits", h.requireAdmin(service.PermNodeWrite, h.createPlatformChainExit))
+	mux.HandleFunc("PUT /api/admin/chain-exits/{id}", h.requireAdmin(service.PermNodeWrite, h.updatePlatformChainExit))
+	mux.HandleFunc("DELETE /api/admin/chain-exits/{id}", h.requireAdmin(service.PermNodeWrite, h.deleteChainExitAsAdmin))
+	mux.HandleFunc("PUT /api/admin/chain-exits/{id}/enabled", h.requireAdmin(service.PermNodeWrite, h.setChainExitEnabled))
+	mux.HandleFunc("GET /api/admin/chain-exits/{id}/link", h.requireAdmin(service.PermNodeWrite, h.getPlatformChainExitLink))
 	mux.HandleFunc("GET /api/admin/servers/{id}/inbounds", h.requireAdmin(service.PermNodeRead, h.listServerInbounds))
 	mux.HandleFunc("POST /api/admin/servers/{id}/inbounds", h.requireAdmin(service.PermNodeWrite, h.createInbound))
 	mux.HandleFunc("POST /api/admin/servers/{id}/endpoints", h.requireAdmin(service.PermNodeWrite, h.createEndpoints))
@@ -274,16 +283,14 @@ func NewRouter(deps Deps) http.Handler {
 	mux.HandleFunc("PUT /api/user/wallet/auto-renew", h.requireUser(false, h.setAutoRenew))
 	mux.HandleFunc("POST /api/user/wallet/payments", h.requireUser(false, h.createPayment))
 	mux.HandleFunc("GET /api/user/chain", h.requireUser(false, h.getChainOverview))
-	mux.HandleFunc("POST /api/user/chain/rules", h.requireUser(false, h.createChainRule))
-	mux.HandleFunc("PUT /api/user/chain/rules/{id}", h.requireUser(false, h.updateChainRule))
-	mux.HandleFunc("DELETE /api/user/chain/rules/{id}", h.requireUser(false, h.deleteChainRule))
-	mux.HandleFunc("POST /api/user/chain/custom-nodes", h.requireUser(false, h.createCustomNode))
-	mux.HandleFunc("PUT /api/user/chain/custom-nodes/{id}", h.requireUser(false, h.updateCustomNode))
-	mux.HandleFunc("DELETE /api/user/chain/custom-nodes/{id}", h.requireUser(false, h.deleteCustomNode))
-	mux.HandleFunc("GET /api/user/chain/custom-nodes/{id}/link", h.requireUser(false, h.getCustomNodeLink))
-	mux.HandleFunc("POST /api/user/chain/server-rules", h.requireUser(false, h.createServerChainRule))
-	mux.HandleFunc("PUT /api/user/chain/server-rules/{id}", h.requireUser(false, h.updateServerChainRule))
-	mux.HandleFunc("DELETE /api/user/chain/server-rules/{id}", h.requireUser(false, h.deleteServerChainRule))
+	mux.HandleFunc("POST /api/user/chain/routes", h.requireUser(false, h.createChainRoute))
+	mux.HandleFunc("PUT /api/user/chain/routes/order", h.requireUser(false, h.reorderChainRoutes))
+	mux.HandleFunc("PUT /api/user/chain/routes/{id}", h.requireUser(false, h.updateChainRoute))
+	mux.HandleFunc("DELETE /api/user/chain/routes/{id}", h.requireUser(false, h.deleteChainRoute))
+	mux.HandleFunc("POST /api/user/chain/exits", h.requireUser(false, h.createChainExit))
+	mux.HandleFunc("PUT /api/user/chain/exits/{id}", h.requireUser(false, h.updateChainExit))
+	mux.HandleFunc("DELETE /api/user/chain/exits/{id}", h.requireUser(false, h.deleteChainExit))
+	mux.HandleFunc("GET /api/user/chain/exits/{id}/link", h.requireUser(false, h.getChainExitLink))
 	// 支付网关回调：没有会话与 CSRF，真实性靠网关实现验签
 	mux.HandleFunc("POST /api/pay/notify/{gateway}", h.paymentNotify)
 	mux.HandleFunc("GET /api/user/wallet/ledger", h.requireUser(false, h.listOwnLedger))

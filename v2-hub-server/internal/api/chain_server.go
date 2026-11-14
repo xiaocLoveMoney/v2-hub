@@ -9,102 +9,28 @@ import (
 	"v2-hub-server/internal/service"
 )
 
-// 服务端链式（docs/03 §5.19）：用户侧规则接口与管理端下发状态 / 重试 / 全站规则接口。
+// 管理端的链式接口：服务端链式的下发状态与重试（docs/03 §5.19）、全站规则列表、出口管理（docs/03 §5.21，Ruling-50）。
 
-// ChainApplyManager 是管理端服务端链式接口需要的能力（由 service.ChainApplier 实现）。
+// ChainApplyManager 是下发状态与重试需要的能力（由 service.ChainApplier 实现）。
 type ChainApplyManager interface {
 	Status(ctx context.Context, serverID int64) (*service.ChainApply, error)
 	Retry(ctx context.Context, actor *service.AdminPrincipal, serverID int64, ip *netip.Addr) (*service.ChainApply, error)
-	ListServerRules(ctx context.Context, f service.ServerChainRuleFilter, pq service.PageQuery) (*service.Page[service.AdminServerChainRule], error)
 }
 
-type serverChainExitVO struct {
-	NodeID   int64  `json:"nodeId"`
-	Name     string `json:"name"`
-	Protocol string `json:"protocol"`
+// ChainAdminManager 是管理端规则列表与出口管理需要的能力（由 service.ChainService 实现）。
+type ChainAdminManager interface {
+	ListRoutes(ctx context.Context, f service.ChainRouteFilter, pq service.PageQuery) (*service.Page[service.AdminChainRoute], error)
+	ListExits(ctx context.Context, f service.ChainExitFilter, pq service.PageQuery) (*service.Page[service.AdminChainExit], error)
+	CreatePlatformExit(ctx context.Context, actor *service.AdminPrincipal, in service.PlatformExitInput, ip *netip.Addr) (*service.AdminChainExit, error)
+	UpdatePlatformExit(ctx context.Context, actor *service.AdminPrincipal, id int64, in service.PlatformExitInput, ip *netip.Addr) (*service.AdminChainExit, error)
+	SetExitEnabled(ctx context.Context, actor *service.AdminPrincipal, id int64, enabled bool, ip *netip.Addr) (*service.AdminChainExit, error)
+	DeleteExitAsAdmin(ctx context.Context, actor *service.AdminPrincipal, id int64, ip *netip.Addr) error
+	PlatformExitLink(ctx context.Context, actor *service.AdminPrincipal, id int64, ip *netip.Addr) (string, error)
 }
 
-// serverChainRuleVO 对应 hub-api.yaml ServerChainRule。
-type serverChainRuleVO struct {
-	ID            int64             `json:"id"`
-	Entry         chainEntryVO      `json:"entry"`
-	Exit          serverChainExitVO `json:"exit"`
-	IsEnabled     bool              `json:"isEnabled"`
-	Status        string            `json:"status"`
-	BlockedReason string            `json:"blockedReason"`
-	ApplyStatus   string            `json:"applyStatus"`
-	CreatedAt     time.Time         `json:"createdAt"`
-}
-
-func toServerChainRuleVO(r service.ServerChainRule) serverChainRuleVO {
-	return serverChainRuleVO{
-		ID: r.ID, IsEnabled: r.Enabled, Status: r.Status, BlockedReason: r.BlockedReason, ApplyStatus: r.ApplyStatus, CreatedAt: r.CreatedAt,
-		Entry: chainEntryVO{NodeID: r.EntryNodeID, Name: r.EntryName},
-		Exit:  serverChainExitVO{NodeID: r.ExitNodeID, Name: r.ExitName, Protocol: r.ExitProtocol},
-	}
-}
-
-// serverChainRuleCreateRequest 对应 hub-api.yaml ServerChainRuleInput；isEnabled 省略按启用。
-type serverChainRuleCreateRequest struct {
-	EntryNodeID int64 `json:"entryNodeId"`
-	ExitNodeID  int64 `json:"exitNodeId"`
-	IsEnabled   *bool `json:"isEnabled"`
-}
-
-// serverChainRuleUpdateRequest 对应 hub-api.yaml ServerChainRuleUpdateInput。
-type serverChainRuleUpdateRequest struct {
-	IsEnabled bool `json:"isEnabled"`
-}
-
-func (h *handlers) createServerChainRule(w http.ResponseWriter, r *http.Request, p *service.UserPrincipal) {
-	var req serverChainRuleCreateRequest
-	if err := decodeJSON(w, r, &req); err != nil {
-		writeError(w, r, err)
-		return
-	}
-	in := service.ServerChainRuleInput{EntryNodeID: req.EntryNodeID, ExitNodeID: req.ExitNodeID, Enabled: true}
-	if req.IsEnabled != nil {
-		in.Enabled = *req.IsEnabled
-	}
-	rule, err := h.chain.CreateServerRule(r.Context(), p, in)
-	if err != nil {
-		writeError(w, r, err)
-		return
-	}
-	writeOK(w, toServerChainRuleVO(*rule))
-}
-
-func (h *handlers) updateServerChainRule(w http.ResponseWriter, r *http.Request, p *service.UserPrincipal) {
-	id, err := pathID(r)
-	if err != nil {
-		writeError(w, r, err)
-		return
-	}
-	var req serverChainRuleUpdateRequest
-	if err := decodeJSON(w, r, &req); err != nil {
-		writeError(w, r, err)
-		return
-	}
-	rule, err := h.chain.UpdateServerRule(r.Context(), p, id, req.IsEnabled)
-	if err != nil {
-		writeError(w, r, err)
-		return
-	}
-	writeOK(w, toServerChainRuleVO(*rule))
-}
-
-func (h *handlers) deleteServerChainRule(w http.ResponseWriter, r *http.Request, p *service.UserPrincipal) {
-	id, err := pathID(r)
-	if err != nil {
-		writeError(w, r, err)
-		return
-	}
-	if err := h.chain.DeleteServerRule(r.Context(), p, id); err != nil {
-		writeError(w, r, err)
-		return
-	}
-	writeOK(w, nil)
-}
+const (
+	queryOwner = "owner"
+)
 
 // chainApplyVO 对应 hub-api.yaml ChainApply。
 type chainApplyVO struct {
@@ -162,41 +88,45 @@ type adminChainUserVO struct {
 	Username string `json:"username"`
 }
 
-type adminChainEntryVO struct {
+// adminChainRouteEntryVO 对应 hub-api.yaml AdminChainRouteEntry。
+type adminChainRouteEntryVO struct {
 	NodeID     int64  `json:"nodeId"`
 	Name       string `json:"name"`
 	ServerID   int64  `json:"serverId"`
 	ServerName string `json:"serverName"`
+	State      string `json:"state"`
+	CoveredBy  int    `json:"coveredBy"`
 }
 
-type adminChainExitVO struct {
-	NodeID int64  `json:"nodeId"`
-	Name   string `json:"name"`
+// adminChainRouteVO 对应 hub-api.yaml AdminChainRoute。
+type adminChainRouteVO struct {
+	ID            int64                    `json:"id"`
+	User          adminChainUserVO         `json:"user"`
+	Kind          string                   `json:"kind"`
+	Position      int                      `json:"position"`
+	Name          string                   `json:"name"`
+	Entries       []adminChainRouteEntryVO `json:"entries"`
+	Exit          chainRouteExitVO         `json:"exit"`
+	IsEnabled     bool                     `json:"isEnabled"`
+	Status        string                   `json:"status"`
+	BlockedReason string                   `json:"blockedReason"`
+	CreatedAt     time.Time                `json:"createdAt"`
 }
 
-// adminServerChainRuleVO 对应 hub-api.yaml AdminServerChainRule。
-type adminServerChainRuleVO struct {
-	ID            int64             `json:"id"`
-	User          adminChainUserVO  `json:"user"`
-	Entry         adminChainEntryVO `json:"entry"`
-	Exit          adminChainExitVO  `json:"exit"`
-	IsEnabled     bool              `json:"isEnabled"`
-	Status        string            `json:"status"`
-	BlockedReason string            `json:"blockedReason"`
-	ApplyStatus   string            `json:"applyStatus"`
-	CreatedAt     time.Time         `json:"createdAt"`
-}
-
-func toAdminServerChainRuleVO(r service.AdminServerChainRule) adminServerChainRuleVO {
-	return adminServerChainRuleVO{
-		ID: r.ID, IsEnabled: r.Enabled, Status: r.Status, BlockedReason: r.BlockedReason, ApplyStatus: r.ApplyStatus, CreatedAt: r.CreatedAt,
-		User:  adminChainUserVO{ID: r.UserID, Username: r.Username},
-		Entry: adminChainEntryVO{NodeID: r.EntryNodeID, Name: r.EntryName, ServerID: r.EntryServerID, ServerName: r.EntryServerName},
-		Exit:  adminChainExitVO{NodeID: r.ExitNodeID, Name: r.ExitName},
+func toAdminChainRouteVO(r service.AdminChainRoute) adminChainRouteVO {
+	return adminChainRouteVO{
+		ID: r.ID, Kind: r.Kind, Position: r.Position, Name: r.Name, IsEnabled: r.Enabled, Status: r.Status,
+		BlockedReason: r.BlockedReason, CreatedAt: r.CreatedAt, Exit: toChainRouteExitVO(r.Exit),
+		User: adminChainUserVO{ID: r.UserID, Username: r.Username},
+		Entries: mapSlice(r.Entries, func(e service.ChainRouteEntry) adminChainRouteEntryVO {
+			return adminChainRouteEntryVO{
+				NodeID: e.NodeID, Name: e.Name, ServerID: e.ServerID, ServerName: e.ServerName, State: e.State, CoveredBy: e.CoveredBy,
+			}
+		}),
 	}
 }
 
-func (h *handlers) listServerChainRules(w http.ResponseWriter, r *http.Request, _ *service.AdminPrincipal) {
+func (h *handlers) listChainRoutes(w http.ResponseWriter, r *http.Request, _ *service.AdminPrincipal) {
 	pq, err := pageQuery(r)
 	if err != nil {
 		writeError(w, r, err)
@@ -212,10 +142,176 @@ func (h *handlers) listServerChainRules(w http.ResponseWriter, r *http.Request, 
 		writeError(w, r, err)
 		return
 	}
-	page, err := h.chainApply.ListServerRules(r.Context(), service.ServerChainRuleFilter{UserID: userID, ServerID: serverID}, pq)
+	f := service.ChainRouteFilter{Kind: r.URL.Query().Get(queryKind), UserID: userID, ServerID: serverID}
+	page, err := h.chainAdmin.ListRoutes(r.Context(), f, pq)
 	if err != nil {
 		writeError(w, r, err)
 		return
 	}
-	writeOK(w, pageVO[adminServerChainRuleVO]{Items: mapSlice(page.Items, toAdminServerChainRuleVO), Total: page.Total})
+	writeOK(w, pageVO[adminChainRouteVO]{Items: mapSlice(page.Items, toAdminChainRouteVO), Total: page.Total})
+}
+
+type exitNodeGroupVO struct {
+	ID   int64  `json:"id"`
+	Name string `json:"name"`
+}
+
+// adminChainExitVO 对应 hub-api.yaml AdminChainExit；原链接不在这里返回。
+type adminChainExitVO struct {
+	ID          int64             `json:"id"`
+	Owner       string            `json:"owner"`
+	User        *adminChainUserVO `json:"user"`
+	Name        string            `json:"name"`
+	Protocol    string            `json:"protocol"`
+	Address     string            `json:"address"`
+	Port        int               `json:"port"`
+	Remark      string            `json:"remark"`
+	IsEnabled   bool              `json:"isEnabled"`
+	AllowServer bool              `json:"allowServer"`
+	AllowClient bool              `json:"allowClient"`
+	NodeGroups  []exitNodeGroupVO `json:"nodeGroups"`
+	RouteCount  int               `json:"routeCount"`
+	CreatedAt   time.Time         `json:"createdAt"`
+	UpdatedAt   time.Time         `json:"updatedAt"`
+}
+
+func toAdminChainExitVO(e service.AdminChainExit) adminChainExitVO {
+	vo := adminChainExitVO{
+		ID: e.ID, Owner: service.ExitOwnerPlatform, Name: e.Name, Protocol: e.Protocol, Address: e.Address, Port: e.Port,
+		Remark: e.Remark, IsEnabled: e.Enabled, AllowServer: e.AllowServer, AllowClient: e.AllowClient,
+		RouteCount: e.RouteCount, CreatedAt: e.CreatedAt, UpdatedAt: e.UpdatedAt,
+		NodeGroups: mapSlice(e.NodeGroups, func(g service.ExitNodeGroup) exitNodeGroupVO { return exitNodeGroupVO{ID: g.ID, Name: g.Name} }),
+	}
+	if e.UserID != 0 {
+		vo.Owner = service.ExitOwnerUser
+		vo.User = &adminChainUserVO{ID: e.UserID, Username: e.Username}
+	}
+	return vo
+}
+
+// platformExitRequest 对应 hub-api.yaml AdminChainExitInput / AdminChainExitUpdateInput；link 属于凭据，不得写日志。
+// 新建时 isEnabled 省略按启用。
+type platformExitRequest struct {
+	Name         string  `json:"name"`
+	Link         string  `json:"link"`
+	Remark       string  `json:"remark"`
+	IsEnabled    *bool   `json:"isEnabled"`
+	AllowServer  bool    `json:"allowServer"`
+	AllowClient  bool    `json:"allowClient"`
+	NodeGroupIDs []int64 `json:"nodeGroupIds"`
+}
+
+func (req platformExitRequest) toInput() service.PlatformExitInput {
+	in := service.PlatformExitInput{
+		Name: req.Name, Link: req.Link, Remark: req.Remark, Enabled: true,
+		AllowServer: req.AllowServer, AllowClient: req.AllowClient, NodeGroupIDs: req.NodeGroupIDs,
+	}
+	if req.IsEnabled != nil {
+		in.Enabled = *req.IsEnabled
+	}
+	return in
+}
+
+// chainExitEnabledRequest 对应 hub-api.yaml ChainExitEnabledInput。
+type chainExitEnabledRequest struct {
+	IsEnabled bool `json:"isEnabled"`
+}
+
+func (h *handlers) listChainExits(w http.ResponseWriter, r *http.Request, _ *service.AdminPrincipal) {
+	pq, err := pageQuery(r)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	userID, err := optionalUserID(r)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	f := service.ChainExitFilter{Owner: r.URL.Query().Get(queryOwner), UserID: userID, Keyword: r.URL.Query().Get(queryKeyword)}
+	page, err := h.chainAdmin.ListExits(r.Context(), f, pq)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeOK(w, pageVO[adminChainExitVO]{Items: mapSlice(page.Items, toAdminChainExitVO), Total: page.Total})
+}
+
+func (h *handlers) createPlatformChainExit(w http.ResponseWriter, r *http.Request, p *service.AdminPrincipal) {
+	var req platformExitRequest
+	if err := decodeJSON(w, r, &req); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	e, err := h.chainAdmin.CreatePlatformExit(r.Context(), p, req.toInput(), clientIP(r, h.trustedProxies))
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeOK(w, toAdminChainExitVO(*e))
+}
+
+func (h *handlers) updatePlatformChainExit(w http.ResponseWriter, r *http.Request, p *service.AdminPrincipal) {
+	id, err := pathID(r)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	var req platformExitRequest
+	if err := decodeJSON(w, r, &req); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	e, err := h.chainAdmin.UpdatePlatformExit(r.Context(), p, id, req.toInput(), clientIP(r, h.trustedProxies))
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeOK(w, toAdminChainExitVO(*e))
+}
+
+func (h *handlers) setChainExitEnabled(w http.ResponseWriter, r *http.Request, p *service.AdminPrincipal) {
+	id, err := pathID(r)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	var req chainExitEnabledRequest
+	if err := decodeJSON(w, r, &req); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	e, err := h.chainAdmin.SetExitEnabled(r.Context(), p, id, req.IsEnabled, clientIP(r, h.trustedProxies))
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeOK(w, toAdminChainExitVO(*e))
+}
+
+func (h *handlers) deleteChainExitAsAdmin(w http.ResponseWriter, r *http.Request, p *service.AdminPrincipal) {
+	id, err := pathID(r)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	if err := h.chainAdmin.DeleteExitAsAdmin(r.Context(), p, id, clientIP(r, h.trustedProxies)); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeOK(w, nil)
+}
+
+func (h *handlers) getPlatformChainExitLink(w http.ResponseWriter, r *http.Request, p *service.AdminPrincipal) {
+	id, err := pathID(r)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	link, err := h.chainAdmin.PlatformExitLink(r.Context(), p, id, clientIP(r, h.trustedProxies))
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeOK(w, nodeLinkVO{Link: link})
 }

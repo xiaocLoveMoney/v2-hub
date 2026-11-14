@@ -7,129 +7,199 @@ package sqlcgen
 
 import (
 	"context"
+	"net/netip"
 
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const countAdminServerChainRules = `-- name: CountAdminServerChainRules :one
-SELECT COUNT(*) FROM chain_rule r JOIN node n ON n.id = r.entry_node_id JOIN inbound i ON i.id = n.inbound_id
-WHERE r.kind = 'server'
-  AND ($1::bigint IS NULL OR r.user_id = $1)
-  AND ($2::bigint IS NULL OR i.server_id = $2)
+const addChainRouteEntries = `-- name: AddChainRouteEntries :exec
+INSERT INTO chain_route_entry (route_id, entry_node_id)
+SELECT $1, unnest($2::bigint[])
+ON CONFLICT DO NOTHING
 `
 
-type CountAdminServerChainRulesParams struct {
+type AddChainRouteEntriesParams struct {
+	RouteID int64
+	NodeIds []int64
+}
+
+// 先加后删（见 RemoveChainRouteEntriesExcept）：起飞节点被删光时触发器会连规则一起删
+func (q *Queries) AddChainRouteEntries(ctx context.Context, arg AddChainRouteEntriesParams) error {
+	_, err := q.db.Exec(ctx, addChainRouteEntries, arg.RouteID, arg.NodeIds)
+	return err
+}
+
+const addExitNodeGroups = `-- name: AddExitNodeGroups :exec
+INSERT INTO node_group_exit (node_group_id, exit_id)
+SELECT unnest($1::bigint[]), $2
+ON CONFLICT DO NOTHING
+`
+
+type AddExitNodeGroupsParams struct {
+	NodeGroupIds []int64
+	ExitID       int64
+}
+
+func (q *Queries) AddExitNodeGroups(ctx context.Context, arg AddExitNodeGroupsParams) error {
+	_, err := q.db.Exec(ctx, addExitNodeGroups, arg.NodeGroupIds, arg.ExitID)
+	return err
+}
+
+const countAdminChainExits = `-- name: CountAdminChainExits :one
+
+SELECT COUNT(*) FROM chain_exit x
+WHERE ($1::boolean IS NULL OR (x.user_id IS NULL) = $1)
+  AND ($2::bigint IS NULL OR x.user_id = $2)
+  AND ($3::text IS NULL OR strpos(lower(x.name), lower($3)) > 0 OR strpos(lower(x.address), lower($3)) > 0)
+`
+
+type CountAdminChainExitsParams struct {
+	IsPlatform pgtype.Bool
+	UserID     pgtype.Int8
+	Keyword    pgtype.Text
+}
+
+// 管理端：出口 ------------------------------------------------------------------------------
+// 关键字按子串匹配名称或地址（strpos，不当通配符解释；出口表很小，不需要索引）
+func (q *Queries) CountAdminChainExits(ctx context.Context, arg CountAdminChainExitsParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countAdminChainExits, arg.IsPlatform, arg.UserID, arg.Keyword)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const countAdminChainRoutes = `-- name: CountAdminChainRoutes :one
+
+SELECT COUNT(*) FROM chain_route r
+WHERE ($1::text IS NULL OR r.kind = $1)
+  AND ($2::bigint IS NULL OR r.user_id = $2)
+  AND ($3::bigint IS NULL OR EXISTS (
+        SELECT 1 FROM chain_route_entry e JOIN node n ON n.id = e.entry_node_id JOIN inbound i ON i.id = n.inbound_id
+        WHERE e.route_id = r.id AND i.server_id = $3))
+`
+
+type CountAdminChainRoutesParams struct {
+	Kind     pgtype.Text
 	UserID   pgtype.Int8
 	ServerID pgtype.Int8
 }
 
-func (q *Queries) CountAdminServerChainRules(ctx context.Context, arg CountAdminServerChainRulesParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countAdminServerChainRules, arg.UserID, arg.ServerID)
+// 管理端：规则 ------------------------------------------------------------------------------
+func (q *Queries) CountAdminChainRoutes(ctx context.Context, arg CountAdminChainRoutesParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countAdminChainRoutes, arg.Kind, arg.UserID, arg.ServerID)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
 }
 
-const countChainRules = `-- name: CountChainRules :one
-SELECT COUNT(*) FROM chain_rule WHERE user_id = $1 AND kind = 'client'
+const countChainExits = `-- name: CountChainExits :one
+SELECT COUNT(*) FROM chain_exit WHERE user_id = $1::bigint
 `
 
-func (q *Queries) CountChainRules(ctx context.Context, userID int64) (int64, error) {
-	row := q.db.QueryRow(ctx, countChainRules, userID)
+func (q *Queries) CountChainExits(ctx context.Context, userID int64) (int64, error) {
+	row := q.db.QueryRow(ctx, countChainExits, userID)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
 }
 
-const countCustomNodes = `-- name: CountCustomNodes :one
-SELECT COUNT(*) FROM custom_node WHERE user_id = $1
+const countChainRoutes = `-- name: CountChainRoutes :one
+SELECT COUNT(*) FROM chain_route WHERE user_id = $1 AND kind = $2
 `
 
-func (q *Queries) CountCustomNodes(ctx context.Context, userID int64) (int64, error) {
-	row := q.db.QueryRow(ctx, countCustomNodes, userID)
+type CountChainRoutesParams struct {
+	UserID int64
+	Kind   string
+}
+
+func (q *Queries) CountChainRoutes(ctx context.Context, arg CountChainRoutesParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countChainRoutes, arg.UserID, arg.Kind)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
 }
 
-const countServerChainRules = `-- name: CountServerChainRules :one
-SELECT COUNT(*) FROM chain_rule WHERE user_id = $1 AND kind = 'server'
+const countServerRoutesByExit = `-- name: CountServerRoutesByExit :one
+SELECT COUNT(*) FROM chain_route WHERE exit_id = $1 AND kind = 'server'
 `
 
-func (q *Queries) CountServerChainRules(ctx context.Context, userID int64) (int64, error) {
-	row := q.db.QueryRow(ctx, countServerChainRules, userID)
+func (q *Queries) CountServerRoutesByExit(ctx context.Context, exitID pgtype.Int8) (int64, error) {
+	row := q.db.QueryRow(ctx, countServerRoutesByExit, exitID)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
 }
 
-const deleteChainRule = `-- name: DeleteChainRule :execrows
-DELETE FROM chain_rule WHERE id = $1 AND user_id = $2 AND kind = 'client'
+const deleteChainExit = `-- name: DeleteChainExit :execrows
+DELETE FROM chain_exit WHERE id = $1 AND user_id = $2::bigint
 `
 
-type DeleteChainRuleParams struct {
+type DeleteChainExitParams struct {
 	ID     int64
 	UserID int64
 }
 
-func (q *Queries) DeleteChainRule(ctx context.Context, arg DeleteChainRuleParams) (int64, error) {
-	result, err := q.db.Exec(ctx, deleteChainRule, arg.ID, arg.UserID)
+func (q *Queries) DeleteChainExit(ctx context.Context, arg DeleteChainExitParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteChainExit, arg.ID, arg.UserID)
 	if err != nil {
 		return 0, err
 	}
 	return result.RowsAffected(), nil
 }
 
-const deleteChainRulesByUser = `-- name: DeleteChainRulesByUser :exec
-DELETE FROM chain_rule WHERE user_id = $1
+const deleteChainExitByID = `-- name: DeleteChainExitByID :execrows
+DELETE FROM chain_exit WHERE id = $1
 `
 
-func (q *Queries) DeleteChainRulesByUser(ctx context.Context, userID int64) error {
-	_, err := q.db.Exec(ctx, deleteChainRulesByUser, userID)
+func (q *Queries) DeleteChainExitByID(ctx context.Context, id int64) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteChainExitByID, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const deleteChainExitsByUser = `-- name: DeleteChainExitsByUser :exec
+DELETE FROM chain_exit WHERE user_id = $1::bigint
+`
+
+func (q *Queries) DeleteChainExitsByUser(ctx context.Context, userID int64) error {
+	_, err := q.db.Exec(ctx, deleteChainExitsByUser, userID)
 	return err
 }
 
-const deleteCustomNode = `-- name: DeleteCustomNode :execrows
-DELETE FROM custom_node WHERE id = $1 AND user_id = $2
+const deleteChainRoute = `-- name: DeleteChainRoute :one
+DELETE FROM chain_route WHERE id = $1 AND user_id = $2 RETURNING kind
 `
 
-type DeleteCustomNodeParams struct {
+type DeleteChainRouteParams struct {
 	ID     int64
 	UserID int64
 }
 
-func (q *Queries) DeleteCustomNode(ctx context.Context, arg DeleteCustomNodeParams) (int64, error) {
-	result, err := q.db.Exec(ctx, deleteCustomNode, arg.ID, arg.UserID)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
+func (q *Queries) DeleteChainRoute(ctx context.Context, arg DeleteChainRouteParams) (string, error) {
+	row := q.db.QueryRow(ctx, deleteChainRoute, arg.ID, arg.UserID)
+	var kind string
+	err := row.Scan(&kind)
+	return kind, err
 }
 
-const deleteCustomNodesByUser = `-- name: DeleteCustomNodesByUser :exec
-DELETE FROM custom_node WHERE user_id = $1
+const deleteChainRoutesByUser = `-- name: DeleteChainRoutesByUser :exec
+DELETE FROM chain_route WHERE user_id = $1
 `
 
-func (q *Queries) DeleteCustomNodesByUser(ctx context.Context, userID int64) error {
-	_, err := q.db.Exec(ctx, deleteCustomNodesByUser, userID)
+func (q *Queries) DeleteChainRoutesByUser(ctx context.Context, userID int64) error {
+	_, err := q.db.Exec(ctx, deleteChainRoutesByUser, userID)
 	return err
 }
 
-const deleteServerChainRule = `-- name: DeleteServerChainRule :execrows
-DELETE FROM chain_rule WHERE id = $1 AND user_id = $2 AND kind = 'server'
+const deleteExitNodeGroups = `-- name: DeleteExitNodeGroups :exec
+DELETE FROM node_group_exit WHERE exit_id = $1
 `
 
-type DeleteServerChainRuleParams struct {
-	ID     int64
-	UserID int64
-}
-
-func (q *Queries) DeleteServerChainRule(ctx context.Context, arg DeleteServerChainRuleParams) (int64, error) {
-	result, err := q.db.Exec(ctx, deleteServerChainRule, arg.ID, arg.UserID)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
+func (q *Queries) DeleteExitNodeGroups(ctx context.Context, exitID int64) error {
+	_, err := q.db.Exec(ctx, deleteExitNodeGroups, exitID)
+	return err
 }
 
 const getChainApply = `-- name: GetChainApply :one
@@ -156,17 +226,40 @@ func (q *Queries) GetChainApply(ctx context.Context, serverID int64) (ChainApply
 	return i, err
 }
 
-const getCustomNodeLink = `-- name: GetCustomNodeLink :one
-SELECT link_enc FROM custom_node WHERE id = $1 AND user_id = $2
+const getChainExitLink = `-- name: GetChainExitLink :one
+SELECT link_enc FROM chain_exit WHERE id = $1 AND user_id = $2::bigint
 `
 
-type GetCustomNodeLinkParams struct {
+type GetChainExitLinkParams struct {
 	ID     int64
 	UserID int64
 }
 
-func (q *Queries) GetCustomNodeLink(ctx context.Context, arg GetCustomNodeLinkParams) ([]byte, error) {
-	row := q.db.QueryRow(ctx, getCustomNodeLink, arg.ID, arg.UserID)
+func (q *Queries) GetChainExitLink(ctx context.Context, arg GetChainExitLinkParams) ([]byte, error) {
+	row := q.db.QueryRow(ctx, getChainExitLink, arg.ID, arg.UserID)
+	var link_enc []byte
+	err := row.Scan(&link_enc)
+	return link_enc, err
+}
+
+const getDBNow = `-- name: GetDBNow :one
+SELECT now()::timestamptz AS db_now
+`
+
+// 数据库的当前时间：下发记录的 applied_at 用它，才能与规则的 updated_at 直接比较
+func (q *Queries) GetDBNow(ctx context.Context) (pgtype.Timestamptz, error) {
+	row := q.db.QueryRow(ctx, getDBNow)
+	var db_now pgtype.Timestamptz
+	err := row.Scan(&db_now)
+	return db_now, err
+}
+
+const getPlatformChainExitLink = `-- name: GetPlatformChainExitLink :one
+SELECT link_enc FROM chain_exit WHERE id = $1 AND user_id IS NULL
+`
+
+func (q *Queries) GetPlatformChainExitLink(ctx context.Context, id int64) ([]byte, error) {
+	row := q.db.QueryRow(ctx, getPlatformChainExitLink, id)
 	var link_enc []byte
 	err := row.Scan(&link_enc)
 	return link_enc, err
@@ -203,7 +296,7 @@ type GetUserChainFlagsRow struct {
 	AllowServerChain bool
 }
 
-// 客户端链式：链式规则与自有落地节点（docs/03 §5.18）------------------------------------
+// 链式规则与出口（docs/03 §5.18、§5.19、§5.21）-------------------------------------------
 // 当前套餐的链式开关；没有套餐时都为假
 func (q *Queries) GetUserChainFlags(ctx context.Context, id int64) (GetUserChainFlagsRow, error) {
 	row := q.db.QueryRow(ctx, getUserChainFlags, id)
@@ -212,81 +305,68 @@ func (q *Queries) GetUserChainFlags(ctx context.Context, id int64) (GetUserChain
 	return i, err
 }
 
-const insertChainRule = `-- name: InsertChainRule :one
-INSERT INTO chain_rule (user_id, kind, name, entry_node_id, exit_node_id, exit_custom_id, is_enabled)
-VALUES ($1, 'client', $2, $3, $4, $5, $6)
+const insertChainExit = `-- name: InsertChainExit :one
+INSERT INTO chain_exit (user_id, name, protocol, address, port, link_enc, remark, is_enabled, allow_server, allow_client)
+VALUES ($1, $2, $3, $4, $5, ''::bytea,
+        $6, $7, $8, $9)
 RETURNING id
 `
 
-type InsertChainRuleParams struct {
-	UserID       int64
-	Name         string
-	EntryNodeID  int64
-	ExitNodeID   pgtype.Int8
-	ExitCustomID pgtype.Int8
-	IsEnabled    bool
+type InsertChainExitParams struct {
+	UserID      pgtype.Int8
+	Name        string
+	Protocol    string
+	Address     string
+	Port        int32
+	Remark      string
+	IsEnabled   bool
+	AllowServer bool
+	AllowClient bool
 }
 
-func (q *Queries) InsertChainRule(ctx context.Context, arg InsertChainRuleParams) (int64, error) {
-	row := q.db.QueryRow(ctx, insertChainRule,
-		arg.UserID,
-		arg.Name,
-		arg.EntryNodeID,
-		arg.ExitNodeID,
-		arg.ExitCustomID,
-		arg.IsEnabled,
-	)
-	var id int64
-	err := row.Scan(&id)
-	return id, err
-}
-
-const insertCustomNode = `-- name: InsertCustomNode :one
-INSERT INTO custom_node (user_id, name, protocol, address, port, link_enc)
-VALUES ($1, $2, $3, $4, $5, ''::bytea)
-RETURNING id
-`
-
-type InsertCustomNodeParams struct {
-	UserID   int64
-	Name     string
-	Protocol string
-	Address  string
-	Port     int32
-}
-
-// 链接密文的关联数据含 id，所以先插入空值，拿到 id 后由 SetCustomNodeLink 回填
-func (q *Queries) InsertCustomNode(ctx context.Context, arg InsertCustomNodeParams) (int64, error) {
-	row := q.db.QueryRow(ctx, insertCustomNode,
+// 链接密文的关联数据含 id，所以先插入空值，拿到 id 后由 SetChainExitLink 回填。user_id 为空 = 平台出口
+func (q *Queries) InsertChainExit(ctx context.Context, arg InsertChainExitParams) (int64, error) {
+	row := q.db.QueryRow(ctx, insertChainExit,
 		arg.UserID,
 		arg.Name,
 		arg.Protocol,
 		arg.Address,
 		arg.Port,
+		arg.Remark,
+		arg.IsEnabled,
+		arg.AllowServer,
+		arg.AllowClient,
 	)
 	var id int64
 	err := row.Scan(&id)
 	return id, err
 }
 
-const insertServerChainRule = `-- name: InsertServerChainRule :one
-INSERT INTO chain_rule (user_id, kind, entry_node_id, exit_node_id, is_enabled)
-VALUES ($1, 'server', $2, $3, $4)
+const insertChainRoute = `-- name: InsertChainRoute :one
+INSERT INTO chain_route (user_id, kind, position, name, exit_node_id, exit_id, is_enabled)
+VALUES ($1::bigint, $2::varchar,
+        (SELECT coalesce(max(c.position), 0) + 1 FROM chain_route c WHERE c.user_id = $1::bigint AND c.kind = $2::varchar),
+        $3, $4, $5, $6)
 RETURNING id
 `
 
-type InsertServerChainRuleParams struct {
-	UserID      int64
-	EntryNodeID int64
-	ExitNodeID  pgtype.Int8
-	IsEnabled   bool
+type InsertChainRouteParams struct {
+	UserID     int64
+	Kind       string
+	Name       string
+	ExitNodeID pgtype.Int8
+	ExitID     pgtype.Int8
+	IsEnabled  bool
 }
 
-func (q *Queries) InsertServerChainRule(ctx context.Context, arg InsertServerChainRuleParams) (int64, error) {
-	row := q.db.QueryRow(ctx, insertServerChainRule,
+// 新规则排在同类型的最后
+func (q *Queries) InsertChainRoute(ctx context.Context, arg InsertChainRouteParams) (int64, error) {
+	row := q.db.QueryRow(ctx, insertChainRoute,
 		arg.UserID,
-		arg.EntryNodeID,
+		arg.Kind,
+		arg.Name,
 		arg.ExitNodeID,
+		arg.ExitID,
 		arg.IsEnabled,
 	)
 	var id int64
@@ -294,49 +374,53 @@ func (q *Queries) InsertServerChainRule(ctx context.Context, arg InsertServerCha
 	return id, err
 }
 
-const listAdminServerChainRules = `-- name: ListAdminServerChainRules :many
-SELECT r.id, r.user_id, u.username, r.is_enabled, r.created_at,
-       r.entry_node_id, en.display_name AS entry_name, ei.server_id AS entry_server_id, s.name AS entry_server_name,
-       r.exit_node_id::bigint AS exit_node_id, xn.display_name AS exit_name
-FROM chain_rule r
-JOIN end_user u ON u.id = r.user_id
-JOIN node en ON en.id = r.entry_node_id
-JOIN inbound ei ON ei.id = en.inbound_id
-JOIN server s ON s.id = ei.server_id
-JOIN node xn ON xn.id = r.exit_node_id
-WHERE r.kind = 'server'
-  AND ($1::bigint IS NULL OR r.user_id = $1)
-  AND ($2::bigint IS NULL OR ei.server_id = $2)
-ORDER BY r.id DESC
-LIMIT $4 OFFSET $3
+const listAdminChainExits = `-- name: ListAdminChainExits :many
+SELECT x.id, coalesce(x.user_id, 0)::bigint AS owner_id, coalesce(u.username, '')::text AS username,
+       x.name, x.protocol, x.address, x.port, x.remark, x.is_enabled, x.allow_server, x.allow_client, x.created_at, x.updated_at,
+       (SELECT COUNT(*) FROM chain_route r WHERE r.exit_id = x.id)::int AS route_count
+FROM chain_exit x
+LEFT JOIN end_user u ON u.id = x.user_id
+WHERE ($1::bigint IS NULL OR x.id = $1)
+  AND ($2::boolean IS NULL OR (x.user_id IS NULL) = $2)
+  AND ($3::bigint IS NULL OR x.user_id = $3)
+  AND ($4::text IS NULL OR strpos(lower(x.name), lower($4)) > 0 OR strpos(lower(x.address), lower($4)) > 0)
+ORDER BY x.id DESC
+LIMIT $6 OFFSET $5
 `
 
-type ListAdminServerChainRulesParams struct {
-	UserID    pgtype.Int8
-	ServerID  pgtype.Int8
-	RowOffset int32
-	RowLimit  int32
+type ListAdminChainExitsParams struct {
+	ExitID     pgtype.Int8
+	IsPlatform pgtype.Bool
+	UserID     pgtype.Int8
+	Keyword    pgtype.Text
+	RowOffset  int32
+	RowLimit   int32
 }
 
-type ListAdminServerChainRulesRow struct {
-	ID              int64
-	UserID          int64
-	Username        string
-	IsEnabled       bool
-	CreatedAt       pgtype.Timestamptz
-	EntryNodeID     int64
-	EntryName       string
-	EntryServerID   int64
-	EntryServerName string
-	ExitNodeID      int64
-	ExitName        string
+type ListAdminChainExitsRow struct {
+	ID          int64
+	OwnerID     int64
+	Username    string
+	Name        string
+	Protocol    string
+	Address     string
+	Port        int32
+	Remark      string
+	IsEnabled   bool
+	AllowServer bool
+	AllowClient bool
+	CreatedAt   pgtype.Timestamptz
+	UpdatedAt   pgtype.Timestamptz
+	RouteCount  int32
 }
 
-// 全站服务端规则（管理端只读，Ruling-41），按 id 倒序分页
-func (q *Queries) ListAdminServerChainRules(ctx context.Context, arg ListAdminServerChainRulesParams) ([]ListAdminServerChainRulesRow, error) {
-	rows, err := q.db.Query(ctx, listAdminServerChainRules,
+// 全部出口（Ruling-50），按 id 倒序分页；exit_id 非空时只取这一个
+func (q *Queries) ListAdminChainExits(ctx context.Context, arg ListAdminChainExitsParams) ([]ListAdminChainExitsRow, error) {
+	rows, err := q.db.Query(ctx, listAdminChainExits,
+		arg.ExitID,
+		arg.IsPlatform,
 		arg.UserID,
-		arg.ServerID,
+		arg.Keyword,
 		arg.RowOffset,
 		arg.RowLimit,
 	)
@@ -344,21 +428,24 @@ func (q *Queries) ListAdminServerChainRules(ctx context.Context, arg ListAdminSe
 		return nil, err
 	}
 	defer rows.Close()
-	items := []ListAdminServerChainRulesRow{}
+	items := []ListAdminChainExitsRow{}
 	for rows.Next() {
-		var i ListAdminServerChainRulesRow
+		var i ListAdminChainExitsRow
 		if err := rows.Scan(
 			&i.ID,
-			&i.UserID,
+			&i.OwnerID,
 			&i.Username,
+			&i.Name,
+			&i.Protocol,
+			&i.Address,
+			&i.Port,
+			&i.Remark,
 			&i.IsEnabled,
+			&i.AllowServer,
+			&i.AllowClient,
 			&i.CreatedAt,
-			&i.EntryNodeID,
-			&i.EntryName,
-			&i.EntryServerID,
-			&i.EntryServerName,
-			&i.ExitNodeID,
-			&i.ExitName,
+			&i.UpdatedAt,
+			&i.RouteCount,
 		); err != nil {
 			return nil, err
 		}
@@ -370,14 +457,69 @@ func (q *Queries) ListAdminServerChainRules(ctx context.Context, arg ListAdminSe
 	return items, nil
 }
 
+const listAdminChainRoutes = `-- name: ListAdminChainRoutes :many
+SELECT r.id, r.user_id, u.username
+FROM chain_route r
+JOIN end_user u ON u.id = r.user_id
+WHERE ($1::text IS NULL OR r.kind = $1)
+  AND ($2::bigint IS NULL OR r.user_id = $2)
+  AND ($3::bigint IS NULL OR EXISTS (
+        SELECT 1 FROM chain_route_entry e JOIN node n ON n.id = e.entry_node_id JOIN inbound i ON i.id = n.inbound_id
+        WHERE e.route_id = r.id AND i.server_id = $3))
+ORDER BY r.id DESC
+LIMIT $5 OFFSET $4
+`
+
+type ListAdminChainRoutesParams struct {
+	Kind      pgtype.Text
+	UserID    pgtype.Int8
+	ServerID  pgtype.Int8
+	RowOffset int32
+	RowLimit  int32
+}
+
+type ListAdminChainRoutesRow struct {
+	ID       int64
+	UserID   int64
+	Username string
+}
+
+// 全站规则（管理端只读，Ruling-41），按 id 倒序分页；只取 id 与归属，内容由调用方按用户整体装配
+func (q *Queries) ListAdminChainRoutes(ctx context.Context, arg ListAdminChainRoutesParams) ([]ListAdminChainRoutesRow, error) {
+	rows, err := q.db.Query(ctx, listAdminChainRoutes,
+		arg.Kind,
+		arg.UserID,
+		arg.ServerID,
+		arg.RowOffset,
+		arg.RowLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListAdminChainRoutesRow{}
+	for rows.Next() {
+		var i ListAdminChainRoutesRow
+		if err := rows.Scan(&i.ID, &i.UserID, &i.Username); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listChainApplies = `-- name: ListChainApplies :many
-SELECT server_id, status, applied_rule_ids FROM chain_apply WHERE server_id = ANY($1::bigint[])
+SELECT server_id, status, applied_rule_ids, applied_at FROM chain_apply WHERE server_id = ANY($1::bigint[])
 `
 
 type ListChainAppliesRow struct {
 	ServerID       int64
 	Status         string
 	AppliedRuleIds []int64
+	AppliedAt      pgtype.Timestamptz
 }
 
 func (q *Queries) ListChainApplies(ctx context.Context, serverIds []int64) ([]ListChainAppliesRow, error) {
@@ -389,7 +531,12 @@ func (q *Queries) ListChainApplies(ctx context.Context, serverIds []int64) ([]Li
 	items := []ListChainAppliesRow{}
 	for rows.Next() {
 		var i ListChainAppliesRow
-		if err := rows.Scan(&i.ServerID, &i.Status, &i.AppliedRuleIds); err != nil {
+		if err := rows.Scan(
+			&i.ServerID,
+			&i.Status,
+			&i.AppliedRuleIds,
+			&i.AppliedAt,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -403,13 +550,14 @@ func (q *Queries) ListChainApplies(ctx context.Context, serverIds []int64) ([]Li
 const listChainApplyServerIDs = `-- name: ListChainApplyServerIDs :many
 SELECT s.id FROM server s
 WHERE NOT s.is_disabled
-  AND (EXISTS (SELECT 1 FROM chain_rule r JOIN node n ON n.id = r.entry_node_id JOIN inbound i ON i.id = n.inbound_id
+  AND (EXISTS (SELECT 1 FROM chain_route r JOIN chain_route_entry e ON e.route_id = r.id
+               JOIN node n ON n.id = e.entry_node_id JOIN inbound i ON i.id = n.inbound_id
                WHERE r.kind = 'server' AND i.server_id = s.id)
        OR EXISTS (SELECT 1 FROM chain_apply a WHERE a.server_id = s.id AND cardinality(a.applied_rule_ids) > 0))
 ORDER BY s.id
 `
 
-// 需要检查下发的服务器：启用中，且有以它为入口的服务端规则，或面板上还留着平台条目
+// 需要检查下发的服务器：启用中，且有起飞节点在它上面的服务端规则，或面板上还留着平台条目
 func (q *Queries) ListChainApplyServerIDs(ctx context.Context) ([]int64, error) {
 	rows, err := q.db.Query(ctx, listChainApplyServerIDs)
 	if err != nil {
@@ -430,66 +578,37 @@ func (q *Queries) ListChainApplyServerIDs(ctx context.Context) ([]int64, error) 
 	return items, nil
 }
 
-const listChainRules = `-- name: ListChainRules :many
-SELECT r.id, r.name, r.is_enabled, r.created_at,
-       r.entry_node_id, en.display_name AS entry_name,
-       coalesce(r.exit_node_id, 0)::bigint AS exit_node_id, coalesce(xn.display_name, '')::text AS exit_node_name,
-       coalesce(xi.protocol, '')::text AS exit_node_protocol,
-       coalesce(r.exit_custom_id, 0)::bigint AS exit_custom_id, coalesce(c.name, '')::text AS exit_custom_name,
-       coalesce(c.protocol, '')::text AS exit_custom_protocol
-FROM chain_rule r
-JOIN node en ON en.id = r.entry_node_id
-LEFT JOIN node xn ON xn.id = r.exit_node_id
-LEFT JOIN inbound xi ON xi.id = xn.inbound_id
-LEFT JOIN custom_node c ON c.id = r.exit_custom_id
-WHERE r.user_id = $1 AND r.kind = 'client'
-  AND ($2::bigint IS NULL OR r.id = $2)
-ORDER BY r.id
+const listChainExitSecrets = `-- name: ListChainExitSecrets :many
+SELECT id, coalesce(user_id, 0)::bigint AS owner_id, name, link_enc, resolved_ip, resolved_at
+FROM chain_exit WHERE id = ANY($1::bigint[])
 `
 
-type ListChainRulesParams struct {
-	UserID int64
-	RuleID pgtype.Int8
+type ListChainExitSecretsRow struct {
+	ID         int64
+	OwnerID    int64
+	Name       string
+	LinkEnc    []byte
+	ResolvedIp *netip.Addr
+	ResolvedAt pgtype.Timestamptz
 }
 
-type ListChainRulesRow struct {
-	ID                 int64
-	Name               string
-	IsEnabled          bool
-	CreatedAt          pgtype.Timestamptz
-	EntryNodeID        int64
-	EntryName          string
-	ExitNodeID         int64
-	ExitNodeName       string
-	ExitNodeProtocol   string
-	ExitCustomID       int64
-	ExitCustomName     string
-	ExitCustomProtocol string
-}
-
-// 某用户的客户端链式规则，带入口与落地的显示信息；rule_id 非空时只取这一条（归属仍按 user_id 约束，R8）
-func (q *Queries) ListChainRules(ctx context.Context, arg ListChainRulesParams) ([]ListChainRulesRow, error) {
-	rows, err := q.db.Query(ctx, listChainRules, arg.UserID, arg.RuleID)
+// 渲染订阅与下发用：这些出口的名称、链接密文与固定的地址
+func (q *Queries) ListChainExitSecrets(ctx context.Context, ids []int64) ([]ListChainExitSecretsRow, error) {
+	rows, err := q.db.Query(ctx, listChainExitSecrets, ids)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []ListChainRulesRow{}
+	items := []ListChainExitSecretsRow{}
 	for rows.Next() {
-		var i ListChainRulesRow
+		var i ListChainExitSecretsRow
 		if err := rows.Scan(
 			&i.ID,
+			&i.OwnerID,
 			&i.Name,
-			&i.IsEnabled,
-			&i.CreatedAt,
-			&i.EntryNodeID,
-			&i.EntryName,
-			&i.ExitNodeID,
-			&i.ExitNodeName,
-			&i.ExitNodeProtocol,
-			&i.ExitCustomID,
-			&i.ExitCustomName,
-			&i.ExitCustomProtocol,
+			&i.LinkEnc,
+			&i.ResolvedIp,
+			&i.ResolvedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -501,142 +620,51 @@ func (q *Queries) ListChainRules(ctx context.Context, arg ListChainRulesParams) 
 	return items, nil
 }
 
-const listCustomNodeLinks = `-- name: ListCustomNodeLinks :many
-SELECT id, name, link_enc FROM custom_node WHERE user_id = $1 ORDER BY id
+const listChainExits = `-- name: ListChainExits :many
+
+SELECT x.id, x.name, x.protocol, x.address, x.port, x.is_enabled, x.created_at,
+       (SELECT COUNT(*) FROM chain_route r WHERE r.exit_id = x.id)::int AS route_count
+FROM chain_exit x
+WHERE x.user_id = $1::bigint AND ($2::bigint IS NULL OR x.id = $2)
+ORDER BY x.id
 `
 
-type ListCustomNodeLinksRow struct {
-	ID      int64
-	Name    string
-	LinkEnc []byte
-}
-
-// 渲染订阅用：该用户全部自有落地节点的名称与链接密文
-func (q *Queries) ListCustomNodeLinks(ctx context.Context, userID int64) ([]ListCustomNodeLinksRow, error) {
-	rows, err := q.db.Query(ctx, listCustomNodeLinks, userID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []ListCustomNodeLinksRow{}
-	for rows.Next() {
-		var i ListCustomNodeLinksRow
-		if err := rows.Scan(&i.ID, &i.Name, &i.LinkEnc); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listCustomNodes = `-- name: ListCustomNodes :many
-SELECT c.id, c.name, c.protocol, c.address, c.port, c.created_at,
-       (SELECT COUNT(*) FROM chain_rule r WHERE r.exit_custom_id = c.id)::int AS rule_count
-FROM custom_node c
-WHERE c.user_id = $1 AND ($2::bigint IS NULL OR c.id = $2)
-ORDER BY c.id
-`
-
-type ListCustomNodesParams struct {
+type ListChainExitsParams struct {
 	UserID int64
-	NodeID pgtype.Int8
+	ExitID pgtype.Int8
 }
 
-type ListCustomNodesRow struct {
-	ID        int64
-	Name      string
-	Protocol  string
-	Address   string
-	Port      int32
-	CreatedAt pgtype.Timestamptz
-	RuleCount int32
+type ListChainExitsRow struct {
+	ID         int64
+	Name       string
+	Protocol   string
+	Address    string
+	Port       int32
+	IsEnabled  bool
+	CreatedAt  pgtype.Timestamptz
+	RouteCount int32
 }
 
-// 某用户的自有落地节点及各自被多少条规则引用；node_id 非空时只取这一个
-func (q *Queries) ListCustomNodes(ctx context.Context, arg ListCustomNodesParams) ([]ListCustomNodesRow, error) {
-	rows, err := q.db.Query(ctx, listCustomNodes, arg.UserID, arg.NodeID)
+// 出口 ------------------------------------------------------------------------------------
+// 某用户自己的出口及各自被多少条规则引用；exit_id 非空时只取这一个（归属按 user_id 约束，R8）
+func (q *Queries) ListChainExits(ctx context.Context, arg ListChainExitsParams) ([]ListChainExitsRow, error) {
+	rows, err := q.db.Query(ctx, listChainExits, arg.UserID, arg.ExitID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []ListCustomNodesRow{}
+	items := []ListChainExitsRow{}
 	for rows.Next() {
-		var i ListCustomNodesRow
+		var i ListChainExitsRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.Name,
 			&i.Protocol,
 			&i.Address,
 			&i.Port,
-			&i.CreatedAt,
-			&i.RuleCount,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listServerChainRules = `-- name: ListServerChainRules :many
-
-SELECT r.id, r.is_enabled, r.created_at,
-       r.entry_node_id, en.display_name AS entry_name, ei.server_id AS entry_server_id,
-       r.exit_node_id::bigint AS exit_node_id, xn.display_name AS exit_name, xi.protocol AS exit_protocol
-FROM chain_rule r
-JOIN node en ON en.id = r.entry_node_id
-JOIN inbound ei ON ei.id = en.inbound_id
-JOIN node xn ON xn.id = r.exit_node_id
-JOIN inbound xi ON xi.id = xn.inbound_id
-WHERE r.user_id = $1 AND r.kind = 'server'
-  AND ($2::bigint IS NULL OR r.id = $2)
-ORDER BY r.id
-`
-
-type ListServerChainRulesParams struct {
-	UserID int64
-	RuleID pgtype.Int8
-}
-
-type ListServerChainRulesRow struct {
-	ID            int64
-	IsEnabled     bool
-	CreatedAt     pgtype.Timestamptz
-	EntryNodeID   int64
-	EntryName     string
-	EntryServerID int64
-	ExitNodeID    int64
-	ExitName      string
-	ExitProtocol  string
-}
-
-// 服务端链式：规则与下发记录（docs/03 §5.19）------------------------------------------------
-// 某用户的服务端规则；rule_id 非空时只取这一条（归属按 user_id 约束，R8）
-func (q *Queries) ListServerChainRules(ctx context.Context, arg ListServerChainRulesParams) ([]ListServerChainRulesRow, error) {
-	rows, err := q.db.Query(ctx, listServerChainRules, arg.UserID, arg.RuleID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []ListServerChainRulesRow{}
-	for rows.Next() {
-		var i ListServerChainRulesRow
-		if err := rows.Scan(
-			&i.ID,
 			&i.IsEnabled,
 			&i.CreatedAt,
-			&i.EntryNodeID,
-			&i.EntryName,
-			&i.EntryServerID,
-			&i.ExitNodeID,
-			&i.ExitName,
-			&i.ExitProtocol,
+			&i.RouteCount,
 		); err != nil {
 			return nil, err
 		}
@@ -648,46 +676,190 @@ func (q *Queries) ListServerChainRules(ctx context.Context, arg ListServerChainR
 	return items, nil
 }
 
-const listServerChainRulesOnServer = `-- name: ListServerChainRulesOnServer :many
-SELECT r.id, r.user_id, r.is_enabled, r.entry_node_id, r.exit_node_id::bigint AS exit_node_id, i.tag AS inbound_tag
-FROM chain_rule r
-JOIN node n ON n.id = r.entry_node_id
+const listChainRouteEntries = `-- name: ListChainRouteEntries :many
+SELECT e.route_id, e.entry_node_id, n.display_name, i.id AS inbound_id, i.tag AS inbound_tag, i.server_id, s.name AS server_name
+FROM chain_route_entry e
+JOIN chain_route r ON r.id = e.route_id
+JOIN node n ON n.id = e.entry_node_id
 JOIN inbound i ON i.id = n.inbound_id
-JOIN end_user u ON u.id = r.user_id AND u.deleted_at IS NULL
-WHERE r.kind = 'server' AND i.server_id = $1
-ORDER BY r.id
+JOIN server s ON s.id = i.server_id
+WHERE r.user_id = ANY($1::bigint[])
+ORDER BY e.route_id, n.sort_order, n.display_name, n.id
 `
 
-type ListServerChainRulesOnServerRow struct {
-	ID          int64
-	UserID      int64
-	IsEnabled   bool
+type ListChainRouteEntriesRow struct {
+	RouteID     int64
 	EntryNodeID int64
-	ExitNodeID  int64
+	DisplayName string
+	InboundID   int64
 	InboundTag  string
+	ServerID    int64
+	ServerName  string
 }
 
-// 以某台服务器为入口的全部服务端规则，带入口入站的 tag
-func (q *Queries) ListServerChainRulesOnServer(ctx context.Context, serverID int64) ([]ListServerChainRulesOnServerRow, error) {
-	rows, err := q.db.Query(ctx, listServerChainRulesOnServer, serverID)
+// 这些用户全部规则的起飞节点，带入站与服务器；规则内按节点目录顺序
+func (q *Queries) ListChainRouteEntries(ctx context.Context, userIds []int64) ([]ListChainRouteEntriesRow, error) {
+	rows, err := q.db.Query(ctx, listChainRouteEntries, userIds)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []ListServerChainRulesOnServerRow{}
+	items := []ListChainRouteEntriesRow{}
 	for rows.Next() {
-		var i ListServerChainRulesOnServerRow
+		var i ListChainRouteEntriesRow
+		if err := rows.Scan(
+			&i.RouteID,
+			&i.EntryNodeID,
+			&i.DisplayName,
+			&i.InboundID,
+			&i.InboundTag,
+			&i.ServerID,
+			&i.ServerName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listChainRoutes = `-- name: ListChainRoutes :many
+SELECT r.id, r.user_id, r.kind, r.position, r.name, r.is_enabled, r.quarantine_hash, r.created_at, r.updated_at,
+       coalesce(r.exit_node_id, 0)::bigint AS exit_node_id, coalesce(xn.display_name, '')::text AS exit_node_name,
+       coalesce(xi.protocol, '')::text AS exit_node_protocol,
+       coalesce(r.exit_id, 0)::bigint AS exit_id, coalesce(x.name, '')::text AS exit_name, coalesce(x.protocol, '')::text AS exit_protocol,
+       coalesce(x.user_id, 0)::bigint AS exit_owner_id, coalesce(x.is_enabled, FALSE)::boolean AS exit_enabled,
+       coalesce(x.allow_server, FALSE)::boolean AS exit_allow_server, coalesce(x.allow_client, FALSE)::boolean AS exit_allow_client,
+       coalesce(x.updated_at, r.updated_at)::timestamptz AS exit_updated_at
+FROM chain_route r
+LEFT JOIN node xn ON xn.id = r.exit_node_id
+LEFT JOIN inbound xi ON xi.id = xn.inbound_id
+LEFT JOIN chain_exit x ON x.id = r.exit_id
+WHERE r.user_id = ANY($1::bigint[])
+ORDER BY r.user_id, r.kind, r.position, r.id
+`
+
+type ListChainRoutesRow struct {
+	ID               int64
+	UserID           int64
+	Kind             string
+	Position         int32
+	Name             string
+	IsEnabled        bool
+	QuarantineHash   string
+	CreatedAt        pgtype.Timestamptz
+	UpdatedAt        pgtype.Timestamptz
+	ExitNodeID       int64
+	ExitNodeName     string
+	ExitNodeProtocol string
+	ExitID           int64
+	ExitName         string
+	ExitProtocol     string
+	ExitOwnerID      int64
+	ExitEnabled      bool
+	ExitAllowServer  bool
+	ExitAllowClient  bool
+	ExitUpdatedAt    pgtype.Timestamptz
+}
+
+// 这些用户的全部规则（两种类型），带落地的显示信息与出口的开关；同一用户同一类型内按 position 排
+func (q *Queries) ListChainRoutes(ctx context.Context, userIds []int64) ([]ListChainRoutesRow, error) {
+	rows, err := q.db.Query(ctx, listChainRoutes, userIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListChainRoutesRow{}
+	for rows.Next() {
+		var i ListChainRoutesRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.UserID,
+			&i.Kind,
+			&i.Position,
+			&i.Name,
 			&i.IsEnabled,
-			&i.EntryNodeID,
+			&i.QuarantineHash,
+			&i.CreatedAt,
+			&i.UpdatedAt,
 			&i.ExitNodeID,
-			&i.InboundTag,
+			&i.ExitNodeName,
+			&i.ExitNodeProtocol,
+			&i.ExitID,
+			&i.ExitName,
+			&i.ExitProtocol,
+			&i.ExitOwnerID,
+			&i.ExitEnabled,
+			&i.ExitAllowServer,
+			&i.ExitAllowClient,
+			&i.ExitUpdatedAt,
 		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listExitNodeGroups = `-- name: ListExitNodeGroups :many
+SELECT ge.exit_id, g.id, g.name
+FROM node_group_exit ge JOIN node_group g ON g.id = ge.node_group_id
+WHERE ge.exit_id = ANY($1::bigint[])
+ORDER BY ge.exit_id, g.name, g.id
+`
+
+type ListExitNodeGroupsRow struct {
+	ExitID int64
+	ID     int64
+	Name   string
+}
+
+func (q *Queries) ListExitNodeGroups(ctx context.Context, exitIds []int64) ([]ListExitNodeGroupsRow, error) {
+	rows, err := q.db.Query(ctx, listExitNodeGroups, exitIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListExitNodeGroupsRow{}
+	for rows.Next() {
+		var i ListExitNodeGroupsRow
+		if err := rows.Scan(&i.ExitID, &i.ID, &i.Name); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPlatformHosts = `-- name: ListPlatformHosts :many
+SELECT base_url AS host FROM server
+UNION
+SELECT address AS host FROM endpoint WHERE NOT is_missing
+`
+
+// 平台自己的地址：面板地址与节点对外地址；用户出口不得指向它们（防环，Ruling-49）
+func (q *Queries) ListPlatformHosts(ctx context.Context) ([]string, error) {
+	rows, err := q.db.Query(ctx, listPlatformHosts)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []string{}
+	for rows.Next() {
+		var host string
+		if err := rows.Scan(&host); err != nil {
+			return nil, err
+		}
+		items = append(items, host)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -696,6 +868,7 @@ func (q *Queries) ListServerChainRulesOnServer(ctx context.Context, serverID int
 }
 
 const listServerProviderTypes = `-- name: ListServerProviderTypes :many
+
 SELECT id, provider_type FROM server ORDER BY id
 `
 
@@ -704,7 +877,8 @@ type ListServerProviderTypesRow struct {
 	ProviderType string
 }
 
-// 各服务器的面板类型，用来判断入口能否改内核配置
+// 服务端链式的下发（docs/03 §5.19）-----------------------------------------------------------
+// 各服务器的面板类型，用来判断能否改内核配置
 func (q *Queries) ListServerProviderTypes(ctx context.Context) ([]ListServerProviderTypesRow, error) {
 	rows, err := q.db.Query(ctx, listServerProviderTypes)
 	if err != nil {
@@ -725,19 +899,147 @@ func (q *Queries) ListServerProviderTypes(ctx context.Context) ([]ListServerProv
 	return items, nil
 }
 
-const renameCustomNode = `-- name: RenameCustomNode :execrows
-UPDATE custom_node SET name = $1, updated_at = now()
-WHERE id = $2 AND user_id = $3
+const listServerRouteNodeRoles = `-- name: ListServerRouteNodeRoles :many
+SELECT r.id AS route_id, e.entry_node_id AS node_id, TRUE::boolean AS is_entry
+FROM chain_route r JOIN chain_route_entry e ON e.route_id = r.id
+WHERE r.user_id = $1 AND r.kind = 'server'
+UNION ALL
+SELECT r.id AS route_id, r.exit_node_id::bigint AS node_id, FALSE::boolean AS is_entry
+FROM chain_route r
+WHERE r.user_id = $1 AND r.kind = 'server' AND r.exit_node_id IS NOT NULL
 `
 
-type RenameCustomNodeParams struct {
+type ListServerRouteNodeRolesRow struct {
+	RouteID int64
+	NodeID  int64
+	IsEntry bool
+}
+
+// 某用户服务端规则里用到的节点：is_entry 为真 = 作起飞，为假 = 作落地；防环校验用（Ruling-49）
+func (q *Queries) ListServerRouteNodeRoles(ctx context.Context, userID int64) ([]ListServerRouteNodeRolesRow, error) {
+	rows, err := q.db.Query(ctx, listServerRouteNodeRoles, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListServerRouteNodeRolesRow{}
+	for rows.Next() {
+		var i ListServerRouteNodeRolesRow
+		if err := rows.Scan(&i.RouteID, &i.NodeID, &i.IsEntry); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listServerRouteUsersOnServer = `-- name: ListServerRouteUsersOnServer :many
+SELECT DISTINCT r.user_id
+FROM chain_route r
+JOIN chain_route_entry e ON e.route_id = r.id
+JOIN node n ON n.id = e.entry_node_id
+JOIN inbound i ON i.id = n.inbound_id
+JOIN end_user u ON u.id = r.user_id AND u.deleted_at IS NULL
+WHERE r.kind = 'server' AND i.server_id = $1
+ORDER BY r.user_id
+`
+
+// 有服务端规则的起飞节点在这台服务器上的用户
+func (q *Queries) ListServerRouteUsersOnServer(ctx context.Context, serverID int64) ([]int64, error) {
+	rows, err := q.db.Query(ctx, listServerRouteUsersOnServer, serverID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []int64{}
+	for rows.Next() {
+		var user_id int64
+		if err := rows.Scan(&user_id); err != nil {
+			return nil, err
+		}
+		items = append(items, user_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listUserPlatformExits = `-- name: ListUserPlatformExits :many
+SELECT DISTINCT x.id, x.name, x.protocol, x.allow_server, x.allow_client
+FROM end_user u
+JOIN plan_node_group pg ON pg.plan_id = u.plan_id
+JOIN node_group_exit ge ON ge.node_group_id = pg.node_group_id
+JOIN chain_exit x ON x.id = ge.exit_id AND x.user_id IS NULL AND x.is_enabled
+WHERE u.id = $1 AND u.deleted_at IS NULL
+ORDER BY x.name, x.id
+`
+
+type ListUserPlatformExitsRow struct {
+	ID          int64
+	Name        string
+	Protocol    string
+	AllowServer bool
+	AllowClient bool
+}
+
+// 用户被授权的平台出口：启用，且属于套餐绑定的某个节点组（Ruling-47）
+func (q *Queries) ListUserPlatformExits(ctx context.Context, id int64) ([]ListUserPlatformExitsRow, error) {
+	rows, err := q.db.Query(ctx, listUserPlatformExits, id)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListUserPlatformExitsRow{}
+	for rows.Next() {
+		var i ListUserPlatformExitsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.Protocol,
+			&i.AllowServer,
+			&i.AllowClient,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const removeChainRouteEntriesExcept = `-- name: RemoveChainRouteEntriesExcept :exec
+DELETE FROM chain_route_entry WHERE route_id = $1 AND entry_node_id <> ALL($2::bigint[])
+`
+
+type RemoveChainRouteEntriesExceptParams struct {
+	RouteID int64
+	NodeIds []int64
+}
+
+func (q *Queries) RemoveChainRouteEntriesExcept(ctx context.Context, arg RemoveChainRouteEntriesExceptParams) error {
+	_, err := q.db.Exec(ctx, removeChainRouteEntriesExcept, arg.RouteID, arg.NodeIds)
+	return err
+}
+
+const renameChainExit = `-- name: RenameChainExit :execrows
+UPDATE chain_exit SET name = $1, updated_at = now()
+WHERE id = $2 AND user_id = $3::bigint
+`
+
+type RenameChainExitParams struct {
 	Name   string
 	ID     int64
 	UserID int64
 }
 
-func (q *Queries) RenameCustomNode(ctx context.Context, arg RenameCustomNodeParams) (int64, error) {
-	result, err := q.db.Exec(ctx, renameCustomNode, arg.Name, arg.ID, arg.UserID)
+func (q *Queries) RenameChainExit(ctx context.Context, arg RenameChainExitParams) (int64, error) {
+	result, err := q.db.Exec(ctx, renameChainExit, arg.Name, arg.ID, arg.UserID)
 	if err != nil {
 		return 0, err
 	}
@@ -757,69 +1059,161 @@ func (q *Queries) ResetChainApplyFailures(ctx context.Context, serverID int64) (
 	return result.RowsAffected(), nil
 }
 
-const setCustomNodeLink = `-- name: SetCustomNodeLink :exec
-UPDATE custom_node SET link_enc = $1, protocol = $2, address = $3, port = $4, updated_at = now()
-WHERE id = $5 AND user_id = $6
+const setChainExitEnabled = `-- name: SetChainExitEnabled :execrows
+UPDATE chain_exit SET is_enabled = $1, updated_at = now() WHERE id = $2
 `
 
-type SetCustomNodeLinkParams struct {
-	LinkEnc  []byte
-	Protocol string
-	Address  string
-	Port     int32
-	ID       int64
-	UserID   int64
-}
-
-func (q *Queries) SetCustomNodeLink(ctx context.Context, arg SetCustomNodeLinkParams) error {
-	_, err := q.db.Exec(ctx, setCustomNodeLink,
-		arg.LinkEnc,
-		arg.Protocol,
-		arg.Address,
-		arg.Port,
-		arg.ID,
-		arg.UserID,
-	)
-	return err
-}
-
-const setServerChainRuleEnabled = `-- name: SetServerChainRuleEnabled :execrows
-UPDATE chain_rule SET is_enabled = $1, updated_at = now()
-WHERE id = $2 AND user_id = $3 AND kind = 'server'
-`
-
-type SetServerChainRuleEnabledParams struct {
+type SetChainExitEnabledParams struct {
 	IsEnabled bool
 	ID        int64
-	UserID    int64
 }
 
-func (q *Queries) SetServerChainRuleEnabled(ctx context.Context, arg SetServerChainRuleEnabledParams) (int64, error) {
-	result, err := q.db.Exec(ctx, setServerChainRuleEnabled, arg.IsEnabled, arg.ID, arg.UserID)
+func (q *Queries) SetChainExitEnabled(ctx context.Context, arg SetChainExitEnabledParams) (int64, error) {
+	result, err := q.db.Exec(ctx, setChainExitEnabled, arg.IsEnabled, arg.ID)
 	if err != nil {
 		return 0, err
 	}
 	return result.RowsAffected(), nil
 }
 
-const updateChainRule = `-- name: UpdateChainRule :execrows
-UPDATE chain_rule SET name = $1, is_enabled = $2, updated_at = now()
-WHERE id = $3 AND user_id = $4 AND kind = 'client'
+const setChainExitLink = `-- name: SetChainExitLink :exec
+UPDATE chain_exit
+SET link_enc = $1, protocol = $2, address = $3, port = $4,
+    resolved_ip = NULL, resolved_at = NULL, updated_at = now()
+WHERE id = $5
 `
 
-type UpdateChainRuleParams struct {
-	Name      string
-	IsEnabled bool
-	ID        int64
-	UserID    int64
+type SetChainExitLinkParams struct {
+	LinkEnc  []byte
+	Protocol string
+	Address  string
+	Port     int32
+	ID       int64
 }
 
-func (q *Queries) UpdateChainRule(ctx context.Context, arg UpdateChainRuleParams) (int64, error) {
-	result, err := q.db.Exec(ctx, updateChainRule,
+// 换链接：展示字段一并更新，固定的 IP 作废（由调用方按需重新固定）
+func (q *Queries) SetChainExitLink(ctx context.Context, arg SetChainExitLinkParams) error {
+	_, err := q.db.Exec(ctx, setChainExitLink,
+		arg.LinkEnc,
+		arg.Protocol,
+		arg.Address,
+		arg.Port,
+		arg.ID,
+	)
+	return err
+}
+
+const setChainExitResolved = `-- name: SetChainExitResolved :exec
+UPDATE chain_exit SET resolved_ip = $1, resolved_at = $2 WHERE id = $3
+`
+
+type SetChainExitResolvedParams struct {
+	ResolvedIp *netip.Addr
+	ResolvedAt pgtype.Timestamptz
+	ID         int64
+}
+
+// 固定用于服务端链式的地址（Ruling-48）；resolved_ip 为空而 resolved_at 非空 = 复查发现不安全
+func (q *Queries) SetChainExitResolved(ctx context.Context, arg SetChainExitResolvedParams) error {
+	_, err := q.db.Exec(ctx, setChainExitResolved, arg.ResolvedIp, arg.ResolvedAt, arg.ID)
+	return err
+}
+
+const setChainRoutePosition = `-- name: SetChainRoutePosition :execrows
+UPDATE chain_route SET position = $1, updated_at = now()
+WHERE id = $2 AND user_id = $3 AND kind = $4
+`
+
+type SetChainRoutePositionParams struct {
+	Position int32
+	ID       int64
+	UserID   int64
+	Kind     string
+}
+
+// 调顺序：唯一约束是延迟到提交时检查的，事务内可以逐条改；同时刷新 updated_at，让下发状态按新顺序重新判断
+func (q *Queries) SetChainRoutePosition(ctx context.Context, arg SetChainRoutePositionParams) (int64, error) {
+	result, err := q.db.Exec(ctx, setChainRoutePosition,
+		arg.Position,
+		arg.ID,
+		arg.UserID,
+		arg.Kind,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const setChainRouteQuarantine = `-- name: SetChainRouteQuarantine :exec
+UPDATE chain_route SET quarantine_hash = $1 WHERE id = $2
+`
+
+type SetChainRouteQuarantineParams struct {
+	QuarantineHash string
+	ID             int64
+}
+
+// 失败隔离（docs/03 §5.19）：记下当时的内容指纹；内容变化后指纹对不上即视为解除
+func (q *Queries) SetChainRouteQuarantine(ctx context.Context, arg SetChainRouteQuarantineParams) error {
+	_, err := q.db.Exec(ctx, setChainRouteQuarantine, arg.QuarantineHash, arg.ID)
+	return err
+}
+
+const updateChainRoute = `-- name: UpdateChainRoute :execrows
+UPDATE chain_route
+SET name = $1, exit_node_id = $2, exit_id = $3, is_enabled = $4, updated_at = now()
+WHERE id = $5 AND user_id = $6
+`
+
+type UpdateChainRouteParams struct {
+	Name       string
+	ExitNodeID pgtype.Int8
+	ExitID     pgtype.Int8
+	IsEnabled  bool
+	ID         int64
+	UserID     int64
+}
+
+func (q *Queries) UpdateChainRoute(ctx context.Context, arg UpdateChainRouteParams) (int64, error) {
+	result, err := q.db.Exec(ctx, updateChainRoute,
 		arg.Name,
+		arg.ExitNodeID,
+		arg.ExitID,
 		arg.IsEnabled,
 		arg.ID,
 		arg.UserID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const updatePlatformChainExit = `-- name: UpdatePlatformChainExit :execrows
+UPDATE chain_exit
+SET name = $1, remark = $2, is_enabled = $3,
+    allow_server = $4, allow_client = $5, updated_at = now()
+WHERE id = $6 AND user_id IS NULL
+`
+
+type UpdatePlatformChainExitParams struct {
+	Name        string
+	Remark      string
+	IsEnabled   bool
+	AllowServer bool
+	AllowClient bool
+	ID          int64
+}
+
+func (q *Queries) UpdatePlatformChainExit(ctx context.Context, arg UpdatePlatformChainExitParams) (int64, error) {
+	result, err := q.db.Exec(ctx, updatePlatformChainExit,
+		arg.Name,
+		arg.Remark,
+		arg.IsEnabled,
+		arg.AllowServer,
+		arg.AllowClient,
+		arg.ID,
 	)
 	if err != nil {
 		return 0, err

@@ -8,7 +8,9 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"regexp"
 	"slices"
 	"strings"
 
@@ -30,13 +32,20 @@ const (
 	ruleTypeField  = "field"
 )
 
-// Entry 是一条要下发的服务端规则：入口入站的 tag、用户在入口面板上的 client email、落地节点参数。
+// Entry 是一条规则在一台起飞服务器上要下发的内容：这条规则在该服务器上生效的入站 tag、用户在该面板上的 client email、落地参数。
 type Entry struct {
-	RuleID     int64
-	InboundTag string
-	UserEmail  string
-	Exit       render.ProxyNode
+	RuleID      int64
+	InboundTags []string
+	UserEmail   string
+	Exit        render.ProxyNode
 }
+
+// userEmailPattern 是平台生成的 client email 的格式（docs/03 §6：u{用户 id}-{随机码}）。
+// Xray 路由的 user 条件把 "regexp:" 开头的值当正则，别的值一旦混进来就可能匹配到其他用户（docs/03 §5.19 平台条目）。
+var userEmailPattern = regexp.MustCompile(`^u[0-9]+-[0-9a-z]+$`)
+
+// ErrBadEntry 表示条目不满足下发的前提（email 格式不对、没有入站）；调用方的数据有问题，不应下发。
+var ErrBadEntry = errors.New("bad chain entry")
 
 // Tag 返回规则对应的出站 tag 与路由 ruleTag。
 func Tag(ruleID int64) string {
@@ -49,13 +58,17 @@ type Section struct {
 	Rules     []json.RawMessage
 }
 
-// Build 由规则生成平台条目，返回实际纳入的规则 id（升序）。落地的协议或传输 Xray 表达不了的规则跳过，不纳入。
+// Build 由规则生成平台条目，返回实际纳入的规则 id（升序）。落地的协议或传输 Xray 表达不了的规则跳过，不纳入；
+// email 不是平台生成的格式或没有入站时返回 ErrBadEntry。
 func Build(entries []Entry) (Section, []int64, error) {
 	sorted := slices.Clone(entries)
 	slices.SortFunc(sorted, func(a, b Entry) int { return cmp.Compare(a.RuleID, b.RuleID) })
 	sec := Section{Outbounds: make([]json.RawMessage, 0, len(sorted)), Rules: make([]json.RawMessage, 0, len(sorted))}
 	included := make([]int64, 0, len(sorted))
 	for _, e := range sorted {
+		if !userEmailPattern.MatchString(e.UserEmail) || len(e.InboundTags) == 0 || slices.Contains(e.InboundTags, "") {
+			return Section{}, nil, fmt.Errorf("%w: rule %d", ErrBadEntry, e.RuleID)
+		}
 		tag := Tag(e.RuleID)
 		outbound, ok := render.XrayOutbound(e.Exit, tag)
 		if !ok {
@@ -66,7 +79,7 @@ func Build(entries []Entry) (Section, []int64, error) {
 			return Section{}, nil, fmt.Errorf("marshal outbound of rule %d: %w", e.RuleID, err)
 		}
 		rule := map[string]any{
-			"type": ruleTypeField, keyRuleTag: tag, keyInboundTag: []string{e.InboundTag},
+			"type": ruleTypeField, keyRuleTag: tag, keyInboundTag: slices.Sorted(slices.Values(e.InboundTags)),
 			"user": []string{e.UserEmail}, keyOutboundTag: tag,
 		}
 		rawRule, err := json.Marshal(rule)

@@ -2,6 +2,7 @@ package chain
 
 import (
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 
@@ -44,9 +45,9 @@ func tags(t *testing.T, config json.RawMessage, path string) []string {
 
 func TestBuildMergeExtract(t *testing.T) {
 	entries := []Entry{
-		{RuleID: 7, InboundTag: "in-443-tcp", UserEmail: "u2-abc123", Exit: exitNode("uuid-b")},
-		{RuleID: 3, InboundTag: "in-443-tcp", UserEmail: "u1-def456", Exit: exitNode("uuid-a")},
-		{RuleID: 9, InboundTag: "in-80-tcp", UserEmail: "u1-def456", Exit: render.ProxyNode{Protocol: render.ProtoHysteria2, Address: "x", Port: 1}},
+		{RuleID: 7, InboundTags: []string{"in-443-tcp"}, UserEmail: "u2-abc123", Exit: exitNode("uuid-b")},
+		{RuleID: 3, InboundTags: []string{"in-443-tcp"}, UserEmail: "u1-def456", Exit: exitNode("uuid-a")},
+		{RuleID: 9, InboundTags: []string{"in-80-tcp"}, UserEmail: "u1-def456", Exit: render.ProxyNode{Protocol: render.ProtoHysteria2, Address: "x", Port: 1}},
 	}
 	sec, included, err := Build(entries)
 	if err != nil {
@@ -106,7 +107,7 @@ func TestBuildMergeExtract(t *testing.T) {
 }
 
 func TestMergeWithoutRouting(t *testing.T) {
-	sec, _, err := Build([]Entry{{RuleID: 1, InboundTag: "in-1", UserEmail: "u1-x", Exit: exitNode("u")}})
+	sec, _, err := Build([]Entry{{RuleID: 1, InboundTags: []string{"in-1"}, UserEmail: "u1-x", Exit: exitNode("u")}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -119,5 +120,41 @@ func TestMergeWithoutRouting(t *testing.T) {
 	}
 	if _, err := Merge(json.RawMessage(`[]`), sec); err == nil {
 		t.Fatal("模板不是对象应报错")
+	}
+}
+
+// 一条规则可以带多个入站（M9）：路由的 inboundTag 是这些入站，按字典序排，保证哈希稳定。
+func TestBuildMultipleInbounds(t *testing.T) {
+	a, _, err := Build([]Entry{{RuleID: 4, InboundTags: []string{"in-8443-tcp", "in-443-tcp"}, UserEmail: "u1-def456", Exit: exitNode("uuid-a")}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _, err := Build([]Entry{{RuleID: 4, InboundTags: []string{"in-443-tcp", "in-8443-tcp"}, UserEmail: "u1-def456", Exit: exitNode("uuid-a")}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(a.Rules) != 1 || !strings.Contains(string(a.Rules[0]), `"inboundTag":["in-443-tcp","in-8443-tcp"]`) {
+		t.Fatalf("路由应带两个入站且已排序：%s", a.Rules)
+	}
+	hashA, errA := a.Hash()
+	hashB, errB := b.Hash()
+	if errA != nil || errB != nil || hashA != hashB {
+		t.Fatalf("入站顺序不同不应改变哈希：%v %v", errA, errB)
+	}
+}
+
+// 路由里的用户必须是平台生成的 email：Xray 把 regexp: 开头的值当正则，混进来就可能匹配到别的用户（docs/03 §5.19）。
+func TestBuildRejectsForeignEmail(t *testing.T) {
+	for _, email := range []string{"regexp:.*", "", "alice@example.com", "u1", "u1-", "U1-abc", "u1-abc def", "u-abc"} {
+		_, _, err := Build([]Entry{{RuleID: 1, InboundTags: []string{"in-1"}, UserEmail: email, Exit: exitNode("u")}})
+		if !errors.Is(err, ErrBadEntry) {
+			t.Errorf("email %q 应被拒绝，err = %v", email, err)
+		}
+	}
+	for what, tags := range map[string][]string{"没有入站": nil, "空入站": {"in-1", ""}} {
+		_, _, err := Build([]Entry{{RuleID: 1, InboundTags: tags, UserEmail: "u1-abc123", Exit: exitNode("u")}})
+		if !errors.Is(err, ErrBadEntry) {
+			t.Errorf("%s 应被拒绝，err = %v", what, err)
+		}
 	}
 }

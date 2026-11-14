@@ -181,6 +181,9 @@ func runServer(args []string) error {
 	chainCfg.MinInterval = cfg.Chain.MinApplyInterval
 	chainApplier := service.NewChainApplier(pool, sealer, users, panels, chainCfg, nil)
 	go job.RunChainApply(ctx, chainApplier, cfg.Chain.ApplyInterval)
+	chains := service.NewChainService(pool, sealer, chainApplier, service.ChainOptions{
+		ServerWriteLimit: cfg.Chain.UserWriteLimit, ServerWriteWindow: cfg.Chain.UserWriteWindow,
+	})
 
 	srv := &http.Server{
 		Addr: cfg.Server.ListenAddr,
@@ -202,7 +205,8 @@ func runServer(args []string) error {
 			Shop:           shop,
 			Finance:        shop,
 			Pay:            payments,
-			Chain:          service.NewChainService(pool, sealer, chainApplier),
+			Chain:          chains,
+			ChainAdmin:     chains,
 			ChainApply:     chainApplier,
 			Telegram:       telegramSvc,
 			Ops:            ops,

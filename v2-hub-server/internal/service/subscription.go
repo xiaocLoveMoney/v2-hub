@@ -435,21 +435,25 @@ func renderSubscription(format string, infoTexts []string, items []subItem, chai
 	}
 }
 
-// subChain 是一条可输出的链路：entryItem 是入口在 items 里的下标，exit 是落地节点，name 为空表示用默认名。
+// subChain 是一条可输出的链路：entryItem 是起飞节点在 items 里的下标，exit 是落地，name 为空表示用默认名。
 type subChain struct {
 	name      string
 	entryItem int
 	exit      render.ProxyNode
 }
 
-// loadSubChains 取用户通畅且启用的链式规则，对到本次要输出的节点上（docs/03 §5.18 订阅输出）。
-// 入口或落地这次没有可输出的链接（如面板还没同步到）的规则跳过；自有落地节点的链接解不开或解析不了时跳过并留痕，
+// chainNameSep 连接规则名与起飞节点名，作为起了名的规则在订阅里各条链路的名称。
+const chainNameSep = " · "
+
+// loadSubChains 取用户启用且通畅的客户端规则，把每个生效的（起飞，落地）组合对到本次要输出的节点上（docs/03 §5.18 订阅输出）。
+// 起飞或落地这次没有可输出的链接（如面板还没同步到）的组合跳过；出口的链接解不开或解析不了时跳过（读取处已留痕），
 // 不让一条坏规则拖垮整份订阅。
 func (s *UserService) loadSubChains(ctx context.Context, userID int64, items []subItem) ([]subChain, error) {
 	if len(items) == 0 {
 		return nil, nil
 	}
-	rules, err := listRules(ctx, s.q, userID, 0)
+	// 订阅只关心客户端规则，不需要各面板能否改内核配置
+	st, err := loadChainState(ctx, s.q, s.sealer, nil, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -457,53 +461,39 @@ func (s *UserService) loadSubChains(ctx context.Context, userID int64, items []s
 	for i, it := range items {
 		itemIndex[it.nodeID] = i
 	}
-	out := make([]subChain, 0, len(rules))
-	var customNodes map[int64]render.ProxyNode
-	for _, r := range rules {
-		entry, hasEntry := itemIndex[r.EntryNodeID]
-		if !r.Enabled || r.Status != ChainOK || !hasEntry {
+	routes := st.routesOf(ChainKindClient)
+	out := make([]subChain, 0, len(routes))
+	for _, r := range routes {
+		exit, ok := subChainExit(st, r, items, itemIndex)
+		if !ok {
 			continue
 		}
-		if r.ExitKind == ChainExitNode {
-			if exit, ok := itemIndex[r.ExitID]; ok {
-				out = append(out, subChain{name: r.Name, entryItem: entry, exit: items[exit].node})
+		for _, e := range r.Entries {
+			entry, hasEntry := itemIndex[e.NodeID]
+			if e.State != EntryOK || !hasEntry {
+				continue
 			}
-			continue
-		}
-		if customNodes == nil {
-			if customNodes, err = s.loadCustomNodes(ctx, userID); err != nil {
-				return nil, err
+			name := ""
+			if r.Name != "" {
+				name = r.Name + chainNameSep + e.Name
 			}
-		}
-		if exit, ok := customNodes[r.ExitID]; ok {
-			out = append(out, subChain{name: r.Name, entryItem: entry, exit: exit})
+			out = append(out, subChain{name: name, entryItem: entry, exit: exit})
 		}
 	}
 	return out, nil
 }
 
-// loadCustomNodes 解密并解析用户全部自有落地节点，按 id 索引；节点名用用户起的名称。
-func (s *UserService) loadCustomNodes(ctx context.Context, userID int64) (map[int64]render.ProxyNode, error) {
-	rows, err := s.q.ListCustomNodeLinks(ctx, userID)
-	if err != nil {
-		return nil, fmt.Errorf("list custom node links of user %d: %w", userID, err)
-	}
-	out := make(map[int64]render.ProxyNode, len(rows))
-	for _, r := range rows {
-		plain, err := s.sealer.Open(r.LinkEnc, customNodeAAD(r.ID))
-		if err != nil {
-			slog.Error("open link of custom node", "custom_node_id", r.ID, "err", err)
-			continue
+// subChainExit 返回一条客户端规则的落地参数：平台节点取本次输出的节点，出口取解析好的链接（客户端自己连，不用固定的地址）。
+func subChainExit(st *chainState, r ChainRoute, items []subItem, itemIndex map[int64]int) (render.ProxyNode, bool) {
+	if r.Exit.Kind == ChainExitNode {
+		i, ok := itemIndex[r.Exit.ID]
+		if !ok {
+			return render.ProxyNode{}, false
 		}
-		node, err := render.ParseLink(string(plain))
-		if err != nil {
-			slog.Warn("skip unparsable custom node link", "custom_node_id", r.ID)
-			continue
-		}
-		node.Name = r.Name
-		out[r.ID] = node
+		return items[i].node, true
 	}
-	return out, nil
+	sec := st.exits[r.Exit.ID]
+	return sec.node, sec.isParsed
 }
 
 // subItem 是一条可输出的节点：nodeID 对应节点目录，link 是改好名称与地址的分享链接，node 是解析后的模型。

@@ -33,9 +33,12 @@ user:
   reconcileInterval: 5m
   timeZone: Local
 # 服务端链式下发，语义见 docs/03 §5.19：后台检查间隔；同一台服务器两次下发的最小间隔（每次下发都会重启该服务器的 Xray）
+# userWriteLimit / userWriteWindow：每个用户在一个时间窗内最多改几次服务端规则（新建、修改、删除、调顺序）
 chain:
   applyInterval: 30s
   minApplyInterval: 60s
+  userWriteLimit: 10
+  userWriteWindow: 1h
 # 终端用户会话，语义见 docs/03 §5.3；登录频控与 Cookie 的 Secure 沿用 auth 段
 portal:
   sessionIdleTimeout: 168h

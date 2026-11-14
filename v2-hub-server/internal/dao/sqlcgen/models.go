@@ -79,17 +79,41 @@ type ChainApply struct {
 	UpdatedAt      pgtype.Timestamptz
 }
 
-type ChainRule struct {
-	ID           int64
-	UserID       int64
-	Kind         string
-	Name         string
-	EntryNodeID  int64
-	ExitNodeID   pgtype.Int8
-	ExitCustomID pgtype.Int8
-	IsEnabled    bool
-	CreatedAt    pgtype.Timestamptz
-	UpdatedAt    pgtype.Timestamptz
+type ChainExit struct {
+	ID          int64
+	UserID      pgtype.Int8
+	Name        string
+	Protocol    string
+	Address     string
+	Port        int32
+	LinkEnc     []byte
+	CreatedAt   pgtype.Timestamptz
+	UpdatedAt   pgtype.Timestamptz
+	Remark      string
+	IsEnabled   bool
+	AllowServer bool
+	AllowClient bool
+	ResolvedIp  *netip.Addr
+	ResolvedAt  pgtype.Timestamptz
+}
+
+type ChainRoute struct {
+	ID             int64
+	UserID         int64
+	Kind           string
+	Position       int32
+	Name           string
+	ExitNodeID     pgtype.Int8
+	ExitID         pgtype.Int8
+	IsEnabled      bool
+	QuarantineHash string
+	CreatedAt      pgtype.Timestamptz
+	UpdatedAt      pgtype.Timestamptz
+}
+
+type ChainRouteEntry struct {
+	RouteID     int64
+	EntryNodeID int64
 }
 
 type CheckinLog struct {
@@ -130,18 +154,6 @@ type CouponUsage struct {
 	UserID    pgtype.Int8
 	OrderID   int64
 	CreatedAt pgtype.Timestamptz
-}
-
-type CustomNode struct {
-	ID        int64
-	UserID    int64
-	Name      string
-	Protocol  string
-	Address   string
-	Port      int32
-	LinkEnc   []byte
-	CreatedAt pgtype.Timestamptz
-	UpdatedAt pgtype.Timestamptz
 }
 
 type EmailCode struct {
@@ -298,6 +310,11 @@ type NodeGroup struct {
 	Remark    string
 	CreatedAt pgtype.Timestamptz
 	UpdatedAt pgtype.Timestamptz
+}
+
+type NodeGroupExit struct {
+	NodeGroupID int64
+	ExitID      int64
 }
 
 type NodeGroupItem struct {
