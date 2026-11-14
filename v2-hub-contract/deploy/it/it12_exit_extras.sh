@@ -17,7 +17,6 @@ DEPLOY_DIR="$(cd "$IT_DIR/.." && pwd)"
 COMPOSE=(docker compose -f "$DEPLOY_DIR/docker-compose.yml" --profile xui)
 BASE=http://127.0.0.1:8080
 XUI_A_URL="http://127.0.0.1:${XUI_A_PORT:-12053}"
-MIHOMO_IMAGE="${IT_MIHOMO_IMAGE:-metacubex/mihomo:latest}"
 SINGBOX_IMAGE="${IT_SINGBOX_IMAGE:-ghcr.io/sagernet/sing-box:latest}"
 ROOT_USER=it12-root  # 与前面用例的超管区分（run_all 只在开头重置一次库）
 END_USER=it12-user
@@ -179,7 +178,7 @@ curl -s "$SUB_URL?format=xray" -o "$SUB_DIR/xray.json"
 [ "$(jq '[.outbounds[] | select(.type == "http" and .tls.enabled == true)] | length' "$SUB_DIR/singbox.json")" = "1" ] || fail "sing-box 订阅里 HTTPS 出口应带 TLS"
 [ "$(jq '[.[] | select([.outbounds[]? | select(.protocol == "http")] | length > 0)] | length' "$SUB_DIR/xray.json")" = "2" ] || fail "Xray JSON 订阅应有 2 份带 http 出站的配置"
 chmod -R a+rX "$SUB_DIR"
-docker run --rm -v "$SUB_DIR:/cfg:ro" "$MIHOMO_IMAGE" -t -f /cfg/mihomo.yaml -d /tmp >"$WORK/mihomo.log" 2>&1 || fail "mihomo -t 未通过：$(tail -5 "$WORK/mihomo.log")"
+mihomo_test "$SUB_DIR/mihomo.yaml" "$WORK/mihomo.log" "$WORK/mihomo-home" || fail "mihomo -t 未通过：$(tail -5 "$WORK/mihomo.log")"
 docker run --rm -v "$SUB_DIR:/cfg:ro" "$SINGBOX_IMAGE" check -c /cfg/singbox.json >"$WORK/singbox.log" 2>&1 || fail "sing-box check 未通过：$(tail -5 "$WORK/singbox.log")"
 XRAY_BIN="$("${COMPOSE[@]}" exec -T xui-a sh -c 'ls /app/bin/xray-linux-* | head -1' | tr -d '\r')"
 [ -n "$XRAY_BIN" ] || fail "面板容器里没有找到 xray"
