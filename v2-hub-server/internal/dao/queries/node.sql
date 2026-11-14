@@ -6,6 +6,18 @@ INSERT INTO node (inbound_id, endpoint_id, display_name)
 VALUES ($1, $2, $3)
 ON CONFLICT (inbound_id, endpoint_id) DO NOTHING;
 
+-- name: RenameLegacyDirectNodes :execrows
+-- 旧默认名“服务器名 · 入站称呼”去掉服务器名前缀，只改直连节点（Ruling-63）
+UPDATE node n
+SET display_name = substr(n.display_name, char_length(s.name) + char_length(sqlc.arg(separator)::text) + 1),
+    updated_at   = now()
+FROM inbound i
+JOIN server s ON s.id = i.server_id
+WHERE n.inbound_id = i.id
+  AND n.endpoint_id IS NULL
+  AND char_length(n.display_name) > char_length(s.name) + char_length(sqlc.arg(separator)::text)
+  AND left(n.display_name, char_length(s.name) + char_length(sqlc.arg(separator)::text)) = s.name || sqlc.arg(separator)::text;
+
 -- name: CountNodes :one
 SELECT COUNT(*)
 FROM node n

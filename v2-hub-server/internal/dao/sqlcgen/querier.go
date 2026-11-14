@@ -422,6 +422,8 @@ type Querier interface {
 	PurgeTelegramOutbox(ctx context.Context, createdAt pgtype.Timestamptz) (int64, error)
 	RemoveChainRouteEntriesExcept(ctx context.Context, arg RemoveChainRouteEntriesExceptParams) error
 	RenameChainExit(ctx context.Context, arg RenameChainExitParams) (int64, error)
+	// 旧默认名“服务器名 · 入站称呼”去掉服务器名前缀，只改直连节点（Ruling-63）
+	RenameLegacyDirectNodes(ctx context.Context, separator string) (int64, error)
 	// 删除对外地址拆分了面板上的组：被挪到新组的地址改写组标识，保留原记录与节点（docs/03 §5.1）
 	RepointEndpoint(ctx context.Context, arg RepointEndpointParams) error
 	// 管理员重试（docs/03 §3 C4）：清零失败次数与退避
