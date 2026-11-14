@@ -54,7 +54,7 @@ expect_code() { [ "$(cat /tmp/it3-code)" = "$1" ] || fail "$2：期望 HTTP $1�
 # ---- 3. 接入服务器：错误 token 应被拒且不保存，正确 token 接入并同步 ----
 bad_server="$(jq -nc --arg u "$XUI_URL" '{name:"it-bad",providerType:"xui",baseUrl:$u,apiToken:"wrong",tlsMode:"verify"}')"
 hub POST /api/admin/servers "$bad_server" >/dev/null; expect_code 502 "错误 token 接入"
-server_body="$(jq -nc --arg u "$XUI_URL" --arg t "$XUI_TOKEN" '{name:"it-xui-a",providerType:"xui",baseUrl:$u,apiToken:$t,tlsMode:"verify",region:"local"}')"
+server_body="$(jq -nc --arg u "$XUI_URL" --arg t "$XUI_TOKEN" '{name:"it-xui-a",providerType:"xui",baseUrl:$u,apiToken:$t,tlsMode:"verify",region:"HK"}')"
 server="$(hub POST /api/admin/servers "$server_body")"; expect_code 200 "接入服务器"
 SERVER_ID="$(printf '%s' "$server" | jq -r .data.id)"
 [ "$(printf '%s' "$server" | jq -r .data.status)" = "online" ] || fail "接入后状态不是 online：$server"
