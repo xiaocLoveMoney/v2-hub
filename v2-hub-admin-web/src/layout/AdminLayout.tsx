@@ -73,11 +73,9 @@ export function AdminLayout() {
             </Button>
           </Space>
         </Layout.Header>
-        <Layout.Content className="admin-content">
-          {/* 切换页面或页面里的块插入时依次进场（components/motion.ts） */}
-          <div ref={revealChildren}>
-            <Outlet />
-          </div>
+        {/* 页面根节点插入时进场（components/motion.ts）；不另包一层，样式里的 .admin-content:has(> .card-page) 要求页面是直接子元素 */}
+        <Layout.Content className="admin-content" ref={revealChildren}>
+          <Outlet />
         </Layout.Content>
       </Layout>
     </Layout>
