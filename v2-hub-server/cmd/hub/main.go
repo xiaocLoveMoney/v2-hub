@@ -145,6 +145,10 @@ func runServer(args []string) error {
 		InfoNodes: cfg.Subscription.InfoNodes, LogRetention: cfg.Subscription.LogRetention,
 	}
 	settings := service.NewSettingsService(pool, subCfg, nil)
+	// 订阅路径前缀首次启动随机生成，老部署的 sub 进入过渡期（Ruling-59）
+	if err := settings.EnsureSubscriptionPath(ctx); err != nil {
+		return fmt.Errorf("ensure subscription path: %w", err)
+	}
 	sender, err := smtpSenderFromEnv()
 	if err != nil {
 		return err

@@ -2,8 +2,10 @@ package service
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
+	"math/big"
 	"net/mail"
 	"net/netip"
 	"net/url"
@@ -56,6 +58,16 @@ const (
 	maxNotifyTrafficPct = 50
 	maxMenuKeys         = 64
 
+	// 订阅路径前缀（docs/03 §5.4 订阅路径，Ruling-59）
+	LegacySubPath           = "sub"
+	subPathLen              = 16
+	subPathAlphabet         = "abcdefghijklmnopqrstuvwxyz0123456789"
+	defaultSubPathGraceDays = 30
+	maxSubPathGraceDays     = 90
+	keySubPath              = "subscription.path"
+	keySubOldPath           = "subscription.oldPath"
+	keySubOldPathUntil      = "subscription.oldPathUntil"
+
 	defaultCurrency = "CNY"
 
 	// 运营设置（docs/03 §5.20）
@@ -85,6 +97,7 @@ const (
 	msgSettingCheckinMin = "签到奖励下限不能大于上限"
 	msgSettingPlanGone   = "注册赠送的套餐不存在"
 	msgSettingBadGroup   = "设置分组必须是对象："
+	msgSettingReadOnly   = "设置项只读："
 )
 
 // telegramChatPattern 是 Telegram 会话 id：数字（群组为负数）或 @频道用户名；空串表示不发。
@@ -92,6 +105,9 @@ var telegramChatPattern = regexp.MustCompile(`^(-?[0-9]{1,20}|@[A-Za-z][A-Za-z0-
 
 // menuKeyPattern 是菜单键的写法（docs/03 §5.6 菜单顺序，Ruling-57）：小写字母开头，1–32 位小写字母、数字、-。
 var menuKeyPattern = regexp.MustCompile(`^[a-z][a-z0-9-]{0,31}$`)
+
+// subPathPattern 是订阅路径前缀的写法；旧前缀另外允许 LegacySubPath。
+var subPathPattern = regexp.MustCompile(`^[a-z0-9]{10,32}$`)
 
 var domainPattern = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$`)
 
@@ -236,6 +252,20 @@ type SubscriptionSettings struct {
 	UpdateIntervalHours int
 	InfoNodes           bool
 	LogRetentionDays    int
+	// Path 是订阅地址的路径前缀（Ruling-59）；PathGraceDays 是改前缀后旧前缀还能用几天。
+	Path          string
+	PathGraceDays int
+	// OldPath / OldPathUntil 是过渡中的旧前缀与失效时间，只由后端在改前缀时写入；OldPath 为空即没有。
+	OldPath      string
+	OldPathUntil time.Time
+}
+
+// AcceptsSubPath 报告 path 能否用来拉订阅：当前前缀，或未过期的旧前缀（docs/03 §5.4 订阅路径）。
+func (s SubscriptionSettings) AcceptsSubPath(path string, now time.Time) bool {
+	if path == s.Path {
+		return true
+	}
+	return s.OldPath != "" && path == s.OldPath && now.Before(s.OldPathUntil)
 }
 
 // Location 返回 site.timezone 对应的时区；设置写入时已校验，解析失败只可能是运行环境缺时区库，此时退回 UTC。
@@ -247,10 +277,11 @@ func (s Settings) Location() *time.Location {
 	return loc
 }
 
-// settingDef 描述一个设置项：怎么取当前值、怎么校验并写入新值。
+// settingDef 描述一个设置项：怎么取当前值、怎么校验并写入新值。readOnly 的项接口不可改，只由后端写入。
 type settingDef struct {
-	get func(s *Settings) any
-	set func(s *Settings, raw json.RawMessage) error
+	get      func(s *Settings) any
+	set      func(s *Settings, raw json.RawMessage) error
+	readOnly bool
 }
 
 func decodeSetting[T any](raw json.RawMessage, check func(v T) bool, assign func(v T)) error {
@@ -360,6 +391,24 @@ func validMenuOrder(v []string) bool {
 		seen[k] = struct{}{}
 	}
 	return true
+}
+
+func validOldSubPath(v string) bool {
+	return v == "" || v == LegacySubPath || subPathPattern.MatchString(v)
+}
+
+// randomSubPath 生成订阅路径前缀：16 位小写字母与数字。
+func randomSubPath() (string, error) {
+	var b strings.Builder
+	limit := big.NewInt(int64(len(subPathAlphabet)))
+	for range subPathLen {
+		n, err := rand.Int(rand.Reader, limit)
+		if err != nil {
+			return "", fmt.Errorf("random subscription path: %w", err)
+		}
+		b.WriteByte(subPathAlphabet[n.Int64()])
+	}
+	return b.String(), nil
 }
 
 func validIntro(v string) bool {
@@ -640,6 +689,32 @@ var settingDefs = map[string]settingDef{
 			return decodeSetting(raw, validMenuOrder, func(v []string) { s.Menu.User = v })
 		},
 	},
+	keySubPath: {
+		get: func(s *Settings) any { return s.Subscription.Path },
+		set: func(s *Settings, raw json.RawMessage) error {
+			return decodeSetting(raw, subPathPattern.MatchString, func(v string) { s.Subscription.Path = v })
+		},
+	},
+	"subscription.pathGraceDays": {
+		get: func(s *Settings) any { return s.Subscription.PathGraceDays },
+		set: func(s *Settings, raw json.RawMessage) error {
+			return decodeSetting(raw, intBetween(0, maxSubPathGraceDays), func(v int) { s.Subscription.PathGraceDays = v })
+		},
+	},
+	keySubOldPath: {
+		readOnly: true,
+		get:      func(s *Settings) any { return s.Subscription.OldPath },
+		set: func(s *Settings, raw json.RawMessage) error {
+			return decodeSetting(raw, validOldSubPath, func(v string) { s.Subscription.OldPath = v })
+		},
+	},
+	keySubOldPathUntil: {
+		readOnly: true,
+		get:      func(s *Settings) any { return s.Subscription.OldPathUntil },
+		set: func(s *Settings, raw json.RawMessage) error {
+			return decodeSetting(raw, nil, func(v time.Time) { s.Subscription.OldPathUntil = v })
+		},
+	},
 	"subscription.logRetentionDays": {
 		get: func(s *Settings) any { return s.Subscription.LogRetentionDays },
 		set: func(s *Settings, raw json.RawMessage) error {
@@ -696,6 +771,8 @@ func defaultSettings(sub SubscriptionConfig) Settings {
 		Menu:     MenuSettings{Admin: []string{}, User: []string{}},
 		Subscription: SubscriptionSettings{
 			BaseURL: strings.TrimRight(sub.BaseURL, "/"), Title: title, UpdateIntervalHours: interval, InfoNodes: sub.InfoNodes, LogRetentionDays: retention,
+			// 首次启动前的兜底；EnsureSubscriptionPath 会生成随机前缀并保存
+			Path: LegacySubPath, PathGraceDays: defaultSubPathGraceDays,
 		},
 	}
 }
@@ -741,14 +818,19 @@ func (s *SettingsService) load(ctx context.Context, q *sqlcgen.Queries) (Setting
 // Update 修改设置：patch 的键是“分组.键”（如 register.mode），只改出现的键；任一项不合法则整体不保存。
 // 返回修改后的全部设置。错误：CodeInvalidArgument。
 func (s *SettingsService) Update(ctx context.Context, actor *AdminPrincipal, patch map[string]json.RawMessage, ip *netip.Addr) (Settings, error) {
-	keys := make([]string, 0, len(patch))
+	keys := make([]string, 0, len(patch)+2)
 	for k := range patch {
-		if _, ok := settingDefs[k]; !ok {
+		def, ok := settingDefs[k]
+		if !ok {
 			return Settings{}, newError(CodeInvalidArgument, msgSettingUnknown+k)
+		}
+		if def.readOnly {
+			return Settings{}, newError(CodeInvalidArgument, msgSettingReadOnly+k)
 		}
 		keys = append(keys, k)
 	}
 	slices.Sort(keys)
+	writes := keys
 
 	var next Settings
 	err := s.inTx(ctx, func(q *sqlcgen.Queries) error {
@@ -765,7 +847,11 @@ func (s *SettingsService) Update(ctx context.Context, actor *AdminPrincipal, pat
 		if err := s.checkCrossFields(ctx, q, next); err != nil {
 			return err
 		}
-		for _, k := range keys {
+		if next.Subscription.Path != cur.Subscription.Path {
+			next.Subscription.OldPath, next.Subscription.OldPathUntil = oldSubPath(cur.Subscription.Path, next.Subscription.PathGraceDays, s.now())
+			writes = append(slices.Clone(keys), keySubOldPath, keySubOldPathUntil)
+		}
+		for _, k := range writes {
 			raw, err := json.Marshal(settingDefs[k].get(&next))
 			if err != nil {
 				return fmt.Errorf("marshal setting %s: %w", k, err)
@@ -776,7 +862,7 @@ func (s *SettingsService) Update(ctx context.Context, actor *AdminPrincipal, pat
 		}
 		// 审计只记键名，不记值（docs/03 §5.6 修改）
 		return writeAudit(ctx, q, AuditEntry{ActorType: ActorAdmin, ActorID: actor.AdminID, Action: ActionSettingUpdate, TargetType: targetSetting,
-			Detail: map[string]any{"keys": keys}, ClientIP: ip})
+			Detail: map[string]any{"keys": writes}, ClientIP: ip})
 	})
 	if err != nil {
 		return Settings{}, err
@@ -785,6 +871,58 @@ func (s *SettingsService) Update(ctx context.Context, actor *AdminPrincipal, pat
 	s.cached, s.cachedAt = next, s.now()
 	s.mu.Unlock()
 	return next, nil
+}
+
+// oldSubPath 返回改前缀后的旧前缀与失效时间：过渡期为 0 时不留旧前缀（docs/03 §5.4 订阅路径）。
+func oldSubPath(previous string, graceDays int, now time.Time) (string, time.Time) {
+	if graceDays <= 0 {
+		return "", time.Time{}
+	}
+	return previous, now.AddDate(0, 0, graceDays)
+}
+
+// EnsureSubscriptionPath 在库里还没有订阅路径前缀时生成一个随机前缀并保存，原来的 sub 作为旧前缀按默认天数过渡（Ruling-59 升级）。
+// 启动时调用一次；已有前缀时什么也不做。
+func (s *SettingsService) EnsureSubscriptionPath(ctx context.Context) error {
+	err := s.inTx(ctx, func(q *sqlcgen.Queries) error {
+		rows, err := q.ListSettings(ctx)
+		if err != nil {
+			return fmt.Errorf("list settings: %w", err)
+		}
+		for _, row := range rows {
+			if row.Key == keySubPath {
+				return nil
+			}
+		}
+		path, err := randomSubPath()
+		if err != nil {
+			return err
+		}
+		cur, err := s.load(ctx, q)
+		if err != nil {
+			return err
+		}
+		next := cur
+		next.Subscription.Path = path
+		next.Subscription.OldPath, next.Subscription.OldPathUntil = oldSubPath(LegacySubPath, cur.Subscription.PathGraceDays, s.now())
+		for _, k := range []string{keySubPath, keySubOldPath, keySubOldPathUntil} {
+			raw, err := json.Marshal(settingDefs[k].get(&next))
+			if err != nil {
+				return fmt.Errorf("marshal setting %s: %w", k, err)
+			}
+			if err := q.UpsertSetting(ctx, sqlcgen.UpsertSettingParams{Key: k, Value: raw}); err != nil {
+				return fmt.Errorf("upsert setting %s: %w", k, err)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	s.mu.Lock()
+	s.cachedAt = time.Time{}
+	s.mu.Unlock()
+	return nil
 }
 
 func (s *SettingsService) checkCrossFields(ctx context.Context, q *sqlcgen.Queries, next Settings) error {
@@ -825,5 +963,6 @@ func (s Settings) subscriptionConfig() SubscriptionConfig {
 	return SubscriptionConfig{
 		BaseURL: sub.BaseURL, Title: sub.Title, UpdateIntervalHours: sub.UpdateIntervalHours, InfoNodes: sub.InfoNodes,
 		LogRetention: time.Duration(sub.LogRetentionDays) * 24 * time.Hour,
+		Path:         sub.Path, OldPath: sub.OldPath, OldPathUntil: sub.OldPathUntil,
 	}
 }

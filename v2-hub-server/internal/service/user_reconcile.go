@@ -96,6 +96,7 @@ func (d desiredClient) needsRotation() bool {
 func (d desiredClient) spec() panel.ClientSpec {
 	spec := panel.ClientSpec{Email: d.email, UUID: d.cred.UUID, LimitIP: d.limitIP, Enabled: d.enabled, InboundRefs: d.refs}
 	spec.Auth = d.cred.Auth
+	spec.Password = d.cred.Password
 	return spec
 }
 

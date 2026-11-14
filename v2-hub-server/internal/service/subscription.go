@@ -10,6 +10,8 @@ import (
 	"log/slog"
 	"net/netip"
 	"net/url"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -26,8 +28,17 @@ import (
 
 const (
 	subTokenBytes = 24 // 192 bit，URL 安全 Base64 后 32 个字符
-	subPathPrefix = "/sub/"
-	queryFormat   = "format"
+	queryFormat = "format"
+	pathSep     = "/"
+
+	// 连接密码（docs/03 §5.4 连接密码，Ruling-58）：每用户每小时最多改 5 次
+	connPasswordPerHour = 5
+	connPasswordWindow  = time.Hour
+	connPasswordMaxKeys = 10000
+
+	ActionPortalConnPassword = "portal.connection_password"
+	msgConnPasswordBad       = "连接密码须为 8–64 位字母、数字或 - _ . ~"
+	msgConnPasswordRate      = "修改太频繁，请稍后再试"
 
 	// 频控（docs/03 §5.4）：同一 token 每分钟 30 次、同一 IP 每分钟 60 次；token 不存在按 IP 计失败，15 分钟 20 次即锁 15 分钟
 	subTokenRatePerMinute = 30
@@ -71,7 +82,27 @@ type SubscriptionConfig struct {
 	InfoNodes bool
 	// LogRetention 是订阅记录的保留时长。
 	LogRetention time.Duration
+	// Path 是订阅地址的路径前缀，空 = sub；OldPath / OldPathUntil 是过渡中的旧前缀（Ruling-59）。
+	Path         string
+	OldPath      string
+	OldPathUntil time.Time
 }
+
+// subPath 返回当前路径前缀；没配置时用 sub（M10 之前的固定前缀）。
+func (c SubscriptionConfig) subPath() string {
+	if c.Path == "" {
+		return LegacySubPath
+	}
+	return c.Path
+}
+
+// acceptsPath 报告 path 能否用来拉订阅（docs/03 §5.4 订阅路径）。
+func (c SubscriptionConfig) acceptsPath(path string, now time.Time) bool {
+	return SubscriptionSettings{Path: c.subPath(), OldPath: c.OldPath, OldPathUntil: c.OldPathUntil}.AcceptsSubPath(path, now)
+}
+
+// connPasswordPattern 是自设连接密码的写法：8–64 位，分享链接里不用转义的字符（Ruling-58）。
+var connPasswordPattern = regexp.MustCompile(`^[A-Za-z0-9._~-]{8,64}$`)
 
 // subGuards 是订阅端点的三个频控器。
 type subGuards struct {
@@ -105,11 +136,12 @@ type SubscriptionFormatLink struct {
 	URL    string
 }
 
-// SubscriptionInfo 是用户的订阅地址；URL 属于凭据，不得写日志。
+// SubscriptionInfo 是用户的订阅地址；URL 属于凭据，不得写日志。HasCustomPassword 表示自设了连接密码（不回传密码本身）。
 type SubscriptionInfo struct {
 	URL                 string
 	Formats             []SubscriptionFormatLink
 	UpdateIntervalHours int
+	HasCustomPassword   bool
 }
 
 var subscriptionFormats = []string{render.FormatBase64, render.FormatMihomo, render.FormatSingBox, render.FormatXray}
@@ -134,7 +166,7 @@ func (s *UserService) subscriptionInfo(ctx context.Context, token, requestBase s
 	if base == "" {
 		base = strings.TrimRight(requestBase, "/")
 	}
-	u := base + subPathPrefix + token
+	u := base + pathSep + cfg.subPath() + pathSep + token
 	info := &SubscriptionInfo{URL: u, UpdateIntervalHours: cfg.UpdateIntervalHours, Formats: make([]SubscriptionFormatLink, 0, len(subscriptionFormats))}
 	for _, f := range subscriptionFormats {
 		info.Formats = append(info.Formats, SubscriptionFormatLink{Format: f, URL: u + "?" + queryFormat + "=" + f})
@@ -148,7 +180,90 @@ func (s *UserService) GetSubscription(ctx context.Context, p *UserPrincipal, req
 	if err != nil {
 		return nil, err
 	}
-	return s.subscriptionInfo(ctx, token, requestBase), nil
+	return s.subscriptionInfoOf(ctx, p.UserID, token, requestBase)
+}
+
+// subscriptionInfoOf 是带“是否自设连接密码”的订阅信息。
+func (s *UserService) subscriptionInfoOf(ctx context.Context, userID int64, token, requestBase string) (*SubscriptionInfo, error) {
+	sealed, err := s.q.GetUserCredential(ctx, userID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, newError(CodeNotFound, msgUserNotFound)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get credential of user %d: %w", userID, err)
+	}
+	cred, err := s.openCredential(userID, sealed)
+	if err != nil {
+		return nil, err
+	}
+	info := s.subscriptionInfo(ctx, token, requestBase)
+	info.HasCustomPassword = cred.Password != ""
+	return info, nil
+}
+
+// SetConnectionPassword 由用户本人自设连接密码，空串恢复为随机（docs/03 §5.4 连接密码，Ruling-58）。
+// 只改面板 client 的 password 字段：凭据版本 +1 后由对账写到各面板，UUID、auth 与订阅地址不变。
+// 错误：CodeInvalidArgument（写法不对）、CodeRateLimited（每小时超过 5 次）。
+func (s *UserService) SetConnectionPassword(ctx context.Context, p *UserPrincipal, password, requestBase string, ip *netip.Addr) (*SubscriptionInfo, error) {
+	if password != "" && !connPasswordPattern.MatchString(password) {
+		return nil, newError(CodeInvalidArgument, msgConnPasswordBad)
+	}
+	key := strconv.FormatInt(p.UserID, 10)
+	if s.connPasswordGuard.IsLocked(key) {
+		return nil, newError(CodeRateLimited, msgConnPasswordRate)
+	}
+	token, err := s.ensureSubToken(ctx, p.UserID)
+	if err != nil {
+		return nil, err
+	}
+	err = s.inTx(ctx, func(q *sqlcgen.Queries) error {
+		sealed, err := q.GetUserCredentialForUpdate(ctx, p.UserID)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return newError(CodeNotFound, msgUserNotFound)
+		}
+		if err != nil {
+			return fmt.Errorf("lock credential of user %d: %w", p.UserID, err)
+		}
+		cred, err := s.openCredential(p.UserID, sealed)
+		if err != nil {
+			return err
+		}
+		cred.Password = password
+		resealed, err := s.sealCredential(p.UserID, cred)
+		if err != nil {
+			return err
+		}
+		if _, err := q.UpdateUserCredential(ctx, sqlcgen.UpdateUserCredentialParams{ID: p.UserID, ClientCredEnc: resealed}); err != nil {
+			return fmt.Errorf("update credential of user %d: %w", p.UserID, err)
+		}
+		if err := q.MarkUserProvisionsPending(ctx, p.UserID); err != nil {
+			return fmt.Errorf("mark provisions of user %d pending: %w", p.UserID, err)
+		}
+		// 审计只记动作与是否自设，不记密码
+		return writeAudit(ctx, q, AuditEntry{ActorType: ActorUser, ActorID: p.UserID, Action: ActionPortalConnPassword, TargetType: targetUser,
+			TargetID: key, Detail: map[string]any{"custom": password != ""}, ClientIP: ip})
+	})
+	if err != nil {
+		return nil, err
+	}
+	s.connPasswordGuard.RecordFailure(key)
+	s.TriggerReconcile()
+	info := s.subscriptionInfo(ctx, token, requestBase)
+	info.HasCustomPassword = password != ""
+	return info, nil
+}
+
+// sealCredential 把连接凭据加密（关联数据 end_user:<id>:client）。
+func (s *UserService) sealCredential(userID int64, cred clientCredential) ([]byte, error) {
+	plain, err := json.Marshal(cred)
+	if err != nil {
+		return nil, fmt.Errorf("encode credential: %w", err)
+	}
+	sealed, err := s.sealer.Seal(plain, credentialAAD(userID))
+	if err != nil {
+		return nil, fmt.Errorf("seal credential of user %d: %w", userID, err)
+	}
+	return sealed, nil
 }
 
 func (s *UserService) ensureSubToken(ctx context.Context, userID int64) (string, error) {
@@ -201,17 +316,14 @@ func (s *UserService) rotateSubscription(ctx context.Context, userID int64, audi
 	if err != nil {
 		return "", err
 	}
+	// 新凭据不带自设的连接密码：重置即一并改回随机（Ruling-58）
 	cred, err := newClientCredential()
 	if err != nil {
 		return "", err
 	}
-	plain, err := json.Marshal(cred)
+	sealedCred, err := s.sealCredential(userID, cred)
 	if err != nil {
-		return "", fmt.Errorf("encode credential: %w", err)
-	}
-	sealedCred, err := s.sealer.Seal(plain, credentialAAD(userID))
-	if err != nil {
-		return "", fmt.Errorf("seal credential of user %d: %w", userID, err)
+		return "", err
 	}
 	err = s.inTx(ctx, func(q *sqlcgen.Queries) error {
 		n, err := q.RotateUserSubscription(ctx, sqlcgen.RotateUserSubscriptionParams{ID: userID, SubTokenHash: hash, SubTokenEnc: sealedToken, ClientCredEnc: sealedCred})
@@ -251,6 +363,8 @@ func (s *UserService) ResetUserSubscription(ctx context.Context, actor *AdminPri
 
 // SubscriptionRequest 是一次订阅拉取。
 type SubscriptionRequest struct {
+	// Path 是地址里的路径前缀，只认当前与未过期的旧前缀（Ruling-59）。
+	Path      string
 	Token     string
 	Format    string // 空表示按 User-Agent 判断
 	UserAgent string
@@ -292,7 +406,7 @@ func resolveFormat(explicit, ua string) (string, error) {
 	return "", newError(CodeInvalidArgument, msgSubBadFormat)
 }
 
-// RenderSubscription 处理一次 /sub/{token} 请求：频控 → 找用户 → 取缓存的链接 → 渲染 → 记录。不回源面板（铁律四）。
+// RenderSubscription 处理一次 /{path}/{token} 请求：频控 → 校验前缀 → 找用户 → 取缓存的链接 → 渲染 → 记录。不回源面板（铁律四）。
 func (s *UserService) RenderSubscription(ctx context.Context, req SubscriptionRequest) (*SubscriptionResult, error) {
 	ipKey := ""
 	if req.ClientIP != nil {
@@ -303,6 +417,14 @@ func (s *UserService) RenderSubscription(ctx context.Context, req SubscriptionRe
 	}
 	if ipKey != "" {
 		s.subGuards.ip.RecordFailure(ipKey)
+	}
+	cfg := s.subConfig(ctx)
+	// 前缀不对与 token 不存在同样对待：404 并计入失败频控，防枚举
+	if !cfg.acceptsPath(req.Path, s.now()) {
+		if ipKey != "" {
+			s.subGuards.miss.RecordFailure(ipKey)
+		}
+		return nil, newError(CodeNotFound, msgSubNotFound)
 	}
 	format, err := resolveFormat(req.Format, req.UserAgent)
 	if err != nil {
@@ -325,7 +447,6 @@ func (s *UserService) RenderSubscription(ctx context.Context, req SubscriptionRe
 	}
 	s.subGuards.token.RecordFailure(tokenKey)
 
-	cfg := s.subConfig(ctx)
 	var items []subItem
 	var chains []subChain
 	if user.Status == UserStatusActive {

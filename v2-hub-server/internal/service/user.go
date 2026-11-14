@@ -20,6 +20,7 @@ import (
 
 	"v2-hub-server/internal/dao/sqlcgen"
 	"v2-hub-server/internal/manager/crypto"
+	"v2-hub-server/internal/manager/ratelimit"
 )
 
 const (
@@ -82,6 +83,8 @@ type UserService struct {
 	// linkStamps 记每台服务器上次取链接时的入站 / 对外地址摘要（serverID → string）；进程重启后为空，会全量重取一次。
 	linkStamps sync.Map
 	subGuards  subGuards
+	// connPasswordGuard 限制每用户改连接密码的次数（docs/03 §5.4 连接密码）。
+	connPasswordGuard *ratelimit.FailureGuard
 }
 
 // NewUserService 创建用户服务；now 为 nil 时用 time.Now，cfg.Location 为空时用本地时区。
@@ -101,7 +104,10 @@ func NewUserService(pool *pgxpool.Pool, sealer *crypto.Sealer, panels *PanelServ
 	if cfg.Subscription.LogRetention <= 0 {
 		cfg.Subscription.LogRetention = defaultSubscribeLogRetention
 	}
-	return &UserService{store: newStore(pool), sealer: sealer, panels: panels, cfg: cfg, now: now, trigger: make(chan struct{}, 1), subGuards: newSubGuards(now)}
+	return &UserService{store: newStore(pool), sealer: sealer, panels: panels, cfg: cfg, now: now, trigger: make(chan struct{}, 1), subGuards: newSubGuards(now),
+		connPasswordGuard: ratelimit.NewFailureGuard(ratelimit.FailureGuardConfig{
+			MaxFailures: connPasswordPerHour, Window: connPasswordWindow, Lockout: connPasswordWindow, MaxKeys: connPasswordMaxKeys,
+		}, now)}
 }
 
 // ---- 套餐 ----------------------------------------------------------------------
@@ -459,9 +465,11 @@ type UserFilter struct {
 }
 
 // clientCredential 是用户在各面板 client 上共用的凭据，加密存储（关联数据 end_user:<id>:client）。
+// Password 是用户自设的连接密码（Ruling-58），空 = 面板的 password 字段沿用 Auth。
 type clientCredential struct {
-	UUID string `json:"uuid"`
-	Auth string `json:"auth"`
+	UUID     string `json:"uuid"`
+	Auth     string `json:"auth"`
+	Password string `json:"password,omitempty"`
 }
 
 func credentialAAD(userID int64) []byte {

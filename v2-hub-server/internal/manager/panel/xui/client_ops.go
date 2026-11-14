@@ -69,7 +69,7 @@ func (c *Client) AddClient(ctx context.Context, spec panel.ClientSpec) error {
 	}
 	body := map[string]any{
 		"client": map[string]any{
-			keyEmail: spec.Email, "id": spec.UUID, "password": spec.Auth, "auth": spec.Auth,
+			keyEmail: spec.Email, "id": spec.UUID, "password": spec.PasswordOrAuth(), "auth": spec.Auth,
 			keyTotalGB: 0, keyExpiryTime: 0, keyLimitIP: spec.LimitIP, keyEnable: spec.Enabled,
 		},
 		"inboundIds": ids,
@@ -121,7 +121,7 @@ func (c *Client) DeleteClient(ctx context.Context, email string) error {
 // SetClientCredential 实现 panel.Provider：面板按字段合并，未给出的挂载保持不变。
 func (c *Client) SetClientCredential(ctx context.Context, spec panel.ClientSpec) error {
 	body := map[string]any{
-		keyEmail: spec.Email, "id": spec.UUID, "password": spec.Auth, "auth": spec.Auth,
+		keyEmail: spec.Email, "id": spec.UUID, "password": spec.PasswordOrAuth(), "auth": spec.Auth,
 		keyLimitIP: spec.LimitIP, keyEnable: spec.Enabled,
 	}
 	return c.call(ctx, http.MethodPost, "/clients/update/"+url.PathEscape(spec.Email), body, nil)

@@ -69,6 +69,30 @@ func (q *Queries) GetUserBySubTokenHash(ctx context.Context, subTokenHash []byte
 	return i, err
 }
 
+const getUserCredential = `-- name: GetUserCredential :one
+SELECT client_cred_enc FROM end_user WHERE id = $1 AND deleted_at IS NULL
+`
+
+// 读连接凭据（只读），订阅信息里判断是否自设了连接密码
+func (q *Queries) GetUserCredential(ctx context.Context, id int64) ([]byte, error) {
+	row := q.db.QueryRow(ctx, getUserCredential, id)
+	var client_cred_enc []byte
+	err := row.Scan(&client_cred_enc)
+	return client_cred_enc, err
+}
+
+const getUserCredentialForUpdate = `-- name: GetUserCredentialForUpdate :one
+SELECT client_cred_enc FROM end_user WHERE id = $1 AND deleted_at IS NULL FOR UPDATE
+`
+
+// 读连接凭据并锁行，改连接密码时用（docs/03 §5.4 连接密码）
+func (q *Queries) GetUserCredentialForUpdate(ctx context.Context, id int64) ([]byte, error) {
+	row := q.db.QueryRow(ctx, getUserCredentialForUpdate, id)
+	var client_cred_enc []byte
+	err := row.Scan(&client_cred_enc)
+	return client_cred_enc, err
+}
+
 const getUserDashboard = `-- name: GetUserDashboard :one
 SELECT u.status, coalesce(p.name, '')::text AS plan_name, u.traffic_limit, u.traffic_used, u.expires_at, u.pending_days,
        u.limit_ip, u.last_used_at, u.balance,
@@ -464,6 +488,25 @@ type SetUserSubTokenParams struct {
 // 只在还没有 token 时写入，避免并发请求互相覆盖
 func (q *Queries) SetUserSubToken(ctx context.Context, arg SetUserSubTokenParams) (int64, error) {
 	result, err := q.db.Exec(ctx, setUserSubToken, arg.ID, arg.SubTokenHash, arg.SubTokenEnc)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const updateUserCredential = `-- name: UpdateUserCredential :execrows
+UPDATE end_user SET client_cred_enc = $2, cred_version = cred_version + 1, updated_at = now()
+WHERE id = $1 AND deleted_at IS NULL
+`
+
+type UpdateUserCredentialParams struct {
+	ID            int64
+	ClientCredEnc []byte
+}
+
+// 换连接凭据并把凭据版本 +1，交给对账写到各面板（docs/03 §5.4 连接密码）
+func (q *Queries) UpdateUserCredential(ctx context.Context, arg UpdateUserCredentialParams) (int64, error) {
+	result, err := q.db.Exec(ctx, updateUserCredential, arg.ID, arg.ClientCredEnc)
 	if err != nil {
 		return 0, err
 	}

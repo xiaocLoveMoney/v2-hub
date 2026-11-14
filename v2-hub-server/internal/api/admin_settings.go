@@ -98,6 +98,19 @@ type subscriptionSettingsVO struct {
 	UpdateIntervalHours int    `json:"updateIntervalHours"`
 	InfoNodes           bool   `json:"infoNodes"`
 	LogRetentionDays    int    `json:"logRetentionDays"`
+	Path                string `json:"path"`
+	PathGraceDays       int    `json:"pathGraceDays"`
+	OldPath             string `json:"oldPath"`
+	// OldPathUntil 为 nil 表示没有过渡中的旧前缀。
+	OldPathUntil *time.Time `json:"oldPathUntil"`
+}
+
+// optionalTime 把零值时间转成 nil（接口里写 null）。
+func optionalTime(t time.Time) *time.Time {
+	if t.IsZero() {
+		return nil
+	}
+	return &t
 }
 
 type alertSettingsVO struct {
@@ -191,7 +204,9 @@ func toSettingsVO(s service.Settings, mailEnabled, telegramEnabled bool) setting
 		Shared:  sharedSettingsVO{Enabled: s.Shared.Enabled},
 		Mail:    mailSettingsVO{RatePerMinute: s.Mail.RatePerMinute},
 		Subscription: subscriptionSettingsVO{BaseURL: s.Subscription.BaseURL, Title: s.Subscription.Title,
-			UpdateIntervalHours: s.Subscription.UpdateIntervalHours, InfoNodes: s.Subscription.InfoNodes, LogRetentionDays: s.Subscription.LogRetentionDays},
+			UpdateIntervalHours: s.Subscription.UpdateIntervalHours, InfoNodes: s.Subscription.InfoNodes, LogRetentionDays: s.Subscription.LogRetentionDays,
+			Path: s.Subscription.Path, PathGraceDays: s.Subscription.PathGraceDays, OldPath: s.Subscription.OldPath,
+			OldPathUntil: optionalTime(s.Subscription.OldPathUntil)},
 	}
 }
 

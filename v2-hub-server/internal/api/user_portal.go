@@ -16,6 +16,7 @@ const (
 	queryHours            = "hours"
 	querySubFormat        = "format"
 	pathParamToken        = "token"
+	pathParamSubPath      = "subPath"
 	headerForwardedProto  = "X-Forwarded-Proto"
 	schemeHTTP            = "http"
 	schemeHTTPS           = "https"
@@ -37,6 +38,7 @@ type PortalManager interface {
 	GetNodeLink(ctx context.Context, p *service.UserPrincipal, nodeID int64) (string, error)
 	GetSubscription(ctx context.Context, p *service.UserPrincipal, requestBase string) (*service.SubscriptionInfo, error)
 	ResetOwnSubscription(ctx context.Context, p *service.UserPrincipal, requestBase string, ip *netip.Addr) (*service.SubscriptionInfo, error)
+	SetConnectionPassword(ctx context.Context, p *service.UserPrincipal, password, requestBase string, ip *netip.Addr) (*service.SubscriptionInfo, error)
 	ListSubscribeLogs(ctx context.Context, userID int64, pq service.PageQuery) (*service.Page[service.SubscribeLogItem], error)
 	RenderSubscription(ctx context.Context, req service.SubscriptionRequest) (*service.SubscriptionResult, error)
 }
@@ -181,6 +183,7 @@ type subscriptionInfoVO struct {
 	URL                 string                 `json:"url"`
 	Formats             []subscriptionFormatVO `json:"formats"`
 	UpdateIntervalHours int                    `json:"updateIntervalHours"`
+	HasCustomPassword   bool                   `json:"hasCustomPassword"`
 }
 
 func toSubscriptionInfoVO(info *service.SubscriptionInfo) subscriptionInfoVO {
@@ -188,7 +191,7 @@ func toSubscriptionInfoVO(info *service.SubscriptionInfo) subscriptionInfoVO {
 	for _, f := range info.Formats {
 		formats = append(formats, subscriptionFormatVO{Format: f.Format, URL: f.URL})
 	}
-	return subscriptionInfoVO{URL: info.URL, Formats: formats, UpdateIntervalHours: info.UpdateIntervalHours}
+	return subscriptionInfoVO{URL: info.URL, Formats: formats, UpdateIntervalHours: info.UpdateIntervalHours, HasCustomPassword: info.HasCustomPassword}
 }
 
 func (h *handlers) getUserSubscription(w http.ResponseWriter, r *http.Request, p *service.UserPrincipal) {
@@ -202,6 +205,26 @@ func (h *handlers) getUserSubscription(w http.ResponseWriter, r *http.Request, p
 
 func (h *handlers) resetOwnSubscription(w http.ResponseWriter, r *http.Request, p *service.UserPrincipal) {
 	info, err := h.portal.ResetOwnSubscription(r.Context(), p, h.requestBase(r), clientIP(r, h.trustedProxies))
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeOK(w, toSubscriptionInfoVO(info))
+}
+
+// connectionPasswordRequest 对应 hub-api.yaml ConnectionPasswordInput。
+type connectionPasswordRequest struct {
+	Password string `json:"password"`
+}
+
+// setConnectionPassword 处理 PUT /api/user/subscription/password（Ruling-58）；写法由业务层校验。
+func (h *handlers) setConnectionPassword(w http.ResponseWriter, r *http.Request, p *service.UserPrincipal) {
+	var req connectionPasswordRequest
+	if err := decodeJSON(w, r, &req); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	info, err := h.portal.SetConnectionPassword(r.Context(), p, req.Password, h.requestBase(r), clientIP(r, h.trustedProxies))
 	if err != nil {
 		writeError(w, r, err)
 		return
@@ -231,7 +254,7 @@ func writePlain(w http.ResponseWriter, status int, body string) {
 	writeBody(w, []byte(body))
 }
 
-// getSubscription 处理 GET /sub/{token}：凭 token 访问，无需登录；错误以纯文本返回，不透出内部细节。
+// getSubscription 处理 GET /{subPath}/{token}（Ruling-59，前缀由业务层校验）：凭 token 访问，无需登录；错误以纯文本返回，不透出内部细节。
 func (h *handlers) getSubscription(w http.ResponseWriter, r *http.Request) {
 	token := r.PathValue(pathParamToken)
 	if len(token) < subTokenMinLen || len(token) > subTokenMaxLen {
@@ -239,7 +262,7 @@ func (h *handlers) getSubscription(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	res, err := h.portal.RenderSubscription(r.Context(), service.SubscriptionRequest{
-		Token: token, Format: r.URL.Query().Get(querySubFormat), UserAgent: r.Header.Get(headerUserAgent), ClientIP: clientIP(r, h.trustedProxies),
+		Path: r.PathValue(pathParamSubPath), Token: token, Format: r.URL.Query().Get(querySubFormat), UserAgent: r.Header.Get(headerUserAgent), ClientIP: clientIP(r, h.trustedProxies),
 	})
 	if err != nil {
 		status, body := plainError(r, err)

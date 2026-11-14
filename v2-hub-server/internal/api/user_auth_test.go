@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"fmt"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -21,15 +22,19 @@ import (
 const (
 	portalLoginPath = "/api/user/auth/login"
 	portalMePath    = "/api/user/auth/me"
-	// insertEndUser 直接落一行最小的终端用户（凭据列放占位密文，本组用例不涉及下发）。
+	// insertEndUser 直接落一行最小的终端用户；连接凭据随后用测试密钥加密写入（订阅信息要读它）。
 	insertEndUser = `INSERT INTO end_user (username, password_hash, email_code, client_cred_enc, is_disabled, status)
-VALUES ($1, $2, 'abc123', '\x00', $3, $4)`
+VALUES ($1, $2, 'abc123', '\x00', $3, $4) RETURNING id`
+	setEndUserCred = `UPDATE end_user SET client_cred_enc = $2 WHERE id = $1`
+	// testSealerKey 是接口测试共用的加密主密钥（仅测试用）。
+	testSealerKey = "KioqKioqKioqKioqKioqKioqKioqKioqKioqKioqKio="
+	testClientCred = `{"uuid":"00000000-0000-4000-8000-000000000001","auth":"test-auth-value"}`
 )
 
 func newPortalAPIServer(t *testing.T) (*httptest.Server, *pgxpool.Pool) {
 	t.Helper()
 	pool := daotest.NewPool(t)
-	sealer, err := crypto.NewSealer("KioqKioqKioqKioqKioqKioqKioqKioqKioqKioqKio=")
+	sealer, err := crypto.NewSealer(testSealerKey)
 	if err != nil {
 		t.Fatalf("NewSealer: %v", err)
 	}
@@ -73,8 +78,20 @@ func seedEndUser(t *testing.T, pool *pgxpool.Pool, username string, disabled boo
 	if disabled {
 		status = "disabled"
 	}
-	if _, err := pool.Exec(context.Background(), insertEndUser, username, hash, disabled, status); err != nil {
+	var id int64
+	if err := pool.QueryRow(context.Background(), insertEndUser, username, hash, disabled, status).Scan(&id); err != nil {
 		t.Fatalf("seed end user %s: %v", username, err)
+	}
+	sealer, err := crypto.NewSealer(testSealerKey)
+	if err != nil {
+		t.Fatalf("NewSealer: %v", err)
+	}
+	sealed, err := sealer.Seal([]byte(testClientCred), fmt.Appendf(nil, "end_user:%d:client", id))
+	if err != nil {
+		t.Fatalf("seal credential: %v", err)
+	}
+	if _, err := pool.Exec(context.Background(), setEndUserCred, id, sealed); err != nil {
+		t.Fatalf("set credential of %s: %v", username, err)
 	}
 }
 
@@ -158,6 +175,16 @@ func TestSubscriptionEndpoint(t *testing.T) {
 	expectStatus(t, c.do(http.MethodGet, "/api/user/traffic?hours=0", nil), http.StatusBadRequest, string(service.CodeInvalidArgument))
 	expectStatus(t, c.do(http.MethodGet, "/api/user/nodes/1/link", nil), http.StatusNotFound, string(service.CodeNotFound))
 
+	// 自设连接密码（Ruling-58）：写法不对 400；成功后订阅信息标记为自设
+	expectStatus(t, c.do(http.MethodPut, "/api/user/subscription/password", map[string]string{"password": "bad pass"}),
+		http.StatusBadRequest, string(service.CodeInvalidArgument))
+	pw := c.do(http.MethodPut, "/api/user/subscription/password", map[string]string{"password": "carol-Pass_123"})
+	expectStatus(t, pw, http.StatusOK, codeOK)
+	var withPassword subscriptionInfoVO
+	if err := json.Unmarshal(pw.Data, &withPassword); err != nil || !withPassword.HasCustomPassword || withPassword.URL != info.URL {
+		t.Fatalf("after setting password = %+v, %v", withPassword, err)
+	}
+
 	// 订阅端点不需要登录，不走响应信封
 	anon := &http.Client{}
 	get := func(url string) (*http.Response, string) {
@@ -194,6 +221,10 @@ func TestSubscriptionEndpoint(t *testing.T) {
 	}
 	if resp, body := get(prefix + "unknown-token-0000000000000000"); resp.StatusCode != http.StatusNotFound || body != string(service.CodeNotFound) {
 		t.Fatalf("unknown token: %d %q", resp.StatusCode, body)
+	}
+	// 前缀不是当前或过渡中的前缀（Ruling-59）：同样 404
+	if resp, _ := get(srv.URL + "/zzzzzzzzzz9/" + strings.TrimPrefix(info.URL, prefix)); resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("unknown path prefix: %d, want 404", resp.StatusCode)
 	}
 	if resp, _ := get(prefix + "short"); resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("short token: %d", resp.StatusCode)

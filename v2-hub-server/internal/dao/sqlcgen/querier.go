@@ -215,6 +215,10 @@ type Querier interface {
 	GetUserChainFlags(ctx context.Context, id int64) (GetUserChainFlagsRow, error)
 	// 判断能否签到要用的字段；状态由调用方按当前时间现算，不取库里可能滞后的 status 列
 	GetUserCheckinState(ctx context.Context, id int64) (GetUserCheckinStateRow, error)
+	// 读连接凭据（只读），订阅信息里判断是否自设了连接密码
+	GetUserCredential(ctx context.Context, id int64) ([]byte, error)
+	// 读连接凭据并锁行，改连接密码时用（docs/03 §5.4 连接密码）
+	GetUserCredentialForUpdate(ctx context.Context, id int64) ([]byte, error)
 	GetUserDashboard(ctx context.Context, arg GetUserDashboardParams) (GetUserDashboardRow, error)
 	// 切换为用户身份（docs/03 §5.17）-----------------------------------------------------
 	GetUserForImpersonate(ctx context.Context, id int64) (GetUserForImpersonateRow, error)
@@ -494,6 +498,8 @@ type Querier interface {
 	UpdateSharedAccount(ctx context.Context, arg UpdateSharedAccountParams) (int64, error)
 	UpdateTrafficPack(ctx context.Context, arg UpdateTrafficPackParams) (int64, error)
 	UpdateTutorial(ctx context.Context, arg UpdateTutorialParams) (int64, error)
+	// 换连接凭据并把凭据版本 +1，交给对账写到各面板（docs/03 §5.4 连接密码）
+	UpdateUserCredential(ctx context.Context, arg UpdateUserCredentialParams) (int64, error)
 	UpdateUserRemark(ctx context.Context, arg UpdateUserRemarkParams) (int64, error)
 	UpsertChainApply(ctx context.Context, arg UpsertChainApplyParams) error
 	UpsertEndpoint(ctx context.Context, arg UpsertEndpointParams) (int64, error)
