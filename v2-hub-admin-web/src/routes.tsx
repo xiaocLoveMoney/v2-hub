@@ -21,7 +21,8 @@ import { RolesPage } from './pages/system/RolesPage'
 import { SettingsPage } from './pages/system/SettingsPage'
 import { SecurityPage } from './pages/SecurityPage'
 import { NodesPage } from './pages/panel/NodesPage'
-import { ServerChainRulesPage } from './pages/panel/ServerChainRulesPage'
+import { ChainExitsPage } from './pages/panel/ChainExitsPage'
+import { ChainRoutesPage } from './pages/panel/ChainRoutesPage'
 import { ServerDetailPage } from './pages/panel/ServerDetailPage'
 import { ServersPage } from './pages/panel/ServersPage'
 import { InviteCodesPage } from './pages/users/InviteCodesPage'
@@ -37,7 +38,8 @@ const PAGE_BY_PATH: Record<string, ReactNode> = {
   [ROUTES.TICKETS]: <TicketsPage />,
   [ROUTES.SERVERS]: <ServersPage />,
   [ROUTES.NODES]: <NodesPage />,
-  [ROUTES.SERVER_CHAIN_RULES]: <ServerChainRulesPage />,
+  [ROUTES.CHAIN_EXITS]: <ChainExitsPage />,
+  [ROUTES.CHAIN_ROUTES]: <ChainRoutesPage />,
   [ROUTES.USERS]: <UsersPage />,
   [ROUTES.PLANS]: <PlansPage />,
   [ROUTES.INVITE_CODES]: <InviteCodesPage />,
