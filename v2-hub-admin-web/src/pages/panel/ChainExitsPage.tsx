@@ -10,8 +10,9 @@ import { useRowAction } from '../../hooks/use-submit'
 import { PERMISSIONS } from '../../menu'
 import { ChainExitModal } from './ChainExitModal'
 import { ChainExitTestButton } from './ChainExitTestButton'
+import { MAX_KEYWORD_LEN } from '../form-limits'
+import { PageHeader } from '../../components/PageHeader'
 
-const MAX_KEYWORD_LEN = 64
 const OWNER_PLATFORM: ChainExitOwner = 'platform'
 const ASSIGN_USER: ChainExitAssignMode = 'user'
 const NO_ROUTES = 0
@@ -23,8 +24,6 @@ const OWNER_OPTIONS: { value: ChainExitOwner; label: string }[] = [
 
 const loadGroups = (signal: AbortSignal) => api.GET('/api/admin/node-groups', { signal })
 const loadServers = (signal: AbortSignal) => api.GET('/api/admin/servers', { signal })
-/** 没有 server:read 时不请求服务器列表，测试按钮也不出现。 */
-const loadNoServers = () => Promise.resolve({ data: { data: [] as Server[] } })
 
 /**
  * 链式出口（node:read 查看，node:write 增改删、停用与查看链接；docs/03 §5.21，Ruling-50）。
@@ -42,7 +41,8 @@ export function ChainExitsPage() {
   const groups = useRemote<NodeGroup[]>(loadGroups)
   // 延迟测试的起点：启用中的服务器（docs/03 §5.21）；列服务器要 server:read
   const canTest = canWrite && can(PERMISSIONS.SERVER_READ)
-  const servers = useRemote<Server[]>(canTest ? loadServers : loadNoServers)
+  // 没有 server:read 时不请求服务器列表，测试按钮也不出现
+  const servers = useRemote<Server[]>(loadServers, canTest)
   const testServers = (servers.data ?? []).filter((s) => !s.isDisabled)
   const refresh = () => setRefreshKey((k) => k + 1)
   const act = useRowAction(refresh)
@@ -92,14 +92,14 @@ export function ChainExitsPage() {
 
   return (
     <>
-      <Space className="page-header">
-        <Typography.Title level={3}>链式出口</Typography.Title>
-        {canWrite && (
+      <PageHeader
+        title="链式出口"
+        action={canWrite && (
           <Button type="primary" icon={<PlusOutlined />} onClick={() => open(null)}>
             新建平台出口
           </Button>
         )}
-      </Space>
+      />
       <Typography.Paragraph type="secondary">
         出口只用作链式规则的落地。平台出口可按节点组分配（套餐绑了该节点组的用户能用），也可指定给某些用户；用户出口由用户自己添加，这里可以停用或删除，但不能查看它的链接。
       </Typography.Paragraph>

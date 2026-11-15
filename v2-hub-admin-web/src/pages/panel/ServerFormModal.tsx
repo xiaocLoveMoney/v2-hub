@@ -1,9 +1,10 @@
-import { Alert, App, Button, Form, Input, Modal, Radio, Select, Space, Switch, Typography } from 'antd'
+import { Alert, App, Button, Form, Input, Radio, Select, Space, Switch, Typography } from 'antd'
 import { useState } from 'react'
 import { api, csrfHeader, toApiError, type ApiError, type ProviderType, type Server, type TlsMode } from '../../api/client'
-import { useOpenGeneration } from '../../hooks/use-open-generation'
 import { mutate } from '../../hooks/use-remote'
 import { COUNTRY_OPTIONS, countryName } from './countries'
+import { ErrorAlert } from '../../components/ErrorAlert'
+import { FormModal } from '../../components/FormModal'
 
 const PROVIDER_OPTIONS: { value: ProviderType; label: string }[] = [{ value: 'xui', label: '3x-ui（v3.x）' }]
 const TLS_VERIFY: TlsMode = 'verify'
@@ -35,11 +36,10 @@ interface ServerFormModalProps {
  * 上一次填的值（含 token）不会带到下一次打开。
  */
 export function ServerFormModal({ server, isOpen, onClose, onSaved }: ServerFormModalProps) {
-  const generation = useOpenGeneration(isOpen)
   return (
-    <Modal title={server === null ? '接入服务器' : `编辑服务器：${server.name}`} open={isOpen} onCancel={onClose} footer={null} destroyOnHidden width={560}>
-      <ServerFormBody key={generation} server={server} onSaved={onSaved} />
-    </Modal>
+    <FormModal title={server === null ? '接入服务器' : `编辑服务器：${server.name}`} isOpen={isOpen} onClose={onClose} width={560}>
+      {(generation) => <ServerFormBody key={generation} server={server} onSaved={onSaved} />}
+    </FormModal>
   )
 }
 
@@ -155,7 +155,7 @@ function ServerFormBody({ server, onSaved }: ServerFormBodyProps) {
 
   return (
     <>
-      {error !== null && <Alert type="error" title={error.message} showIcon className="page-alert" />}
+      <ErrorAlert error={error} />
       <Form<ServerForm>
         form={form}
         layout="vertical"

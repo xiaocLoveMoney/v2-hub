@@ -2,10 +2,10 @@ import { Alert, Button, Card, Form, Input, InputNumber, Select, Space, Switch, T
 import { api, csrfHeader } from '../../api/client'
 import { ErrorAlert } from '../../components/ErrorAlert'
 import { useSubmit } from '../../hooks/use-submit'
+import { MAX_EMAIL_LEN } from '../form-limits'
 
 // 运营设置（docs/03 §5.20）；取值范围与 hub-api.yaml 的 Settings 一致
 const MAX_ALERT_EMAILS = 10
-const MAX_EMAIL_LEN = 254
 const MAX_OFFLINE_MINUTES = 60
 const MAX_REPORT_HOUR = 23
 const MAX_CHAT_ID_LEN = 64

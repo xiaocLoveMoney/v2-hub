@@ -1,10 +1,7 @@
-import { Alert, Table, Tag, Typography, type TableProps } from 'antd'
-import { useCallback, useState } from 'react'
-import { api, type AuditLog, type PageData } from '../../api/client'
-import { useRemote } from '../../hooks/use-remote'
-import { TABLE_SCROLL, formatDetail, formatTime } from './format'
-
-const DEFAULT_PAGE_SIZE = 20
+import { Tag, Typography, type TableProps } from 'antd'
+import { api, type AuditLog } from '../../api/client'
+import { PagedTable } from '../../components/PagedTable'
+import { formatDetail, formatTime } from './format'
 
 /** 审计动作的中文名；未登记的动作原样显示。取值见 hub-server service 包的 Action 常量。 */
 const ACTION_LABELS: Record<string, string> = {
@@ -21,16 +18,11 @@ const ACTION_LABELS: Record<string, string> = {
 
 const ACTOR_LABELS: Record<string, string> = { admin: '管理员', user: '用户', system: '系统' }
 
+const loadLogs = (page: number, pageSize: number, signal: AbortSignal) =>
+  api.GET('/api/admin/audit-logs', { params: { query: { page, pageSize } }, signal })
+
 /** 审计日志（audit:read），按时间倒序。 */
 export function AuditLogsPage() {
-  const [page, setPage] = useState(1)
-  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE)
-  const loadLogs = useCallback(
-    (signal: AbortSignal) => api.GET('/api/admin/audit-logs', { params: { query: { page, pageSize } }, signal }),
-    [page, pageSize],
-  )
-  const logs = useRemote<PageData<AuditLog>>(loadLogs)
-
   const columns: TableProps<AuditLog>['columns'] = [
     { title: '时间', dataIndex: 'createdAt', width: 180, render: (v: string) => formatTime(v) },
     {
@@ -66,23 +58,7 @@ export function AuditLogsPage() {
   return (
     <>
       <Typography.Title level={3}>审计日志</Typography.Title>
-      {logs.error !== null && <Alert type="error" title={logs.error.message} showIcon className="page-alert" />}
-      <Table<AuditLog>
-        rowKey="id"
-        scroll={TABLE_SCROLL}
-        loading={logs.isLoading}
-        columns={columns}
-        dataSource={logs.data?.items ?? []}
-        pagination={{
-          current: page,
-          pageSize,
-          total: logs.data?.total ?? 0,
-          onChange: (p, size) => {
-            setPage(p)
-            setPageSize(size)
-          },
-        }}
-      />
+      <PagedTable<AuditLog> load={loadLogs} columns={columns} />
     </>
   )
 }

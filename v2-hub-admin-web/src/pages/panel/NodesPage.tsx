@@ -1,5 +1,5 @@
 import { PlusOutlined } from '@ant-design/icons'
-import { Alert, App, Button, Form, Input, InputNumber, Modal, Popconfirm, Select, Space, Switch, Table, Tabs, Tag, Typography, type TableProps } from 'antd'
+import { App, Button, Form, Input, InputNumber, Modal, Popconfirm, Select, Space, Switch, Table, Tabs, Tag, Typography, type TableProps } from 'antd'
 import { useCallback, useState } from 'react'
 import { api, csrfHeader, type ApiError, type NodeGroup, type PageData, type PanelNode, type Server } from '../../api/client'
 import { useSession } from '../../auth/session-context'
@@ -7,6 +7,7 @@ import { mutate, useRemote } from '../../hooks/use-remote'
 import { PERMISSIONS } from '../../menu'
 import { TABLE_SCROLL } from '../system/format'
 import { formatCountry } from './countries'
+import { ErrorAlert } from '../../components/ErrorAlert'
 
 const DEFAULT_PAGE_SIZE = 20
 /** 节点组成员选择器一次拉取的节点数上限（与接口 pageSize 上限一致）。 */
@@ -148,7 +149,7 @@ function NodeCatalog({ canWrite, servers, groups }: NodeCatalogProps) {
           }}
         />
       </Space>
-      {nodes.error !== null && <Alert type="error" title={nodes.error.message} showIcon className="page-alert" />}
+      <ErrorAlert error={nodes.error} />
       <Table<PanelNode>
         rowKey="id"
         scroll={TABLE_SCROLL}
@@ -175,7 +176,7 @@ function NodeCatalog({ canWrite, servers, groups }: NodeCatalogProps) {
         footer={null}
         destroyOnHidden
       >
-        {error !== null && <Alert type="error" title={error.message} showIcon className="page-alert" />}
+        <ErrorAlert error={error} />
         <Form<NodeForm>
           layout="vertical"
           onFinish={handleSave}
@@ -289,10 +290,10 @@ function GroupList({ canWrite, groups, error, onChanged }: GroupListProps) {
           </Button>
         </Space>
       )}
-      {error !== null && <Alert type="error" title={error.message} showIcon className="page-alert" />}
+      <ErrorAlert error={error} />
       <Table<NodeGroup> rowKey="id" scroll={TABLE_SCROLL} columns={columns} dataSource={groups} pagination={false} />
       <Modal title={editing === null ? '新建节点组' : `编辑节点组：${editing.name}`} open={isCreating || editing !== null} onCancel={close} footer={null} destroyOnHidden>
-        {formError !== null && <Alert type="error" title={formError.message} showIcon className="page-alert" />}
+        <ErrorAlert error={formError} />
         <Form<GroupForm> layout="vertical" onFinish={handleSave} initialValues={{ name: editing?.name ?? '', remark: editing?.remark ?? '', nodeIds: editing?.nodeIds ?? [] }}>
           <Form.Item name="name" label="名称" rules={[{ required: true, max: 64, message: '1–64 个字符' }]}>
             <Input autoComplete="off" />

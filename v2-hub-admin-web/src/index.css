@@ -278,15 +278,6 @@ body {
   margin-top: 16px;
 }
 
-.config-preview {
-  max-height: 240px;
-  overflow: auto;
-  padding: 12px;
-  background: var(--hub-code-bg);
-  border-radius: var(--hub-radius);
-  font-size: 12px;
-}
-
 .security-card {
   max-width: 640px;
 }

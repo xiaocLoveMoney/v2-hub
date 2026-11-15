@@ -1,22 +1,23 @@
 import { MinusCircleOutlined, PlusOutlined } from '@ant-design/icons'
-import { Button, Form, Input, InputNumber, Modal, Popconfirm, Select, Space, Switch, Table, Tag, Typography, type TableProps } from 'antd'
+import { Button, Form, Input, InputNumber, Popconfirm, Select, Space, Switch, Table, Tag, type TableProps } from 'antd'
 import { useState } from 'react'
 import { api, csrfHeader, type Tutorial, type TutorialInput, type TutorialPlatform } from '../../api/client'
 import { useSession } from '../../auth/session-context'
 import { ErrorAlert } from '../../components/ErrorAlert'
-import { useOpenGeneration } from '../../hooks/use-open-generation'
 import { useRemote } from '../../hooks/use-remote'
 import { useRowAction, useSubmit } from '../../hooks/use-submit'
 import { PERMISSIONS } from '../../menu'
 import { TABLE_SCROLL } from '../system/format'
 import { MARKDOWN_HINT, MAX_MARKDOWN_LEN } from './markdown'
+import { MAX_SORT_ORDER } from '../form-limits'
+import { PageHeader } from '../../components/PageHeader'
+import { FormModal } from '../../components/FormModal'
 
 const MAX_CLIENT_NAME_LEN = 64
 const MAX_SUMMARY_LEN = 255
 const MAX_LINKS = 5
 const MAX_LINK_LABEL_LEN = 32
 const MAX_LINK_URL_LEN = 512
-const MAX_SORT_ORDER = 100000
 const CONTENT_ROWS = 12
 const MODAL_WIDTH = 720
 // 下载链接只收 https（docs/03 §5.9）
@@ -88,14 +89,14 @@ export function TutorialsPage() {
 
   return (
     <>
-      <Space className="page-header">
-        <Typography.Title level={3}>教程</Typography.Title>
-        {canWrite && (
+      <PageHeader
+        title="教程"
+        action={canWrite && (
           <Button type="primary" icon={<PlusOutlined />} onClick={() => open(null)}>
             新建教程
           </Button>
         )}
-      </Space>
+      />
       <ErrorAlert error={tutorials.error} />
       <Table<Tutorial> rowKey="id" scroll={TABLE_SCROLL} loading={tutorials.isLoading} columns={columns} dataSource={tutorials.data ?? []} pagination={false} />
       <TutorialModal
@@ -120,11 +121,10 @@ interface TutorialModalProps {
 }
 
 function TutorialModal({ tutorial, isOpen, onClose, onSaved }: TutorialModalProps) {
-  const generation = useOpenGeneration(isOpen)
   return (
-    <Modal title={tutorial === null ? '新建教程' : `编辑教程：${tutorial.clientName}`} open={isOpen} onCancel={onClose} footer={null} destroyOnHidden width={MODAL_WIDTH}>
-      <TutorialForm key={generation} tutorial={tutorial} onSaved={onSaved} />
-    </Modal>
+    <FormModal title={tutorial === null ? '新建教程' : `编辑教程：${tutorial.clientName}`} isOpen={isOpen} onClose={onClose} width={MODAL_WIDTH}>
+      {(generation) => <TutorialForm key={generation} tutorial={tutorial} onSaved={onSaved} />}
+    </FormModal>
   )
 }
 

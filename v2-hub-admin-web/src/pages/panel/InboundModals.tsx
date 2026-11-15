@@ -1,9 +1,8 @@
-import { Alert, App, Button, Form, Input, InputNumber, Modal, Select } from 'antd'
-import { useState } from 'react'
-import { api, csrfHeader, type ApiError, type Inbound } from '../../api/client'
-import { mutate } from '../../hooks/use-remote'
-
-const MAX_PORT = 65535
+import { Button, Form, Input, InputNumber, Modal, Select } from 'antd'
+import { api, csrfHeader, type Inbound } from '../../api/client'
+import { useSubmit } from '../../hooks/use-submit'
+import { ErrorAlert } from '../../components/ErrorAlert'
+import { MAX_PORT } from '../form-limits'
 
 interface EndpointForm {
   inboundIds: number[]
@@ -22,31 +21,19 @@ interface EndpointModalProps {
 
 /** 为入站添加对外地址（3x-ui Host），每个地址生成一个节点。 */
 export function EndpointModal({ serverId, inbounds, isOpen, onClose, onSaved }: EndpointModalProps) {
-  const { message } = App.useApp()
-  const [error, setError] = useState<ApiError | null>(null)
-  const [isBusy, setIsBusy] = useState(false)
+  const { error, isBusy, run } = useSubmit('已添加对外地址', onSaved)
 
-  const handleFinish = async (v: EndpointForm) => {
-    setIsBusy(true)
-    setError(null)
-    const err = await mutate(() =>
+  const handleFinish = (v: EndpointForm) =>
+    run(() =>
       api.POST('/api/admin/servers/{id}/endpoints', {
         params: { ...csrfHeader(), path: { id: serverId } },
         body: { inboundIds: v.inboundIds, addresses: v.addresses, port: v.port ?? 0, remark: v.remark ?? '' },
       }),
     )
-    setIsBusy(false)
-    if (err !== null) {
-      setError(err)
-      return
-    }
-    void message.success('已添加对外地址')
-    onSaved()
-  }
 
   return (
     <Modal title="添加对外地址（Host）" open={isOpen} onCancel={onClose} footer={null} destroyOnHidden>
-      {error !== null && <Alert type="error" title={error.message} showIcon className="page-alert" />}
+      <ErrorAlert error={error} />
       <Form<EndpointForm> layout="vertical" onFinish={handleFinish}>
         <Form.Item name="inboundIds" label="入站" rules={[{ required: true, message: '至少选一个入站' }]}>
           <Select

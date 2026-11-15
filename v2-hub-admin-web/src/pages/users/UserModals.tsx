@@ -1,24 +1,23 @@
-import { Alert, App, Button, DatePicker, Descriptions, Drawer, Form, Input, InputNumber, Modal, Select, Space, Switch, Table, Tag, Typography } from 'antd'
+import { App, Button, DatePicker, Descriptions, Drawer, Form, Input, InputNumber, Select, Space, Switch, Table, Tag } from 'antd'
 import dayjs, { type Dayjs } from 'dayjs'
 import { useCallback, useState } from 'react'
 import { api, csrfHeader, type EndUser, type Plan, type Provision } from '../../api/client'
 import { ErrorAlert } from '../../components/ErrorAlert'
-import { useOpenGeneration } from '../../hooks/use-open-generation'
 import { mutate, useRemote } from '../../hooks/use-remote'
 import { useSubmit } from '../../hooks/use-submit'
 import { TABLE_SCROLL, formatTime } from '../system/format'
 import { RenewResetFields, type RenewResetForm } from './quota-fields'
 import { bytesToGb, describeRenew, describeReset, formatBytes, gbToBytes, renewFieldsOf, renewModeOf, renewValueOf } from './quota'
+import { MAX_EMAIL_LEN, MAX_LIMIT_IP, MAX_REMARK_LEN } from '../form-limits'
+import { PageHeader } from '../../components/PageHeader'
+import { FormModal } from '../../components/FormModal'
 
 // 终端用户密码 8–128 位（docs/03 §5.3；管理员密码是 12 位起）
 const MIN_CREDENTIAL_LEN = 8
 const MAX_CREDENTIAL_LEN = 128
-const MAX_REMARK_LEN = 255
-const MAX_LIMIT_IP = 1000
 const MAX_PENDING_DAYS = 36500
 // 新用户名不含 @，好与邮箱登录区分（docs/03 §5.8）
 const USERNAME_PATTERN = /^[A-Za-z0-9_.-]{3,64}$/
-const MAX_EMAIL_LEN = 254
 const emailRules = [{ type: 'email' as const, max: MAX_EMAIL_LEN, message: '邮箱格式不对' }]
 
 const credentialRules = [
@@ -45,11 +44,10 @@ interface CreateUserModalProps {
 
 /** 新建用户，可同时分配套餐（docs/03 U1、U6）。 */
 export function CreateUserModal({ isOpen, plans, onClose, onSaved }: CreateUserModalProps) {
-  const generation = useOpenGeneration(isOpen)
   return (
-    <Modal title="新建用户" open={isOpen} onCancel={onClose} footer={null} destroyOnHidden>
-      <CreateUserForm key={generation} plans={plans} onSaved={onSaved} />
-    </Modal>
+    <FormModal title="新建用户" isOpen={isOpen} onClose={onClose}>
+      {(generation) => <CreateUserForm key={generation} plans={plans} onSaved={onSaved} />}
+    </FormModal>
   )
 }
 
@@ -96,11 +94,10 @@ interface UserModalProps {
 
 /** 修改备注与停用 / 启用（docs/03 U8）。 */
 export function EditUserModal({ user, onClose, onSaved }: UserModalProps) {
-  const generation = useOpenGeneration(user !== null)
   return (
-    <Modal title={`编辑用户：${user?.username ?? ''}`} open={user !== null} onCancel={onClose} footer={null} destroyOnHidden>
-      {user !== null && <EditUserForm key={generation} user={user} onSaved={onSaved} />}
-    </Modal>
+    <FormModal title={`编辑用户：${user?.username ?? ''}`} isOpen={user !== null} onClose={onClose}>
+      {(generation) => user !== null && <EditUserForm key={generation} user={user} onSaved={onSaved} />}
+    </FormModal>
   )
 }
 
@@ -139,11 +136,10 @@ function EditUserForm({ user, onSaved }: { user: EndUser; onSaved: () => void })
 
 /** 分配或续费套餐：未到期从原到期日顺延，已到期从现在起算，已用清零（docs/03 U6）。 */
 export function AssignPlanModal({ user, plans, onClose, onSaved }: UserModalProps & { plans: Plan[] }) {
-  const generation = useOpenGeneration(user !== null)
   return (
-    <Modal title={`续费：${user?.username ?? ''}`} open={user !== null} onCancel={onClose} footer={null} destroyOnHidden>
-      {user !== null && <AssignPlanForm key={generation} user={user} plans={plans} onSaved={onSaved} />}
-    </Modal>
+    <FormModal title={`续费：${user?.username ?? ''}`} isOpen={user !== null} onClose={onClose}>
+      {(generation) => user !== null && <AssignPlanForm key={generation} user={user} plans={plans} onSaved={onSaved} />}
+    </FormModal>
   )
 }
 
@@ -192,11 +188,10 @@ function quotaFormOf(u: EndUser): QuotaForm {
 
 /** 管理员直接改已用、额度、到期、IP 限制、自动续期与周期重置（docs/03 U7，记审计）。 */
 export function QuotaModal({ user, onClose, onSaved }: UserModalProps) {
-  const generation = useOpenGeneration(user !== null)
   return (
-    <Modal title={`改用量：${user?.username ?? ''}`} open={user !== null} onCancel={onClose} footer={null} destroyOnHidden width={600}>
-      {user !== null && <QuotaForm key={generation} user={user} onSaved={onSaved} />}
-    </Modal>
+    <FormModal title={`改用量：${user?.username ?? ''}`} isOpen={user !== null} onClose={onClose} width={600}>
+      {(generation) => user !== null && <QuotaForm key={generation} user={user} onSaved={onSaved} />}
+    </FormModal>
   )
 }
 
@@ -256,11 +251,10 @@ function QuotaForm({ user, onSaved }: { user: EndUser; onSaved: () => void }) {
 
 /** 重置客户后台登录密码。 */
 export function ResetUserCredentialModal({ user, onClose, onSaved }: UserModalProps) {
-  const generation = useOpenGeneration(user !== null)
   return (
-    <Modal title={`重置密码：${user?.username ?? ''}`} open={user !== null} onCancel={onClose} footer={null} destroyOnHidden>
-      {user !== null && <ResetCredentialForm key={generation} user={user} onSaved={onSaved} />}
-    </Modal>
+    <FormModal title={`重置密码：${user?.username ?? ''}`} isOpen={user !== null} onClose={onClose}>
+      {(generation) => user !== null && <ResetCredentialForm key={generation} user={user} onSaved={onSaved} />}
+    </FormModal>
   )
 }
 
@@ -336,15 +330,16 @@ function ProvisionBody({ user, canWrite, onChanged }: { user: EndUser; canWrite:
         <Descriptions.Item label="自动续期">{`${describeRenew(user)}（已续 ${user.renewCount} 次）`}</Descriptions.Item>
         <Descriptions.Item label="周期重置">{describeReset(user.trafficReset, user.trafficResetDay)}</Descriptions.Item>
       </Descriptions>
-      <Space className="page-header">
-        <Typography.Title level={5}>各面板下发</Typography.Title>
-        {canWrite && (
+      <PageHeader
+        title="各面板下发"
+        level={5}
+        action={canWrite && (
           <Button loading={isBusy} onClick={() => void reconcile()}>
             立即对账
           </Button>
         )}
-      </Space>
-      {provisions.error !== null && <Alert type="error" title={provisions.error.message} showIcon className="page-alert" />}
+      />
+      <ErrorAlert error={provisions.error} />
       <Table<Provision>
         rowKey="serverId"
         size="small"

@@ -1,5 +1,5 @@
 import { PlusOutlined } from '@ant-design/icons'
-import { Alert, App, Button, Input, Popconfirm, Progress, Select, Space, Table, Tag, Tooltip, Typography, type TableProps } from 'antd'
+import { App, Button, Input, Popconfirm, Progress, Select, Space, Table, Tag, Tooltip, Typography, type TableProps } from 'antd'
 import { useCallback, useState } from 'react'
 import { api, csrfHeader, toApiError, type EndUser, type PageData, type Plan, type UserStatus } from '../../api/client'
 import { useSession } from '../../auth/session-context'
@@ -12,6 +12,8 @@ import { BalanceModal } from './BalanceModal'
 import { UserStatusTag } from './quota-fields'
 import { USER_STATUS, formatBytes } from './quota'
 import { AssignPlanModal, CreateUserModal, EditUserModal, ProvisionDrawer, QuotaModal, ResetUserCredentialModal } from './UserModals'
+import { ErrorAlert } from '../../components/ErrorAlert'
+import { PageHeader } from '../../components/PageHeader'
 
 const DEFAULT_PAGE_SIZE = 20
 const PERCENT_FULL = 100
@@ -78,8 +80,7 @@ export function UsersPage() {
     [page, pageSize, keyword, status, planId],
   )
   const users = useRemote<PageData<EndUser>>(loadUsers)
-  const loadPlansIfAllowed = useCallback((signal: AbortSignal) => (canReadPlans ? loadPlans(signal) : Promise.resolve({ data: { data: [] as Plan[] } })), [canReadPlans])
-  const plans = useRemote<Plan[]>(loadPlansIfAllowed)
+  const plans = useRemote<Plan[]>(loadPlans, canReadPlans)
 
   const open = (d: Dialog, u: EndUser | null) => {
     setCurrent(u)
@@ -246,14 +247,14 @@ export function UsersPage() {
   const planOptions = (plans.data ?? []).map((p) => ({ value: p.id, label: p.name }))
   return (
     <>
-      <Space className="page-header">
-        <Typography.Title level={3}>用户</Typography.Title>
-        {canWrite && (
+      <PageHeader
+        title="用户"
+        action={canWrite && (
           <Button type="primary" icon={<PlusOutlined />} onClick={() => open('create', null)}>
             新建用户
           </Button>
         )}
-      </Space>
+      />
       <Space wrap className="page-alert">
         <Input.Search
           allowClear
@@ -288,7 +289,7 @@ export function UsersPage() {
           />
         )}
       </Space>
-      {users.error !== null && <Alert type="error" title={users.error.message} showIcon className="page-alert" />}
+      <ErrorAlert error={users.error} />
       <Table<EndUser>
         rowKey="id"
         scroll={TABLE_SCROLL}

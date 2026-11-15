@@ -1,8 +1,9 @@
-import { Alert, App, Button, Card, Form, Input, QRCode, Space, Tag, Typography } from 'antd'
+import { App, Button, Card, Form, Input, QRCode, Space, Tag, Typography } from 'antd'
 import { useState } from 'react'
 import { api, csrfHeader, toApiError, type ApiError } from '../api/client'
 import { useSession } from '../auth/session-context'
 import { mutate } from '../hooks/use-remote'
+import { ErrorAlert } from '../components/ErrorAlert'
 
 const TOTP_PATTERN = /^\d{6}$/
 const QR_SIZE = 180
@@ -63,7 +64,7 @@ export function SecurityPage() {
     <>
       <Typography.Title level={3}>账号安全</Typography.Title>
       <Card title={<Space>两步验证{isEnabled ? <Tag color="green">已开启</Tag> : <Tag>未开启</Tag>}</Space>} className="security-card">
-        {error !== null && <Alert type="error" title={error.message} showIcon className="page-alert" />}
+        <ErrorAlert error={error} />
 
         {isEnabled && (
           <>

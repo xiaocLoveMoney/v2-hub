@@ -1,15 +1,14 @@
-import { Alert, Button, Form, Input, Modal, Radio, Segmented, Select, Space, Switch, Typography } from 'antd'
+import { Alert, Button, Form, Input, Radio, Segmented, Select, Space, Switch, Typography } from 'antd'
 import { useState } from 'react'
 import { api, csrfHeader, toApiError, type AdminChainExit, type AdminChainExitInput, type ApiError, type ChainExitAssignMode, type NodeGroup } from '../../api/client'
 import { ErrorAlert } from '../../components/ErrorAlert'
-import { useOpenGeneration } from '../../hooks/use-open-generation'
 import { useSubmit } from '../../hooks/use-submit'
 import { ChainExitFieldsForm } from './ChainExitFieldsForm'
 import { ExitUserSelect } from './ExitUserSelect'
 import { buildExitLink, emptyExitFields, exitFieldProblems, parseExitLink, type ExitFields } from './chain-exit-link'
+import { MAX_NAME_LEN, MAX_REMARK_LEN } from '../form-limits'
+import { FormModal } from '../../components/FormModal'
 
-const MAX_NAME_LEN = 64
-const MAX_REMARK_LEN = 255
 const MAX_LINK_LEN = 2048
 const LINK_ROWS = 5
 const LABEL_COL = { flex: '150px' }
@@ -61,11 +60,10 @@ interface ChainExitModalProps {
 
 /** 新建 / 编辑平台出口的弹窗；每次打开都重建表单（useOpenGeneration）。 */
 export function ChainExitModal({ exit, isOpen, groups, onClose, onSaved }: ChainExitModalProps) {
-  const generation = useOpenGeneration(isOpen)
   return (
-    <Modal title={exit === null ? '新建平台出口' : `编辑平台出口：${exit.name}`} open={isOpen} onCancel={onClose} footer={null} destroyOnHidden width={MODAL_WIDTH}>
-      <ExitForm key={generation} exit={exit} groups={groups} onSaved={onSaved} />
-    </Modal>
+    <FormModal title={exit === null ? '新建平台出口' : `编辑平台出口：${exit.name}`} isOpen={isOpen} onClose={onClose} width={MODAL_WIDTH}>
+      {(generation) => <ExitForm key={generation} exit={exit} groups={groups} onSaved={onSaved} />}
+    </FormModal>
   )
 }
 

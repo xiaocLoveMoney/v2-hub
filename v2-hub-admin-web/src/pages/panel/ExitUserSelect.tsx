@@ -1,11 +1,11 @@
 import { Select, Spin } from 'antd'
 import { useEffect, useState } from 'react'
 import { api } from '../../api/client'
+import { MAX_KEYWORD_LEN } from '../form-limits'
 
 /** 输入停顿多久后才去搜（毫秒），避免每敲一个字发一次请求。 */
 const SEARCH_DELAY_MS = 300
 const SEARCH_PAGE_SIZE = 20
-const MAX_KEYWORD_LEN = 64
 
 /** 一个可选的用户：id 与用户名。 */
 export interface UserOption {

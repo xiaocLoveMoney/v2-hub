@@ -1,4 +1,4 @@
-import { Alert, App, Button, Descriptions, Space, Tag, Typography } from 'antd'
+import { Alert, App, Button, Descriptions, Tag, Typography } from 'antd'
 import { useCallback, useState } from 'react'
 import { api, csrfHeader, type ChainApply } from '../../api/client'
 import { useSession } from '../../auth/session-context'
@@ -6,6 +6,8 @@ import { mutate, useRemote } from '../../hooks/use-remote'
 import { PERMISSIONS } from '../../menu'
 import { formatTime } from '../system/format'
 import { CHAIN_APPLY_STATUS_META } from './chain-labels'
+import { ErrorAlert } from '../../components/ErrorAlert'
+import { PageHeader } from '../../components/PageHeader'
 
 /**
  * 这台服务器作为服务端链式入口的下发状态（docs/03 §5.19，server:read）；失败停止自动重试后可点“重试”（server:write）。
@@ -35,7 +37,7 @@ export function ChainApplyCard({ serverId }: { serverId: number }) {
   }
 
   if (state.error !== null) {
-    return <Alert type="error" title={state.error.message} showIcon className="page-alert" />
+    return <ErrorAlert error={state.error} />
   }
   if (a === null) {
     return null
@@ -47,14 +49,15 @@ export function ChainApplyCard({ serverId }: { serverId: number }) {
   const canRetry = can(PERMISSIONS.SERVER_WRITE) && a.status === 'failed'
   return (
     <>
-      <Space className="page-header">
-        <Typography.Title level={4}>服务端链式下发</Typography.Title>
-        {canRetry && (
+      <PageHeader
+        title="服务端链式下发"
+        level={4}
+        action={canRetry && (
           <Button onClick={() => void retry()} loading={isBusy}>
             重试
           </Button>
         )}
-      </Space>
+      />
       {a.isRetryStopped && <Alert type="warning" showIcon className="page-alert" title="同一配置连续失败 3 次，已停止自动重试；规则变化或点“重试”后再下发" />}
       <Descriptions size="small" column={{ xs: 1, md: 3 }} className="page-alert">
         <Descriptions.Item label="状态">

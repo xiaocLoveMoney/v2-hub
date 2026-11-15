@@ -1,11 +1,8 @@
-import { Select, Space, Table, Tag, Typography, type TableProps } from 'antd'
+import { Select, Tag, Typography, type TableProps } from 'antd'
 import { useCallback, useState } from 'react'
-import { api, type MailOutboxItem, type MailStatus, type PageData } from '../../api/client'
-import { ErrorAlert } from '../../components/ErrorAlert'
-import { useRemote } from '../../hooks/use-remote'
-import { TABLE_SCROLL, formatTime } from './format'
-
-const DEFAULT_PAGE_SIZE = 20
+import { api, type MailOutboxItem, type MailStatus } from '../../api/client'
+import { PagedTable } from '../../components/PagedTable'
+import { formatTime } from './format'
 
 /** 发件状态的显示名与颜色；取值见 hub-api.yaml 的 MailStatus。 */
 const STATUS_META: Record<MailStatus, { label: string; color: string }> = {
@@ -17,14 +14,11 @@ const STATUS_OPTIONS = (Object.keys(STATUS_META) as MailStatus[]).map((value) =>
 
 /** 发件记录（setting:read）：只有收件人（已打码）、主题与状态，不含正文（docs/03 §5.7）。 */
 export function MailOutboxPage() {
-  const [page, setPage] = useState(1)
-  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE)
   const [status, setStatus] = useState<MailStatus | undefined>(undefined)
   const loadMails = useCallback(
-    (signal: AbortSignal) => api.GET('/api/admin/mail-outbox', { params: { query: { page, pageSize, status } }, signal }),
-    [page, pageSize, status],
+    (page: number, pageSize: number, signal: AbortSignal) => api.GET('/api/admin/mail-outbox', { params: { query: { page, pageSize, status } }, signal }),
+    [status],
   )
-  const mails = useRemote<PageData<MailOutboxItem>>(loadMails)
 
   const columns: TableProps<MailOutboxItem>['columns'] = [
     { title: '入队时间', dataIndex: 'createdAt', width: 180, render: (v: string) => formatTime(v) },
@@ -47,36 +41,20 @@ export function MailOutboxPage() {
   return (
     <>
       <Typography.Title level={3}>发件记录</Typography.Title>
-      <Space wrap className="page-filters">
-        <Select
-          allowClear
-          placeholder="按状态过滤"
-          aria-label="按状态过滤"
-          className="filter-select"
-          options={STATUS_OPTIONS}
-          value={status}
-          onChange={(v: MailStatus | undefined) => {
-            setPage(1)
-            setStatus(v)
-          }}
-        />
-      </Space>
-      <ErrorAlert error={mails.error} />
-      <Table<MailOutboxItem>
-        rowKey="id"
-        scroll={TABLE_SCROLL}
-        loading={mails.isLoading}
+      <PagedTable<MailOutboxItem>
+        load={loadMails}
         columns={columns}
-        dataSource={mails.data?.items ?? []}
-        pagination={{
-          current: page,
-          pageSize,
-          total: mails.data?.total ?? 0,
-          onChange: (p, size) => {
-            setPage(p)
-            setPageSize(size)
-          },
-        }}
+        filters={
+          <Select
+            allowClear
+            placeholder="按状态过滤"
+            aria-label="按状态过滤"
+            className="filter-select"
+            options={STATUS_OPTIONS}
+            value={status}
+            onChange={(v: MailStatus | undefined) => setStatus(v)}
+          />
+        }
       />
     </>
   )

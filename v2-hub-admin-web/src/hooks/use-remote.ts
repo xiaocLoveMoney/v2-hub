@@ -18,14 +18,18 @@ interface RemoteState<T> {
 /**
  * 拉取一份远端数据：load 变化或调用 reload 时重新请求，卸载 / 重新请求时取消旧请求，避免过期响应覆盖新数据。
  * @param load 发起请求的函数，调用方用 useCallback 固定并列出依赖；必须把 signal 传给 openapi-fetch
+ * @param isEnabled 为 false 时不发请求（如没有读权限），返回空数据、无错误、不在加载；默认 true
  */
-export function useRemote<T>(load: (signal: AbortSignal) => Promise<FetchResult<T>>): RemoteState<T> {
+export function useRemote<T>(load: (signal: AbortSignal) => Promise<FetchResult<T>>, isEnabled = true): RemoteState<T> {
   const [data, setData] = useState<T | null>(null)
   const [error, setError] = useState<ApiError | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [version, setVersion] = useState(0)
 
   useEffect(() => {
+    if (!isEnabled) {
+      return
+    }
     const controller = new AbortController()
     const run = async () => {
       setIsLoading(true)
@@ -54,9 +58,12 @@ export function useRemote<T>(load: (signal: AbortSignal) => Promise<FetchResult<
     }
     void run()
     return () => controller.abort()
-  }, [load, version])
+  }, [load, version, isEnabled])
 
   const reload = useCallback(() => setVersion((v) => v + 1), [])
+  if (!isEnabled) {
+    return { data: null, error: null, isLoading: false, reload }
+  }
   return { data, error, isLoading, reload }
 }
 

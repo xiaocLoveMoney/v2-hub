@@ -1,24 +1,25 @@
 import { MinusCircleOutlined, PlusOutlined } from '@ant-design/icons'
-import { Alert, App, Button, Form, Input, InputNumber, Modal, Popconfirm, Select, Space, Switch, Table, Tag, Typography, type TableProps } from 'antd'
+import { App, Button, Form, Input, InputNumber, Popconfirm, Select, Space, Switch, Table, Tag, type TableProps } from 'antd'
 import { useState } from 'react'
-import { api, csrfHeader, type ApiError, type NodeGroup, type Plan, type PlanInput } from '../../api/client'
+import { api, csrfHeader, type NodeGroup, type Plan, type PlanInput } from '../../api/client'
 import { useSession } from '../../auth/session-context'
 import { useCurrency } from '../../hooks/use-currency'
-import { useOpenGeneration } from '../../hooks/use-open-generation'
 import { mutate, useRemote } from '../../hooks/use-remote'
+import { useSubmit } from '../../hooks/use-submit'
 import { PERMISSIONS } from '../../menu'
 import { MAX_MONEY_AMOUNT, MONEY_PRECISION, amountToCents, centsToAmount, formatMoney } from '../../money'
 import { TABLE_SCROLL } from '../system/format'
 import { ResetFields, type ResetForm } from './quota-fields'
 import { bytesToGb, describeReset, formatBytes, gbToBytes } from './quota'
+import { ErrorAlert } from '../../components/ErrorAlert'
+import { MAX_LIMIT_IP, MAX_NAME_LEN, MAX_SORT_ORDER } from '../form-limits'
+import { PageHeader } from '../../components/PageHeader'
+import { FormModal } from '../../components/FormModal'
 
-const MAX_NAME_LEN = 64
 const MAX_DURATION_DAYS = 36500
-const MAX_LIMIT_IP = 1000
 // 售卖属性的取值范围与 hub-api.yaml 的 PlanBase / PlanPriceInput 一致（docs/03 §5.12）
 const MAX_PRICES = 6
 const MAX_PRICE_DAYS = 3650
-const MAX_SORT_ORDER = 100000
 const MAX_DESCRIPTION_LEN = 500
 const DESCRIPTION_ROWS = 3
 const MODAL_WIDTH = 620
@@ -152,9 +153,9 @@ export function PlansPage() {
 
   return (
     <>
-      <Space className="page-header">
-        <Typography.Title level={3}>套餐</Typography.Title>
-        {canWrite && (
+      <PageHeader
+        title="套餐"
+        action={canWrite && (
           <Button
             type="primary"
             icon={<PlusOutlined />}
@@ -166,8 +167,8 @@ export function PlansPage() {
             新建套餐
           </Button>
         )}
-      </Space>
-      {plans.error !== null && <Alert type="error" title={plans.error.message} showIcon className="page-alert" />}
+      />
+      <ErrorAlert error={plans.error} />
       <Table<Plan> rowKey="id" scroll={TABLE_SCROLL} loading={plans.isLoading} columns={columns} dataSource={plans.data ?? []} pagination={false} />
       <PlanModal
         plan={editing}
@@ -192,41 +193,29 @@ interface PlanModalProps {
 }
 
 function PlanModal({ plan, isOpen, groups, onClose, onSaved }: PlanModalProps) {
-  const generation = useOpenGeneration(isOpen)
   return (
-    <Modal title={plan === null ? '新建套餐' : `编辑套餐：${plan.name}`} open={isOpen} onCancel={onClose} footer={null} destroyOnHidden width={MODAL_WIDTH}>
-      <PlanFormBody key={generation} plan={plan} groups={groups} onSaved={onSaved} />
-    </Modal>
+    <FormModal title={plan === null ? '新建套餐' : `编辑套餐：${plan.name}`} isOpen={isOpen} onClose={onClose} width={MODAL_WIDTH}>
+      {(generation) => <PlanFormBody key={generation} plan={plan} groups={groups} onSaved={onSaved} />}
+    </FormModal>
   )
 }
 
 function PlanFormBody({ plan, groups, onSaved }: { plan: Plan | null; groups: NodeGroup[]; onSaved: () => void }) {
-  const { message } = App.useApp()
   const [form] = Form.useForm<PlanForm>()
-  const [error, setError] = useState<ApiError | null>(null)
-  const [isBusy, setIsBusy] = useState(false)
+  const { error, isBusy, run } = useSubmit(plan === null ? '已创建套餐' : '已保存（不影响已分配的用户）', onSaved)
 
-  const submit = async (v: PlanForm) => {
-    setIsBusy(true)
-    setError(null)
+  const submit = (v: PlanForm) => {
     const body = inputOf(v)
-    const err = await mutate(() =>
+    return run(() =>
       plan === null
         ? api.POST('/api/admin/plans', { params: csrfHeader(), body })
         : api.PUT('/api/admin/plans/{id}', { params: { ...csrfHeader(), path: { id: plan.id } }, body }),
     )
-    setIsBusy(false)
-    if (err !== null) {
-      setError(err)
-      return
-    }
-    void message.success(plan === null ? '已创建套餐' : '已保存（不影响已分配的用户）')
-    onSaved()
   }
 
   return (
     <>
-      {error !== null && <Alert type="error" title={error.message} showIcon className="page-alert" />}
+      <ErrorAlert error={error} />
       <Form<PlanForm> form={form} layout="vertical" initialValues={formOf(plan)} onFinish={submit}>
         <Form.Item name="name" label="名称" rules={[{ required: true, max: MAX_NAME_LEN, message: `1–${MAX_NAME_LEN} 个字符` }]}>
           <Input autoComplete="off" />

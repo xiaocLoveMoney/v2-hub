@@ -1,5 +1,5 @@
 import { PlusOutlined } from '@ant-design/icons'
-import { Button, DatePicker, Form, Input, InputNumber, Modal, Popconfirm, Radio, Select, Space, Switch, Tag, Typography, type TableProps } from 'antd'
+import { Button, DatePicker, Form, Input, InputNumber, Popconfirm, Radio, Select, Space, Switch, Tag, Typography, type TableProps } from 'antd'
 import dayjs, { type Dayjs } from 'dayjs'
 import { useCallback, useState } from 'react'
 import { api, csrfHeader, type Coupon, type CouponInput, type CouponKind, type Plan } from '../../api/client'
@@ -7,19 +7,20 @@ import { useSession } from '../../auth/session-context'
 import { ErrorAlert } from '../../components/ErrorAlert'
 import { PagedTable } from '../../components/PagedTable'
 import { useCurrency } from '../../hooks/use-currency'
-import { useOpenGeneration } from '../../hooks/use-open-generation'
 import { useRemote } from '../../hooks/use-remote'
 import { useRowAction, useSubmit } from '../../hooks/use-submit'
 import { PERMISSIONS } from '../../menu'
 import { MAX_MONEY_AMOUNT, MONEY_PRECISION, amountToCents, centsToAmount, formatMoney } from '../../money'
 import { formatTime } from '../system/format'
 import { randomCouponCode } from './coupon-code'
+import { MAX_REMARK_LEN } from '../form-limits'
+import { PageHeader } from '../../components/PageHeader'
+import { FormModal } from '../../components/FormModal'
 
 const COUPON_CODE_PATTERN = /^[A-Za-z0-9]{4,32}$/
 const MAX_PERCENT = 100
 const MAX_USES = 1000000
 const MAX_USES_PER_USER = 1000
-const MAX_REMARK_LEN = 255
 const UNLIMITED = 0
 const MODAL_WIDTH = 620
 
@@ -48,8 +49,6 @@ interface CouponForm {
 
 const NO_PLANS: Plan[] = []
 const loadPlans = (signal: AbortSignal) => api.GET('/api/admin/plans', { signal })
-// 没有 plan:read 时不请求套餐列表，指定套餐只显示 ID
-const loadNoPlans = () => Promise.resolve({ data: { data: NO_PLANS } })
 
 function formOf(c: Coupon | null): CouponForm {
   if (c === null) {
@@ -80,7 +79,8 @@ export function CouponsPage() {
   const { can } = useSession()
   const canWrite = can(PERMISSIONS.SHOP_WRITE)
   const currency = useCurrency()
-  const plans = useRemote<Plan[]>(can(PERMISSIONS.PLAN_READ) ? loadPlans : loadNoPlans)
+  // 没有 plan:read 时不请求套餐列表，指定套餐只显示 ID
+  const plans = useRemote<Plan[]>(loadPlans, can(PERMISSIONS.PLAN_READ))
   const [refreshKey, setRefreshKey] = useState(0)
   const reload = () => setRefreshKey((k) => k + 1)
   const act = useRowAction(reload)
@@ -140,14 +140,14 @@ export function CouponsPage() {
 
   return (
     <>
-      <Space className="page-header">
-        <Typography.Title level={3}>优惠码</Typography.Title>
-        {canWrite && (
+      <PageHeader
+        title="优惠码"
+        action={canWrite && (
           <Button type="primary" icon={<PlusOutlined />} onClick={() => open(null)}>
             新建优惠码
           </Button>
         )}
-      </Space>
+      />
       <PagedTable<Coupon> load={load} columns={columns} refreshKey={refreshKey} />
       <CouponModal
         coupon={editing}
@@ -173,11 +173,10 @@ interface CouponModalProps {
 }
 
 function CouponModal({ coupon, isOpen, plans, onClose, onSaved }: CouponModalProps) {
-  const generation = useOpenGeneration(isOpen)
   return (
-    <Modal title={coupon === null ? '新建优惠码' : `编辑优惠码：${coupon.code}`} open={isOpen} onCancel={onClose} footer={null} destroyOnHidden width={MODAL_WIDTH}>
-      <CouponFormBody key={generation} coupon={coupon} plans={plans} onSaved={onSaved} />
-    </Modal>
+    <FormModal title={coupon === null ? '新建优惠码' : `编辑优惠码：${coupon.code}`} isOpen={isOpen} onClose={onClose} width={MODAL_WIDTH}>
+      {(generation) => <CouponFormBody key={generation} coupon={coupon} plans={plans} onSaved={onSaved} />}
+    </FormModal>
   )
 }
 
