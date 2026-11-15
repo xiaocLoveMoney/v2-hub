@@ -102,6 +102,19 @@ IP 换国家在 `internal/manager/geoip`：`Locator` 接口 + HTTP 实现，查�
 健康探测成功后 `ProbeServer` 写一条 `server_metric`（`date_bin` 对齐 5 分钟，冲突时覆盖为最新值，在线数取 `server.online_clients`），过期采样由清理任务按 7 天删除；
 用户端趋势图走 `UserService.ListNodeMetrics`：先按本人节点列表的同一套连接条件确认节点可见，再按范围取 5 分钟原值或按小时平均。
 
+总览分析（Ruling-66）：`service/analytics.go` 的 `AnalyticsService`，用户 / 流量 / 服务器 / 财务 / 待处理各一个方法，查询在 `dao/queries/analytics.sql`；
+时间范围只认 7 / 30 / 90 天（`validAnalyticsDays`），自然日按 `Settings.Location()`；同一分区同一参数的结果放进进程内的短时缓存（配置 `analytics.cacheTtl`，默认 60 秒，0 不缓存），
+待处理分区都是小查询、且按权限出块，不缓存。按服务器的流量由 `CollectServerTraffic` 在给用户记小时明细的同一个事务里顺带累加到 `server_traffic_hourly`。
+前四个分区在路由上按权限码鉴权；流量分区里按服务器的那一块由 handler 再看一次 `server:read`。
+
+大陆连通检测（Ruling-67）：探测封装在 `internal/manager/reach`——`Prober` 接口 + Globalping 实现（建一个 `ping` 测量再轮询结果，TCP 目标带端口，
+大陆 3 个探测点 + 日本、美国各 1 个对照点；只把公网地址发出去；限流、被拒、连不上各有哨兵错误），接口地址是配置 `reach.apiUrl`（环境变量 `HUB_REACH_API_URL` 可覆盖，联调指向模拟端），
+令牌只走环境变量 `HUB_GLOBALPING_TOKEN`。`service/reach.go` 的 `ReachService`：检测范围由节点目录现算（`ListReachCandidates`，目标 = 地址 + 端口 + 传输，按它去重），
+`RunRound` 每轮同步 `node_reach`、挑最久没测且到了间隔的目标（最多 5 个，所在服务器都不在线的跳过）、按 docs/03 的规则归结论（`judgeReach` 是纯函数），
+再发被墙告警与恢复通知（走 `OpsService.broadcast`，同掉线告警的渠道）；按小时的探测额度记在内存里（`reachBudget`，留一成余量），同一目标的检测互斥（`reachLocks`），
+手动检测按管理员频控（`ratelimit.FailureGuard`）。`job.RunReach` 按配置 `reach.checkInterval`（默认 1 分钟）驱动；功能开关、检测间隔与是否通知在系统设置的 `reach` 分组。
+节点列表与服务器列表的结论由 handler 调 `ReachService.NodeBriefs` / `ServerCounts` 拼上，`PanelService` 不依赖连通检测。
+
 ## 7. 接口待补 / 契约缺口
 
 - 见《任务与边界》契约缺口节。
