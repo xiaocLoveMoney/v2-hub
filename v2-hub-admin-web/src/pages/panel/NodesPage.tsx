@@ -8,10 +8,13 @@ import { PERMISSIONS } from '../../menu'
 import { TABLE_SCROLL } from '../system/format'
 import { formatCountry } from './countries'
 import { ErrorAlert } from '../../components/ErrorAlert'
+import { NodeReachButton } from './reach'
 
 const DEFAULT_PAGE_SIZE = 20
 /** 节点组成员选择器一次拉取的节点数上限（与接口 pageSize 上限一致）。 */
 const PICKER_PAGE_SIZE = 100
+/** “大陆连通”列插在“地址”列后面。 */
+const REACH_COLUMN_INDEX = 4
 
 const loadServers = (signal: AbortSignal) => api.GET('/api/admin/servers', { signal })
 const loadGroups = (signal: AbortSignal) => api.GET('/api/admin/node-groups', { signal })
@@ -111,6 +114,15 @@ function NodeCatalog({ canWrite, servers, groups }: NodeCatalogProps) {
     { title: '节点组', dataIndex: 'groupIds', render: (ids: number[]) => ids.map((id) => <Tag key={id} color="blue">{groupName.get(id) ?? id}</Tag>) },
     { title: '排序', dataIndex: 'sortOrder' },
   ]
+  // 大陆连通检测开着时接口才带 reach（Ruling-67）；没开就不出这一列
+  const hasReach = (nodes.data?.items ?? []).some((n) => n.reach !== null)
+  if (hasReach) {
+    columns.splice(REACH_COLUMN_INDEX, 0, {
+      title: '大陆连通',
+      key: 'reach',
+      render: (_: unknown, n: PanelNode) => <NodeReachButton node={n} canWrite={canWrite} onChecked={nodes.reload} />,
+    })
+  }
   if (canWrite) {
     columns.push({
       title: '操作',

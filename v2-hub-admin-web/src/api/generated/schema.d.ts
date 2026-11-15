@@ -163,6 +163,97 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/admin/analytics/users": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 总览的用户分区（user:read；docs/03 §5.20 总览分析，Ruling-66，0.11.0） */
+        get: operations["getAnalyticsUsers"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/analytics/traffic": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 总览的流量分区（user:read；按服务器那一块另需 server:read，没有则为 null；0.11.0） */
+        get: operations["getAnalyticsTraffic"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/analytics/servers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 总览的服务器分区（server:read；0.11.0）
+         * @description 可用率与负载排行固定看近 7 日 / 最近 15 分钟；range 只影响在线连接数曲线（24h 为 5 分钟原值，7d 按小时平均）。
+         */
+        get: operations["getAnalyticsServers"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/analytics/finance": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 总览的财务分区（finance:read；0.11.0） */
+        get: operations["getAnalyticsFinance"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/analytics/backlog": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 总览的待处理分区（任何已登录管理员；0.11.0）
+         * @description 缺对应权限码的块为 null：tickets 要 ticket:read，provisions 要 user:read，panels 要 server:read，outbox 要 setting:read。
+         */
+        get: operations["getAnalyticsBacklog"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/admin/permissions": {
         parameters: {
             query?: never;
@@ -845,6 +936,51 @@ export interface paths {
         /** 修改节点的展示属性（只影响平台，node:write） */
         put: operations["updateNode"];
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/nodes/{id}/reach": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        /**
+         * 节点的大陆连通检测详情（node:read；docs/03 §5.20 大陆连通检测，Ruling-67，0.11.0）
+         * @description 功能没开返回 403 feature_disabled；节点不在检测范围（停用、缺失、所在服务器停用）返回 409。
+         */
+        get: operations["getNodeReach"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/nodes/{id}/reach/check": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 立即检测一次节点的大陆连通（node:write；Ruling-67，0.11.0）
+         * @description 由第三方探测点发起，hub-server 不连节点；同步返回，耗时可达半分钟。
+         *     功能没开 403 feature_disabled；节点不在检测范围或同一目标正在检测 409；每个管理员每分钟最多 6 次、本小时探测额度用完 429；探测服务连不上 502。
+         */
+        post: operations["checkNodeReach"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2975,6 +3111,15 @@ export interface components {
             inboundCount: number;
             /** Format: date-time */
             createdAt: string;
+            /** @description 这台服务器上的大陆连通检测目标数（0.11.0，Ruling-67）；功能没开为 null */
+            reach: {
+                /** @description 这台服务器上的检测目标数 */
+                total: number;
+                /** @description 其中结论为 ok 的；其余可能是还没测、未知或端口不通 */
+                ok: number;
+                blocked: number;
+                partial: number;
+            } | null;
         };
         ServerEnvelope: components["schemas"]["Envelope"] & {
             data?: components["schemas"]["Server"];
@@ -3103,6 +3248,8 @@ export interface components {
             /** @description 来源入站或地址在面板上已不存在 */
             isMissing: boolean;
             groupIds: number[];
+            /** @description 大陆连通结论（0.11.0，Ruling-67）；功能没开或节点不在检测范围（停用、缺失、所在服务器停用）为 null */
+            reach: components["schemas"]["NodeReach"] | null;
         };
         NodeInput: {
             displayName: string;
@@ -3502,6 +3649,17 @@ export interface components {
                 /** @description 在每台已接入服务器的模板里加平台拦截规则 hub-block（Ruling-55），默认开 */
                 blockRule: boolean;
             };
+            /** @description 大陆连通检测（0.11.0，docs/03 §5.20，Ruling-67） */
+            reach: {
+                /** @description 开启后节点地址与端口会发给第三方探测服务，默认关 */
+                enabled: boolean;
+                /** @description 同一目标两次检测的最小间隔 */
+                intervalMinutes: number;
+                /** @description 被墙与恢复时是否发通知 */
+                notify: boolean;
+                /** @description 环境变量 HUB_GLOBALPING_TOKEN 是否已配置（决定每小时额度），不可经接口修改 */
+                readonly hasToken: boolean;
+            };
             /** @description 侧栏菜单顺序（0.7.3，docs/03 §5.6 菜单顺序，Ruling-57）；空数组 = 默认顺序 */
             menu: {
                 admin: components["schemas"]["MenuOrder"];
@@ -3639,6 +3797,9 @@ export interface components {
                 [key: string]: unknown;
             };
             routing?: {
+                [key: string]: unknown;
+            };
+            reach?: {
                 [key: string]: unknown;
             };
             menu?: {
@@ -4392,6 +4553,346 @@ export interface components {
                 open: number;
             } | null;
         };
+        /**
+         * @description 大陆连通检测的结论（Ruling-67）：pending 还没测过；ok 大陆探测点全通；partial 大陆有通有不通；
+         *     blocked 大陆全不通而境外通（被墙）；port_down 境内外都不通（端口没开，只对 tcp 目标）；unknown 探测点不够、接口出错或地址不是公网地址。
+         * @enum {string}
+         */
+        ReachVerdict: "pending" | "ok" | "partial" | "blocked" | "port_down" | "unknown";
+        /**
+         * @description port = 测的是 TCP 端口；ip = 只测了 ICMP（UDP 类入站），结论只说明 IP 层
+         * @enum {string}
+         */
+        ReachScope: "port" | "ip";
+        /** @description 节点所属目标的大陆连通结论（0.11.0） */
+        NodeReach: {
+            verdict: components["schemas"]["ReachVerdict"];
+            scope: components["schemas"]["ReachScope"];
+            /** @description 连通的大陆探测点数 */
+            cnOk: number;
+            /** @description 计入的大陆探测点数 */
+            cnTotal: number;
+            /** Format: date-time */
+            checkedAt: string | null;
+        };
+        ReachProbe: {
+            /** @description 真 = 大陆探测点，假 = 境外对照点 */
+            isMainland: boolean;
+            /** @description ISO 两位国家码 */
+            country: string;
+            city: string;
+            /** @description 探测点所在网络（运营商或机房）的名称 */
+            network: string;
+            isOk: boolean;
+            /** @description 平均往返时间（毫秒），不通为 null */
+            rttMs: number | null;
+        };
+        NodeReachDetail: {
+            address: string;
+            port: number;
+            /** @enum {string} */
+            transport: "tcp" | "udp";
+            verdict: components["schemas"]["ReachVerdict"];
+            scope: components["schemas"]["ReachScope"];
+            cnOk: number;
+            cnTotal: number;
+            /** @description 连通的境外对照点数 */
+            controlOk: number;
+            controlTotal: number;
+            /** @description tcp 目标判为 blocked 时补测的大陆 ICMP 是否还通（真 = 只封了端口，假 = 封了 IP）；其余情形为 null */
+            ipReachable: boolean | null;
+            /** Format: date-time */
+            checkedAt: string | null;
+            /**
+             * Format: date-time
+             * @description 这一轮连续 blocked 的起点
+             */
+            blockedSince: string | null;
+            /** @description 上一次检测没出结论的原因，正常为空串 */
+            lastError: string;
+            probes: components["schemas"]["ReachProbe"][];
+        };
+        NodeReachDetailEnvelope: components["schemas"]["Envelope"] & {
+            data?: components["schemas"]["NodeReachDetail"];
+        };
+        /** @description 总览用户分区（0.11.0，docs/03 §5.20 总览分析）；都只算未注销的用户，自然日按 site.timezone */
+        AnalyticsUsers: {
+            /** @description 窗口内每个自然日，旧的在前 */
+            growth: {
+                /** Format: date */
+                date: string;
+                newUsers: number;
+                /** @description 截至当日的累计用户数 */
+                totalUsers: number;
+            }[];
+            /** @description 每日活跃（当日有流量）的用户数 */
+            activeDays: {
+                /** Format: date */
+                date: string;
+                users: number;
+            }[];
+            /** @description 今日活跃用户数 */
+            dau: number;
+            /** @description 近 7 个自然日活跃的去重用户数 */
+            wau: number;
+            /** @description 近 30 个自然日活跃的去重用户数 */
+            mau: number;
+            status: {
+                active: number;
+                limited: number;
+                expired: number;
+                disabled: number;
+            };
+            expiry: {
+                expired: number;
+                within7d: number;
+                /** @description 8–30 日内到期 */
+                within30d: number;
+                later: number;
+                /** @description 不过期（含等待首次使用） */
+                never: number;
+                /** @description 7 日内到期且没开自动续费 */
+                within7dNoAutoRenew: number;
+            };
+            plans: {
+                /**
+                 * Format: int64
+                 * @description null = 没有套餐
+                 */
+                planId: number | null;
+                name: string;
+                users: number;
+                activeUsers: number;
+            }[];
+            /** @description active 且近 7 日没有流量（含从未使用） */
+            silentUsers: number;
+            topUsers: {
+                /** Format: int64 */
+                userId: number;
+                username: string;
+                /** @description 没有套餐为空串 */
+                planName: string;
+                /** Format: int64 */
+                bytes: number;
+            }[];
+            /** @description 订阅拉取；只能看到订阅记录保留期内的数据 */
+            subscription: {
+                days: {
+                    /** Format: date */
+                    date: string;
+                    pulls: number;
+                    users: number;
+                }[];
+                clients: {
+                    /** @enum {string} */
+                    client: "clash" | "singbox" | "v2rayn" | "v2rayng" | "shadowrocket" | "stash" | "quantumult" | "surge" | "loon" | "hiddify" | "nekobox" | "other";
+                    pulls: number;
+                    users: number;
+                }[];
+                formats: {
+                    format: string;
+                    pulls: number;
+                }[];
+            };
+        };
+        /** @description 总览流量分区（0.11.0） */
+        AnalyticsTraffic: {
+            days: {
+                /** Format: date */
+                date: string;
+                /** Format: int64 */
+                up: number;
+                /** Format: int64 */
+                down: number;
+            }[];
+            /** @description 一天 24 个小时各自的日均流量（按 site.timezone），固定 24 项 */
+            hours: {
+                hour: number;
+                /** Format: int64 */
+                bytes: number;
+            }[];
+            /** @description 窗口内每台服务器的流量，按合计取前 20；没有 server:read 为 null。只有 0.11.0 上线之后的数据 */
+            servers: {
+                /** Format: int64 */
+                serverId: number;
+                name: string;
+                /** Format: int64 */
+                up: number;
+                /** Format: int64 */
+                down: number;
+            }[] | null;
+        };
+        AnalyticsServerLoad: {
+            /** Format: int64 */
+            serverId: number;
+            name: string;
+            /** @description CPU 占用百分比，面板没报为 null */
+            cpu: number | null;
+            onlineClients: number;
+        };
+        /** @description 一个结论不是 ok 的检测目标 */
+        ReachProblem: {
+            address: string;
+            port: number;
+            /** @enum {string} */
+            transport: "tcp" | "udp";
+            verdict: components["schemas"]["ReachVerdict"];
+            scope: components["schemas"]["ReachScope"];
+            cnOk: number;
+            cnTotal: number;
+            ipReachable: boolean | null;
+            /** Format: date-time */
+            checkedAt: string | null;
+            /** Format: date-time */
+            blockedSince: string | null;
+            /** @description 涉及的服务器名 */
+            servers: string[];
+            /** @description 涉及的节点显示名（最多 5 个） */
+            nodes: string[];
+            nodeCount: number;
+        };
+        /** @description 总览服务器分区（0.11.0） */
+        AnalyticsServers: {
+            /** @description 启用中的服务器近 7 日可用率，从低到高 */
+            availability: {
+                /** Format: int64 */
+                serverId: number;
+                name: string;
+                /** @description 保留一位小数 */
+                percent: number;
+                /** @description 有负载采样的 5 分钟时段数 */
+                samples: number;
+                /** @description 应有的时段数 */
+                expected: number;
+            }[];
+            /** @description 全站在线连接数（各服务器在线 client 数之和），按时间升序 */
+            online: {
+                /** Format: date-time */
+                at: string;
+                connections: number;
+            }[];
+            topCpu: components["schemas"]["AnalyticsServerLoad"][];
+            topOnline: components["schemas"]["AnalyticsServerLoad"][];
+            /** @description 大陆连通检测汇总（Ruling-67）；功能没开为 null */
+            reach: {
+                counts: {
+                    pending: number;
+                    ok: number;
+                    partial: number;
+                    blocked: number;
+                    portDown: number;
+                    unknown: number;
+                };
+                /** @description 结论为 blocked / partial / port_down 的目标，被墙的在前 */
+                problems: components["schemas"]["ReachProblem"][];
+            } | null;
+        };
+        /** @description 总览财务分区（0.11.0）；金额为整数分，按建单时间 */
+        AnalyticsFinance: {
+            days: {
+                /** Format: date */
+                date: string;
+                /** Format: int64 */
+                orderPaid: number;
+                /** Format: int64 */
+                topup: number;
+            }[];
+            /** @description 新购、续费、流量包，固定三项 */
+            orderKinds: {
+                /** @enum {string} */
+                kind: "plan" | "renew" | "traffic_pack";
+                count: number;
+                /** Format: int64 */
+                paid: number;
+            }[];
+            /** @description 窗口内的试用单数 */
+            trialCount: number;
+            plans: {
+                /**
+                 * Format: int64
+                 * @description null = 套餐已删除（合并为一行）
+                 */
+                planId: number | null;
+                name: string;
+                count: number;
+                /** Format: int64 */
+                paid: number;
+            }[];
+            funnel: {
+                /** @description 窗口内注册的用户数 */
+                registered: number;
+                /** @description 其中下过试用单的 */
+                trial: number;
+                /** @description 其中有过实付 > 0 订单的 */
+                paid: number;
+            };
+            payers: {
+                /** @description 窗口内实付 > 0 的去重用户数 */
+                users: number;
+                /** Format: int64 */
+                paid: number;
+            };
+            /**
+             * Format: int64
+             * @description 全站用户余额合计
+             */
+            balanceTotal: number;
+            /** @description 窗口内建的充值单按状态计数 */
+            payments: {
+                paid: number;
+                expired: number;
+                pending: number;
+            };
+            coupons: {
+                code: string;
+                count: number;
+                /** Format: int64 */
+                discount: number;
+                /** Format: int64 */
+                paid: number;
+            }[];
+        };
+        /** @description 总览待处理分区（0.11.0）；缺权限的块为 null */
+        AnalyticsBacklog: {
+            tickets: {
+                open: number;
+                /**
+                 * Format: date-time
+                 * @description 等得最久的待回复工单的最后回复时间
+                 */
+                oldestWaitingSince: string | null;
+                /** @description 近 30 日新建且已有管理员回复的工单的平均首次回复时长 */
+                avgFirstReplyMinutes: number | null;
+            } | null;
+            provisions: {
+                /** @description 下发失败的 client 总数 */
+                failed: number;
+                servers: {
+                    /** Format: int64 */
+                    serverId: number;
+                    name: string;
+                    failed: number;
+                }[];
+            } | null;
+            panels: {
+                chainFailed: {
+                    /** Format: int64 */
+                    serverId: number;
+                    name: string;
+                    failCount: number;
+                    /** Format: date-time */
+                    lastAttemptAt: string | null;
+                }[];
+                driftInbounds: number;
+                missingInbounds: number;
+            } | null;
+            outbox: {
+                mailPending: number;
+                mailFailed24h: number;
+                telegramPending: number;
+                telegramFailed24h: number;
+            } | null;
+        };
         ShopTrafficPack: {
             /** Format: int64 */
             id: number;
@@ -5001,6 +5502,8 @@ export interface components {
         IdPath: number;
         Page: number;
         PageSize: number;
+        /** @description 总览分析的时间范围（自然日，含今天；Ruling-66），其它值 400 */
+        AnalyticsDays: 7 | 30 | 90;
     };
     requestBodies: never;
     headers: never;
@@ -5220,6 +5723,140 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["Envelope"] & {
                         data?: components["schemas"]["AdminDashboard"];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+        };
+    };
+    getAnalyticsUsers: {
+        parameters: {
+            query?: {
+                /** @description 总览分析的时间范围（自然日，含今天；Ruling-66），其它值 400 */
+                days?: components["parameters"]["AnalyticsDays"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 用户分析 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["AnalyticsUsers"];
+                    };
+                };
+            };
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+        };
+    };
+    getAnalyticsTraffic: {
+        parameters: {
+            query?: {
+                /** @description 总览分析的时间范围（自然日，含今天；Ruling-66），其它值 400 */
+                days?: components["parameters"]["AnalyticsDays"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 流量分析 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["AnalyticsTraffic"];
+                    };
+                };
+            };
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+        };
+    };
+    getAnalyticsServers: {
+        parameters: {
+            query?: {
+                range?: components["schemas"]["MetricRange"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 服务器分析 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["AnalyticsServers"];
+                    };
+                };
+            };
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+        };
+    };
+    getAnalyticsFinance: {
+        parameters: {
+            query?: {
+                /** @description 总览分析的时间范围（自然日，含今天；Ruling-66），其它值 400 */
+                days?: components["parameters"]["AnalyticsDays"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 财务分析 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["AnalyticsFinance"];
+                    };
+                };
+            };
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+        };
+    };
+    getAnalyticsBacklog: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 待处理 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["AnalyticsBacklog"];
                     };
                 };
             };
@@ -6565,6 +7202,62 @@ export interface operations {
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["PermissionDenied"];
             404: components["responses"]["NotFound"];
+        };
+    };
+    getNodeReach: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 检测详情 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NodeReachDetailEnvelope"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["FeatureDisabled"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    checkNodeReach: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 检测后的详情 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NodeReachDetailEnvelope"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["FeatureDisabled"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            429: components["responses"]["RateLimited"];
+            502: components["responses"]["UpstreamUnavailable"];
         };
     };
     listNodeGroups: {

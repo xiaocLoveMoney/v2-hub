@@ -212,6 +212,7 @@ describe('SettingsPage', () => {
     landing: { enabled: false, headline: '', intro: '' },
     support: { url: '', label: '在线客服' },
     routing: { blockRule: true },
+    reach: { enabled: false, intervalMinutes: 30, notify: true, hasToken: false },
     menu: { admin: ['users'], user: [] },
   }
 
@@ -250,7 +251,13 @@ describe('SettingsPage', () => {
     const { mailEnabled: _readOnly, telegramEnabled: _readOnlyToo, menu: _otherPage, ...editable } = settings
     // 旧前缀只读，不随表单提交（Ruling-59）
     const { oldPath: _oldPath, oldPathUntil: _oldPathUntil, ...subscription } = settings.subscription
-    expect(put?.body).toEqual({ ...editable, site: { ...settings.site, name: '新站名' }, routing: { blockRule: false }, subscription })
+    expect(put?.body).toEqual({
+      ...editable,
+      site: { ...settings.site, name: '新站名' },
+      routing: { blockRule: false },
+      reach: { enabled: false, intervalMinutes: 30, notify: true },
+      subscription,
+    })
   })
 
   it('只有 setting:read 时表单只读、没有保存按钮', async () => {

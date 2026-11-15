@@ -7,8 +7,8 @@ import {
   TeamOutlined,
   WifiOutlined,
 } from '@ant-design/icons'
-import { Alert, Card, Tag, Typography } from 'antd'
-import type { CSSProperties, ReactNode } from 'react'
+import { Alert, Card, Spin, Tabs, Tag, Typography, type TabsProps } from 'antd'
+import { lazy, Suspense, type ComponentType, type CSSProperties, type ReactNode } from 'react'
 import { Link } from 'react-router'
 import { api, type AdminDashboard } from '../api/client'
 import { useSession } from '../auth/session-context'
@@ -16,7 +16,7 @@ import { CardPage } from '../components/CardPage'
 import { ErrorAlert } from '../components/ErrorAlert'
 import { useCurrency } from '../hooks/use-currency'
 import { useRemote } from '../hooks/use-remote'
-import { ROUTES } from '../menu'
+import { PERMISSIONS, ROUTES } from '../menu'
 import { formatMoney } from '../money'
 import { formatTime } from './system/format'
 import { formatBytes } from './users/quota'
@@ -28,6 +28,31 @@ const loadDashboard = (signal: AbortSignal) => api.GET('/api/admin/dashboard', {
 const MONTH_DAY_START = 5 // yyyy-MM-dd 里 MM-dd 的起点
 const MIN_BAR_PERCENT = 2
 const FULL_PERCENT = 100
+
+// 分析分区（Ruling-66）单独成包：切到对应分区才下载代码、才请求数据，图表库不进首屏包
+const UsersSection = lazy(async () => ({ default: (await import('./dashboard/UsersSection')).UsersSection }))
+const TrafficSection = lazy(async () => ({ default: (await import('./dashboard/TrafficSection')).TrafficSection }))
+const ServersSection = lazy(async () => ({ default: (await import('./dashboard/ServersSection')).ServersSection }))
+const FinanceSection = lazy(async () => ({ default: (await import('./dashboard/FinanceSection')).FinanceSection }))
+const BacklogSection = lazy(async () => ({ default: (await import('./dashboard/BacklogSection')).BacklogSection }))
+
+const TAB_OVERVIEW = 'overview'
+type TabItem = NonNullable<TabsProps['items']>[number]
+
+/** 分析分区及其权限码；permission 为空表示任何已登录管理员可进（docs/03 §5.20 总览分析）。 */
+const SECTIONS: { key: string; label: string; permission?: string; component: ComponentType }[] = [
+  { key: 'users', label: '用户', permission: PERMISSIONS.USER_READ, component: UsersSection },
+  { key: 'traffic', label: '流量', permission: PERMISSIONS.USER_READ, component: TrafficSection },
+  { key: 'servers', label: '服务器', permission: PERMISSIONS.SERVER_READ, component: ServersSection },
+  { key: 'finance', label: '财务', permission: PERMISSIONS.FINANCE_READ, component: FinanceSection },
+  { key: 'backlog', label: '待处理', component: BacklogSection },
+]
+
+const sectionFallback = (
+  <div className="chart-empty">
+    <Spin />
+  </div>
+)
 
 /** 统计卡左侧色块的配色，对应 index.css 的 .stat-tile-*。 */
 type StatTone = 'primary' | 'success' | 'warning' | 'info' | 'danger'
@@ -104,9 +129,12 @@ function ServerStatusCard({ servers }: { servers: ServerBlock }) {
   )
 }
 
-/** 管理端总览（docs/03 §5.20）：各区块按权限码出现，缺权限的区块接口返回 null，这里不显示。 */
+/**
+ * 管理端总览（docs/03 §5.20）：“概览”各区块按权限码出现，缺权限的区块接口返回 null，这里不显示；
+ * 其余分区（用户 / 流量 / 服务器 / 财务 / 待处理）按会话里的权限码出现，切到时才加载（Ruling-66）。
+ */
 export function DashboardPage() {
-  const { session } = useSession()
+  const { session, can } = useSession()
   const currency = useCurrency()
   const state = useRemote<AdminDashboard>(loadDashboard)
   const d = state.data
@@ -114,9 +142,8 @@ export function DashboardPage() {
   const money = (cents: number) => formatMoney(cents, currency)
   const greeting = <Typography.Text type="secondary">欢迎，{session?.admin.username}</Typography.Text>
 
-  return (
-    <CardPage title="总览" extra={greeting}>
-      <ErrorAlert error={state.error} />
+  const overview = (
+    <>
       {isEmpty && <Alert type="info" showIcon title="当前角色没有可看的统计区块" className="page-alert" />}
       <div className="stat-grid">
         {d?.users && (
@@ -166,6 +193,22 @@ export function DashboardPage() {
           {d.servers && <ServerStatusCard servers={d.servers} />}
         </div>
       )}
+    </>
+  )
+  const sections: TabItem[] = SECTIONS.filter((sec) => sec.permission === undefined || can(sec.permission)).map((sec) => ({
+    key: sec.key,
+    label: sec.label,
+    children: (
+      <Suspense fallback={sectionFallback}>
+        <sec.component />
+      </Suspense>
+    ),
+  }))
+
+  return (
+    <CardPage title="总览" extra={greeting}>
+      <ErrorAlert error={state.error} />
+      <Tabs className="dashboard-tabs" defaultActiveKey={TAB_OVERVIEW} items={[{ key: TAB_OVERVIEW, label: '概览', children: overview }, ...sections]} />
     </CardPage>
   )
 }
