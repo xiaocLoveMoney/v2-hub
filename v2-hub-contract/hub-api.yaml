@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: v2-hub API
-  version: 0.10.0
+  version: 0.11.0
   description: |
     v2-hub 对外接口契约（hub-server 提供，v2-hub-admin-web / v2-hub-user-web 消费）。
     - 管理端接口前缀 /api/admin，客户端接口前缀 /api/user，订阅端点前缀 /sub。
@@ -25,6 +25,8 @@ info:
     0.7.3：侧栏菜单顺序（Ruling-57）——系统设置增加 menu 分组（menu.admin、menu.user），管理员会话信息与公开站点信息带 menuOrder。
     0.8.0：订阅地址的路径前缀改为全站随机串（Ruling-59），端点由 /sub/{token} 改为 /{subPath}/{token}，系统设置 subscription 增加 path、pathGraceDays 与只读的 oldPath、oldPathUntil；
       用户自设连接密码（Ruling-58）——新增 PUT /api/user/subscription/password，订阅信息带 hasCustomPassword。
+    0.11.0：总览分析（Ruling-66）——新增 /api/admin/analytics/{users,traffic,servers,finance,backlog}；
+      大陆连通检测（Ruling-67）——节点带 reach、服务器带 reach 汇总，新增 /api/admin/nodes/{id}/reach 与 /reach/check，系统设置增加 reach 分组。
 servers:
   - url: http://127.0.0.1:8080
     description: 本地开发
@@ -236,6 +238,112 @@ paths:
                   - type: object
                     properties:
                       data: { $ref: "#/components/schemas/AdminDashboard" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+  /api/admin/analytics/users:
+    get:
+      tags: [admin-dashboard]
+      operationId: getAnalyticsUsers
+      summary: 总览的用户分区（user:read；docs/03 §5.20 总览分析，Ruling-66，0.11.0）
+      parameters:
+        - $ref: "#/components/parameters/AnalyticsDays"
+      responses:
+        "200":
+          description: 用户分析
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/AnalyticsUsers" }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+  /api/admin/analytics/traffic:
+    get:
+      tags: [admin-dashboard]
+      operationId: getAnalyticsTraffic
+      summary: 总览的流量分区（user:read；按服务器那一块另需 server:read，没有则为 null；0.11.0）
+      parameters:
+        - $ref: "#/components/parameters/AnalyticsDays"
+      responses:
+        "200":
+          description: 流量分析
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/AnalyticsTraffic" }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+  /api/admin/analytics/servers:
+    get:
+      tags: [admin-dashboard]
+      operationId: getAnalyticsServers
+      summary: 总览的服务器分区（server:read；0.11.0）
+      description: 可用率与负载排行固定看近 7 日 / 最近 15 分钟；range 只影响在线连接数曲线（24h 为 5 分钟原值，7d 按小时平均）。
+      parameters:
+        - name: range
+          in: query
+          required: false
+          schema: { $ref: "#/components/schemas/MetricRange" }
+      responses:
+        "200":
+          description: 服务器分析
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/AnalyticsServers" }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+  /api/admin/analytics/finance:
+    get:
+      tags: [admin-dashboard]
+      operationId: getAnalyticsFinance
+      summary: 总览的财务分区（finance:read；0.11.0）
+      parameters:
+        - $ref: "#/components/parameters/AnalyticsDays"
+      responses:
+        "200":
+          description: 财务分析
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/AnalyticsFinance" }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+  /api/admin/analytics/backlog:
+    get:
+      tags: [admin-dashboard]
+      operationId: getAnalyticsBacklog
+      summary: 总览的待处理分区（任何已登录管理员；0.11.0）
+      description: 缺对应权限码的块为 null：tickets 要 ticket:read，provisions 要 user:read，panels 要 server:read，outbox 要 setting:read。
+      responses:
+        "200":
+          description: 待处理
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/AnalyticsBacklog" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
   /api/admin/permissions:
     get:
@@ -1312,6 +1420,48 @@ paths:
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "403": { $ref: "#/components/responses/PermissionDenied" }
         "404": { $ref: "#/components/responses/NotFound" }
+  /api/admin/nodes/{id}/reach:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    get:
+      tags: [admin-panel]
+      operationId: getNodeReach
+      summary: 节点的大陆连通检测详情（node:read；docs/03 §5.20 大陆连通检测，Ruling-67，0.11.0）
+      description: 功能没开返回 403 feature_disabled；节点不在检测范围（停用、缺失、所在服务器停用）返回 409。
+      responses:
+        "200":
+          description: 检测详情
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/NodeReachDetailEnvelope" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/FeatureDisabled" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /api/admin/nodes/{id}/reach/check:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    post:
+      tags: [admin-panel]
+      operationId: checkNodeReach
+      summary: 立即检测一次节点的大陆连通（node:write；Ruling-67，0.11.0）
+      description: |
+        由第三方探测点发起，hub-server 不连节点；同步返回，耗时可达半分钟。
+        功能没开 403 feature_disabled；节点不在检测范围或同一目标正在检测 409；每个管理员每分钟最多 6 次、本小时探测额度用完 429；探测服务连不上 502。
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      responses:
+        "200":
+          description: 检测后的详情
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/NodeReachDetailEnvelope" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/FeatureDisabled" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "502": { $ref: "#/components/responses/UpstreamUnavailable" }
   /api/admin/node-groups:
     get:
       tags: [admin-panel]
@@ -4295,6 +4445,11 @@ components:
       name: pageSize
       in: query
       schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+    AnalyticsDays:
+      name: days
+      in: query
+      description: 总览分析的时间范围（自然日，含今天；Ruling-66），其它值 400
+      schema: { type: integer, enum: [7, 30, 90], default: 30 }
   responses:
     Ok:
       description: 成功（data 为空）
@@ -4590,7 +4745,7 @@ components:
           description: 资源快照（cpu、mem、uptime、xray 运行状态等，原样透传，字段随面板而定）
     Server:
       type: object
-      required: [id, name, providerType, baseUrl, tlsMode, region, remark, isDisabled, status, lastError, panelVersion, inboundCount, createdAt]
+      required: [id, name, providerType, baseUrl, tlsMode, region, remark, isDisabled, status, lastError, panelVersion, inboundCount, createdAt, reach]
       properties:
         id: { type: integer, format: int64 }
         name: { type: string }
@@ -4609,6 +4764,15 @@ components:
         statusSnapshot: { type: [object, "null"], additionalProperties: true }
         inboundCount: { type: integer }
         createdAt: { type: string, format: date-time }
+        reach:
+          type: [object, "null"]
+          description: 这台服务器上的大陆连通检测目标数（0.11.0，Ruling-67）；功能没开为 null
+          required: [total, ok, blocked, partial]
+          properties:
+            total: { type: integer, description: 这台服务器上的检测目标数 }
+            ok: { type: integer, description: 其中结论为 ok 的；其余可能是还没测、未知或端口不通 }
+            blocked: { type: integer }
+            partial: { type: integer }
     ServerEnvelope:
       allOf:
         - $ref: "#/components/schemas/Envelope"
@@ -4722,7 +4886,7 @@ components:
         remark: { type: string, maxLength: 255 }
     Node:
       type: object
-      required: [id, inboundId, serverId, serverName, protocol, address, port, displayName, region, tags, sortOrder, isEnabled, isMissing, groupIds]
+      required: [id, inboundId, serverId, serverName, protocol, address, port, displayName, region, tags, sortOrder, isEnabled, isMissing, groupIds, reach]
       properties:
         id: { type: integer, format: int64 }
         inboundId: { type: integer, format: int64 }
@@ -4743,6 +4907,11 @@ components:
         groupIds:
           type: array
           items: { type: integer, format: int64 }
+        reach:
+          description: 大陆连通结论（0.11.0，Ruling-67）；功能没开或节点不在检测范围（停用、缺失、所在服务器停用）为 null
+          oneOf:
+            - { $ref: "#/components/schemas/NodeReach" }
+            - { type: "null" }
     NodeInput:
       type: object
       required: [displayName, tags, sortOrder, isEnabled]
@@ -5077,7 +5246,7 @@ components:
     Settings:
       type: object
       description: 全部系统设置（docs/03 §5.6 设置清单），键名去掉点号改驼峰分组
-      required: [site, register, invite, checkin, ticket, shared, mail, subscription, shop, rebate, notify, mailEnabled, alert, telegram, report, landing, support, routing, menu, telegramEnabled]
+      required: [site, register, invite, checkin, ticket, shared, mail, subscription, shop, rebate, notify, mailEnabled, alert, telegram, report, landing, support, routing, menu, telegramEnabled, reach]
       properties:
         mailEnabled: { type: boolean, readOnly: true, description: SMTP 环境变量是否已配置（Ruling-24），不可经接口修改 }
         telegramEnabled: { type: boolean, readOnly: true, description: 环境变量 HUB_TELEGRAM_BOT_TOKEN 是否已配置（0.4.3，Ruling-42） }
@@ -5125,6 +5294,15 @@ components:
           required: [blockRule]
           properties:
             blockRule: { type: boolean, description: 在每台已接入服务器的模板里加平台拦截规则 hub-block（Ruling-55），默认开 }
+        reach:
+          type: object
+          description: 大陆连通检测（0.11.0，docs/03 §5.20，Ruling-67）
+          required: [enabled, intervalMinutes, notify, hasToken]
+          properties:
+            enabled: { type: boolean, description: 开启后节点地址与端口会发给第三方探测服务，默认关 }
+            intervalMinutes: { type: integer, minimum: 10, maximum: 1440, description: 同一目标两次检测的最小间隔 }
+            notify: { type: boolean, description: 被墙与恢复时是否发通知 }
+            hasToken: { type: boolean, readOnly: true, description: 环境变量 HUB_GLOBALPING_TOKEN 是否已配置（决定每小时额度），不可经接口修改 }
         menu:
           type: object
           description: 侧栏菜单顺序（0.7.3，docs/03 §5.6 菜单顺序，Ruling-57）；空数组 = 默认顺序
@@ -5234,6 +5412,7 @@ components:
         landing: { type: object, additionalProperties: true }
         support: { type: object, additionalProperties: true }
         routing: { type: object, additionalProperties: true }
+        reach: { type: object, additionalProperties: true }
         menu: { type: object, additionalProperties: true }
     MenuOrder:
       type: array
@@ -5913,6 +6092,400 @@ components:
           required: [open]
           properties:
             open: { type: integer, description: 待回复（open）工单数 }
+    ReachVerdict:
+      type: string
+      description: |
+        大陆连通检测的结论（Ruling-67）：pending 还没测过；ok 大陆探测点全通；partial 大陆有通有不通；
+        blocked 大陆全不通而境外通（被墙）；port_down 境内外都不通（端口没开，只对 tcp 目标）；unknown 探测点不够、接口出错或地址不是公网地址。
+      enum: [pending, ok, partial, blocked, port_down, unknown]
+    ReachScope:
+      type: string
+      description: port = 测的是 TCP 端口；ip = 只测了 ICMP（UDP 类入站），结论只说明 IP 层
+      enum: [port, ip]
+    NodeReach:
+      type: object
+      description: 节点所属目标的大陆连通结论（0.11.0）
+      required: [verdict, scope, cnOk, cnTotal, checkedAt]
+      properties:
+        verdict: { $ref: "#/components/schemas/ReachVerdict" }
+        scope: { $ref: "#/components/schemas/ReachScope" }
+        cnOk: { type: integer, description: 连通的大陆探测点数 }
+        cnTotal: { type: integer, description: 计入的大陆探测点数 }
+        checkedAt: { type: [string, "null"], format: date-time }
+    ReachProbe:
+      type: object
+      required: [isMainland, country, city, network, isOk, rttMs]
+      properties:
+        isMainland: { type: boolean, description: 真 = 大陆探测点，假 = 境外对照点 }
+        country: { type: string, description: ISO 两位国家码 }
+        city: { type: string }
+        network: { type: string, description: 探测点所在网络（运营商或机房）的名称 }
+        isOk: { type: boolean }
+        rttMs: { type: [number, "null"], description: 平均往返时间（毫秒），不通为 null }
+    NodeReachDetail:
+      type: object
+      required: [address, port, transport, verdict, scope, cnOk, cnTotal, controlOk, controlTotal, ipReachable, checkedAt, blockedSince, lastError, probes]
+      properties:
+        address: { type: string }
+        port: { type: integer }
+        transport: { type: string, enum: [tcp, udp] }
+        verdict: { $ref: "#/components/schemas/ReachVerdict" }
+        scope: { $ref: "#/components/schemas/ReachScope" }
+        cnOk: { type: integer }
+        cnTotal: { type: integer }
+        controlOk: { type: integer, description: 连通的境外对照点数 }
+        controlTotal: { type: integer }
+        ipReachable: { type: [boolean, "null"], description: tcp 目标判为 blocked 时补测的大陆 ICMP 是否还通（真 = 只封了端口，假 = 封了 IP）；其余情形为 null }
+        checkedAt: { type: [string, "null"], format: date-time }
+        blockedSince: { type: [string, "null"], format: date-time, description: 这一轮连续 blocked 的起点 }
+        lastError: { type: string, description: 上一次检测没出结论的原因，正常为空串 }
+        probes:
+          type: array
+          maxItems: 16
+          items: { $ref: "#/components/schemas/ReachProbe" }
+    NodeReachDetailEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/Envelope"
+        - type: object
+          properties:
+            data: { $ref: "#/components/schemas/NodeReachDetail" }
+    AnalyticsUsers:
+      type: object
+      description: 总览用户分区（0.11.0，docs/03 §5.20 总览分析）；都只算未注销的用户，自然日按 site.timezone
+      required: [growth, activeDays, dau, wau, mau, status, expiry, plans, silentUsers, topUsers, subscription]
+      properties:
+        growth:
+          type: array
+          description: 窗口内每个自然日，旧的在前
+          items:
+            type: object
+            required: [date, newUsers, totalUsers]
+            properties:
+              date: { type: string, format: date }
+              newUsers: { type: integer }
+              totalUsers: { type: integer, description: 截至当日的累计用户数 }
+        activeDays:
+          type: array
+          description: 每日活跃（当日有流量）的用户数
+          items:
+            type: object
+            required: [date, users]
+            properties:
+              date: { type: string, format: date }
+              users: { type: integer }
+        dau: { type: integer, description: 今日活跃用户数 }
+        wau: { type: integer, description: 近 7 个自然日活跃的去重用户数 }
+        mau: { type: integer, description: 近 30 个自然日活跃的去重用户数 }
+        status:
+          type: object
+          required: [active, limited, expired, disabled]
+          properties:
+            active: { type: integer }
+            limited: { type: integer }
+            expired: { type: integer }
+            disabled: { type: integer }
+        expiry:
+          type: object
+          required: [expired, within7d, within30d, later, never, within7dNoAutoRenew]
+          properties:
+            expired: { type: integer }
+            within7d: { type: integer }
+            within30d: { type: integer, description: 8–30 日内到期 }
+            later: { type: integer }
+            never: { type: integer, description: 不过期（含等待首次使用） }
+            within7dNoAutoRenew: { type: integer, description: 7 日内到期且没开自动续费 }
+        plans:
+          type: array
+          items:
+            type: object
+            required: [planId, name, users, activeUsers]
+            properties:
+              planId: { type: [integer, "null"], format: int64, description: null = 没有套餐 }
+              name: { type: string }
+              users: { type: integer }
+              activeUsers: { type: integer }
+        silentUsers: { type: integer, description: active 且近 7 日没有流量（含从未使用） }
+        topUsers:
+          type: array
+          maxItems: 10
+          items:
+            type: object
+            required: [userId, username, planName, bytes]
+            properties:
+              userId: { type: integer, format: int64 }
+              username: { type: string }
+              planName: { type: string, description: 没有套餐为空串 }
+              bytes: { type: integer, format: int64 }
+        subscription:
+          type: object
+          description: 订阅拉取；只能看到订阅记录保留期内的数据
+          required: [days, clients, formats]
+          properties:
+            days:
+              type: array
+              items:
+                type: object
+                required: [date, pulls, users]
+                properties:
+                  date: { type: string, format: date }
+                  pulls: { type: integer }
+                  users: { type: integer }
+            clients:
+              type: array
+              items:
+                type: object
+                required: [client, pulls, users]
+                properties:
+                  client: { type: string, enum: [clash, singbox, v2rayn, v2rayng, shadowrocket, stash, quantumult, surge, loon, hiddify, nekobox, other] }
+                  pulls: { type: integer }
+                  users: { type: integer }
+            formats:
+              type: array
+              items:
+                type: object
+                required: [format, pulls]
+                properties:
+                  format: { type: string }
+                  pulls: { type: integer }
+    AnalyticsTraffic:
+      type: object
+      description: 总览流量分区（0.11.0）
+      required: [days, hours, servers]
+      properties:
+        days:
+          type: array
+          items:
+            type: object
+            required: [date, up, down]
+            properties:
+              date: { type: string, format: date }
+              up: { type: integer, format: int64 }
+              down: { type: integer, format: int64 }
+        hours:
+          type: array
+          description: 一天 24 个小时各自的日均流量（按 site.timezone），固定 24 项
+          minItems: 24
+          maxItems: 24
+          items:
+            type: object
+            required: [hour, bytes]
+            properties:
+              hour: { type: integer, minimum: 0, maximum: 23 }
+              bytes: { type: integer, format: int64 }
+        servers:
+          type: [array, "null"]
+          description: 窗口内每台服务器的流量，按合计取前 20；没有 server:read 为 null。只有 0.11.0 上线之后的数据
+          maxItems: 20
+          items:
+            type: object
+            required: [serverId, name, up, down]
+            properties:
+              serverId: { type: integer, format: int64 }
+              name: { type: string }
+              up: { type: integer, format: int64 }
+              down: { type: integer, format: int64 }
+    AnalyticsServerLoad:
+      type: object
+      required: [serverId, name, cpu, onlineClients]
+      properties:
+        serverId: { type: integer, format: int64 }
+        name: { type: string }
+        cpu: { type: [number, "null"], description: CPU 占用百分比，面板没报为 null }
+        onlineClients: { type: integer }
+    ReachProblem:
+      type: object
+      description: 一个结论不是 ok 的检测目标
+      required: [address, port, transport, verdict, scope, cnOk, cnTotal, ipReachable, checkedAt, blockedSince, servers, nodes, nodeCount]
+      properties:
+        address: { type: string }
+        port: { type: integer }
+        transport: { type: string, enum: [tcp, udp] }
+        verdict: { $ref: "#/components/schemas/ReachVerdict" }
+        scope: { $ref: "#/components/schemas/ReachScope" }
+        cnOk: { type: integer }
+        cnTotal: { type: integer }
+        ipReachable: { type: [boolean, "null"] }
+        checkedAt: { type: [string, "null"], format: date-time }
+        blockedSince: { type: [string, "null"], format: date-time }
+        servers: { type: array, maxItems: 5, items: { type: string }, description: 涉及的服务器名 }
+        nodes: { type: array, maxItems: 5, items: { type: string }, description: 涉及的节点显示名（最多 5 个） }
+        nodeCount: { type: integer }
+    AnalyticsServers:
+      type: object
+      description: 总览服务器分区（0.11.0）
+      required: [availability, online, topCpu, topOnline, reach]
+      properties:
+        availability:
+          type: array
+          description: 启用中的服务器近 7 日可用率，从低到高
+          maxItems: 100
+          items:
+            type: object
+            required: [serverId, name, percent, samples, expected]
+            properties:
+              serverId: { type: integer, format: int64 }
+              name: { type: string }
+              percent: { type: number, minimum: 0, maximum: 100, description: 保留一位小数 }
+              samples: { type: integer, description: 有负载采样的 5 分钟时段数 }
+              expected: { type: integer, description: 应有的时段数 }
+        online:
+          type: array
+          description: 全站在线连接数（各服务器在线 client 数之和），按时间升序
+          items:
+            type: object
+            required: [at, connections]
+            properties:
+              at: { type: string, format: date-time }
+              connections: { type: integer }
+        topCpu:
+          type: array
+          maxItems: 5
+          items: { $ref: "#/components/schemas/AnalyticsServerLoad" }
+        topOnline:
+          type: array
+          maxItems: 5
+          items: { $ref: "#/components/schemas/AnalyticsServerLoad" }
+        reach:
+          type: [object, "null"]
+          description: 大陆连通检测汇总（Ruling-67）；功能没开为 null
+          required: [counts, problems]
+          properties:
+            counts:
+              type: object
+              required: [pending, ok, partial, blocked, portDown, unknown]
+              properties:
+                pending: { type: integer }
+                ok: { type: integer }
+                partial: { type: integer }
+                blocked: { type: integer }
+                portDown: { type: integer }
+                unknown: { type: integer }
+            problems:
+              type: array
+              description: 结论为 blocked / partial / port_down 的目标，被墙的在前
+              maxItems: 20
+              items: { $ref: "#/components/schemas/ReachProblem" }
+    AnalyticsFinance:
+      type: object
+      description: 总览财务分区（0.11.0）；金额为整数分，按建单时间
+      required: [days, orderKinds, trialCount, plans, funnel, payers, balanceTotal, payments, coupons]
+      properties:
+        days:
+          type: array
+          items:
+            type: object
+            required: [date, orderPaid, topup]
+            properties:
+              date: { type: string, format: date }
+              orderPaid: { type: integer, format: int64 }
+              topup: { type: integer, format: int64 }
+        orderKinds:
+          type: array
+          description: 新购、续费、流量包，固定三项
+          items:
+            type: object
+            required: [kind, count, paid]
+            properties:
+              kind: { type: string, enum: [plan, renew, traffic_pack] }
+              count: { type: integer }
+              paid: { type: integer, format: int64 }
+        trialCount: { type: integer, description: 窗口内的试用单数 }
+        plans:
+          type: array
+          maxItems: 10
+          items:
+            type: object
+            required: [planId, name, count, paid]
+            properties:
+              planId: { type: [integer, "null"], format: int64, description: null = 套餐已删除（合并为一行） }
+              name: { type: string }
+              count: { type: integer }
+              paid: { type: integer, format: int64 }
+        funnel:
+          type: object
+          required: [registered, trial, paid]
+          properties:
+            registered: { type: integer, description: 窗口内注册的用户数 }
+            trial: { type: integer, description: 其中下过试用单的 }
+            paid: { type: integer, description: 其中有过实付 > 0 订单的 }
+        payers:
+          type: object
+          required: [users, paid]
+          properties:
+            users: { type: integer, description: 窗口内实付 > 0 的去重用户数 }
+            paid: { type: integer, format: int64 }
+        balanceTotal: { type: integer, format: int64, description: 全站用户余额合计 }
+        payments:
+          type: object
+          description: 窗口内建的充值单按状态计数
+          required: [paid, expired, pending]
+          properties:
+            paid: { type: integer }
+            expired: { type: integer }
+            pending: { type: integer }
+        coupons:
+          type: array
+          maxItems: 5
+          items:
+            type: object
+            required: [code, count, discount, paid]
+            properties:
+              code: { type: string }
+              count: { type: integer }
+              discount: { type: integer, format: int64 }
+              paid: { type: integer, format: int64 }
+    AnalyticsBacklog:
+      type: object
+      description: 总览待处理分区（0.11.0）；缺权限的块为 null
+      required: [tickets, provisions, panels, outbox]
+      properties:
+        tickets:
+          type: [object, "null"]
+          required: [open, oldestWaitingSince, avgFirstReplyMinutes]
+          properties:
+            open: { type: integer }
+            oldestWaitingSince: { type: [string, "null"], format: date-time, description: 等得最久的待回复工单的最后回复时间 }
+            avgFirstReplyMinutes: { type: [integer, "null"], description: 近 30 日新建且已有管理员回复的工单的平均首次回复时长 }
+        provisions:
+          type: [object, "null"]
+          required: [failed, servers]
+          properties:
+            failed: { type: integer, description: 下发失败的 client 总数 }
+            servers:
+              type: array
+              maxItems: 10
+              items:
+                type: object
+                required: [serverId, name, failed]
+                properties:
+                  serverId: { type: integer, format: int64 }
+                  name: { type: string }
+                  failed: { type: integer }
+        panels:
+          type: [object, "null"]
+          required: [chainFailed, driftInbounds, missingInbounds]
+          properties:
+            chainFailed:
+              type: array
+              maxItems: 10
+              items:
+                type: object
+                required: [serverId, name, failCount, lastAttemptAt]
+                properties:
+                  serverId: { type: integer, format: int64 }
+                  name: { type: string }
+                  failCount: { type: integer }
+                  lastAttemptAt: { type: [string, "null"], format: date-time }
+            driftInbounds: { type: integer }
+            missingInbounds: { type: integer }
+        outbox:
+          type: [object, "null"]
+          required: [mailPending, mailFailed24h, telegramPending, telegramFailed24h]
+          properties:
+            mailPending: { type: integer }
+            mailFailed24h: { type: integer }
+            telegramPending: { type: integer }
+            telegramFailed24h: { type: integer }
     ShopTrafficPack:
       type: object
       required: [id, name, trafficBytes, price]
