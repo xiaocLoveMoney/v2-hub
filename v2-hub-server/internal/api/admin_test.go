@@ -72,13 +72,17 @@ func newAPIServer(t *testing.T) (*httptest.Server, *service.RBACService) {
 	chains := service.NewChainService(pool, sealer, applier, service.ChainOptions{})
 	// 没配 Telegram token：测试消息接口返回 feature_disabled
 	telegramSvc := service.NewTelegramService(pool, nil, settings, nil)
+	ops := service.NewOpsService(pool, settings, mails, telegramSvc, nil)
+	// 不接探测服务：大陆连通检测只能看结论，手动检测返回 upstream_unavailable
+	reachSvc := service.NewReachService(pool, settings, ops, nil, service.ReachOptions{})
 	srv := httptest.NewServer(NewRouter(Deps{
 		Database: pool, PingTimeout: time.Second, Auth: auth, RBAC: rbac,
 		Settings: settings, Mail: mails, Account: account, Users: users, PortalAuth: portal, Portal: users,
 		Content: service.NewContentService(pool, sealer, settings, mails, nil), Tickets: service.NewTicketService(pool, settings, mails, nil, nil),
 		Wallet: service.NewWalletService(pool, sealer, settings, nil), Shop: shop, Finance: shop, Pay: service.NewPayService(pool, settings, testGateways(t), nil, nil),
 		Chain: chains, ChainAdmin: chains, ChainApply: applier,
-		Telegram: telegramSvc, Ops: service.NewOpsService(pool, settings, mails, telegramSvc, nil),
+		Telegram: telegramSvc, Ops: ops,
+		Analytics: service.NewAnalyticsService(pool, settings, reachSvc, 0, nil), Reach: reachSvc, Panels: panels,
 		Cookie: CookieConfig{Secure: false}, TrustedProxies: []netip.Prefix{},
 	}))
 	t.Cleanup(srv.Close)

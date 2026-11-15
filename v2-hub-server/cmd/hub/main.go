@@ -31,6 +31,7 @@ import (
 	"v2-hub-server/internal/manager/panel"
 	"v2-hub-server/internal/manager/panel/xui"
 	"v2-hub-server/internal/manager/pay"
+	"v2-hub-server/internal/manager/reach"
 	"v2-hub-server/internal/manager/telegram"
 	"v2-hub-server/internal/service"
 )
@@ -57,6 +58,9 @@ const (
 	envTelegramAPIBase = "HUB_TELEGRAM_API_BASE"
 	// envGeoIPLookupURL 覆盖配置里的 IP 库查询地址（联调指向模拟端；设为空串即关闭扫描，Ruling-65）
 	envGeoIPLookupURL = "HUB_GEOIP_LOOKUP_URL"
+	// envReachToken 是大陆连通检测用的探测服务令牌（可空，Ruling-67）；envReachAPIURL 覆盖配置里的接口地址（联调指向模拟端）
+	envReachToken  = "HUB_GLOBALPING_TOKEN"
+	envReachAPIURL = "HUB_REACH_API_URL"
 	// serverLocateInterval 是位置为空的服务器的补扫周期（docs/03 §5.1）。
 	serverLocateInterval = time.Hour
 	// telegramOutboxInterval 是 Telegram 发件箱任务的周期；opsInterval 是掉线告警与日报的检查周期。
@@ -181,6 +185,15 @@ func runServer(args []string) error {
 	ops := service.NewOpsService(pool, settings, mails, telegramSvc, nil)
 	go job.RunOps(ctx, ops, opsInterval)
 	go job.RunSessionCleanup(ctx, job.PurgeFunc(mails.PurgeOutbox), cfg.Auth.SessionCleanupInterval)
+	// 大陆连通检测（Ruling-67）：开关在系统设置里，默认关；关着时这个任务每轮什么都不做
+	reachToken := os.Getenv(envReachToken)
+	prober, err := reachProberFromConfig(cfg.Reach, reachToken)
+	if err != nil {
+		return err
+	}
+	reachSvc := service.NewReachService(pool, settings, ops, prober, service.ReachOptions{HasToken: reachToken != ""})
+	go job.RunReach(ctx, reachSvc, cfg.Reach.CheckInterval)
+	analytics := service.NewAnalyticsService(pool, settings, reachSvc, cfg.Analytics.CacheTTL, nil)
 	users := service.NewUserService(pool, sealer, panels, service.UserConfig{Location: quotaLoc, Subscription: subCfg, Settings: settings}, nil)
 	// 老用户补 SS2022 密钥（Ruling-60），对账随后写到面板
 	if _, err := users.EnsureSS2022Keys(ctx); err != nil {
@@ -236,6 +249,8 @@ func runServer(args []string) error {
 			ChainApply:     chainApplier,
 			Telegram:       telegramSvc,
 			Ops:            ops,
+			Analytics:      analytics,
+			Reach:          reachSvc,
 			Cookie:         api.CookieConfig{Secure: secureCookie},
 			TrustedProxies: trusted,
 		}),
@@ -364,6 +379,19 @@ func telegramSenderFromEnv() (telegram.Sender, error) {
 	}
 	if client == nil {
 		return nil, nil
+	}
+	return client, nil
+}
+
+// reachProberFromConfig 按配置（环境变量可覆盖接口地址）创建大陆连通检测的探测客户端；token 可空。
+func reachProberFromConfig(cfg config.ReachConfig, token string) (reach.Prober, error) {
+	apiURL := cfg.APIURL
+	if v := os.Getenv(envReachAPIURL); v != "" {
+		apiURL = v
+	}
+	client, err := reach.New(reach.Config{APIURL: apiURL, Token: token, Timeout: cfg.Timeout})
+	if err != nil {
+		return nil, fmt.Errorf("init reach prober (env %s): %w", envReachAPIURL, err)
 	}
 	return client, nil
 }

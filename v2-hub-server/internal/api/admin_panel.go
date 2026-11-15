@@ -73,9 +73,12 @@ type serverVO struct {
 	StatusSnapshot json.RawMessage `json:"statusSnapshot"`
 	InboundCount   int             `json:"inboundCount"`
 	CreatedAt      time.Time       `json:"createdAt"`
+	// Reach 是这台服务器上大陆连通检测的目标数（Ruling-67）；功能没开为 null。
+	Reach *serverReachVO `json:"reach"`
 }
 
-func toServerVO(s service.Server) serverVO {
+// toServerVO 把服务器转成 VO；reach 为 nil 表示大陆连通检测没开。
+func toServerVO(s service.Server, reach map[int64]service.ReachCount) serverVO {
 	vo := serverVO{
 		ID: s.ID, Name: s.Name, ProviderType: s.ProviderType, BaseURL: s.BaseURL, TLSMode: s.TLSMode,
 		CertPinSHA256: s.CertPinSHA256, Region: s.Region, Remark: s.Remark, IsDisabled: s.IsDisabled,
@@ -85,7 +88,21 @@ func toServerVO(s service.Server) serverVO {
 	if len(s.StatusSnapshot) > 0 {
 		vo.StatusSnapshot = s.StatusSnapshot
 	}
+	if reach != nil {
+		c := reach[s.ID]
+		vo.Reach = &serverReachVO{Total: c.Total, OK: c.OK, Blocked: c.Blocked, Partial: c.Partial}
+	}
 	return vo
+}
+
+// writeServer 输出一台服务器（带大陆连通的目标数）。
+func (h *handlers) writeServer(w http.ResponseWriter, r *http.Request, srv *service.Server) {
+	reach, err := h.serverReach(r.Context())
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeOK(w, toServerVO(*srv, reach))
 }
 
 type endpointVO struct {
@@ -154,6 +171,8 @@ type nodeVO struct {
 	IsEnabled   bool     `json:"isEnabled"`
 	IsMissing   bool     `json:"isMissing"`
 	GroupIDs    []int64  `json:"groupIds"`
+	// Reach 是大陆连通结论（Ruling-67）；功能没开或节点不在检测范围为 null。
+	Reach *nodeReachVO `json:"reach"`
 }
 
 type nodeGroupVO struct {
@@ -277,7 +296,12 @@ func (h *handlers) listServers(w http.ResponseWriter, r *http.Request, _ *servic
 		writeError(w, r, err)
 		return
 	}
-	writeOK(w, mapSlice(list, toServerVO))
+	reach, err := h.serverReach(r.Context())
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeOK(w, mapSlice(list, func(s service.Server) serverVO { return toServerVO(s, reach) }))
 }
 
 func (h *handlers) getServer(w http.ResponseWriter, r *http.Request, _ *service.AdminPrincipal) {
@@ -291,7 +315,7 @@ func (h *handlers) getServer(w http.ResponseWriter, r *http.Request, _ *service.
 		writeError(w, r, err)
 		return
 	}
-	writeOK(w, toServerVO(*srv))
+	h.writeServer(w, r, srv)
 }
 
 func (h *handlers) createServer(w http.ResponseWriter, r *http.Request, p *service.AdminPrincipal) {
@@ -305,7 +329,7 @@ func (h *handlers) createServer(w http.ResponseWriter, r *http.Request, p *servi
 		writeError(w, r, err)
 		return
 	}
-	writeOK(w, toServerVO(*srv))
+	h.writeServer(w, r, srv)
 }
 
 func (h *handlers) updateServer(w http.ResponseWriter, r *http.Request, p *service.AdminPrincipal) {
@@ -320,7 +344,7 @@ func (h *handlers) updateServer(w http.ResponseWriter, r *http.Request, p *servi
 		writeError(w, r, err)
 		return
 	}
-	writeOK(w, toServerVO(*srv))
+	h.writeServer(w, r, srv)
 }
 
 func (h *handlers) deleteServer(w http.ResponseWriter, r *http.Request, p *service.AdminPrincipal) {
@@ -649,6 +673,11 @@ func (h *handlers) listNodes(w http.ResponseWriter, r *http.Request, _ *service.
 		writeError(w, r, err)
 		return
 	}
+	reach, err := h.nodeReach(r.Context())
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
 	writeOK(w, pageVO[nodeVO]{Total: page.Total, Items: mapSlice(page.Items, func(n service.Node) nodeVO {
 		vo := nodeVO{
 			ID: n.ID, InboundID: n.InboundID, EndpointID: n.EndpointID, ServerID: n.ServerID, ServerName: n.ServerName,
@@ -660,6 +689,9 @@ func (h *handlers) listNodes(w http.ResponseWriter, r *http.Request, _ *service.
 		}
 		if vo.GroupIDs == nil {
 			vo.GroupIDs = []int64{}
+		}
+		if b, ok := reach[n.ID]; ok {
+			vo.Reach = &nodeReachVO{Verdict: b.Verdict, Scope: b.Scope, CnOK: b.CnOK, CnTotal: b.CnTotal, CheckedAt: b.CheckedAt}
 		}
 		return vo
 	})})

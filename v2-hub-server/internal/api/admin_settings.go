@@ -145,6 +145,14 @@ type routingSettingsVO struct {
 	BlockRule bool `json:"blockRule"`
 }
 
+// reachSettingsVO 是大陆连通检测设置；HasToken 只读，表示环境变量里配了探测服务的令牌。
+type reachSettingsVO struct {
+	Enabled         bool `json:"enabled"`
+	IntervalMinutes int  `json:"intervalMinutes"`
+	Notify          bool `json:"notify"`
+	HasToken        bool `json:"hasToken"`
+}
+
 type menuSettingsVO struct {
 	Admin []string `json:"admin"`
 	User  []string `json:"user"`
@@ -160,6 +168,7 @@ type settingsVO struct {
 	Landing         landingSettingsVO      `json:"landing"`
 	Support         supportSettingsVO      `json:"support"`
 	Routing         routingSettingsVO      `json:"routing"`
+	Reach           reachSettingsVO        `json:"reach"`
 	Menu            menuSettingsVO         `json:"menu"`
 	Site            siteSettingsVO         `json:"site"`
 	Register        registerSettingsVO     `json:"register"`
@@ -181,7 +190,7 @@ func nonNil(v []string) []string {
 	return v
 }
 
-func toSettingsVO(s service.Settings, mailEnabled, telegramEnabled bool) settingsVO {
+func toSettingsVO(s service.Settings, mailEnabled, telegramEnabled, hasReachToken bool) settingsVO {
 	return settingsVO{
 		MailEnabled: mailEnabled, TelegramEnabled: telegramEnabled,
 		Alert: alertSettingsVO{Emails: nonNil(s.Alert.Emails), OfflineMinutes: s.Alert.OfflineMinutes},
@@ -191,6 +200,7 @@ func toSettingsVO(s service.Settings, mailEnabled, telegramEnabled bool) setting
 		Landing: landingSettingsVO{Enabled: s.Landing.Enabled, Headline: s.Landing.Headline, Intro: s.Landing.Intro},
 		Support: supportSettingsVO{URL: s.Support.URL, Label: s.Support.Label},
 		Routing: routingSettingsVO{BlockRule: s.Routing.BlockRule},
+		Reach:   reachSettingsVO{Enabled: s.Reach.Enabled, IntervalMinutes: s.Reach.IntervalMinutes, Notify: s.Reach.Notify, HasToken: hasReachToken},
 		Menu:    menuSettingsVO{Admin: nonNil(s.Menu.Admin), User: nonNil(s.Menu.User)},
 		Site:    siteSettingsVO{Name: s.Site.Name, Timezone: s.Site.Timezone, PortalURL: s.Site.PortalURL},
 		Shop:    shopSettingsVO{Enabled: s.Shop.Enabled, Currency: s.Shop.Currency},
@@ -210,13 +220,18 @@ func toSettingsVO(s service.Settings, mailEnabled, telegramEnabled bool) setting
 	}
 }
 
+// hasReachToken 报告探测服务是否带了令牌；没接连通检测时为假。
+func (h *handlers) hasReachToken() bool {
+	return h.reach != nil && h.reach.HasToken()
+}
+
 func (h *handlers) getSettings(w http.ResponseWriter, r *http.Request, _ *service.AdminPrincipal) {
 	cur, err := h.settings.Current(r.Context())
 	if err != nil {
 		writeError(w, r, err)
 		return
 	}
-	writeOK(w, toSettingsVO(cur, h.mail.Enabled(), h.telegram.Enabled()))
+	writeOK(w, toSettingsVO(cur, h.mail.Enabled(), h.telegram.Enabled(), h.hasReachToken()))
 }
 
 func (h *handlers) updateSettings(w http.ResponseWriter, r *http.Request, p *service.AdminPrincipal) {
@@ -236,7 +251,7 @@ func (h *handlers) updateSettings(w http.ResponseWriter, r *http.Request, p *ser
 		writeError(w, r, err)
 		return
 	}
-	writeOK(w, toSettingsVO(next, h.mail.Enabled(), h.telegram.Enabled()))
+	writeOK(w, toSettingsVO(next, h.mail.Enabled(), h.telegram.Enabled(), h.hasReachToken()))
 }
 
 type testMailRequest struct {

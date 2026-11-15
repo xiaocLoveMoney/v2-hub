@@ -74,7 +74,12 @@ func (s *UserService) CollectServerTraffic(ctx context.Context, serverID int64) 
 			if err := q.TouchUserLastUsed(ctx, sqlcgen.TouchUserLastUsedParams{ID: row.ID, LastUsedAt: timestamptz(now)}); err != nil {
 				return fmt.Errorf("touch last used of user %d: %w", row.ID, err)
 			}
-			return q.AddUserTraffic(ctx, sqlcgen.AddUserTrafficParams{UserID: row.ID, Hour: timestamptz(hourOf(now)), Up: up, Down: down})
+			hour := timestamptz(hourOf(now))
+			// 按服务器的小时汇总（总览流量分区，Ruling-66）
+			if err := q.AddServerTraffic(ctx, sqlcgen.AddServerTrafficParams{ServerID: serverID, Hour: hour, Up: up, Down: down}); err != nil {
+				return fmt.Errorf("add traffic of server %d: %w", serverID, err)
+			}
+			return q.AddUserTraffic(ctx, sqlcgen.AddUserTrafficParams{UserID: row.ID, Hour: hour, Up: up, Down: down})
 		})
 		if err != nil {
 			return fmt.Errorf("account traffic of %s on server %d: %w", c.Email, serverID, err)

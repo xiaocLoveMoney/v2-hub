@@ -327,6 +327,27 @@ type NodeGroupItem struct {
 	NodeID      int64
 }
 
+type NodeReach struct {
+	ID            int64
+	Address       string
+	Port          int32
+	Transport     string
+	Verdict       string
+	CnOk          int32
+	CnTotal       int32
+	ControlOk     int32
+	ControlTotal  int32
+	IpReachable   pgtype.Bool
+	Probes        []byte
+	LastError     string
+	BlockedStreak int32
+	BlockedSince  pgtype.Timestamptz
+	AlertSentAt   pgtype.Timestamptz
+	CheckedAt     pgtype.Timestamptz
+	CreatedAt     pgtype.Timestamptz
+	UpdatedAt     pgtype.Timestamptz
+}
+
 type Payment struct {
 	ID             int64
 	TradeNo        string
@@ -457,6 +478,13 @@ type ServerMetric struct {
 	BucketAt      pgtype.Timestamptz
 	Cpu           pgtype.Float8
 	OnlineClients int32
+}
+
+type ServerTrafficHourly struct {
+	ServerID int64
+	Hour     pgtype.Timestamptz
+	Up       int64
+	Down     int64
 }
 
 type Setting struct {

@@ -63,6 +63,14 @@ const (
 	// 服务器位置扫描用的在线 IP 库，语义见 docs/03 §5.1（Ruling-65）
 	defaultGeoIPLookupURL = "https://api.country.is/{ip}"
 	defaultGeoIPTimeout   = 5 * time.Second
+
+	// 总览分析的结果缓存，语义见 docs/03 §5.20 总览分析（Ruling-66）
+	defaultAnalyticsCacheTTL = time.Minute
+
+	// 大陆连通检测，语义见 docs/03 §5.20 大陆连通检测（Ruling-67）
+	defaultReachAPIURL        = "https://api.globalping.io"
+	defaultReachTimeout       = 40 * time.Second
+	defaultReachCheckInterval = time.Minute
 )
 
 // ErrInvalidConfig 表示配置内容不合法。
@@ -78,6 +86,9 @@ type Config struct {
 	Portal   PortalConfig   `yaml:"portal"`
 	Chain    ChainConfig    `yaml:"chain"`
 	GeoIP    GeoIPConfig    `yaml:"geoip"`
+	// Analytics 是总览分析（docs/03 §5.20，Ruling-66）；Reach 是大陆连通检测（Ruling-67）。
+	Analytics AnalyticsConfig `yaml:"analytics"`
+	Reach     ReachConfig     `yaml:"reach"`
 	// Subscription 是订阅设置（docs/03 §5.4）；M4 起移入系统设置表。
 	Subscription SubscriptionConfig `yaml:"subscription"`
 }
@@ -100,6 +111,19 @@ type ChainConfig struct {
 type GeoIPConfig struct {
 	LookupURL string        `yaml:"lookupUrl"`
 	Timeout   time.Duration `yaml:"timeout"`
+}
+
+// AnalyticsConfig 是总览分析：CacheTTL 是同一分区同一参数的结果缓存多久，0 = 不缓存。
+type AnalyticsConfig struct {
+	CacheTTL time.Duration `yaml:"cacheTtl"`
+}
+
+// ReachConfig 是大陆连通检测用的探测服务（Globalping）：APIURL 是接口地址，Timeout 是一次检测的总时限，
+// CheckInterval 是后台任务的检查周期。令牌只走环境变量；功能开关与检测间隔在系统设置里。
+type ReachConfig struct {
+	APIURL        string        `yaml:"apiUrl"`
+	Timeout       time.Duration `yaml:"timeout"`
+	CheckInterval time.Duration `yaml:"checkInterval"`
 }
 
 // SubscriptionConfig 是订阅的系统级设置。
@@ -243,6 +267,12 @@ func defaults() Config {
 	}, GeoIP: GeoIPConfig{
 		LookupURL: defaultGeoIPLookupURL,
 		Timeout:   defaultGeoIPTimeout,
+	}, Analytics: AnalyticsConfig{
+		CacheTTL: defaultAnalyticsCacheTTL,
+	}, Reach: ReachConfig{
+		APIURL:        defaultReachAPIURL,
+		Timeout:       defaultReachTimeout,
+		CheckInterval: defaultReachCheckInterval,
 	}, Subscription: SubscriptionConfig{
 		Title:               defaultSubscriptionTitle,
 		UpdateIntervalHours: defaultSubscriptionIntervalHours,
@@ -290,6 +320,12 @@ func (c Config) validate() error {
 	}
 	if c.GeoIP.Timeout <= 0 {
 		return fmt.Errorf("%w: geoip.timeout must be positive", ErrInvalidConfig)
+	}
+	if c.Analytics.CacheTTL < 0 {
+		return fmt.Errorf("%w: analytics.cacheTtl must not be negative", ErrInvalidConfig)
+	}
+	if c.Reach.APIURL == "" || c.Reach.Timeout <= 0 || c.Reach.CheckInterval <= 0 {
+		return fmt.Errorf("%w: reach.apiUrl, reach.timeout and reach.checkInterval must be set", ErrInvalidConfig)
 	}
 	po := c.Portal
 	if po.SessionIdleTimeout <= a.SessionTouchInterval || po.SessionMaxAge < po.SessionIdleTimeout || po.LoginLogRetention <= 0 {

@@ -15,11 +15,51 @@ type Querier interface {
 	AddChainRouteEntries(ctx context.Context, arg AddChainRouteEntriesParams) error
 	AddExitNodeGroups(ctx context.Context, arg AddExitNodeGroupsParams) error
 	AddExitUsers(ctx context.Context, arg AddExitUsersParams) error
+	AddServerTraffic(ctx context.Context, arg AddServerTrafficParams) error
 	AddUserTraffic(ctx context.Context, arg AddUserTrafficParams) error
 	// 原子地推进已用步长；返回 0 行表示该步长已被用过（并发重放）
 	AdvanceAdminTOTPStep(ctx context.Context, arg AdvanceAdminTOTPStepParams) (int64, error)
 	// 原子地推进已用步长；返回 0 行表示该步长已被用过（并发重放）
 	AdvanceUserTOTPStep(ctx context.Context, arg AdvanceUserTOTPStepParams) (int64, error)
+	// 每个自然日有流量的去重用户数
+	AnalyticsActiveDays(ctx context.Context, arg AnalyticsActiveDaysParams) ([]AnalyticsActiveDaysRow, error)
+	AnalyticsChainFailed(ctx context.Context, rowLimit int32) ([]AnalyticsChainFailedRow, error)
+	AnalyticsCoupons(ctx context.Context, arg AnalyticsCouponsParams) ([]AnalyticsCouponsRow, error)
+	AnalyticsFailedProvisions(ctx context.Context) ([]AnalyticsFailedProvisionsRow, error)
+	// 窗口内新建且已有管理员回复的工单：数量与首次回复时长合计（整秒）
+	AnalyticsFirstReply(ctx context.Context, since pgtype.Timestamptz) (AnalyticsFirstReplyRow, error)
+	// 窗口内注册的用户 → 其中下过试用单的 → 其中有过实付 > 0 订单的
+	AnalyticsFunnel(ctx context.Context, since pgtype.Timestamptz) (AnalyticsFunnelRow, error)
+	AnalyticsInboundIssues(ctx context.Context) (AnalyticsInboundIssuesRow, error)
+	// 每台启用中的服务器在窗口内最新的一条采样
+	AnalyticsLatestLoads(ctx context.Context, since pgtype.Timestamptz) ([]AnalyticsLatestLoadsRow, error)
+	// 各服务器同一 5 分钟时段的在线 client 数之和
+	AnalyticsOnlineSeries(ctx context.Context, since pgtype.Timestamptz) ([]AnalyticsOnlineSeriesRow, error)
+	AnalyticsOnlineSeriesHourly(ctx context.Context, since pgtype.Timestamptz) ([]AnalyticsOnlineSeriesHourlyRow, error)
+	AnalyticsOrderKinds(ctx context.Context, since pgtype.Timestamptz) ([]AnalyticsOrderKindsRow, error)
+	// 试用单数、付费用户数（按下单时的用户名去重）与实付合计
+	AnalyticsOrderSummary(ctx context.Context, since pgtype.Timestamptz) (AnalyticsOrderSummaryRow, error)
+	AnalyticsOutbox(ctx context.Context, since pgtype.Timestamptz) (AnalyticsOutboxRow, error)
+	AnalyticsPayments(ctx context.Context, since pgtype.Timestamptz) (AnalyticsPaymentsRow, error)
+	AnalyticsPlanSales(ctx context.Context, arg AnalyticsPlanSalesParams) ([]AnalyticsPlanSalesRow, error)
+	AnalyticsPlanUsers(ctx context.Context, rowLimit int32) ([]AnalyticsPlanUsersRow, error)
+	// 启用中的服务器在窗口内的负载采样数（可用率的分子）
+	AnalyticsServerSamples(ctx context.Context, arg AnalyticsServerSamplesParams) ([]AnalyticsServerSamplesRow, error)
+	// 客户端按 User-Agent 里出现的名字归类（strpos：只是分类用的包含判断，过滤走 created_at 索引）；
+	// 顺序有讲究：v2rayNG 含 v2rayn，Hiddify / Stash 的 UA 里带 clash 字样，所以排在前面
+	AnalyticsSubscribeClients(ctx context.Context, since pgtype.Timestamptz) ([]AnalyticsSubscribeClientsRow, error)
+	AnalyticsSubscribeDays(ctx context.Context, arg AnalyticsSubscribeDaysParams) ([]AnalyticsSubscribeDaysRow, error)
+	AnalyticsSubscribeFormats(ctx context.Context, since pgtype.Timestamptz) ([]AnalyticsSubscribeFormatsRow, error)
+	AnalyticsTicketBacklog(ctx context.Context) (AnalyticsTicketBacklogRow, error)
+	AnalyticsTopUsers(ctx context.Context, arg AnalyticsTopUsersParams) ([]AnalyticsTopUsersRow, error)
+	AnalyticsTrafficDays(ctx context.Context, arg AnalyticsTrafficDaysParams) ([]AnalyticsTrafficDaysRow, error)
+	// 一天中每个小时（平台时区）在窗口内的流量合计；日均由 service 除以天数
+	AnalyticsTrafficHours(ctx context.Context, arg AnalyticsTrafficHoursParams) ([]AnalyticsTrafficHoursRow, error)
+	AnalyticsTrafficServers(ctx context.Context, arg AnalyticsTrafficServersParams) ([]AnalyticsTrafficServersRow, error)
+	// 状态分布、到期分布与沉默用户，一次扫描
+	AnalyticsUserBreakdown(ctx context.Context, arg AnalyticsUserBreakdownParams) (AnalyticsUserBreakdownRow, error)
+	// 总览分析（docs/03 §5.20 总览分析，Ruling-66）。时间范围由 service 校验（7 / 30 / 90 天），自然日按传入的时区。
+	AnalyticsUserGrowth(ctx context.Context, arg AnalyticsUserGrowthParams) ([]AnalyticsUserGrowthRow, error)
 	BumpCouponUse(ctx context.Context, id int64) error
 	// 校验失败计一次；达到上限即作废
 	BumpEmailCodeAttempts(ctx context.Context, arg BumpEmailCodeAttemptsParams) error
@@ -32,11 +72,13 @@ type Querier interface {
 	ClearCouponPlans(ctx context.Context, couponID int64) error
 	ClearNodeGroupItems(ctx context.Context, nodeGroupID int64) error
 	ClearPlanNodeGroups(ctx context.Context, planID int64) error
+	ClearReachAlert(ctx context.Context, id int64) error
 	ClearServerAlert(ctx context.Context, id int64) error
 	ClearSharedAccountPlans(ctx context.Context, sharedAccountID int64) error
 	ClearUserTOTP(ctx context.Context, id int64) (int64, error)
 	ClearUserTrafficNotified(ctx context.Context, id int64) error
 	ConsumeEmailCode(ctx context.Context, arg ConsumeEmailCodeParams) (int64, error)
+	CountActiveUsersBetween(ctx context.Context, arg CountActiveUsersBetweenParams) (int32, error)
 	// 管理端：出口 ------------------------------------------------------------------------------
 	// 关键字按子串匹配名称或地址（strpos，不当通配符解释；出口表很小，不需要索引）
 	CountAdminChainExits(ctx context.Context, arg CountAdminChainExitsParams) (int64, error)
@@ -46,6 +88,7 @@ type Querier interface {
 	CountAdminsByRole(ctx context.Context, roleID int64) (int64, error)
 	CountAnnouncements(ctx context.Context) (int64, error)
 	CountAuditLogs(ctx context.Context) (int64, error)
+	CountBlockedReachTargets(ctx context.Context) (int32, error)
 	CountChainExits(ctx context.Context, userID int64) (int64, error)
 	CountChainRoutes(ctx context.Context, arg CountChainRoutesParams) (int64, error)
 	CountCouponUsesByUser(ctx context.Context, arg CountCouponUsesByUserParams) (int64, error)
@@ -79,6 +122,7 @@ type Querier interface {
 	CountTopupCodes(ctx context.Context, arg CountTopupCodesParams) (int64, error)
 	CountUserTicketMessagesSince(ctx context.Context, arg CountUserTicketMessagesSinceParams) (int64, error)
 	CountUsers(ctx context.Context, arg CountUsersParams) (int64, error)
+	CountUsersCreatedBefore(ctx context.Context, before pgtype.Timestamptz) (int32, error)
 	CountUsersCreatedBetween(ctx context.Context, arg CountUsersCreatedBetweenParams) (int32, error)
 	CouponCoversPlan(ctx context.Context, arg CouponCoversPlanParams) (bool, error)
 	CouponExists(ctx context.Context, id int64) (bool, error)
@@ -130,6 +174,7 @@ type Querier interface {
 	DeletePlan(ctx context.Context, id int64) (int64, error)
 	DeletePlanPricesExcept(ctx context.Context, arg DeletePlanPricesExceptParams) error
 	DeleteProvision(ctx context.Context, arg DeleteProvisionParams) error
+	DeleteReachTargets(ctx context.Context, ids []int64) error
 	DeleteRole(ctx context.Context, id int64) error
 	DeleteRolePermissions(ctx context.Context, roleID int64) error
 	DeleteServer(ctx context.Context, id int64) (int64, error)
@@ -197,6 +242,7 @@ type Querier interface {
 	GetPlanPriceForSale(ctx context.Context, id int64) (GetPlanPriceForSaleRow, error)
 	GetPlatformChainExitLink(ctx context.Context, id int64) ([]byte, error)
 	GetProvisionEmail(ctx context.Context, arg GetProvisionEmailParams) (string, error)
+	GetReachTarget(ctx context.Context, arg GetReachTargetParams) (GetReachTargetRow, error)
 	GetRoleByCode(ctx context.Context, code string) (GetRoleByCodeRow, error)
 	GetRoleByID(ctx context.Context, id int64) (GetRoleByIDRow, error)
 	GetServer(ctx context.Context, id int64) (GetServerRow, error)
@@ -264,6 +310,7 @@ type Querier interface {
 	// 在线充值单、返利列表与收支统计（docs/03 §5.13–§5.16）--------------------------------
 	InsertPayment(ctx context.Context, arg InsertPaymentParams) (int64, error)
 	InsertPlanNodeGroups(ctx context.Context, arg InsertPlanNodeGroupsParams) error
+	InsertReachTarget(ctx context.Context, arg InsertReachTargetParams) error
 	InsertRebate(ctx context.Context, arg InsertRebateParams) (int64, error)
 	InsertRolePermissions(ctx context.Context, arg InsertRolePermissionsParams) error
 	InsertSharedAccountPlans(ctx context.Context, arg InsertSharedAccountPlansParams) error
@@ -339,6 +386,10 @@ type Querier interface {
 	ListPlatformHosts(ctx context.Context) ([]string, error)
 	// 用户端：只有已发布的，置顶在前、新的在前；only_popup 为真时只取标了弹窗的
 	ListPublishedAnnouncements(ctx context.Context, arg ListPublishedAnnouncementsParams) ([]ListPublishedAnnouncementsRow, error)
+	// 大陆连通检测（docs/03 §5.20 大陆连通检测，Ruling-67）。
+	// 检测范围内的节点：启用中的服务器上启用且未缺失的节点；目标的地址与端口由 service 推导（直连节点取面板主机名）
+	ListReachCandidates(ctx context.Context) ([]ListReachCandidatesRow, error)
+	ListReachTargets(ctx context.Context) ([]ListReachTargetsRow, error)
 	ListRebates(ctx context.Context, arg ListRebatesParams) ([]ListRebatesRow, error)
 	// 本人最近的返利记录（docs/03 §5.16 返利去向）；被邀请人的用户名由调用方打码
 	ListRebatesByInviter(ctx context.Context, arg ListRebatesByInviterParams) ([]ListRebatesByInviterRow, error)
@@ -418,6 +469,7 @@ type Querier interface {
 	// 发送成功后清空正文（docs/03 §5.7 发件箱）
 	MarkMailSent(ctx context.Context, id int64) error
 	MarkPaymentPaid(ctx context.Context, arg MarkPaymentPaidParams) error
+	MarkReachAlerted(ctx context.Context, arg MarkReachAlertedParams) error
 	MarkServerAlerted(ctx context.Context, arg MarkServerAlertedParams) error
 	MarkTelegramFailed(ctx context.Context, arg MarkTelegramFailedParams) error
 	MarkTelegramSent(ctx context.Context, arg MarkTelegramSentParams) error
@@ -425,6 +477,7 @@ type Querier interface {
 	// 待删除期间把用户名换成占位名并清空邮箱，原用户名与邮箱随即可被重新注册（docs/03 §5.8 注销账号）
 	MarkUserDeleted(ctx context.Context, id int64) (int64, error)
 	MarkUserProvisionsPending(ctx context.Context, userID int64) error
+	NodeExists(ctx context.Context, id int64) (bool, error)
 	// 待删除且各面板 client 已删完的用户，删除记录（docs/03 §5.2 删除用户）
 	PurgeDeletedUsers(ctx context.Context) (int64, error)
 	PurgeEmailCodes(ctx context.Context, createdAt pgtype.Timestamptz) (int64, error)
@@ -449,6 +502,7 @@ type Querier interface {
 	RetireInboundByRef(ctx context.Context, arg RetireInboundByRefParams) ([]int64, error)
 	// 重置订阅：换 token 并轮换连接凭据（docs/03 §5.4 重置）
 	RotateUserSubscription(ctx context.Context, arg RotateUserSubscriptionParams) (int64, error)
+	SaveReachResult(ctx context.Context, arg SaveReachResultParams) error
 	SaveUserQuota(ctx context.Context, arg SaveUserQuotaParams) error
 	SetAdminTOTPPending(ctx context.Context, arg SetAdminTOTPPendingParams) error
 	SetChainExitAssignMode(ctx context.Context, arg SetChainExitAssignModeParams) error

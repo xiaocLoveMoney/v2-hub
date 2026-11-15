@@ -63,3 +63,26 @@ func guarded(name string, fn func() error) {
 		slog.Error("ops job failed", "job", name, "err", err)
 	}
 }
+
+// ReachChecker 能跑一轮大陆连通检测（由 service.ReachService 实现，Ruling-67）。
+type ReachChecker interface {
+	RunRound(ctx context.Context) (int, error)
+}
+
+// RunReach 按 interval 周期跑大陆连通检测，阻塞到 ctx 取消（docs/03 §5.20 大陆连通检测）。
+// 功能开关与同一目标的检测间隔在系统设置里，由 RunRound 自己判断。
+func RunReach(ctx context.Context, c ReachChecker, interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			guarded("reach check", func() error {
+				_, err := c.RunRound(ctx)
+				return err
+			})
+		}
+	}
+}
