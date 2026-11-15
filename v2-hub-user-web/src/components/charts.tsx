@@ -1,9 +1,8 @@
 import { useMemo } from 'react'
 import type { TrafficPoint } from '../api/client'
-import { formatBytes } from '../format'
+import { formatBytes, formatShortTime } from '../format'
 import { useI18n } from '../i18n/i18n-context'
-import { LOCALE_TAG } from '../i18n/locale'
-import { cssColor } from './css-color'
+import { tokenColor } from './css-color'
 import { EChart } from './EChart'
 
 /** 图表：环形图直接画 SVG；按小时用量的气泡图用 ECharts（按需加载）。 */
@@ -90,7 +89,7 @@ interface HourBubblesProps {
 
 /** 最近 hours 小时的用量散点气泡图：上行、下行各一组，纵轴与气泡大小都表示用量；没有用量的小时不画点。 */
 export function HourBubbles({ points, hours, now }: HourBubblesProps) {
-  const { t, locale } = useI18n()
+  const { t, tag } = useI18n()
   const option = useMemo(() => {
     const start = (Math.floor(now / MS_PER_HOUR) - hours + 1) * MS_PER_HOUR
     const inRange = points.filter((p) => new Date(p.hour).getTime() >= start)
@@ -103,22 +102,21 @@ export function HourBubbles({ points, hours, now }: HourBubblesProps) {
       symbolSize: (value: number[]) => bubbleSize(value[1] ?? 0),
       itemStyle: { color, opacity: BUBBLE_OPACITY },
     })
-    const timeText = (ms: number) => new Date(ms).toLocaleString(LOCALE_TAG[locale], { hour12: false, month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })
     return {
       grid: { left: AXIS_LABEL_WIDTH, right: 16, top: 36, bottom: 28 },
-      legend: { top: 0, right: 0, textStyle: { color: cssColor('--hub-muted', '#98a6ad') } },
+      legend: { top: 0, right: 0, textStyle: { color: tokenColor('--hub-muted') } },
       tooltip: {
         trigger: 'item',
-        formatter: (p: { seriesName: string; value: number[] }) => `${p.seriesName}<br/>${timeText(p.value[0] ?? 0)}  ${formatBytes(p.value[1] ?? 0)}`,
+        formatter: (p: { seriesName: string; value: number[] }) => `${p.seriesName}<br/>${formatShortTime(p.value[0] ?? 0, tag)}${formatBytes(p.value[1] ?? 0)}`,
       },
       xAxis: { type: 'time', min: start, max: now, splitLine: { show: false } },
-      yAxis: { type: 'value', axisLabel: { formatter: (v: number) => formatBytes(v) }, splitLine: { lineStyle: { type: 'dashed', color: cssColor('--hub-divider', '#f1f3f6') } } },
+      yAxis: { type: 'value', axisLabel: { formatter: (v: number) => formatBytes(v) }, splitLine: { lineStyle: { type: 'dashed', color: tokenColor('--hub-divider') } } },
       series: [
-        seriesOf(t('chart.upload'), cssColor('--hub-primary', '#6777ef'), (p) => p.up),
-        seriesOf(t('chart.download'), cssColor('--hub-info', '#3abaf4'), (p) => p.down),
+        seriesOf(t('chart.upload'), tokenColor('--hub-primary'), (p) => p.up),
+        seriesOf(t('chart.download'), tokenColor('--hub-info'), (p) => p.down),
       ],
     }
-  }, [points, hours, now, t, locale])
+  }, [points, hours, now, t, tag])
   const total = points.reduce((sum, p) => sum + p.up + p.down, 0)
   return <EChart option={option} height={BUBBLE_CHART_HEIGHT} ariaLabel={t('chart.hoursUsage', { hours, amount: formatBytes(total) })} />
 }

@@ -1,11 +1,11 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useState, type CSSProperties } from 'react'
 import { api, type NodeMetricPoint, type NodeMetrics } from '../api/client'
-import { cssColor } from '../components/css-color'
+import { tokenColor } from '../components/css-color'
 import { EChart } from '../components/EChart'
 import { Alert, Button, Loading } from '../components/ui'
+import { formatShortTime } from '../format'
 import { useRemote } from '../hooks/use-remote'
 import { useI18n } from '../i18n/i18n-context'
-import { LOCALE_TAG } from '../i18n/locale'
 
 type MetricRange = NodeMetrics['range']
 
@@ -17,6 +17,8 @@ const MS_PER_MINUTE = 60_000
 const STEP_MS: Record<MetricRange, number> = { '24h': 5 * MS_PER_MINUTE, '7d': 60 * MS_PER_MINUTE }
 const GAP_FACTOR = 2
 const CHART_HEIGHT = 170
+/** 图高交给样式表：图表区的最小高度由它推出，加载 / 无数据 / 报错时占住同样的位置。 */
+const BODY_STYLE = { '--hub-metric-chart-height': `${CHART_HEIGHT}px` } as CSSProperties
 const AREA_OPACITY = 0.18
 const PERCENT_MAX = 100
 
@@ -47,20 +49,19 @@ interface MetricChartProps {
 
 /** 一张平滑折线面积图。 */
 function MetricChart({ title, points, pick, step, color, unit, max }: MetricChartProps) {
-  const { locale } = useI18n()
+  const { tag } = useI18n()
   const option = useMemo(() => {
-    const timeText = (ms: number) => new Date(ms).toLocaleString(LOCALE_TAG[locale], { hour12: false, month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })
     return {
       grid: { left: 40, right: 12, top: 12, bottom: 24 },
       tooltip: {
         trigger: 'axis',
         formatter: (items: { value: [number, number | null] }[]) => {
           const [at, value] = items[0]?.value ?? [0, null]
-          return `${timeText(at)}<br/>${title}  ${value === null ? '—' : `${Math.round(value * 10) / 10}${unit}`}`
+          return `${formatShortTime(at, tag)}<br/>${title}  ${value === null ? '—' : `${Math.round(value * 10) / 10}${unit}`}`
         },
       },
       xAxis: { type: 'time', splitLine: { show: false } },
-      yAxis: { type: 'value', min: 0, max, minInterval: unit === '' ? 1 : undefined, splitLine: { lineStyle: { type: 'dashed', color: cssColor('--hub-divider', '#f1f3f6') } } },
+      yAxis: { type: 'value', min: 0, max, minInterval: unit === '' ? 1 : undefined, splitLine: { lineStyle: { type: 'dashed', color: tokenColor('--hub-divider') } } },
       series: [
         {
           name: title,
@@ -75,7 +76,7 @@ function MetricChart({ title, points, pick, step, color, unit, max }: MetricChar
         },
       ],
     }
-  }, [title, points, pick, step, color, unit, max, locale])
+  }, [title, points, pick, step, color, unit, max, tag])
   return (
     <>
       <h3 className="hub-metric-title">{title}</h3>
@@ -106,19 +107,17 @@ export function NodeMetricsCharts({ nodeId }: { nodeId: number }) {
           </Button>
         ))}
       </div>
-      {metrics.error !== null && <Alert tone="plain">{metrics.error.message}</Alert>}
-      {metrics.error === null && points === null && (
-        <div className="hub-metric-loading">
-          <Loading isInline />
-        </div>
-      )}
-      {points !== null && points.length === 0 && <div className="hub-empty">{t('nodes.noMetrics')}</div>}
-      {points !== null && points.length > 0 && (
-        <>
-          <MetricChart title={t('nodes.chartOnline')} points={points} pick={pickOnline} step={STEP_MS[range]} color={cssColor('--hub-primary', '#6777ef')} unit="" />
-          <MetricChart title={t('nodes.chartLoad')} points={points} pick={pickLoad} step={STEP_MS[range]} color={cssColor('--hub-warning', '#ffa426')} unit="%" max={PERCENT_MAX} />
-        </>
-      )}
+      <div className="hub-metric-body" style={BODY_STYLE}>
+        {metrics.error !== null && <Alert tone="plain">{metrics.error.message}</Alert>}
+        {metrics.error === null && points === null && <Loading isInline />}
+        {points !== null && points.length === 0 && <div className="hub-empty">{t('nodes.noMetrics')}</div>}
+        {points !== null && points.length > 0 && (
+          <>
+            <MetricChart title={t('nodes.chartOnline')} points={points} pick={pickOnline} step={STEP_MS[range]} color={tokenColor('--hub-primary')} unit="" />
+            <MetricChart title={t('nodes.chartLoad')} points={points} pick={pickLoad} step={STEP_MS[range]} color={tokenColor('--hub-warning')} unit="%" max={PERCENT_MAX} />
+          </>
+        )}
+      </div>
     </section>
   )
 }

@@ -1,10 +1,10 @@
 import { useState, type FormEvent } from 'react'
 import { useNavigate } from 'react-router'
-import { api, csrfHeader, toApiError, type ApiError } from '../api/client'
+import { api, csrfHeader, type ApiError } from '../api/client'
 import { useSession } from '../auth/session-context'
 import { useToast } from '../components/toast-context'
 import { Alert, Badge, Button, Card, Field, Modal } from '../components/ui'
-import { mutate } from '../hooks/use-remote'
+import { mutate, request } from '../hooks/use-remote'
 import { ROUTES } from '../menu'
 import { useSite } from '../site/site-context'
 import { EmailCodeField } from './auth/EmailCodeField'
@@ -34,19 +34,16 @@ export function EmailCard() {
     setError(null)
     const pw = current
     try {
-      const res = await api.PUT('/api/user/account/email', { params: csrfHeader(), body: { currentPassword: pw, email: email.trim(), emailCode } })
-      if (res.error !== undefined || res.data?.data === undefined) {
-        setError(toApiError(res.error).message)
+      const result = await request(() => api.PUT('/api/user/account/email', { params: csrfHeader(), body: { currentPassword: pw, email: email.trim(), emailCode } }))
+      if (result.error !== null) {
+        setError(result.error.message)
         return
       }
-      adopt(res.data.data)
+      adopt(result.data)
       setEmail('')
       setEmailCode('')
       setCurrent('')
       toast.show(t('account.emailBound'), 'success')
-    } catch (err) {
-      reportError(err)
-      setError(toApiError(err).message)
     } finally {
       setIsBusy(false)
     }

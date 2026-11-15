@@ -500,7 +500,6 @@ export const zh = {
   'chain.createTitleClient': '添加客户端链式规则',
   'chain.editTitle': '编辑链式规则',
   'chain.pickEntries': '请选择起飞节点',
-  'chain.entriesSelected': '已选 {n} 个',
   'chain.entriesHintServer': '你连这些节点的全部流量都会改从落地出网；最多选 {max} 个',
   'chain.entriesHintClient': '客户端先连到这些节点，再经它们连到落地；最多选 {max} 个',
   'chain.optNoCore': '面板不支持',

@@ -1,5 +1,5 @@
 import { useId } from 'react'
-import { Field, SelectField } from '../../components/ui'
+import { Field, Segmented, SelectField } from '../../components/ui'
 import { useI18n, type MessageKey } from '../../i18n/i18n-context'
 import {
   EXIT_ALPNS,
@@ -244,19 +244,14 @@ export function ExitFieldsForm({ fields, onChange, problems, shouldShowProblems 
           <span className="hub-field-label" id={securityLabelId}>
             {t('chain.fSecurity')}
           </span>
-          <div className="hub-seg hub-exit-seg" role="group" aria-labelledby={securityLabelId}>
-            {securitiesOf(protocol).map((s) => (
-              <button
-                key={s}
-                type="button"
-                className={`hub-seg-item${s === security ? ' is-active' : ''}`}
-                aria-pressed={s === security}
-                onClick={() => set({ security: s })}
-              >
-                {t(SECURITY_LABEL_KEYS[s])}
-              </button>
-            ))}
-          </div>
+          <Segmented
+            aria="pressed"
+            className="hub-exit-seg"
+            aria-labelledby={securityLabelId}
+            options={securitiesOf(protocol).map((s) => ({ value: s, label: t(SECURITY_LABEL_KEYS[s]) }))}
+            value={security}
+            onChange={(s) => set({ security: s })}
+          />
         </div>
       )}
       {hasFlow(fields) && (

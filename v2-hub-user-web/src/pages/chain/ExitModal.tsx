@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from 'react'
-import { api, csrfHeader, toApiError, type ChainExit } from '../../api/client'
-import { Alert, Button, Field, Modal, TextAreaField } from '../../components/ui'
-import { mutate } from '../../hooks/use-remote'
+import { api, csrfHeader, type ChainExit } from '../../api/client'
+import { Alert, Button, Field, Modal, Segmented, TextAreaField } from '../../components/ui'
+import { mutate, request } from '../../hooks/use-remote'
 import { useI18n } from '../../i18n/i18n-context'
 import { ExitFieldsForm } from './ExitFieldsForm'
 import { buildExitLink, emptyExitFields, exitFieldProblems, parseExitLink, type ExitFields } from './exit-link'
@@ -89,16 +89,13 @@ export function ExitModal({ exit, isOpen, onClose, onSaved }: ExitModalProps) {
     setIsLoadingLink(true)
     setError(null)
     try {
-      const res = await api.GET('/api/user/chain/exits/{id}/link', { params: { path: { id: exit.id } } })
-      if (res.error !== undefined || res.data?.data === undefined) {
-        setError(toApiError(res.error).message)
+      const result = await request(() => api.GET('/api/user/chain/exits/{id}/link', { params: { path: { id: exit.id } } }))
+      if (result.error !== null) {
+        setError(result.error.message)
         return
       }
-      fillFromLink(res.data.data.link)
+      fillFromLink(result.data.link)
       setIsRelinking(true)
-    } catch (err) {
-      reportError(err)
-      setError(toApiError(err).message)
     } finally {
       setIsLoadingLink(false)
     }
@@ -179,19 +176,14 @@ export function ExitModal({ exit, isOpen, onClose, onSaved }: ExitModalProps) {
         )}
         {isRelinking && (
           <>
-            <div className="hub-seg hub-exit-seg" role="group" aria-label={t('chain.modeLabel')}>
-              {modes.map((m) => (
-                <button
-                  key={m.mode}
-                  type="button"
-                  className={`hub-seg-item${m.mode === mode ? ' is-active' : ''}`}
-                  aria-pressed={m.mode === mode}
-                  onClick={() => switchMode(m.mode)}
-                >
-                  {m.label}
-                </button>
-              ))}
-            </div>
+            <Segmented
+              aria="pressed"
+              className="hub-exit-seg"
+              aria-label={t('chain.modeLabel')}
+              options={modes.map((m) => ({ value: m.mode, label: m.label }))}
+              value={mode}
+              onChange={switchMode}
+            />
             {notice !== null && <Alert tone="info">{notice}</Alert>}
             {mode === MODE_FORM ? (
               <ExitFieldsForm fields={fields} onChange={setFields} problems={problems} shouldShowProblems={shouldShowProblems} />

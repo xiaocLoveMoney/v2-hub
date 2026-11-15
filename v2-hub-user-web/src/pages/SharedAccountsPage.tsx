@@ -1,9 +1,9 @@
 import { useState } from 'react'
-import { api, toApiError, type SharedAccount } from '../api/client'
+import { api, type SharedAccount } from '../api/client'
 import { useToast } from '../components/toast-context'
 import { Alert, Button, Card, Empty, PageHeader } from '../components/ui'
 import { useCopy } from '../hooks/use-copy'
-import { useRemote } from '../hooks/use-remote'
+import { request, useRemote } from '../hooks/use-remote'
 import { useI18n } from '../i18n/i18n-context'
 
 const loadAccounts = (signal: AbortSignal) => api.GET('/api/user/shared-accounts', { signal })
@@ -33,15 +33,12 @@ function AccountRow({ account }: { account: SharedAccount }) {
   const reveal = async () => {
     setIsBusy(true)
     try {
-      const res = await api.GET('/api/user/shared-accounts/{id}/credential', { params: { path: { id: account.id } } })
-      if (res.error !== undefined || res.data?.data === undefined) {
-        toast.show(toApiError(res.error).message, 'error')
+      const result = await request(() => api.GET('/api/user/shared-accounts/{id}/credential', { params: { path: { id: account.id } } }))
+      if (result.error !== null) {
+        toast.show(result.error.message, 'error')
         return
       }
-      setCredential(res.data.data.credential)
-    } catch (err) {
-      reportError(err)
-      toast.show(toApiError(err).message, 'error')
+      setCredential(result.data.credential)
     } finally {
       setIsBusy(false)
     }

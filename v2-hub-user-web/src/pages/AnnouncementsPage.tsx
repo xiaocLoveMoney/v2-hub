@@ -1,19 +1,18 @@
-import { useCallback, useState } from 'react'
-import { api, type Announcement, type PageData } from '../api/client'
+import { api, type Announcement } from '../api/client'
 import { Markdown } from '../components/Markdown'
 import { Alert, Badge, Card, Empty, PageHeader, Pager } from '../components/ui'
 import { formatTime } from '../format'
-import { useRemote } from '../hooks/use-remote'
+import { usePagedRemote } from '../hooks/use-remote'
 import { useI18n } from '../i18n/i18n-context'
 
 const PAGE_SIZE = 10
 
+const loadAnnouncements = (page: number, signal: AbortSignal) => api.GET('/api/user/announcements', { params: { query: { page, pageSize: PAGE_SIZE } }, signal })
+
 /** 公告列表（docs/03 §5.9）：只有已发布的，置顶在前、新的在前；正文按 Markdown 渲染。 */
 export function AnnouncementsPage() {
   const { t, tag } = useI18n()
-  const [page, setPage] = useState(1)
-  const load = useCallback((signal: AbortSignal) => api.GET('/api/user/announcements', { params: { query: { page, pageSize: PAGE_SIZE } }, signal }), [page])
-  const announcements = useRemote<PageData<Announcement>>(load)
+  const announcements = usePagedRemote<Announcement>(loadAnnouncements)
   const items = announcements.data?.items ?? []
 
   return (
@@ -31,7 +30,7 @@ export function AnnouncementsPage() {
           <Empty>{t('ann.empty')}</Empty>
         </Card>
       )}
-      <Pager page={page} pageSize={PAGE_SIZE} total={announcements.data?.total ?? 0} onChange={setPage} />
+      <Pager page={announcements.page} pageSize={PAGE_SIZE} total={announcements.data?.total ?? 0} onChange={announcements.setPage} />
     </>
   )
 }

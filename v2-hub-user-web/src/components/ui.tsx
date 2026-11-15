@@ -181,6 +181,65 @@ export function Pager({ page, pageSize, total, onChange }: PagerProps) {
   )
 }
 
+/**
+ * 分段选择的无障碍写法：radio = radiogroup + radio + aria-checked，tab = tablist + tab + aria-selected，
+ * pressed = group + 切换按钮 aria-pressed。各站点沿用自己原有的写法。
+ */
+export type SegmentedAria = 'radio' | 'tab' | 'pressed'
+
+const SEGMENTED_GROUP_ROLES: Record<SegmentedAria, string> = {
+  radio: 'radiogroup',
+  tab: 'tablist',
+  pressed: 'group',
+}
+
+/** 分段选择的一项。 */
+export interface SegmentedOption<T extends string | number> {
+  value: T
+  label: ReactNode
+}
+
+interface SegmentedProps<T extends string | number> {
+  options: readonly SegmentedOption<T>[]
+  value: T
+  onChange: (value: T) => void
+  aria: SegmentedAria
+  /** 追加在 hub-seg 后的类名。 */
+  className?: string
+  'aria-label'?: string
+  'aria-labelledby'?: string
+}
+
+/** 每项按钮的 role 与选中态属性。 */
+function segmentedItemAria(aria: SegmentedAria, isActive: boolean) {
+  if (aria === 'radio') {
+    return { role: 'radio', 'aria-checked': isActive }
+  }
+  if (aria === 'tab') {
+    return { role: 'tab', 'aria-selected': isActive }
+  }
+  return { 'aria-pressed': isActive }
+}
+
+/** 分段选择块（hub-seg）：一排互斥的按钮，选中项加 is-active；option 的 value 同时作 key，须唯一。 */
+export function Segmented<T extends string | number>({ options, value, onChange, aria, className, 'aria-label': ariaLabel, 'aria-labelledby': ariaLabelledBy }: SegmentedProps<T>) {
+  return (
+    <div className={className === undefined ? 'hub-seg' : `hub-seg ${className}`} role={SEGMENTED_GROUP_ROLES[aria]} aria-label={ariaLabel} aria-labelledby={ariaLabelledBy}>
+      {options.map((option) => (
+        <button
+          key={option.value}
+          type="button"
+          {...segmentedItemAria(aria, option.value === value)}
+          className={`hub-seg-item${option.value === value ? ' is-active' : ''}`}
+          onClick={() => onChange(option.value)}
+        >
+          {option.label}
+        </button>
+      ))}
+    </div>
+  )
+}
+
 interface ModalProps {
   title: string
   isOpen: boolean
@@ -329,6 +388,38 @@ export function PageHeader({ title, extra }: { title: string; extra?: ReactNode 
 /** 空状态。 */
 export function Empty({ children }: { children: ReactNode }) {
   return <div className="hub-empty">{children}</div>
+}
+
+interface DataTableProps {
+  /** 表头各列的内容，按列顺序。 */
+  headers: readonly ReactNode[]
+  /** 表体的行（tr 列表）。 */
+  children: ReactNode
+  /** 数据已取到且为空时为 true，表格下方显示空状态。 */
+  isEmpty: boolean
+  emptyText: ReactNode
+}
+
+/** 横向可滚动的表格（hub-table-wrap + hub-table），为空时在表格下方显示空状态。 */
+export function DataTable({ headers, children, isEmpty, emptyText }: DataTableProps) {
+  return (
+    <>
+      <div className="hub-table-wrap">
+        <table className="hub-table">
+          <thead>
+            <tr>
+              {/* 表头列固定不增删，按位置作 key */}
+              {headers.map((header, index) => (
+                <th key={index}>{header}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>{children}</tbody>
+        </table>
+      </div>
+      {isEmpty && <Empty>{emptyText}</Empty>}
+    </>
+  )
 }
 
 const LOADING_MARK_BLOCK = 40

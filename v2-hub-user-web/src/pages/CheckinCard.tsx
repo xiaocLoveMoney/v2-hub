@@ -1,9 +1,9 @@
 import { useState } from 'react'
-import { api, csrfHeader, toApiError, type CheckinInfo } from '../api/client'
+import { api, csrfHeader, type CheckinInfo } from '../api/client'
 import { useToast } from '../components/toast-context'
 import { Alert, Badge, Button, Card } from '../components/ui'
 import { formatBytes } from '../format'
-import { useRemote } from '../hooks/use-remote'
+import { request, useRemote } from '../hooks/use-remote'
 import { useI18n } from '../i18n/i18n-context'
 
 /** 卡片里显示最近几次签到。 */
@@ -27,17 +27,14 @@ export function CheckinCard({ onRewarded }: CheckinCardProps) {
   const handleCheckin = async () => {
     setIsBusy(true)
     try {
-      const res = await api.POST('/api/user/checkin', { params: csrfHeader() })
-      if (res.error !== undefined || res.data?.data === undefined) {
-        toast.show(toApiError(res.error).message, 'error')
+      const result = await request(() => api.POST('/api/user/checkin', { params: csrfHeader() }))
+      if (result.error !== null) {
+        toast.show(result.error.message, 'error')
         return
       }
-      toast.show(t('checkin.done', { amount: formatBytes(res.data.data.rewardBytes) }), 'success')
+      toast.show(t('checkin.done', { amount: formatBytes(result.data.rewardBytes) }), 'success')
       checkin.reload()
       onRewarded()
-    } catch (err) {
-      reportError(err)
-      toast.show(toApiError(err).message, 'error')
     } finally {
       setIsBusy(false)
     }

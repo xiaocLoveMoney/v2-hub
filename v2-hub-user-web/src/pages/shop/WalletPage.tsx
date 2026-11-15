@@ -1,11 +1,12 @@
 import { QRCodeSVG } from 'qrcode.react'
 import { useCallback, useState, type FormEvent } from 'react'
 import { Link } from 'react-router'
-import { api, csrfHeader, toApiError, type LedgerEntry, type Order, type PageData, type Wallet } from '../../api/client'
+import { api, csrfHeader, type LedgerEntry, type Order, type Wallet } from '../../api/client'
+import { HTTPS_PREFIX } from '../../app-config'
 import { useToast } from '../../components/toast-context'
-import { Alert, Badge, Button, Card, Empty, Field, Loading, Modal, PageHeader, Pager } from '../../components/ui'
+import { Alert, Badge, Button, Card, DataTable, Field, Loading, Modal, PageHeader, Pager, Segmented } from '../../components/ui'
 import { formatBytes, formatTime } from '../../format'
-import { mutate, useRemote } from '../../hooks/use-remote'
+import { mutate, request, usePagedRemote, useRemote } from '../../hooks/use-remote'
 import { useI18n } from '../../i18n/i18n-context'
 import { ROUTES } from '../../menu'
 import { formatMoney, parseAmountToCents } from '../../money'
@@ -18,9 +19,9 @@ const MIN_CODE_INPUT_LEN = 16
 const QR_SIZE = 200
 /** 在线充值的最低金额（分），与 hub-api.yaml 的 PaymentCreateInput 一致。 */
 const MIN_TOPUP_CENTS = 100
-const HTTPS_PREFIX = 'https://'
 
 const loadWallet = (signal: AbortSignal) => api.GET('/api/user/wallet', { signal })
+const loadOrders = (page: number, signal: AbortSignal) => api.GET('/api/user/orders', { params: { query: { page, pageSize: PAGE_SIZE } }, signal })
 
 /** 兑换充值码：成功后余额立即到账（docs/03 §5.15）。 */
 function RedeemCard({ onRedeemed }: { onRedeemed: () => void }) {
@@ -36,17 +37,14 @@ function RedeemCard({ onRedeemed }: { onRedeemed: () => void }) {
     setIsBusy(true)
     setError(null)
     try {
-      const res = await api.POST('/api/user/wallet/redeem', { params: csrfHeader(), body: { code: code.trim() } })
-      if (res.error !== undefined || res.data?.data === undefined) {
-        setError(toApiError(res.error).message)
+      const result = await request(() => api.POST('/api/user/wallet/redeem', { params: csrfHeader(), body: { code: code.trim() } }))
+      if (result.error !== null) {
+        setError(result.error.message)
         return
       }
       setCode('')
-      toast.show(t('wallet.redeemed', { amount: formatMoney(res.data.data.amount, currency, tag) }), 'success')
+      toast.show(t('wallet.redeemed', { amount: formatMoney(result.data.amount, currency, tag) }), 'success')
       onRedeemed()
-    } catch (err) {
-      reportError(err)
-      setError(toApiError(err).message)
     } finally {
       setIsBusy(false)
     }
@@ -83,12 +81,12 @@ function OnlineTopupCard({ gateways }: { gateways: Wallet['gateways'] }) {
     setIsBusy(true)
     setError(null)
     try {
-      const res = await api.POST('/api/user/wallet/payments', { params: csrfHeader(), body: { gateway, amount: cents } })
-      if (res.error !== undefined || res.data?.data === undefined) {
-        setError(toApiError(res.error).message)
+      const result = await request(() => api.POST('/api/user/wallet/payments', { params: csrfHeader(), body: { gateway, amount: cents } }))
+      if (result.error !== null) {
+        setError(result.error.message)
         return
       }
-      const { payUrl, qrContent: qr } = res.data.data
+      const { payUrl, qrContent: qr } = result.data
       // 只跟随 https 的支付地址，其余一律不跳
       if (payUrl.startsWith(HTTPS_PREFIX)) {
         window.location.assign(payUrl)
@@ -99,9 +97,6 @@ function OnlineTopupCard({ gateways }: { gateways: Wallet['gateways'] }) {
         return
       }
       setError(t('wallet.noPayEntry'))
-    } catch (err) {
-      reportError(err)
-      setError(toApiError(err).message)
     } finally {
       setIsBusy(false)
     }
@@ -111,13 +106,14 @@ function OnlineTopupCard({ gateways }: { gateways: Wallet['gateways'] }) {
     <Card title={t('wallet.onlineTitle')}>
       {error !== null && <Alert tone="plain">{error}</Alert>}
       <form onSubmit={(e) => void handleSubmit(e)} noValidate>
-        <div className="hub-seg hub-row-gap" role="radiogroup" aria-label={t('wallet.payMethod')}>
-          {gateways.map((g) => (
-            <button key={g.code} type="button" role="radio" aria-checked={g.code === gateway} className={`hub-seg-item${g.code === gateway ? ' is-active' : ''}`} onClick={() => setGateway(g.code)}>
-              {g.name}
-            </button>
-          ))}
-        </div>
+        <Segmented
+          aria="radio"
+          className="hub-row-gap"
+          aria-label={t('wallet.payMethod')}
+          options={gateways.map((g) => ({ value: g.code, label: g.name }))}
+          value={gateway}
+          onChange={setGateway}
+        />
         <Field label={t('wallet.amount')} inputMode="decimal" autoComplete="off" hint={t('wallet.amountHint')} value={amount} onChange={(e) => setAmount(e.target.value)} />
         <Button type="submit" variant="primary" isBusy={isBusy} disabled={cents === null || cents < MIN_TOPUP_CENTS || gateway === ''}>
           {t('wallet.pay')}
@@ -171,46 +167,31 @@ function AutoRenewCard({ wallet, onChanged }: { wallet: Wallet; onChanged: () =>
 function LedgerCard({ version }: { version: number }) {
   const { t, tag } = useI18n()
   const currency = useCurrency()
-  const [page, setPage] = useState(1)
-  const load = useCallback(
-    (signal: AbortSignal) => {
+  const loadPage = useCallback(
+    (page: number, signal: AbortSignal) => {
       // version 只用来在余额变动后让请求函数的引用变化，从而重新拉取
       void version
       return api.GET('/api/user/wallet/ledger', { params: { query: { page, pageSize: PAGE_SIZE } }, signal })
     },
-    [page, version],
+    [version],
   )
-  const ledger = useRemote<PageData<LedgerEntry>>(load)
+  const ledger = usePagedRemote<LedgerEntry>(loadPage)
   const items = ledger.data?.items ?? []
   return (
     <Card title={t('wallet.ledgerTitle')}>
       {ledger.error !== null && <Alert tone="plain">{ledger.error.message}</Alert>}
-      <div className="hub-table-wrap">
-        <table className="hub-table">
-          <thead>
-            <tr>
-              <th>{t('wallet.colTime')}</th>
-              <th>{t('wallet.colKind')}</th>
-              <th>{t('wallet.colChange')}</th>
-              <th>{t('wallet.colBalance')}</th>
-              <th>{t('wallet.colRemark')}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {items.map((l) => (
-              <tr key={l.id}>
-                <td>{formatTime(l.createdAt, tag)}</td>
-                <td>{l.kind in LEDGER_KIND_KEYS ? t(LEDGER_KIND_KEYS[l.kind]) : l.kind}</td>
-                <td className={l.amount < 0 ? 'hub-money-out' : 'hub-money-in'}>{`${l.amount > 0 ? '+' : ''}${formatMoney(l.amount, currency, tag)}`}</td>
-                <td>{formatMoney(l.balanceAfter, currency, tag)}</td>
-                <td>{l.remark || t('common.dash')}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      {ledger.data !== null && items.length === 0 && <Empty>{t('wallet.noLedger')}</Empty>}
-      <Pager page={page} pageSize={PAGE_SIZE} total={ledger.data?.total ?? 0} onChange={setPage} />
+      <DataTable headers={[t('wallet.colTime'), t('wallet.colKind'), t('wallet.colChange'), t('wallet.colBalance'), t('wallet.colRemark')]} isEmpty={ledger.data !== null && items.length === 0} emptyText={t('wallet.noLedger')}>
+        {items.map((l) => (
+          <tr key={l.id}>
+            <td>{formatTime(l.createdAt, tag)}</td>
+            <td>{l.kind in LEDGER_KIND_KEYS ? t(LEDGER_KIND_KEYS[l.kind]) : l.kind}</td>
+            <td className={l.amount < 0 ? 'hub-money-out' : 'hub-money-in'}>{`${l.amount > 0 ? '+' : ''}${formatMoney(l.amount, currency, tag)}`}</td>
+            <td>{formatMoney(l.balanceAfter, currency, tag)}</td>
+            <td>{l.remark || t('common.dash')}</td>
+          </tr>
+        ))}
+      </DataTable>
+      <Pager page={ledger.page} pageSize={PAGE_SIZE} total={ledger.data?.total ?? 0} onChange={ledger.setPage} />
     </Card>
   )
 }
@@ -218,42 +199,26 @@ function LedgerCard({ version }: { version: number }) {
 function OrdersCard() {
   const { t, tag } = useI18n()
   const currency = useCurrency()
-  const [page, setPage] = useState(1)
-  const load = useCallback((signal: AbortSignal) => api.GET('/api/user/orders', { params: { query: { page, pageSize: PAGE_SIZE } }, signal }), [page])
-  const orders = useRemote<PageData<Order>>(load)
+  const orders = usePagedRemote<Order>(loadOrders)
   const items = orders.data?.items ?? []
   return (
     <Card title={t('wallet.ordersTitle')}>
       {orders.error !== null && <Alert tone="plain">{orders.error.message}</Alert>}
-      <div className="hub-table-wrap">
-        <table className="hub-table">
-          <thead>
-            <tr>
-              <th>{t('wallet.colTime')}</th>
-              <th>{t('wallet.colKind')}</th>
-              <th>{t('wallet.colItem')}</th>
-              <th>{t('wallet.colPaid')}</th>
-              <th>{t('wallet.colOrderNo')}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {items.map((o) => (
-              <tr key={o.id}>
-                <td>{formatTime(o.createdAt, tag)}</td>
-                <td>{orderKindLabel(t, o)}</td>
-                <td>{t('wallet.itemWithDetail', { name: o.itemName, detail: o.kind === 'traffic_pack' ? formatBytes(o.trafficBytes) : durationLabel(t, o.durationDays) })}</td>
-                <td>
-                  {formatMoney(o.amountPaid, currency, tag)}
-                  {o.amountDiscount > 0 && <span className="hub-muted">{t('wallet.discount', { amount: formatMoney(o.amountDiscount, currency, tag) })}</span>}
-                </td>
-                <td className="hub-mono">{o.orderNo}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      {orders.data !== null && items.length === 0 && <Empty>{t('wallet.noOrders')}</Empty>}
-      <Pager page={page} pageSize={PAGE_SIZE} total={orders.data?.total ?? 0} onChange={setPage} />
+      <DataTable headers={[t('wallet.colTime'), t('wallet.colKind'), t('wallet.colItem'), t('wallet.colPaid'), t('wallet.colOrderNo')]} isEmpty={orders.data !== null && items.length === 0} emptyText={t('wallet.noOrders')}>
+        {items.map((o) => (
+          <tr key={o.id}>
+            <td>{formatTime(o.createdAt, tag)}</td>
+            <td>{orderKindLabel(t, o)}</td>
+            <td>{t('wallet.itemWithDetail', { name: o.itemName, detail: o.kind === 'traffic_pack' ? formatBytes(o.trafficBytes) : durationLabel(t, o.durationDays) })}</td>
+            <td>
+              {formatMoney(o.amountPaid, currency, tag)}
+              {o.amountDiscount > 0 && <span className="hub-muted">{t('wallet.discount', { amount: formatMoney(o.amountDiscount, currency, tag) })}</span>}
+            </td>
+            <td className="hub-mono">{o.orderNo}</td>
+          </tr>
+        ))}
+      </DataTable>
+      <Pager page={orders.page} pageSize={PAGE_SIZE} total={orders.data?.total ?? 0} onChange={orders.setPage} />
     </Card>
   )
 }

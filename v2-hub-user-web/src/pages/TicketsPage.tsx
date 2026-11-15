@@ -1,9 +1,9 @@
-import { useCallback, useState } from 'react'
+import { useState } from 'react'
 import { Link, generatePath, useNavigate } from 'react-router'
-import { api, csrfHeader, toApiError, type PageData, type Ticket } from '../api/client'
-import { Alert, Button, Card, Empty, Field, Modal, PageHeader, Pager, TextAreaField } from '../components/ui'
+import { api, csrfHeader, type Ticket } from '../api/client'
+import { Alert, Button, Card, DataTable, Field, Modal, PageHeader, Pager, TextAreaField } from '../components/ui'
 import { formatTime } from '../format'
-import { useRemote } from '../hooks/use-remote'
+import { request, usePagedRemote } from '../hooks/use-remote'
 import { ROUTES } from '../menu'
 import { MAX_TICKET_CONTENT_LEN, MAX_TICKET_SUBJECT_LEN, TicketStatusBadge } from './tickets'
 import { useI18n } from '../i18n/i18n-context'
@@ -11,13 +11,13 @@ import { useI18n } from '../i18n/i18n-context'
 const PAGE_SIZE = 20
 const CONTENT_ROWS = 6
 
+const loadTickets = (page: number, signal: AbortSignal) => api.GET('/api/user/tickets', { params: { query: { page, pageSize: PAGE_SIZE } }, signal })
+
 /** 工单支持（docs/03 §5.10）：本人的工单列表与新建；工单关闭时菜单不出现，接口也会拒绝。 */
 export function TicketsPage() {
   const { t, tag } = useI18n()
-  const [page, setPage] = useState(1)
   const [isCreating, setIsCreating] = useState(false)
-  const load = useCallback((signal: AbortSignal) => api.GET('/api/user/tickets', { params: { query: { page, pageSize: PAGE_SIZE } }, signal }), [page])
-  const tickets = useRemote<PageData<Ticket>>(load)
+  const tickets = usePagedRemote<Ticket>(loadTickets)
   const items = tickets.data?.items ?? []
 
   return (
@@ -32,34 +32,21 @@ export function TicketsPage() {
       />
       <Card>
         {tickets.error !== null && <Alert tone="plain">{tickets.error.message}</Alert>}
-        <div className="hub-table-wrap">
-          <table className="hub-table">
-            <thead>
-              <tr>
-                <th>{t('tickets.colSubject')}</th>
-                <th>{t('tickets.colStatus')}</th>
-                <th>{t('tickets.colLastReply')}</th>
-                <th>{t('tickets.colCreated')}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {items.map((ticket) => (
-                <tr key={ticket.id}>
-                  <td>
-                    <Link to={generatePath(ROUTES.TICKET_DETAIL, { id: String(ticket.id) })}>{ticket.subject}</Link>
-                  </td>
-                  <td>
-                    <TicketStatusBadge status={ticket.status} />
-                  </td>
-                  <td>{formatTime(ticket.lastReplyAt, tag)}</td>
-                  <td>{formatTime(ticket.createdAt, tag)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        {tickets.data !== null && items.length === 0 && <Empty>{t('tickets.empty')}</Empty>}
-        <Pager page={page} pageSize={PAGE_SIZE} total={tickets.data?.total ?? 0} onChange={setPage} />
+        <DataTable headers={[t('tickets.colSubject'), t('tickets.colStatus'), t('tickets.colLastReply'), t('tickets.colCreated')]} isEmpty={tickets.data !== null && items.length === 0} emptyText={t('tickets.empty')}>
+          {items.map((ticket) => (
+            <tr key={ticket.id}>
+              <td>
+                <Link to={generatePath(ROUTES.TICKET_DETAIL, { id: String(ticket.id) })}>{ticket.subject}</Link>
+              </td>
+              <td>
+                <TicketStatusBadge status={ticket.status} />
+              </td>
+              <td>{formatTime(ticket.lastReplyAt, tag)}</td>
+              <td>{formatTime(ticket.createdAt, tag)}</td>
+            </tr>
+          ))}
+        </DataTable>
+        <Pager page={tickets.page} pageSize={PAGE_SIZE} total={tickets.data?.total ?? 0} onChange={tickets.setPage} />
       </Card>
       <CreateTicketModal isOpen={isCreating} onClose={() => setIsCreating(false)} />
     </>
@@ -86,15 +73,12 @@ function CreateTicketForm({ onClose }: { onClose: () => void }) {
     setIsBusy(true)
     setError(null)
     try {
-      const res = await api.POST('/api/user/tickets', { params: csrfHeader(), body: { subject: subject.trim(), content: content.trim() } })
-      if (res.error !== undefined || res.data?.data === undefined) {
-        setError(toApiError(res.error).message)
+      const result = await request(() => api.POST('/api/user/tickets', { params: csrfHeader(), body: { subject: subject.trim(), content: content.trim() } }))
+      if (result.error !== null) {
+        setError(result.error.message)
         return
       }
-      void navigate(generatePath(ROUTES.TICKET_DETAIL, { id: String(res.data.data.id) }))
-    } catch (err) {
-      reportError(err)
-      setError(toApiError(err).message)
+      void navigate(generatePath(ROUTES.TICKET_DETAIL, { id: String(result.data.id) }))
     } finally {
       setIsBusy(false)
     }

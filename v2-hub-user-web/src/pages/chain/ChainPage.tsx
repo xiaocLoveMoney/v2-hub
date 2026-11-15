@@ -1,13 +1,13 @@
 import { useEffect, useState } from 'react'
 import { api, type ChainKind, type ChainOverview } from '../../api/client'
-import { Alert, Card, PageHeader } from '../../components/ui'
+import { Alert, Card, PageHeader, Segmented, type SegmentedOption } from '../../components/ui'
 import { useRemote } from '../../hooks/use-remote'
 import { useI18n, type MessageKey } from '../../i18n/i18n-context'
 import { ChainFlowCard } from './ChainFlowCard'
 import { ExitsCard } from './ExitsCard'
+import { KIND_SERVER } from './labels'
 import { RouteList } from './RouteList'
 
-const KIND_SERVER: ChainKind = 'server'
 const KIND_CLIENT: ChainKind = 'client'
 /** 有起飞节点在下发中时自动刷新的间隔（docs/06 §5 M7）。 */
 const PENDING_REFRESH_MS = 15_000
@@ -49,26 +49,13 @@ interface ChainTabsProps {
 /** 两个页签：服务端链式、客户端链式，各是一张有序的规则列表。 */
 function ChainTabs({ overview, kind, onKindChange, onChanged }: ChainTabsProps) {
   const { t } = useI18n()
-  const tabs: { kind: ChainKind; label: string }[] = [
-    { kind: KIND_SERVER, label: t('chain.tabServer', { count: overview.serverRoutes.length, max: overview.maxServerRoutes }) },
-    { kind: KIND_CLIENT, label: t('chain.tabClient', { count: overview.clientRoutes.length, max: overview.maxClientRoutes }) },
+  const tabs: SegmentedOption<ChainKind>[] = [
+    { value: KIND_SERVER, label: t('chain.tabServer', { count: overview.serverRoutes.length, max: overview.maxServerRoutes }) },
+    { value: KIND_CLIENT, label: t('chain.tabClient', { count: overview.clientRoutes.length, max: overview.maxClientRoutes }) },
   ]
   return (
     <>
-      <div className="hub-seg hub-chain-tabs" role="tablist" aria-label={t('chain.tabsLabel')}>
-        {tabs.map((tab) => (
-          <button
-            key={tab.kind}
-            type="button"
-            role="tab"
-            aria-selected={tab.kind === kind}
-            className={`hub-seg-item${tab.kind === kind ? ' is-active' : ''}`}
-            onClick={() => onKindChange(tab.kind)}
-          >
-            {tab.label}
-          </button>
-        ))}
-      </div>
+      <Segmented aria="tab" className="hub-chain-tabs" aria-label={t('chain.tabsLabel')} options={tabs} value={kind} onChange={onKindChange} />
       <RouteList key={kind} overview={overview} kind={kind} onChanged={onChanged} />
     </>
   )

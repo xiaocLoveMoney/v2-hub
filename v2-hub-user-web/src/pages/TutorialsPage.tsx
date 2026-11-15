@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Link } from 'react-router'
 import { api, type Tutorial, type TutorialPlatform } from '../api/client'
+import { HTTPS_PREFIX } from '../app-config'
 import { Markdown } from '../components/Markdown'
 import { Alert, Card, Empty, PageHeader } from '../components/ui'
 import { useRemote } from '../hooks/use-remote'
@@ -17,7 +18,6 @@ const PLATFORMS: { value: TutorialPlatform; labelKey: MessageKey }[] = [
   { value: 'router', labelKey: 'tutorials.router' },
 ]
 // 后端已保证链接是 https；前端再判一次，不合规的不渲染成可点的链接
-const HTTPS_PREFIX = 'https://'
 
 const loadTutorials = (signal: AbortSignal) => api.GET('/api/user/tutorials', { signal })
 

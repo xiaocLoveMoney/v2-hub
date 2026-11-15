@@ -4,9 +4,8 @@ import { MultiSelect, type MultiSelectOption } from '../../components/MultiSelec
 import { Alert, Button, Field, Modal, SelectField } from '../../components/ui'
 import { mutate } from '../../hooks/use-remote'
 import { useI18n, type Translate } from '../../i18n/i18n-context'
-import { MAX_CHAIN_NAME_LEN, isValidChainName } from './labels'
+import { KIND_SERVER, MAX_CHAIN_NAME_LEN, isValidChainName } from './labels'
 
-const KIND_SERVER: ChainKind = 'server'
 const EXIT_SEPARATOR = ':'
 
 interface ExitChoice {
