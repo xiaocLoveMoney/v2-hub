@@ -74,6 +74,10 @@ type Deps struct {
 	// Telegram 提供 Telegram 测试消息，Ops 提供管理端总览（docs/03 §5.20）。
 	Telegram TelegramManager
 	Ops      OpsManager
+	// Analytics 提供总览的分析分区（docs/03 §5.20 总览分析，Ruling-66）。
+	Analytics AnalyticsManager
+	// Reach 提供大陆连通检测的结论与手动检测（Ruling-67）；为 nil 时节点与服务器不带结论。
+	Reach ReachManager
 	// Cookie 是会话 Cookie 属性。
 	Cookie CookieConfig
 	// TrustedProxies 是可采信 X-Forwarded-For 的直连网段（如 Caddy 所在 docker 网络）。
@@ -101,6 +105,8 @@ type handlers struct {
 	chainAdmin     ChainAdminManager
 	telegram       TelegramManager
 	ops            OpsManager
+	analytics      AnalyticsManager
+	reach          ReachManager
 	cookie         CookieConfig
 	trustedProxies []netip.Prefix
 }
@@ -108,7 +114,7 @@ type handlers struct {
 // NewRouter 返回注册好全部路由的 http.Handler。路由与 hub-api.yaml 的 paths 逐条对应。
 func NewRouter(deps Deps) http.Handler {
 	h := &handlers{auth: deps.Auth, rbac: deps.RBAC, panels: deps.Panels, users: deps.Users, portalAuth: deps.PortalAuth, portal: deps.Portal,
-		settings: deps.Settings, mail: deps.Mail, account: deps.Account, content: deps.Content, tickets: deps.Tickets, wallet: deps.Wallet, shop: deps.Shop, finance: deps.Finance, pay: deps.Pay, chain: deps.Chain, chainApply: deps.ChainApply, chainAdmin: deps.ChainAdmin, telegram: deps.Telegram, ops: deps.Ops, cookie: deps.Cookie, trustedProxies: deps.TrustedProxies}
+		settings: deps.Settings, mail: deps.Mail, account: deps.Account, content: deps.Content, tickets: deps.Tickets, wallet: deps.Wallet, shop: deps.Shop, finance: deps.Finance, pay: deps.Pay, chain: deps.Chain, chainApply: deps.ChainApply, chainAdmin: deps.ChainAdmin, telegram: deps.Telegram, ops: deps.Ops, analytics: deps.Analytics, reach: deps.Reach, cookie: deps.Cookie, trustedProxies: deps.TrustedProxies}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", handleHealthz)
 	mux.HandleFunc("GET /readyz", newReadyzHandler(deps.Database, deps.PingTimeout))
@@ -198,6 +204,11 @@ func NewRouter(deps Deps) http.Handler {
 	mux.HandleFunc("GET /api/admin/finance/stats", h.requireAdmin(service.PermFinanceRead, h.getFinanceStats))
 	mux.HandleFunc("GET /api/admin/finance/stats.csv", h.requireAdmin(service.PermFinanceRead, h.exportFinanceStats))
 	mux.HandleFunc("GET /api/admin/dashboard", h.requireAdmin("", h.getAdminDashboard))
+	mux.HandleFunc("GET /api/admin/analytics/users", h.requireAdmin(service.PermUserRead, h.getAnalyticsUsers))
+	mux.HandleFunc("GET /api/admin/analytics/traffic", h.requireAdmin(service.PermUserRead, h.getAnalyticsTraffic))
+	mux.HandleFunc("GET /api/admin/analytics/servers", h.requireAdmin(service.PermServerRead, h.getAnalyticsServers))
+	mux.HandleFunc("GET /api/admin/analytics/finance", h.requireAdmin(service.PermFinanceRead, h.getAnalyticsFinance))
+	mux.HandleFunc("GET /api/admin/analytics/backlog", h.requireAdmin("", h.getAnalyticsBacklog))
 	mux.HandleFunc("GET /api/admin/topup-codes", h.requireAdmin(service.PermFinanceRead, h.listTopupCodes))
 	mux.HandleFunc("POST /api/admin/topup-codes", h.requireAdmin(service.PermFinanceWrite, h.createTopupCodes))
 	mux.HandleFunc("PUT /api/admin/topup-codes/{id}", h.requireAdmin(service.PermFinanceWrite, h.updateTopupCode))
@@ -208,6 +219,8 @@ func NewRouter(deps Deps) http.Handler {
 	mux.HandleFunc("DELETE /api/admin/endpoints/{id}", h.requireAdmin(service.PermNodeWrite, h.deleteEndpoint))
 	mux.HandleFunc("GET /api/admin/nodes", h.requireAdmin(service.PermNodeRead, h.listNodes))
 	mux.HandleFunc("PUT /api/admin/nodes/{id}", h.requireAdmin(service.PermNodeWrite, h.updateNode))
+	mux.HandleFunc("GET /api/admin/nodes/{id}/reach", h.requireAdmin(service.PermNodeRead, h.getNodeReach))
+	mux.HandleFunc("POST /api/admin/nodes/{id}/reach/check", h.requireAdmin(service.PermNodeWrite, h.checkNodeReach))
 	mux.HandleFunc("GET /api/admin/node-groups", h.requireAdmin(service.PermNodeRead, h.listNodeGroups))
 	mux.HandleFunc("POST /api/admin/node-groups", h.requireAdmin(service.PermNodeWrite, h.createNodeGroup))
 	mux.HandleFunc("PUT /api/admin/node-groups/{id}", h.requireAdmin(service.PermNodeWrite, h.updateNodeGroup))

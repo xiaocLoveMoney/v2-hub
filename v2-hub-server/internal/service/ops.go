@@ -159,7 +159,7 @@ func (s *OpsService) DailyReport(ctx context.Context) (bool, error) {
 	if last == day {
 		return false, nil
 	}
-	body, err := s.reportBody(ctx, from, to)
+	body, err := s.reportBody(ctx, cur, from, to)
 	if err != nil {
 		return false, err
 	}
@@ -176,8 +176,8 @@ func (s *OpsService) DailyReport(ctx context.Context) (bool, error) {
 	return true, nil
 }
 
-// reportBody 汇总 [from, to) 的日报内容；金额按分换成元显示。
-func (s *OpsService) reportBody(ctx context.Context, from, to time.Time) (string, error) {
+// reportBody 汇总 [from, to) 的日报内容；金额按分换成元显示。大陆连通检测开着时多一行当前被墙的目标数（Ruling-67）。
+func (s *OpsService) reportBody(ctx context.Context, cur Settings, from, to time.Time) (string, error) {
 	fromAt, toAt := timestamptz(from), timestamptz(to)
 	newUsers, err := s.q.CountUsersCreatedBetween(ctx, sqlcgen.CountUsersCreatedBetweenParams{FromAt: fromAt, ToAt: toAt})
 	if err != nil {
@@ -207,14 +207,26 @@ func (s *OpsService) reportBody(ctx context.Context, from, to time.Time) (string
 	if err != nil {
 		return "", fmt.Errorf("daily report users: %w", err)
 	}
+	activeUsers, err := s.q.CountActiveUsersBetween(ctx, sqlcgen.CountActiveUsersBetweenParams{FromAt: fromAt, ToAt: toAt})
+	if err != nil {
+		return "", fmt.Errorf("daily report active users: %w", err)
+	}
 	lines := []string{
 		fmt.Sprintf("新增用户：%d", newUsers),
 		fmt.Sprintf("有效用户：%d", users.Active),
+		fmt.Sprintf("活跃用户：%d", activeUsers),
 		fmt.Sprintf("流量合计：%.2f GB", float64(traffic)/float64(bytesPerGiB)),
 		fmt.Sprintf("订单实付：%s", formatCents(spend)),
 		fmt.Sprintf("充值入账：%s", formatCents(topup)),
 		fmt.Sprintf("新工单：%d", tickets),
 		fmt.Sprintf("当前不在线服务器：%d", offline),
+	}
+	if cur.Reach.Enabled {
+		blocked, err := s.q.CountBlockedReachTargets(ctx)
+		if err != nil {
+			return "", fmt.Errorf("daily report blocked targets: %w", err)
+		}
+		lines = append(lines, fmt.Sprintf("当前大陆连不上的节点地址：%d", blocked))
 	}
 	return strings.Join(lines, "\n"), nil
 }

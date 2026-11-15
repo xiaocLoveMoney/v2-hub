@@ -68,6 +68,11 @@ const (
 
 	defaultCurrency = "CNY"
 
+	// 大陆连通检测的间隔（分钟），docs/03 §5.6（Ruling-67）
+	defaultReachIntervalMinutes = 30
+	minReachIntervalMinutes     = 10
+	maxReachIntervalMinutes     = 1440
+
 	// 运营设置（docs/03 §5.20）
 	maxAlertEmails          = 10
 	defaultOfflineMinutes   = 5
@@ -129,6 +134,7 @@ type Settings struct {
 	Landing      LandingSettings
 	Support      SupportSettings
 	Routing      RoutingSettings
+	Reach        ReachSettings
 	Menu         MenuSettings
 
 	// loc 是 Site.Timezone 解析出的时区，由 load / Update 填入，免得每次 Location 都查时区库；
@@ -146,6 +152,14 @@ type MenuSettings struct {
 // RoutingSettings 是服务器 Xray 模板里的平台条目（docs/03 §5.19）：BlockRule 为真时下发平台拦截规则（Ruling-55）。
 type RoutingSettings struct {
 	BlockRule bool
+}
+
+// ReachSettings 是大陆连通检测（docs/03 §5.20，Ruling-67）：开关（开启后节点地址与端口会发给第三方探测服务）、
+// 同一目标两次检测的最小间隔（分钟）、被墙与恢复时是否发通知。令牌只走环境变量，不在这里。
+type ReachSettings struct {
+	Enabled         bool
+	IntervalMinutes int
+	Notify          bool
 }
 
 // AlertSettings 是掉线告警（docs/03 §5.20，Ruling-43）：收件人与连续不在线多少分钟才告警。
@@ -683,6 +697,24 @@ var settingDefs = map[string]settingDef{
 			return decodeSetting(raw, nil, func(v bool) { s.Routing.BlockRule = v })
 		},
 	},
+	"reach.enabled": {
+		get: func(s *Settings) any { return s.Reach.Enabled },
+		set: func(s *Settings, raw json.RawMessage) error {
+			return decodeSetting(raw, nil, func(v bool) { s.Reach.Enabled = v })
+		},
+	},
+	"reach.intervalMinutes": {
+		get: func(s *Settings) any { return s.Reach.IntervalMinutes },
+		set: func(s *Settings, raw json.RawMessage) error {
+			return decodeSetting(raw, intBetween(minReachIntervalMinutes, maxReachIntervalMinutes), func(v int) { s.Reach.IntervalMinutes = v })
+		},
+	},
+	"reach.notify": {
+		get: func(s *Settings) any { return s.Reach.Notify },
+		set: func(s *Settings, raw json.RawMessage) error {
+			return decodeSetting(raw, nil, func(v bool) { s.Reach.Notify = v })
+		},
+	},
 	"menu.admin": {
 		get: func(s *Settings) any { return s.Menu.Admin },
 		set: func(s *Settings, raw json.RawMessage) error {
@@ -774,6 +806,7 @@ func defaultSettings(sub SubscriptionConfig) Settings {
 		Report:   ReportSettings{DailyHour: defaultReportDailyHour},
 		Support:  SupportSettings{Label: defaultSupportLabel},
 		Routing:  RoutingSettings{BlockRule: true},
+		Reach:    ReachSettings{IntervalMinutes: defaultReachIntervalMinutes, Notify: true},
 		Menu:     MenuSettings{Admin: []string{}, User: []string{}},
 		Subscription: SubscriptionSettings{
 			BaseURL: strings.TrimRight(sub.BaseURL, "/"), Title: title, UpdateIntervalHours: interval, InfoNodes: sub.InfoNodes, LogRetentionDays: retention,
