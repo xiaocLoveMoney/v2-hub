@@ -268,11 +268,6 @@ type mailOutboxVO struct {
 	SentAt    *time.Time `json:"sentAt"`
 }
 
-type mailOutboxPageVO struct {
-	Items []mailOutboxVO `json:"items"`
-	Total int64          `json:"total"`
-}
-
 func (h *handlers) listMailOutbox(w http.ResponseWriter, r *http.Request, _ *service.AdminPrincipal) {
 	pq, err := pageQuery(r)
 	if err != nil {
@@ -284,10 +279,8 @@ func (h *handlers) listMailOutbox(w http.ResponseWriter, r *http.Request, _ *ser
 		writeError(w, r, err)
 		return
 	}
-	out := mailOutboxPageVO{Items: make([]mailOutboxVO, 0, len(page.Items)), Total: page.Total}
-	for _, it := range page.Items {
-		out.Items = append(out.Items, mailOutboxVO{ID: it.ID, Recipient: it.Recipient, Subject: it.Subject, Status: it.Status,
-			Attempts: it.Attempts, LastError: it.LastError, CreatedAt: it.CreatedAt, SentAt: it.SentAt})
-	}
-	writeOK(w, out)
+	writeOK(w, toPageVO(page, func(it service.MailOutboxItem) mailOutboxVO {
+		return mailOutboxVO{ID: it.ID, Recipient: it.Recipient, Subject: it.Subject, Status: it.Status,
+			Attempts: it.Attempts, LastError: it.LastError, CreatedAt: it.CreatedAt, SentAt: it.SentAt}
+	}))
 }

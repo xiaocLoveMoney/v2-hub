@@ -205,7 +205,7 @@ func TestFinanceStatsByDay(t *testing.T) {
 		t.Fatalf("AdjustBalance: %v", err)
 	}
 
-	stats, err := f.shop.FinanceStats(ctx, 3)
+	stats, err := f.shop.FinanceStatsBy(ctx, FinanceQuery{Granularity: StatsByDay, Days: 3})
 	if err != nil || len(stats.Days) != 3 {
 		t.Fatalf("FinanceStats = %+v, %v", stats, err)
 	}
@@ -218,10 +218,10 @@ func TestFinanceStatsByDay(t *testing.T) {
 	if stats.Topup != 2*topupAmount || stats.Spend != priceMonth || stats.Rebate != 99 || stats.Balance != wantBalance {
 		t.Fatalf("totals = %+v, want balance %d", stats, wantBalance)
 	}
-	if only, err := f.shop.FinanceStats(ctx, 1); err != nil || len(only.Days) != 1 || only.Topup != 0 || only.Spend != priceMonth {
+	if only, err := f.shop.FinanceStatsBy(ctx, FinanceQuery{Granularity: StatsByDay, Days: 1}); err != nil || len(only.Days) != 1 || only.Topup != 0 || only.Spend != priceMonth {
 		t.Fatalf("last day only = %+v, %v", only, err)
 	}
-	if _, err := f.shop.FinanceStats(ctx, maxStatsDays+1); !errors.Is(err, ErrInvalidArgument) {
+	if _, err := f.shop.FinanceStatsBy(ctx, FinanceQuery{Granularity: StatsByDay, Days: maxStatsDays + 1}); !errors.Is(err, ErrInvalidArgument) {
 		t.Fatalf("too many days = %v, want invalid_argument", err)
 	}
 	// 按月（docs/03 §5.20 财务报表）：本月一项合计等于按日合计；导出 CSV 带 BOM、元为单位、末行合计

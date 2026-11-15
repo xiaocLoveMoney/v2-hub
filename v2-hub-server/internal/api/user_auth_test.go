@@ -238,7 +238,7 @@ func TestSubscriptionEndpoint(t *testing.T) {
 	}
 	res = c.do(http.MethodGet, "/api/user/subscribe-logs", nil)
 	expectStatus(t, res, http.StatusOK, codeOK)
-	var page subscribeLogPageVO
+	var page pageVO[subscribeLogVO]
 	if err := json.Unmarshal(res.Data, &page); err != nil || page.Total != 2 {
 		t.Fatalf("subscribe logs = %+v, %v; want the 2 successful pulls", page, err)
 	}

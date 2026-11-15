@@ -52,33 +52,59 @@ var statusByCode = map[service.Code]int{
 	service.CodeInsufficientBalance: http.StatusConflict,
 }
 
+// pageVO 是分页列表的统一响应体；Items 恒为非 nil 切片，空列表输出 []。
+type pageVO[T any] struct {
+	Items []T   `json:"items"`
+	Total int64 `json:"total"`
+}
+
+// mapSlice 逐个转换切片元素；结果恒为非 nil 切片，保证 JSON 输出 [] 而不是 null。
+func mapSlice[S, T any](in []S, f func(S) T) []T {
+	out := make([]T, 0, len(in))
+	for _, v := range in {
+		out = append(out, f(v))
+	}
+	return out
+}
+
+// toPageVO 把 service 层分页结果逐项转换为分页响应体。
+func toPageVO[S, T any](page *service.Page[S], f func(S) T) pageVO[T] {
+	return pageVO[T]{Items: mapSlice(page.Items, f), Total: page.Total}
+}
+
 func writeOK(w http.ResponseWriter, data any) {
 	writeJSON(w, http.StatusOK, envelope{Code: codeOK, Message: msgOK, Data: data})
 }
 
 // writeError 输出业务错误；非 *service.Error 的错误一律记日志并返回 500，不向客户端透出细节。
 func writeError(w http.ResponseWriter, r *http.Request, err error) {
-	var se *service.Error
-	if errors.As(err, &se) {
-		if status, ok := statusByCode[se.Code]; ok {
-			writeJSON(w, status, envelope{Code: string(se.Code), Message: se.Message, Data: se.Data})
-			return
-		}
+	status, se := resolveError(r, err)
+	if se == nil {
+		writeJSON(w, status, envelope{Code: string(service.CodeInternal), Message: msgInternal})
+		return
 	}
-	slog.Error("request failed", "method", r.Method, "path", pathForLog(r), "err", err)
-	writeJSON(w, http.StatusInternalServerError, envelope{Code: string(service.CodeInternal), Message: msgInternal})
+	writeJSON(w, status, envelope{Code: string(se.Code), Message: se.Message, Data: se.Data})
 }
 
 // plainError 把错误转成订阅端点用的（状态码，纯文本）；非业务错误记日志并返回 500。
 func plainError(r *http.Request, err error) (int, string) {
+	status, se := resolveError(r, err)
+	if se == nil {
+		return status, string(service.CodeInternal)
+	}
+	return status, string(se.Code)
+}
+
+// resolveError 把错误解析为 HTTP 状态与业务错误；不是已映射错误码的 *service.Error 时记日志，返回 500 与 nil。
+func resolveError(r *http.Request, err error) (int, *service.Error) {
 	var se *service.Error
 	if errors.As(err, &se) {
 		if status, ok := statusByCode[se.Code]; ok {
-			return status, string(se.Code)
+			return status, se
 		}
 	}
 	slog.Error("request failed", "method", r.Method, "path", pathForLog(r), "err", err)
-	return http.StatusInternalServerError, string(service.CodeInternal)
+	return http.StatusInternalServerError, nil
 }
 
 // pathForLog 返回可写进日志的路径：订阅地址里的 token 是凭据（docs/03 §5.4 凭据处理），只留前缀。
@@ -123,6 +149,18 @@ func pathID(r *http.Request) (int64, error) {
 	return id, nil
 }
 
+// decodeWithID 先取路径 id 再解码请求体；id 不合法时不读请求体，错误与分别调用 pathID、decodeJSON 相同。
+func decodeWithID(w http.ResponseWriter, r *http.Request, dst any) (int64, error) {
+	id, err := pathID(r)
+	if err != nil {
+		return 0, err
+	}
+	if err := decodeJSON(w, r, dst); err != nil {
+		return 0, err
+	}
+	return id, nil
+}
+
 // pageQuery 解析分页参数；范围校验在 service 层统一做。
 func pageQuery(r *http.Request) (service.PageQuery, error) {
 	var pq service.PageQuery
@@ -138,6 +176,32 @@ func pageQuery(r *http.Request) (service.PageQuery, error) {
 		*dst = v
 	}
 	return pq, nil
+}
+
+// optionalPositiveInt64 读取可选的正整数查询参数；省略返回 0，非正整数返回 badMessage 对应的 400。
+func optionalPositiveInt64(r *http.Request, name, badMessage string) (int64, error) {
+	raw := r.URL.Query().Get(name)
+	if raw == "" {
+		return 0, nil
+	}
+	v, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || v < 1 {
+		return 0, badRequest(badMessage)
+	}
+	return v, nil
+}
+
+// optionalPositiveInt 同 optionalPositiveInt64，结果为 int。
+func optionalPositiveInt(r *http.Request, name, badMessage string) (int, error) {
+	raw := r.URL.Query().Get(name)
+	if raw == "" {
+		return 0, nil
+	}
+	v, err := strconv.Atoi(raw)
+	if err != nil || v < 1 {
+		return 0, badRequest(badMessage)
+	}
+	return v, nil
 }
 
 // clientIP 取客户端地址：直连地址在可信代理网段内时，才采信 X-Forwarded-For 最右一个地址（Caddy 追加的那个）。

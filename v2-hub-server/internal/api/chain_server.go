@@ -149,7 +149,7 @@ func (h *handlers) listChainRoutes(w http.ResponseWriter, r *http.Request, _ *se
 		writeError(w, r, err)
 		return
 	}
-	writeOK(w, pageVO[adminChainRouteVO]{Items: mapSlice(page.Items, toAdminChainRouteVO), Total: page.Total})
+	writeOK(w, toPageVO(page, toAdminChainRouteVO))
 }
 
 type exitNodeGroupVO struct {
@@ -242,7 +242,7 @@ func (h *handlers) listChainExits(w http.ResponseWriter, r *http.Request, _ *ser
 		writeError(w, r, err)
 		return
 	}
-	writeOK(w, pageVO[adminChainExitVO]{Items: mapSlice(page.Items, toAdminChainExitVO), Total: page.Total})
+	writeOK(w, toPageVO(page, toAdminChainExitVO))
 }
 
 func (h *handlers) createPlatformChainExit(w http.ResponseWriter, r *http.Request, p *service.AdminPrincipal) {
@@ -260,13 +260,9 @@ func (h *handlers) createPlatformChainExit(w http.ResponseWriter, r *http.Reques
 }
 
 func (h *handlers) updatePlatformChainExit(w http.ResponseWriter, r *http.Request, p *service.AdminPrincipal) {
-	id, err := pathID(r)
-	if err != nil {
-		writeError(w, r, err)
-		return
-	}
 	var req platformExitRequest
-	if err := decodeJSON(w, r, &req); err != nil {
+	id, err := decodeWithID(w, r, &req)
+	if err != nil {
 		writeError(w, r, err)
 		return
 	}
@@ -279,13 +275,9 @@ func (h *handlers) updatePlatformChainExit(w http.ResponseWriter, r *http.Reques
 }
 
 func (h *handlers) setChainExitEnabled(w http.ResponseWriter, r *http.Request, p *service.AdminPrincipal) {
-	id, err := pathID(r)
-	if err != nil {
-		writeError(w, r, err)
-		return
-	}
 	var req chainExitEnabledRequest
-	if err := decodeJSON(w, r, &req); err != nil {
+	id, err := decodeWithID(w, r, &req)
+	if err != nil {
 		writeError(w, r, err)
 		return
 	}
@@ -337,13 +329,9 @@ type adminChainExitTestVO struct {
 }
 
 func (h *handlers) testChainExitAsAdmin(w http.ResponseWriter, r *http.Request, _ *service.AdminPrincipal) {
-	id, err := pathID(r)
-	if err != nil {
-		writeError(w, r, err)
-		return
-	}
 	var req adminChainExitTestRequest
-	if err := decodeJSON(w, r, &req); err != nil {
+	id, err := decodeWithID(w, r, &req)
+	if err != nil {
 		writeError(w, r, err)
 		return
 	}

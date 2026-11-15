@@ -4,7 +4,6 @@ import (
 	"context"
 	"net/http"
 	"net/netip"
-	"strconv"
 	"time"
 
 	"v2-hub-server/internal/service"
@@ -71,17 +70,8 @@ func toTicketDetailVO(d *service.TicketDetail, forAdmin bool) ticketDetailVO {
 	return out
 }
 
-type ticketPageVO struct {
-	Items []ticketVO `json:"items"`
-	Total int64      `json:"total"`
-}
-
-func toTicketPageVO(page *service.Page[service.Ticket], forAdmin bool) ticketPageVO {
-	out := ticketPageVO{Items: make([]ticketVO, 0, len(page.Items)), Total: page.Total}
-	for _, t := range page.Items {
-		out.Items = append(out.Items, toTicketVO(t, forAdmin))
-	}
-	return out
+func toTicketPageVO(page *service.Page[service.Ticket], forAdmin bool) pageVO[ticketVO] {
+	return toPageVO(page, func(t service.Ticket) ticketVO { return toTicketVO(t, forAdmin) })
 }
 
 type ticketCreateRequest struct {
@@ -101,13 +91,12 @@ func (h *handlers) listTickets(w http.ResponseWriter, r *http.Request, _ *servic
 		writeError(w, r, err)
 		return
 	}
-	f := service.TicketFilter{Status: r.URL.Query().Get(queryStatus)}
-	if raw := r.URL.Query().Get(queryUserID); raw != "" {
-		if f.UserID, err = strconv.ParseInt(raw, 10, 64); err != nil || f.UserID < 1 {
-			writeError(w, r, badRequest(msgBadID))
-			return
-		}
+	userID, err := optionalPositiveInt64(r, queryUserID, msgBadID)
+	if err != nil {
+		writeError(w, r, err)
+		return
 	}
+	f := service.TicketFilter{Status: r.URL.Query().Get(queryStatus), UserID: userID}
 	page, err := h.tickets.List(r.Context(), f, pq)
 	if err != nil {
 		writeError(w, r, err)
@@ -131,13 +120,9 @@ func (h *handlers) getTicket(w http.ResponseWriter, r *http.Request, _ *service.
 }
 
 func (h *handlers) replyTicket(w http.ResponseWriter, r *http.Request, p *service.AdminPrincipal) {
-	id, err := pathID(r)
-	if err != nil {
-		writeError(w, r, err)
-		return
-	}
 	var req ticketMessageRequest
-	if err := decodeJSON(w, r, &req); err != nil {
+	id, err := decodeWithID(w, r, &req)
+	if err != nil {
 		writeError(w, r, err)
 		return
 	}
@@ -208,13 +193,9 @@ func (h *handlers) getOwnTicket(w http.ResponseWriter, r *http.Request, p *servi
 }
 
 func (h *handlers) replyOwnTicket(w http.ResponseWriter, r *http.Request, p *service.UserPrincipal) {
-	id, err := pathID(r)
-	if err != nil {
-		writeError(w, r, err)
-		return
-	}
 	var req ticketMessageRequest
-	if err := decodeJSON(w, r, &req); err != nil {
+	id, err := decodeWithID(w, r, &req)
+	if err != nil {
 		writeError(w, r, err)
 		return
 	}

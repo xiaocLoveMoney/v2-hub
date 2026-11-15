@@ -3,7 +3,6 @@ package job
 import (
 	"context"
 	"log/slog"
-	"sync"
 	"time"
 )
 
@@ -63,28 +62,6 @@ func eachServer(ctx context.Context, s UserSyncer, concurrency int, kind string,
 		slog.Error("user sync: list servers", "kind", kind, "err", err)
 		return
 	}
-	sem := make(chan struct{}, max(concurrency, 1))
-	var wg sync.WaitGroup
-	for _, id := range ids {
-		select {
-		case <-ctx.Done():
-			wg.Wait()
-			return
-		case sem <- struct{}{}:
-		}
-		wg.Add(1)
-		go func(id int64) {
-			defer wg.Done()
-			defer func() { <-sem }()
-			defer func() {
-				if r := recover(); r != nil {
-					slog.Error("user sync panicked", "kind", kind, "server_id", id, "panic", r)
-				}
-			}()
-			if err := fn(ctx, id); err != nil {
-				slog.Warn("user sync failed", "kind", kind, "server_id", id, "err", err)
-			}
-		}(id)
-	}
-	wg.Wait()
+	logs := fanOutLog{kind: kind, panicMsg: "user sync panicked", failMsg: "user sync failed", failLevel: slog.LevelWarn}
+	fanOut(ctx, ids, concurrency, logs, func(id int64) error { return fn(ctx, id) })
 }

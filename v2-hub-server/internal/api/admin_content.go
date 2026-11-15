@@ -79,17 +79,8 @@ func optionalAnnouncementVO(a *service.Announcement) *announcementVO {
 	return &vo
 }
 
-type announcementPageVO struct {
-	Items []announcementVO `json:"items"`
-	Total int64            `json:"total"`
-}
-
-func toAnnouncementPageVO(page *service.Page[service.Announcement], forAdmin bool) announcementPageVO {
-	out := announcementPageVO{Items: make([]announcementVO, 0, len(page.Items)), Total: page.Total}
-	for _, a := range page.Items {
-		out.Items = append(out.Items, toAnnouncementVO(a, forAdmin))
-	}
-	return out
+func toAnnouncementPageVO(page *service.Page[service.Announcement], forAdmin bool) pageVO[announcementVO] {
+	return toPageVO(page, func(a service.Announcement) announcementVO { return toAnnouncementVO(a, forAdmin) })
 }
 
 func (h *handlers) listAnnouncements(w http.ResponseWriter, r *http.Request, _ *service.AdminPrincipal) {
@@ -121,13 +112,9 @@ func (h *handlers) createAnnouncement(w http.ResponseWriter, r *http.Request, p 
 }
 
 func (h *handlers) updateAnnouncement(w http.ResponseWriter, r *http.Request, p *service.AdminPrincipal) {
-	id, err := pathID(r)
-	if err != nil {
-		writeError(w, r, err)
-		return
-	}
 	var req announcementBody
-	if err := decodeJSON(w, r, &req); err != nil {
+	id, err := decodeWithID(w, r, &req)
+	if err != nil {
 		writeError(w, r, err)
 		return
 	}
@@ -262,13 +249,9 @@ func (h *handlers) createTutorial(w http.ResponseWriter, r *http.Request, p *ser
 }
 
 func (h *handlers) updateTutorial(w http.ResponseWriter, r *http.Request, p *service.AdminPrincipal) {
-	id, err := pathID(r)
-	if err != nil {
-		writeError(w, r, err)
-		return
-	}
 	var req tutorialBody
-	if err := decodeJSON(w, r, &req); err != nil {
+	id, err := decodeWithID(w, r, &req)
+	if err != nil {
 		writeError(w, r, err)
 		return
 	}
@@ -372,13 +355,9 @@ func (h *handlers) createSharedAccount(w http.ResponseWriter, r *http.Request, p
 }
 
 func (h *handlers) updateSharedAccount(w http.ResponseWriter, r *http.Request, p *service.AdminPrincipal) {
-	id, err := pathID(r)
-	if err != nil {
-		writeError(w, r, err)
-		return
-	}
 	var req sharedAccountBody
-	if err := decodeJSON(w, r, &req); err != nil {
+	id, err := decodeWithID(w, r, &req)
+	if err != nil {
 		writeError(w, r, err)
 		return
 	}

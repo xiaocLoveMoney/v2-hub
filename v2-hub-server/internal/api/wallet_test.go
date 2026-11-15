@@ -60,7 +60,7 @@ func TestWalletEndpoints(t *testing.T) {
 	}
 	list := root.do(http.MethodGet, "/api/admin/topup-codes?status=unused&batch=api", nil)
 	expectStatus(t, list, http.StatusOK, codeOK)
-	var codes topupCodePageVO
+	var codes pageVO[topupCodeVO]
 	if err := json.Unmarshal(list.Data, &codes); err != nil || codes.Total != 2 || len(codes.Items[0].CodeTail) != 4 {
 		t.Fatalf("topup list = %+v, %v", codes, err)
 	}
@@ -116,7 +116,7 @@ func TestWalletEndpoints(t *testing.T) {
 	}
 	all := root.do(http.MethodGet, fmt.Sprintf("/api/admin/wallet-ledger?userId=%d&kind=%s", session.User.ID, service.LedgerTopupCode), nil)
 	expectStatus(t, all, http.StatusOK, codeOK)
-	var admin ledgerPageVO
+	var admin pageVO[ledgerEntryVO]
 	if err := json.Unmarshal(all.Data, &admin); err != nil || admin.Total != 1 || admin.Items[0].Username == nil || *admin.Items[0].Username != "alice" {
 		t.Fatalf("admin ledger = %+v, %v", admin, err)
 	}

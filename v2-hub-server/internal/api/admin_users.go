@@ -4,7 +4,6 @@ import (
 	"context"
 	"net/http"
 	"net/netip"
-	"strconv"
 	"time"
 
 	"v2-hub-server/internal/service"
@@ -237,13 +236,9 @@ func (h *handlers) createPlan(w http.ResponseWriter, r *http.Request, p *service
 }
 
 func (h *handlers) updatePlan(w http.ResponseWriter, r *http.Request, p *service.AdminPrincipal) {
-	id, err := pathID(r)
-	if err != nil {
-		writeError(w, r, err)
-		return
-	}
 	var req planRequest
-	if err := decodeJSON(w, r, &req); err != nil {
+	id, err := decodeWithID(w, r, &req)
+	if err != nil {
 		writeError(w, r, err)
 		return
 	}
@@ -337,13 +332,9 @@ type userUpdateBody struct {
 }
 
 func (h *handlers) updateUser(w http.ResponseWriter, r *http.Request, p *service.AdminPrincipal) {
-	id, err := pathID(r)
-	if err != nil {
-		writeError(w, r, err)
-		return
-	}
 	var req userUpdateBody
-	if err := decodeJSON(w, r, &req); err != nil {
+	id, err := decodeWithID(w, r, &req)
+	if err != nil {
 		writeError(w, r, err)
 		return
 	}
@@ -373,13 +364,9 @@ type assignPlanBody struct {
 }
 
 func (h *handlers) assignUserPlan(w http.ResponseWriter, r *http.Request, p *service.AdminPrincipal) {
-	id, err := pathID(r)
-	if err != nil {
-		writeError(w, r, err)
-		return
-	}
 	var req assignPlanBody
-	if err := decodeJSON(w, r, &req); err != nil {
+	id, err := decodeWithID(w, r, &req)
+	if err != nil {
 		writeError(w, r, err)
 		return
 	}
@@ -396,13 +383,9 @@ func (h *handlers) assignUserPlan(w http.ResponseWriter, r *http.Request, p *ser
 }
 
 func (h *handlers) updateUserQuota(w http.ResponseWriter, r *http.Request, p *service.AdminPrincipal) {
-	id, err := pathID(r)
-	if err != nil {
-		writeError(w, r, err)
-		return
-	}
 	var req quotaBody
-	if err := decodeJSON(w, r, &req); err != nil {
+	id, err := decodeWithID(w, r, &req)
+	if err != nil {
 		writeError(w, r, err)
 		return
 	}
@@ -419,13 +402,9 @@ func (h *handlers) updateUserQuota(w http.ResponseWriter, r *http.Request, p *se
 }
 
 func (h *handlers) resetUserPassword(w http.ResponseWriter, r *http.Request, p *service.AdminPrincipal) {
-	id, err := pathID(r)
-	if err != nil {
-		writeError(w, r, err)
-		return
-	}
 	var req credentialRequest
-	if err := decodeJSON(w, r, &req); err != nil {
+	id, err := decodeWithID(w, r, &req)
+	if err != nil {
 		writeError(w, r, err)
 		return
 	}
@@ -503,17 +482,10 @@ type subscribeLogVO struct {
 	CreatedAt time.Time `json:"createdAt"`
 }
 
-type subscribeLogPageVO struct {
-	Items []subscribeLogVO `json:"items"`
-	Total int64            `json:"total"`
-}
-
-func toSubscribeLogPageVO(page *service.Page[service.SubscribeLogItem]) subscribeLogPageVO {
-	items := make([]subscribeLogVO, 0, len(page.Items))
-	for _, l := range page.Items {
-		items = append(items, subscribeLogVO{ID: l.ID, UserID: l.UserID, Username: l.Username, Format: l.Format, ClientIP: l.ClientIP, UserAgent: l.UserAgent, CreatedAt: l.CreatedAt})
-	}
-	return subscribeLogPageVO{Items: items, Total: page.Total}
+func toSubscribeLogPageVO(page *service.Page[service.SubscribeLogItem]) pageVO[subscribeLogVO] {
+	return toPageVO(page, func(l service.SubscribeLogItem) subscribeLogVO {
+		return subscribeLogVO{ID: l.ID, UserID: l.UserID, Username: l.Username, Format: l.Format, ClientIP: l.ClientIP, UserAgent: l.UserAgent, CreatedAt: l.CreatedAt}
+	})
 }
 
 const queryUserID = "userId"
@@ -524,12 +496,10 @@ func (h *handlers) listSubscribeLogs(w http.ResponseWriter, r *http.Request, _ *
 		writeError(w, r, err)
 		return
 	}
-	var userID int64
-	if raw := r.URL.Query().Get(queryUserID); raw != "" {
-		if userID, err = strconv.ParseInt(raw, 10, 64); err != nil || userID < 1 {
-			writeError(w, r, badRequest(msgBadID))
-			return
-		}
+	userID, err := optionalPositiveInt64(r, queryUserID, msgBadID)
+	if err != nil {
+		writeError(w, r, err)
+		return
 	}
 	page, err := h.users.ListSubscribeLogs(r.Context(), userID, pq)
 	if err != nil {

@@ -90,7 +90,7 @@ func TestPaymentEndpoints(t *testing.T) {
 
 	payments := root.do(http.MethodGet, "/api/admin/payments?status=paid", nil)
 	expectStatus(t, payments, http.StatusOK, codeOK)
-	var page paymentPageVO
+	var page pageVO[paymentVO]
 	if err := json.Unmarshal(payments.Data, &page); err != nil || page.Total != 1 || page.Items[0].TradeNo != created.TradeNo || page.Items[0].Username != "alice" {
 		t.Fatalf("admin payments = %+v, %v", page, err)
 	}

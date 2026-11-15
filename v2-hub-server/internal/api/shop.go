@@ -94,13 +94,9 @@ func (h *handlers) createTrafficPack(w http.ResponseWriter, r *http.Request, p *
 }
 
 func (h *handlers) updateTrafficPack(w http.ResponseWriter, r *http.Request, p *service.AdminPrincipal) {
-	id, err := pathID(r)
-	if err != nil {
-		writeError(w, r, err)
-		return
-	}
 	var req trafficPackBody
-	if err := decodeJSON(w, r, &req); err != nil {
+	id, err := decodeWithID(w, r, &req)
+	if err != nil {
 		writeError(w, r, err)
 		return
 	}
@@ -177,11 +173,6 @@ func toCouponVO(c service.Coupon) couponVO {
 	}}
 }
 
-type couponPageVO struct {
-	Items []couponVO `json:"items"`
-	Total int64      `json:"total"`
-}
-
 func (h *handlers) listCoupons(w http.ResponseWriter, r *http.Request, _ *service.AdminPrincipal) {
 	pq, err := pageQuery(r)
 	if err != nil {
@@ -193,11 +184,7 @@ func (h *handlers) listCoupons(w http.ResponseWriter, r *http.Request, _ *servic
 		writeError(w, r, err)
 		return
 	}
-	out := couponPageVO{Items: make([]couponVO, 0, len(page.Items)), Total: page.Total}
-	for _, c := range page.Items {
-		out.Items = append(out.Items, toCouponVO(c))
-	}
-	writeOK(w, out)
+	writeOK(w, toPageVO(page, toCouponVO))
 }
 
 func (h *handlers) createCoupon(w http.ResponseWriter, r *http.Request, p *service.AdminPrincipal) {
@@ -215,13 +202,9 @@ func (h *handlers) createCoupon(w http.ResponseWriter, r *http.Request, p *servi
 }
 
 func (h *handlers) updateCoupon(w http.ResponseWriter, r *http.Request, p *service.AdminPrincipal) {
-	id, err := pathID(r)
-	if err != nil {
-		writeError(w, r, err)
-		return
-	}
 	var req couponBody
-	if err := decodeJSON(w, r, &req); err != nil {
+	id, err := decodeWithID(w, r, &req)
+	if err != nil {
 		writeError(w, r, err)
 		return
 	}
@@ -280,17 +263,8 @@ func toOrderVO(o service.Order, isAdmin bool) orderVO {
 	return vo
 }
 
-type orderPageVO struct {
-	Items []orderVO `json:"items"`
-	Total int64     `json:"total"`
-}
-
-func toOrderPageVO(page *service.Page[service.Order], isAdmin bool) orderPageVO {
-	out := orderPageVO{Items: make([]orderVO, 0, len(page.Items)), Total: page.Total}
-	for _, o := range page.Items {
-		out.Items = append(out.Items, toOrderVO(o, isAdmin))
-	}
-	return out
+func toOrderPageVO(page *service.Page[service.Order], isAdmin bool) pageVO[orderVO] {
+	return toPageVO(page, func(o service.Order) orderVO { return toOrderVO(o, isAdmin) })
 }
 
 // optionalTimeQuery 读取可选的 RFC 3339 时间查询参数；省略返回 nil。

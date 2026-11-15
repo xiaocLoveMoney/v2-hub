@@ -180,9 +180,7 @@ func (h *handlers) deleteOwnAccount(w http.ResponseWriter, r *http.Request, p *s
 		writeError(w, r, err)
 		return
 	}
-	expired := h.userSessionCookie("", time.Unix(0, 0))
-	expired.MaxAge = -1
-	http.SetCookie(w, expired)
+	http.SetCookie(w, h.expiredCookie(userSessionCookie, userCookiePath))
 	writeOK(w, nil)
 }
 
