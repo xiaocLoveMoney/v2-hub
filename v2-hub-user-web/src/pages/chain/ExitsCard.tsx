@@ -1,9 +1,9 @@
 import { useState } from 'react'
-import { api, csrfHeader, toApiError, type ChainExit, type ChainNodeOption, type ChainOverview } from '../../api/client'
+import { api, csrfHeader, type ChainExit, type ChainNodeOption, type ChainOverview } from '../../api/client'
 import { useToast } from '../../components/toast-context'
 import { Alert, Badge, Button, Card, Confirm, Empty } from '../../components/ui'
 import { useCopy } from '../../hooks/use-copy'
-import { mutate } from '../../hooks/use-remote'
+import { mutate, request } from '../../hooks/use-remote'
 import { useI18n } from '../../i18n/i18n-context'
 import { ExitModal } from './ExitModal'
 import { ExitTestPanel } from './ExitTestPanel'
@@ -32,15 +32,12 @@ function ExitItem({ exit, testNodes, isWritable, onEdit, onDelete }: ExitItemPro
   const reveal = async () => {
     setIsBusy(true)
     try {
-      const res = await api.GET('/api/user/chain/exits/{id}/link', { params: { path: { id: exit.id } } })
-      if (res.error !== undefined || res.data?.data === undefined) {
-        toast.show(toApiError(res.error).message, 'error')
+      const result = await request(() => api.GET('/api/user/chain/exits/{id}/link', { params: { path: { id: exit.id } } }))
+      if (result.error !== null) {
+        toast.show(result.error.message, 'error')
         return
       }
-      setLink(res.data.data.link)
-    } catch (err) {
-      reportError(err)
-      toast.show(toApiError(err).message, 'error')
+      setLink(result.data.link)
     } finally {
       setIsBusy(false)
     }

@@ -9,7 +9,7 @@ import { ROUTES } from '../../menu'
 import { formatMoney } from '../../money'
 import { useCurrency } from '../../site/site-context'
 import { CheckoutModal, type CheckoutItem } from './CheckoutModal'
-import { durationLabel, planFeatureLines } from './labels'
+import { PriceCard } from './PriceCard'
 
 const loadShop = (signal: AbortSignal) => api.GET('/api/user/shop', { signal })
 
@@ -19,44 +19,30 @@ interface PlanCardProps {
   onBuy: (plan: ShopPlan, priceId: number) => void
 }
 
-/** 一张价格卡：卖点、流量、设备数、节点数，卡内用分段选择块选时长（docs/06 §5 商店）。 */
+/** 商店的套餐卡：当前套餐与试用带徽章，底部是购买 / 续费 / 试用按钮及不能购买的原因。 */
 function PlanCard({ plan, currency, onBuy }: PlanCardProps) {
-  const { t, tag } = useI18n()
-  const [picked, setPicked] = useState<number | null>(null)
-  // 没选过，或选中的选项已不在列表里时，落到第一个
-  const price = plan.prices.find((p) => p.id === picked) ?? plan.prices[0]
-  if (price === undefined) {
-    return null
-  }
+  const { t } = useI18n()
   const action = t(plan.isTrial ? 'shop.freeTrial' : plan.isCurrent ? 'shop.renew' : 'shop.buy')
   return (
-    <section className={`hub-price-card${plan.isCurrent ? ' is-current' : ''}`}>
-      <header className="hub-price-head">
-        <h4>{plan.name}</h4>
-        {plan.isCurrent && <Badge tone="primary">{t('shop.currentPlan')}</Badge>}
-        {plan.isTrial && <Badge tone="warning">{t('shop.trial')}</Badge>}
-      </header>
-      <div className="hub-price-amount">{formatMoney(price.price, currency, tag)}</div>
-      <div className="hub-price-period">/ {durationLabel(t, price.durationDays)}</div>
-      {plan.prices.length > 1 && (
-        <div className="hub-seg" role="radiogroup" aria-label={t('shop.durationOf', { name: plan.name })}>
-          {plan.prices.map((p) => (
-            <button key={p.id} type="button" role="radio" aria-checked={p.id === price.id} className={`hub-seg-item${p.id === price.id ? ' is-active' : ''}`} onClick={() => setPicked(p.id)}>
-              {durationLabel(t, p.durationDays)}
-            </button>
-          ))}
-        </div>
+    <PriceCard
+      plan={plan}
+      currency={currency}
+      isCurrent={plan.isCurrent}
+      badges={
+        <>
+          {plan.isCurrent && <Badge tone="primary">{t('shop.currentPlan')}</Badge>}
+          {plan.isTrial && <Badge tone="warning">{t('shop.trial')}</Badge>}
+        </>
+      }
+      renderFooter={(priceId) => (
+        <>
+          <Button variant="primary" isBlock disabled={!plan.canBuy} onClick={() => onBuy(plan, priceId)}>
+            {action}
+          </Button>
+          {!plan.canBuy && plan.reason !== '' && <p className="hub-field-hint">{plan.reason}</p>}
+        </>
       )}
-      <ul className="hub-price-features">
-        {planFeatureLines(t, plan).map((line) => (
-          <li key={line}>{line}</li>
-        ))}
-      </ul>
-      <Button variant="primary" isBlock disabled={!plan.canBuy} onClick={() => onBuy(plan, price.id)}>
-        {action}
-      </Button>
-      {!plan.canBuy && plan.reason !== '' && <p className="hub-field-hint">{plan.reason}</p>}
-    </section>
+    />
   )
 }
 

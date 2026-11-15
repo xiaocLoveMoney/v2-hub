@@ -4,10 +4,9 @@ import { useToast } from '../../components/toast-context'
 import { Alert, Badge, Button, Card, Confirm, Empty } from '../../components/ui'
 import { mutate } from '../../hooks/use-remote'
 import { useI18n } from '../../i18n/i18n-context'
-import { EXIT_KIND_KEYS, entryState, routeState } from './labels'
+import { EXIT_KIND_KEYS, KIND_SERVER, entryState, routeState } from './labels'
 import { RouteModal } from './RouteModal'
 
-const KIND_SERVER: ChainKind = 'server'
 const STATE_PENDING: ChainRoute['entries'][number]['state'] = 'pending'
 const STEP_UP = -1
 const STEP_DOWN = 1

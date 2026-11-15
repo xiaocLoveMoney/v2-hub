@@ -1,10 +1,13 @@
-import type { ChainBlockedReason, ChainEntryState, ChainExitKind, ChainRoute, ChainRouteEntry } from '../../api/client'
+import type { ChainBlockedReason, ChainEntryState, ChainExitKind, ChainKind, ChainRoute, ChainRouteEntry } from '../../api/client'
 import type { MessageKey, Translate } from '../../i18n/i18n-context'
 
 /** 名称上限，与 hub-api.yaml 的 ChainRouteInput / ChainExitInput 一致。 */
 export const MAX_CHAIN_NAME_LEN = 64
 /** 分享链接上限，与 hub-api.yaml 的 ChainExitInput.link 一致。 */
 export const MAX_EXIT_LINK_LEN = 2048
+
+/** 服务端链式（docs/03 §5.19）；另一种是客户端链式 'client'。 */
+export const KIND_SERVER: ChainKind = 'server'
 
 export type BadgeTone = 'success' | 'danger' | 'warning' | 'info' | 'light'
 

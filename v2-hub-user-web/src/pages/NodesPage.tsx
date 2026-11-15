@@ -1,11 +1,11 @@
 import { Copy } from 'lucide-react'
 import { QRCodeSVG } from 'qrcode.react'
 import { useState } from 'react'
-import { api, toApiError, type UserNode, type UserNodeGroup } from '../api/client'
+import { api, type UserNode, type UserNodeGroup } from '../api/client'
 import { useSession } from '../auth/session-context'
 import { Alert, Badge, Button, Card, Empty, Loading, Modal, PageHeader } from '../components/ui'
 import { useCopy } from '../hooks/use-copy'
-import { useRemote } from '../hooks/use-remote'
+import { request, useRemote } from '../hooks/use-remote'
 import { useI18n } from '../i18n/i18n-context'
 import { Flag } from '../components/Flag'
 import { NodeMetricsCharts } from './NodeMetricsCharts'
@@ -59,18 +59,12 @@ export function NodesPage() {
 
   const openNode = async (node: UserNode) => {
     setDetail({ node, link: null, error: null })
-    try {
-      const { data, error } = await api.GET('/api/user/nodes/{id}/link', { params: { path: { id: node.id } } })
-      const link = data?.data?.link
-      if (error !== undefined || link === undefined) {
-        setDetail({ node, link: null, error: toApiError(error).message })
-        return
-      }
-      setDetail({ node, link, error: null })
-    } catch (err) {
-      reportError(err)
-      setDetail({ node, link: null, error: toApiError(err).message })
+    const result = await request(() => api.GET('/api/user/nodes/{id}/link', { params: { path: { id: node.id } } }))
+    if (result.error !== null) {
+      setDetail({ node, link: null, error: result.error.message })
+      return
     }
+    setDetail({ node, link: result.data.link, error: null })
   }
 
   return (

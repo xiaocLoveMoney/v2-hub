@@ -5,11 +5,9 @@ import { useSession } from '../auth/session-context'
 import { useI18n } from '../i18n/i18n-context'
 import { Alert, Button, Field } from '../components/ui'
 import { ROUTES } from '../menu'
-import { useSite } from '../site/site-context'
+import { REGISTER_MODE_CLOSED, useSite } from '../site/site-context'
 import { AuthShell } from './auth/AuthShell'
 import { MAX_CREDENTIAL_LEN, MAX_EMAIL_LEN, TOTP_LENGTH, digitsOnly } from './auth/fields'
-
-const REGISTER_CLOSED = 'closed'
 
 interface LocationState {
   from?: string
@@ -108,7 +106,7 @@ export function LoginPage() {
       </form>
       {!needsTotp && (
         <p className="hub-login-links">
-          {site.registerMode !== REGISTER_CLOSED && <Link to={ROUTES.REGISTER}>{t('auth.registerAccount')}</Link>}
+          {site.registerMode !== REGISTER_MODE_CLOSED && <Link to={ROUTES.REGISTER}>{t('auth.registerAccount')}</Link>}
           {site.mailEnabled && <Link to={ROUTES.RESET}>{t('auth.forgot')}</Link>}
         </p>
       )}

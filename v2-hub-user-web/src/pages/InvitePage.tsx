@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { api, csrfHeader, type InviteInfo } from '../api/client'
 import { useToast } from '../components/toast-context'
-import { Alert, Button, Card, Confirm, Empty, PageHeader } from '../components/ui'
+import { Alert, Button, Card, Confirm, DataTable, Empty, PageHeader } from '../components/ui'
 import { formatTime } from '../format'
 import { useCopy } from '../hooks/use-copy'
 import { mutate, useRemote } from '../hooks/use-remote'
@@ -87,25 +87,14 @@ export function InvitePage() {
             </Button>
           </Card>
           <Card title={t('invite.invitees')}>
-            <div className="hub-table-wrap">
-              <table className="hub-table">
-                <thead>
-                  <tr>
-                    <th>{t('invite.colUsername')}</th>
-                    <th>{t('invite.colRegistered')}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {info.invitees.map((u) => (
-                    <tr key={`${u.username}-${u.createdAt}`}>
-                      <td>{u.username}</td>
-                      <td>{formatTime(u.createdAt, tag)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            {info.invitees.length === 0 && <Empty>{t('invite.noInvitees')}</Empty>}
+            <DataTable headers={[t('invite.colUsername'), t('invite.colRegistered')]} isEmpty={info.invitees.length === 0} emptyText={t('invite.noInvitees')}>
+              {info.invitees.map((u) => (
+                <tr key={`${u.username}-${u.createdAt}`}>
+                  <td>{u.username}</td>
+                  <td>{formatTime(u.createdAt, tag)}</td>
+                </tr>
+              ))}
+            </DataTable>
           </Card>
         </div>
       )}
@@ -115,27 +104,15 @@ export function InvitePage() {
             {rich('invite.rebateRule', { percent: <strong>{info.rebatePercent}</strong> })}{' '}
             {rich('invite.rebateTotal', { amount: <strong>{formatMoney(info.rebateTotal ?? 0, currency, tag)}</strong> })}
           </p>
-          <div className="hub-table-wrap">
-            <table className="hub-table">
-              <thead>
-                <tr>
-                  <th>{t('invite.colInvitee')}</th>
-                  <th>{t('invite.colRebate')}</th>
-                  <th>{t('invite.colTime')}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {(info.rebates ?? []).map((r) => (
-                  <tr key={`${r.username}-${r.createdAt}-${r.amount}`}>
-                    <td>{r.username}</td>
-                    <td>{formatMoney(r.amount, currency, tag)}</td>
-                    <td>{formatTime(r.createdAt, tag)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          {(info.rebates ?? []).length === 0 && <Empty>{t('invite.noRebates')}</Empty>}
+          <DataTable headers={[t('invite.colInvitee'), t('invite.colRebate'), t('invite.colTime')]} isEmpty={(info.rebates ?? []).length === 0} emptyText={t('invite.noRebates')}>
+            {(info.rebates ?? []).map((r) => (
+              <tr key={`${r.username}-${r.createdAt}-${r.amount}`}>
+                <td>{r.username}</td>
+                <td>{formatMoney(r.amount, currency, tag)}</td>
+                <td>{formatTime(r.createdAt, tag)}</td>
+              </tr>
+            ))}
+          </DataTable>
         </Card>
       )}
       <Confirm title={t('invite.reset')} isOpen={isConfirming} isBusy={isBusy} confirmText={t('sub.resetConfirm')} onConfirm={() => void handleReset()} onClose={() => setIsConfirming(false)}>

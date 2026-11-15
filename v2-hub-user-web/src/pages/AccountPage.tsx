@@ -3,22 +3,16 @@ import { useState, type FormEvent } from 'react'
 import { api, csrfHeader, type LoginLog, type TotpSetup } from '../api/client'
 import { useSession } from '../auth/session-context'
 import { useToast } from '../components/toast-context'
-import { Alert, Badge, Button, Card, Empty, Field, Modal, PageHeader } from '../components/ui'
+import { Alert, Badge, Button, Card, DataTable, Field, Modal, PageHeader } from '../components/ui'
 import { formatTime } from '../format'
 import { mutate, useRemote } from '../hooks/use-remote'
 import { DeleteAccountCard, EmailCard } from './AccountEmailCards'
+import { MAX_CREDENTIAL_LEN, MIN_CREDENTIAL_LEN, TOTP_LENGTH, digitsOnly } from './auth/fields'
 import { useI18n } from '../i18n/i18n-context'
 
-const MIN_CREDENTIAL_LEN = 8
-const MAX_CREDENTIAL_LEN = 128
-const TOTP_LENGTH = 6
 const QR_SIZE = 180
 
 const loadLoginLogs = (signal: AbortSignal) => api.GET('/api/user/login-logs', { signal })
-
-function digitsOnly(v: string): string {
-  return v.replace(/\D/g, '')
-}
 
 /** 改密码：须提交旧密码，成功后其它设备上的登录会失效（docs/03 §5.3）。 */
 function CredentialCard() {
@@ -190,29 +184,17 @@ function LoginLogsCard() {
   return (
     <Card title={t('account.loginLogs')}>
       {logs.error !== null && <Alert tone="plain">{logs.error.message}</Alert>}
-      <div className="hub-table-wrap">
-        <table className="hub-table">
-          <thead>
-            <tr>
-              <th>{t('account.colTime')}</th>
-              <th>IP</th>
-              <th>{t('account.colResult')}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {(logs.data ?? []).map((l) => (
-              <tr key={`${l.createdAt}-${l.clientIp}-${String(l.isSuccess)}`}>
-                <td>{formatTime(l.createdAt, tag)}</td>
-                <td>{l.clientIp || t('common.dash')}</td>
-                <td>
-                  <Badge tone={l.isSuccess ? 'success' : 'danger'}>{t(l.isSuccess ? 'account.success' : 'account.failure')}</Badge>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      {logs.data !== null && logs.data.length === 0 && <Empty>{t('account.noLogs')}</Empty>}
+      <DataTable headers={[t('account.colTime'), 'IP', t('account.colResult')]} isEmpty={logs.data !== null && logs.data.length === 0} emptyText={t('account.noLogs')}>
+        {(logs.data ?? []).map((l) => (
+          <tr key={`${l.createdAt}-${l.clientIp}-${String(l.isSuccess)}`}>
+            <td>{formatTime(l.createdAt, tag)}</td>
+            <td>{l.clientIp || t('common.dash')}</td>
+            <td>
+              <Badge tone={l.isSuccess ? 'success' : 'danger'}>{t(l.isSuccess ? 'account.success' : 'account.failure')}</Badge>
+            </td>
+          </tr>
+        ))}
+      </DataTable>
     </Card>
   )
 }

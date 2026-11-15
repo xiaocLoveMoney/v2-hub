@@ -3,7 +3,6 @@ import type { components, paths } from './generated/schema'
 
 /** 契约里的数据结构（hub-api.yaml components.schemas）。 */
 export type UserSession = components['schemas']['UserSession']
-export type UserStatus = components['schemas']['UserStatus']
 export type Dashboard = components['schemas']['UserDashboard']
 export type TrafficPoint = components['schemas']['TrafficPoint']
 export type UserNode = components['schemas']['UserNode']
@@ -30,7 +29,6 @@ export type CheckinInfo = components['schemas']['CheckinInfo']
 export type Shop = components['schemas']['Shop']
 export type ShopPlan = components['schemas']['ShopPlan']
 export type ShopTrafficPack = components['schemas']['ShopTrafficPack']
-export type PlanPrice = components['schemas']['PlanPrice']
 export type OrderInput = components['schemas']['OrderInput']
 export type Quote = components['schemas']['Quote']
 export type Order = components['schemas']['Order']
@@ -69,13 +67,8 @@ const SAFE_METHODS = new Set(['GET', 'HEAD'])
 const FALLBACK_MESSAGE = '网络异常，请稍后重试'
 /** 前端自己的错误码：请求没到后端或响应不是统一信封。 */
 export const CODE_NETWORK = 'network'
-export const CODE_UNAUTHENTICATED = 'unauthenticated'
 /** 密码正确但需要两步验证码（docs/03 §5.3）。 */
 export const CODE_TOTP_REQUIRED = 'totp_required'
-/** 账号已停用，只能查看本人信息与退出（docs/03 §5.3）。 */
-export const CODE_ACCOUNT_DISABLED = 'account_disabled'
-/** 该功能未开启（注册关闭、签到 / 工单未开、邮件未配置等；docs/03 §4 错误码）。 */
-export const CODE_FEATURE_DISABLED = 'feature_disabled'
 /** 余额不足以支付本次下单；data.shortfall 是差额（分）（docs/03 §5.13）。 */
 export const CODE_INSUFFICIENT_BALANCE = 'insufficient_balance'
 

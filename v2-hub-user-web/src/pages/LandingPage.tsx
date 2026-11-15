@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react'
+import { useCallback } from 'react'
 import { Link } from 'react-router'
 import { api, type PublicPlan } from '../api/client'
 import { BrandMark } from '../components/BrandMark'
@@ -9,13 +9,11 @@ import { SupportButton } from '../components/SupportButton'
 import { useRemote } from '../hooks/use-remote'
 import { useI18n } from '../i18n/i18n-context'
 import { ROUTES } from '../menu'
-import { formatMoney } from '../money'
-import { useCurrency, useSite } from '../site/site-context'
-import { durationLabel, planFeatureLines } from './shop/labels'
+import { REGISTER_MODE_CLOSED, useCurrency, useSite } from '../site/site-context'
+import { PriceCard } from './shop/PriceCard'
 
 /** 顶栏品牌位的图标尺寸（像素）。 */
 const BRAND_MARK_SIZE = 26
-const REGISTER_CLOSED = 'closed'
 
 interface PublicPlanCardProps {
   plan: PublicPlan
@@ -26,37 +24,17 @@ interface PublicPlanCardProps {
 
 /** 落地页的套餐卡：与商店价格卡同一外观，但只有公开信息，购买引导去注册或登录。 */
 function PublicPlanCard({ plan, currency, buyTo }: PublicPlanCardProps) {
-  const { t, tag } = useI18n()
-  const [picked, setPicked] = useState<number | null>(null)
-  const price = plan.prices.find((p) => p.id === picked) ?? plan.prices[0]
-  if (price === undefined) {
-    return null
-  }
+  const { t } = useI18n()
   return (
-    <section className="hub-price-card">
-      <header className="hub-price-head">
-        <h4>{plan.name}</h4>
-      </header>
-      <div className="hub-price-amount">{formatMoney(price.price, currency, tag)}</div>
-      <div className="hub-price-period">/ {durationLabel(t, price.durationDays)}</div>
-      {plan.prices.length > 1 && (
-        <div className="hub-seg" role="radiogroup" aria-label={t('shop.durationOf', { name: plan.name })}>
-          {plan.prices.map((p) => (
-            <button key={p.id} type="button" role="radio" aria-checked={p.id === price.id} className={`hub-seg-item${p.id === price.id ? ' is-active' : ''}`} onClick={() => setPicked(p.id)}>
-              {durationLabel(t, p.durationDays)}
-            </button>
-          ))}
-        </div>
+    <PriceCard
+      plan={plan}
+      currency={currency}
+      renderFooter={() => (
+        <Link className="hub-btn hub-btn-primary hub-btn-block" to={buyTo}>
+          {t('landing.buy')}
+        </Link>
       )}
-      <ul className="hub-price-features">
-        {planFeatureLines(t, plan).map((line) => (
-          <li key={line}>{line}</li>
-        ))}
-      </ul>
-      <Link className="hub-btn hub-btn-primary hub-btn-block" to={buyTo}>
-        {t('landing.buy')}
-      </Link>
-    </section>
+    />
   )
 }
 
@@ -70,7 +48,7 @@ export function LandingPage() {
   const { t } = useI18n()
   const loadPlans = useCallback((signal: AbortSignal) => api.GET('/api/user/site/plans', { signal }), [])
   const plans = useRemote<PublicPlan[]>(loadPlans)
-  const canRegister = site.registerMode !== REGISTER_CLOSED
+  const canRegister = site.registerMode !== REGISTER_MODE_CLOSED
   const headline = site.landing?.headline === undefined || site.landing.headline === '' ? site.siteName : site.landing.headline
   const intro = site.landing?.intro ?? ''
   const items = plans.data ?? []

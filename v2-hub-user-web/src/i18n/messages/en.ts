@@ -478,7 +478,6 @@ export const en: Record<MessageKey, string> = {
   'chain.createTitleClient': 'Add a client-side rule',
   'chain.editTitle': 'Edit rule',
   'chain.pickEntries': 'Choose entry nodes',
-  'chain.entriesSelected': '{n} selected',
   'chain.entriesHintServer': 'All traffic you send to these nodes will leave from the exit instead. Up to {max}.',
   'chain.entriesHintClient': 'Your client connects to these nodes first, then through them to the exit. Up to {max}.',
   'chain.optNoCore': 'not supported on this server',

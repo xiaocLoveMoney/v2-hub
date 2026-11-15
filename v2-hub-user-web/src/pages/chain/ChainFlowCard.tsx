@@ -5,9 +5,8 @@ import { Card, Empty } from '../../components/ui'
 import { useRemote } from '../../hooks/use-remote'
 import { useI18n } from '../../i18n/i18n-context'
 import { buildChainFlow, contentHeight, curvePath, FLOW_SIZE, rowTop, truncateByWidth, type FlowLink } from './chain-flow'
-import { EXIT_KIND_KEYS } from './labels'
+import { EXIT_KIND_KEYS, KIND_SERVER } from './labels'
 
-const KIND_SERVER: ChainKind = 'server'
 const ICON_SIZE = 18
 const ICON_BOX = 32
 const ICON_INSET = 13

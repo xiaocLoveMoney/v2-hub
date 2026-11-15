@@ -3,10 +3,13 @@ import type { SiteInfo } from '../api/client'
 import { BRAND } from '../app-config'
 import { DEFAULT_CURRENCY } from '../money'
 
+/** 注册方式“关闭”（docs/03 §5.8）。 */
+export const REGISTER_MODE_CLOSED: SiteInfo['registerMode'] = 'closed'
+
 /** 站点信息取不到时的兜底：按全部关闭处理，不显示用不了的入口（docs/06 §5 M4 的做法）。 */
 export const DEFAULT_SITE: SiteInfo = {
   siteName: BRAND,
-  registerMode: 'closed',
+  registerMode: REGISTER_MODE_CLOSED,
   emailVerifyRequired: false,
   mailEnabled: false,
   checkinEnabled: false,

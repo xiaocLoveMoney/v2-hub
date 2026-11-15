@@ -1,7 +1,8 @@
 import { useId, useState } from 'react'
-import { api, csrfHeader, toApiError, type ChainExit, type ChainExitTestMode, type ChainExitTestResult, type ChainNodeOption } from '../../api/client'
-import { Alert, Badge, Button, SelectField } from '../../components/ui'
+import { api, csrfHeader, type ChainExit, type ChainExitTestMode, type ChainExitTestResult, type ChainNodeOption } from '../../api/client'
+import { Alert, Badge, Button, Segmented, SelectField } from '../../components/ui'
 import { useI18n, type MessageKey } from '../../i18n/i18n-context'
+import { request } from '../../hooks/use-remote'
 
 /** 三种测试方式，按从快到慢排（docs/03 §5.21 延迟测试）。 */
 const TEST_MODES: readonly { mode: ChainExitTestMode; labelKey: MessageKey }[] = [
@@ -50,15 +51,12 @@ export function ExitTestPanel({ exit, nodes }: ExitTestPanelProps) {
     setError(null)
     setResult(null)
     try {
-      const res = await api.POST('/api/user/chain/exits/{id}/test', { params: { ...csrfHeader(), path: { id: exit.id } }, body: { nodeId, mode } })
-      if (res.error !== undefined || res.data?.data === undefined) {
-        setError(toApiError(res.error).message)
+      const result = await request(() => api.POST('/api/user/chain/exits/{id}/test', { params: { ...csrfHeader(), path: { id: exit.id } }, body: { nodeId, mode } }))
+      if (result.error !== null) {
+        setError(result.error.message)
         return
       }
-      setResult(res.data.data)
-    } catch (err) {
-      reportError(err)
-      setError(toApiError(err).message)
+      setResult(result.data)
     } finally {
       setIsBusy(false)
     }
@@ -81,19 +79,14 @@ export function ExitTestPanel({ exit, nodes }: ExitTestPanelProps) {
         <span className="hub-field-label" id={modeLabelId}>
           {t('chain.testMode')}
         </span>
-        <div className="hub-seg hub-exit-seg" role="group" aria-labelledby={modeLabelId}>
-          {TEST_MODES.map((m) => (
-            <button
-              key={m.mode}
-              type="button"
-              className={`hub-seg-item${m.mode === mode ? ' is-active' : ''}`}
-              aria-pressed={m.mode === mode}
-              onClick={() => setMode(m.mode)}
-            >
-              {t(m.labelKey)}
-            </button>
-          ))}
-        </div>
+        <Segmented
+          aria="pressed"
+          className="hub-exit-seg"
+          aria-labelledby={modeLabelId}
+          options={TEST_MODES.map((m) => ({ value: m.mode, label: t(m.labelKey) }))}
+          value={mode}
+          onChange={setMode}
+        />
       </div>
       <div className="hub-actions">
         <Button variant="primary" isBusy={isBusy} onClick={() => void run()}>

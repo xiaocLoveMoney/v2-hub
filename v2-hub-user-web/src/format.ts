@@ -25,6 +25,11 @@ export function formatTime(iso: string | null | undefined, tag: string = DEFAULT
   return new Date(iso).toLocaleString(tag, { hour12: false })
 }
 
+/** 图表提示用的短时间：月-日 时:分（24 小时制，按界面语言标签排版）。 */
+export function formatShortTime(ms: number, tag: string = DEFAULT_TAG): string {
+  return new Date(ms).toLocaleString(tag, { hour12: false, month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+}
+
 /** 只要日期部分（按界面语言标签排版）。 */
 export function formatDate(iso: string, tag: string = DEFAULT_TAG): string {
   return new Date(iso).toLocaleDateString(tag)

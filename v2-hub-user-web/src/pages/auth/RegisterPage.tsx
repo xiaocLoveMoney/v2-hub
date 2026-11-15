@@ -1,19 +1,18 @@
 import { useState, type FormEvent } from 'react'
 import { Link, Navigate, useNavigate, useSearchParams } from 'react-router'
-import { api, toApiError, type ApiError, type RegisterInput } from '../../api/client'
+import { api, type ApiError, type RegisterInput } from '../../api/client'
 import { useSession } from '../../auth/session-context'
 import { Alert, Button, Field } from '../../components/ui'
-import { mutate } from '../../hooks/use-remote'
+import { mutate, request } from '../../hooks/use-remote'
 import { useI18n } from '../../i18n/i18n-context'
 import { ROUTES } from '../../menu'
-import { useSite } from '../../site/site-context'
+import { REGISTER_MODE_CLOSED, useSite } from '../../site/site-context'
 import { AuthShell } from './AuthShell'
 import { EmailCodeField } from './EmailCodeField'
 import {
   EMAIL_CODE_LENGTH, INVITE_QUERY_KEY, MAX_CREDENTIAL_LEN, MAX_EMAIL_LEN, MAX_INVITE_CODE_LEN, MAX_USERNAME_LEN, MIN_CREDENTIAL_LEN, USERNAME_PATTERN, isEmailLike,
 } from './fields'
 
-const MODE_CLOSED = 'closed'
 const MODE_INVITE = 'invite'
 
 const sendRegisterCode = (email: string): Promise<ApiError | null> =>
@@ -41,7 +40,7 @@ export function RegisterPage() {
   if (status === 'authenticated') {
     return <Navigate to={ROUTES.DASHBOARD} replace />
   }
-  if (site.registerMode === MODE_CLOSED) {
+  if (site.registerMode === REGISTER_MODE_CLOSED) {
     return (
       <AuthShell lead={t('auth.registerLead')} subtitle={t('auth.registerSubtitle')}>
         <Alert tone="info">{t('auth.registerClosed')}</Alert>
@@ -77,16 +76,13 @@ export function RegisterPage() {
       body.emailCode = emailCode
     }
     try {
-      const res = await api.POST('/api/user/auth/register', { body })
-      if (res.error !== undefined || res.data?.data === undefined) {
-        setError(toApiError(res.error).message)
+      const result = await request(() => api.POST('/api/user/auth/register', { body }))
+      if (result.error !== null) {
+        setError(result.error.message)
         return
       }
-      adopt(res.data.data)
+      adopt(result.data)
       void navigate(ROUTES.DASHBOARD, { replace: true })
-    } catch (err) {
-      reportError(err)
-      setError(toApiError(err).message)
     } finally {
       setIsBusy(false)
     }
