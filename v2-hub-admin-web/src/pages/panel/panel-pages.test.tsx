@@ -21,7 +21,7 @@ const ok = (data: unknown) => Response.json({ code: '0', message: 'ok', data })
 const server = {
   id: 1, name: 'hk-1', providerType: 'xui', baseUrl: 'https://panel.example.com:2053/p', tlsMode: 'verify', certPinSha256: null,
   region: 'HK', remark: '', isDisabled: false, status: 'auth_failed', lastError: '面板拒绝了 API token', lastSeenAt: null,
-  lastSyncedAt: null, panelVersion: '3.11.0', statusSnapshot: null, inboundCount: 1, createdAt: '2026-11-12T00:00:00Z',
+  lastSyncedAt: null, panelVersion: '3.11.0', statusSnapshot: null, inboundCount: 1, createdAt: '2026-11-12T00:00:00Z', reach: null,
 }
 
 interface Recorded {
@@ -154,7 +154,7 @@ describe('服务器位置（Ruling-65）', () => {
   it('节点地区跟随服务器：编辑表单里只读，保存不提交地区', async () => {
     const node = {
       id: 5, inboundId: 10, endpointId: null, serverId: 1, serverName: 'hk-1', protocol: 'vless', address: 'panel.example.com', port: 443,
-      displayName: '香港 01', region: 'HK', tags: [], sortOrder: 0, isEnabled: true, isMissing: false, groupIds: [],
+      displayName: '香港 01', region: 'HK', tags: [], sortOrder: 0, isEnabled: true, isMissing: false, groupIds: [], reach: null,
     }
     const calls = mockServer({
       'GET /api/admin/servers': () => ok([server]),
@@ -428,7 +428,7 @@ describe('NodesPage', () => {
   it('节点目录显示 Host 节点与所属组；新建节点组提交成员', async () => {
     const node = {
       id: 5, inboundId: 10, endpointId: 7, serverId: 1, serverName: 'hk-1', protocol: 'vless', address: 'cdn.example.com', port: 8443,
-      displayName: '香港 CDN', region: 'HK', tags: ['premium'], sortOrder: 0, isEnabled: true, isMissing: false, groupIds: [3],
+      displayName: '香港 CDN', region: 'HK', tags: ['premium'], sortOrder: 0, isEnabled: true, isMissing: false, groupIds: [3], reach: null,
     }
     const calls = mockServer({
       'GET /api/admin/servers': () => ok([server]),

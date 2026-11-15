@@ -1,5 +1,5 @@
 import { PlusOutlined } from '@ant-design/icons'
-import { App, Button, Popconfirm, Space, Table, type TableProps } from 'antd'
+import { App, Button, Popconfirm, Space, Table, Tag, type TableProps } from 'antd'
 import { useState } from 'react'
 import { Link } from 'react-router'
 import { api, csrfHeader, toApiError, type Server } from '../../api/client'
@@ -14,6 +14,29 @@ import { ErrorAlert } from '../../components/ErrorAlert'
 import { PageHeader } from '../../components/PageHeader'
 
 const loadServers = (signal: AbortSignal) => api.GET('/api/admin/servers', { signal })
+/** “大陆连通”列插在“状态”列后面。 */
+const REACH_COLUMN_INDEX = 3
+const EMPTY = '—'
+
+/** 一台服务器上大陆连通检测的概况：有被墙或部分不通的地址就标出个数；否则说明有几个地址测出来是正常的。 */
+function ServerReachCell({ reach }: { reach: Server['reach'] }) {
+  if (reach === null || reach.total === 0) {
+    return <>{EMPTY}</>
+  }
+  if (reach.blocked === 0 && reach.partial === 0) {
+    if (reach.ok === 0) {
+      // 没有一个地址测出正常：还没测、未知或端口不通，细节在节点页
+      return <Tag>暂无结论</Tag>
+    }
+    return <Tag color="green">{reach.ok === reach.total ? '正常' : `正常 ${reach.ok}/${reach.total}`}</Tag>
+  }
+  return (
+    <Space size={4}>
+      {reach.blocked > 0 && <Tag color="red">被墙 {reach.blocked}</Tag>}
+      {reach.partial > 0 && <Tag color="orange">部分不通 {reach.partial}</Tag>}
+    </Space>
+  )
+}
 
 /** 服务器管理（server:read 查看，server:write 接入 / 编辑 / 同步 / 移除）。 */
 export function ServersPage() {
@@ -68,6 +91,11 @@ export function ServersPage() {
     { title: '最近在线', dataIndex: 'lastSeenAt', render: (v: string | null | undefined) => formatTime(v) },
     { title: '最近同步', dataIndex: 'lastSyncedAt', render: (v: string | null | undefined) => formatTime(v) },
   ]
+  // 大陆连通检测开着时接口才带 reach（Ruling-67）；没开就不出这一列
+  const hasReach = (servers.data ?? []).some((s) => s.reach !== null)
+  if (hasReach) {
+    columns.splice(REACH_COLUMN_INDEX, 0, { title: '大陆连通', key: 'reach', render: (_: unknown, s: Server) => <ServerReachCell reach={s.reach} /> })
+  }
   if (canWrite) {
     columns.push({
       title: '操作',

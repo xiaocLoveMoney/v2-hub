@@ -14,6 +14,9 @@ const MAX_INTRO_LEN = 2000
 const MAX_SUPPORT_URL_LEN = 255
 const MAX_SUPPORT_LABEL_LEN = 16
 const INTRO_ROWS = 6
+// 大陆连通检测的间隔范围（分钟），与 hub-api.yaml 的 Settings.reach 一致
+const MIN_REACH_INTERVAL = 10
+const MAX_REACH_INTERVAL = 1440
 /** Telegram 会话 id：数字（群组为负数）或 @频道用户名；与后端校验一致。 */
 const CHAT_ID_PATTERN = /^(-?[0-9]{1,20}|@[A-Za-z][A-Za-z0-9_]{4,31})?$/
 const HTTPS_PREFIX = 'https://'
@@ -42,8 +45,14 @@ const supportURLRules = [
   },
 ]
 
-/** 掉线告警、Telegram、日报、落地页、客服入口与服务器路由的设置卡片；放在系统设置的同一张表单里整体保存。 */
-export function OpsSettingsCards({ isTelegramEnabled }: { isTelegramEnabled: boolean }) {
+interface OpsSettingsCardsProps {
+  isTelegramEnabled: boolean
+  /** 环境变量里配了探测服务的令牌（决定大陆连通检测的每小时额度）。 */
+  hasReachToken: boolean
+}
+
+/** 掉线告警、Telegram、日报、落地页、客服入口、服务器路由与大陆连通检测的设置卡片；放在系统设置的同一张表单里整体保存。 */
+export function OpsSettingsCards({ isTelegramEnabled, hasReachToken }: OpsSettingsCardsProps) {
   return (
     <>
       <Card title="掉线告警与日报" className="settings-card">
@@ -118,6 +127,38 @@ export function OpsSettingsCards({ isTelegramEnabled }: { isTelegramEnabled: boo
           extra="在每台已接入服务器的 Xray 模板里加一条拦截规则 hub-block：广告、360、百度地图上报、临时邮箱、迅雷、部分网站与支付 / 游戏点卡站、MetaTrader。开或关之后每台服务器会重启一次 Xray（断开现有连接）"
           valuePropName="checked"
         >
+          <Switch />
+        </Form.Item>
+      </Card>
+
+      <Card
+        title={
+          <Space>
+            大陆连通检测
+            {hasReachToken ? <Tag color="green">已配置令牌</Tag> : <Tag>未配置令牌</Tag>}
+          </Space>
+        }
+        className="settings-card"
+      >
+        {/* docs/03 §5.20 大陆连通检测，Ruling-67 */}
+        <Alert
+          type="warning"
+          showIcon
+          className="page-alert"
+          title="开启后，节点的地址与端口会发给第三方探测服务 Globalping，由它在中国大陆与境外的探测点去连；平台自己不连节点"
+        />
+        <Form.Item name={['reach', 'enabled']} label="开启检测" extra="看出“面板在线，但大陆连不上”的节点；只测状态为在线的服务器" valuePropName="checked">
+          <Switch />
+        </Form.Item>
+        <Form.Item
+          name={['reach', 'intervalMinutes']}
+          label="同一地址两次检测的间隔（分钟）"
+          extra={`每小时免费额度：${hasReachToken ? '500' : '250'} 次探测，每个地址一次用 5 次；地址多时周期会自动拉长。令牌只能经环境变量 HUB_GLOBALPING_TOKEN 配置`}
+          rules={required}
+        >
+          <InputNumber min={MIN_REACH_INTERVAL} max={MAX_REACH_INTERVAL} precision={0} className="full-width" />
+        </Form.Item>
+        <Form.Item name={['reach', 'notify']} label="被墙与恢复时发通知" extra="连续 2 轮判为被墙才告警；渠道同掉线告警（邮件与 Telegram）" valuePropName="checked">
           <Switch />
         </Form.Item>
       </Card>

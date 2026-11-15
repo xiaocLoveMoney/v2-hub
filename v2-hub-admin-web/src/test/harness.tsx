@@ -40,6 +40,8 @@ export function renderWith(permissions: string[], node: ReactNode) {
 export interface Recorded {
   method: string
   path: string
+  /** 查询串（含开头的 ?，没有则为空串）。 */
+  query: string
   csrf: string | null
   body: unknown
 }
@@ -53,9 +55,10 @@ export function mockServer(handlers: Record<string, () => Response>): Recorded[]
   vi.stubGlobal(
     'fetch',
     vi.fn(async (req: Request) => {
-      const path = new URL(req.url).pathname
+      const url = new URL(req.url)
+      const path = url.pathname
       const text = await req.clone().text()
-      calls.push({ method: req.method, path, csrf: req.headers.get('X-CSRF-Token'), body: text === '' ? null : JSON.parse(text) })
+      calls.push({ method: req.method, path, query: url.search, csrf: req.headers.get('X-CSRF-Token'), body: text === '' ? null : JSON.parse(text) })
       const handler = handlers[`${req.method} ${path}`]
       return handler === undefined ? Response.json({ code: 'not_found', message: '' }, { status: 404 }) : handler()
     }),

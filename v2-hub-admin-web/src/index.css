@@ -10,6 +10,7 @@
   --hub-heading: #34395e;
   --hub-body: #6c757d;
   --hub-divider: #f9f9f9;
+  --hub-chart-grid: #e3eaef;
   --hub-surface: #fff;
   --hub-code-bg: #f6f8fa;
   --hub-scrollbar: rgb(0 0 0 / 15%);
@@ -707,3 +708,159 @@ body {
     animation: none !important; /* 悬停规则选择器更具体，统一在这里关掉 */
   }
 }
+
+/* 总览分析分区（docs/05 总览分析，Ruling-66） */
+
+.dashboard-tabs > .ant-tabs-nav {
+  margin-bottom: 24px;
+}
+
+.analytics-section {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.analytics-section .ant-card {
+  border: none;
+  box-shadow: var(--hub-card-shadow);
+}
+
+.analytics-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.analytics-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 24px;
+  align-items: start;
+}
+
+.figure-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 24px;
+}
+
+.figure {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 16px 20px;
+  background: var(--hub-surface);
+  border-radius: var(--hub-radius);
+  box-shadow: var(--hub-card-shadow);
+}
+
+.figure-label,
+.figure-hint {
+  font-size: 13px;
+  color: var(--hub-body);
+}
+
+.figure-value {
+  font-size: 24px;
+  font-weight: 700;
+  line-height: 1.3;
+  color: var(--hub-heading);
+}
+
+.chart-host {
+  width: 100%;
+}
+
+.chart-empty {
+  padding: 32px 16px;
+  color: var(--hub-body);
+  text-align: center;
+}
+
+.bar-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.bar-list li {
+  display: grid;
+  grid-template-columns: minmax(72px, 28%) minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+}
+
+.bar-list-label {
+  overflow: hidden;
+  color: var(--hub-heading);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bar-list-track {
+  height: 8px;
+  background: var(--hub-page-bg);
+  border-radius: 4px;
+}
+
+.bar-list-fill {
+  display: block;
+  width: var(--bar-width);
+  height: 100%;
+  background: var(--hub-primary);
+  border-radius: 4px;
+}
+
+.bar-list-value {
+  min-width: 48px;
+  font-variant-numeric: tabular-nums;
+  color: var(--hub-body);
+  text-align: right;
+}
+
+.backlog-list {
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.backlog-list li {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 0;
+  border-top: 1px solid var(--hub-divider);
+}
+
+@media (width <= 992px) {
+  .analytics-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* 大陆连通检测（Ruling-67） */
+
+.reach-button {
+  height: auto;
+  padding: 0;
+}
+
+.reach-hint {
+  margin: 12px 0;
+}
+
+.reach-actions {
+  margin-top: 16px;
+}
+
+.reach-counts {
+  margin-bottom: 16px;
+}
+
