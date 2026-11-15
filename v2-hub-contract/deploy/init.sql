@@ -297,6 +297,18 @@ CREATE TABLE user_traffic_hourly (
     down    BIGINT      NOT NULL DEFAULT 0,
     PRIMARY KEY (user_id, hour)
 );
+-- 总览分析按时间范围扫这张表（docs/03 §5.20 总览分析，Ruling-66）
+CREATE INDEX idx_user_traffic_hourly_hour ON user_traffic_hourly (hour);
+
+-- 按服务器的小时流量（Ruling-66）：用量任务算出每个 client 的增量时顺带累加；只有上线之后的数据。
+CREATE TABLE server_traffic_hourly (
+    server_id BIGINT      NOT NULL REFERENCES server (id) ON DELETE CASCADE,
+    hour      TIMESTAMPTZ NOT NULL,
+    up        BIGINT      NOT NULL DEFAULT 0,
+    down      BIGINT      NOT NULL DEFAULT 0,
+    PRIMARY KEY (server_id, hour)
+);
+CREATE INDEX idx_server_traffic_hourly_hour ON server_traffic_hourly (hour);
 
 -- M3：终端用户会话、登录记录、订阅记录（docs/03 §5.3–§5.5）-------------------------
 
@@ -794,6 +806,34 @@ CREATE TABLE chain_apply (
     backup_enc       BYTEA,
     updated_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT ck_chain_apply_status CHECK (status IN ('pending', 'applied', 'failed'))
+);
+
+-- 大陆连通检测（docs/03 §5.20，Ruling-67）：每个去重后的检测目标（地址，端口，传输）一行，记最近一次结论。
+-- 目标由后台任务按节点目录同步，不再对应任何节点时删除；probes 是各探测点的结果（国家、城市、网络、是否通、延迟）。
+-- blocked_streak 是连续判为 blocked 的轮数，达到 2 才告警；alert_sent_at 非空 = 这次被墙已发过告警。
+CREATE TABLE node_reach (
+    id             BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    address        VARCHAR(255) NOT NULL,
+    port           INTEGER      NOT NULL,
+    transport      VARCHAR(4)   NOT NULL,                   -- tcp：测端口；udp：只测 ICMP
+    verdict        VARCHAR(16)  NOT NULL DEFAULT 'pending', -- pending / ok / partial / blocked / port_down / unknown
+    cn_ok          INTEGER      NOT NULL DEFAULT 0,
+    cn_total       INTEGER      NOT NULL DEFAULT 0,
+    control_ok     INTEGER      NOT NULL DEFAULT 0,
+    control_total  INTEGER      NOT NULL DEFAULT 0,
+    ip_reachable   BOOLEAN,                                 -- tcp 目标 blocked 时补测的大陆 ICMP 是否还通；其余为空
+    probes         JSONB        NOT NULL DEFAULT '[]',
+    last_error     VARCHAR(255) NOT NULL DEFAULT '',
+    blocked_streak INTEGER      NOT NULL DEFAULT 0,
+    blocked_since  TIMESTAMPTZ,
+    alert_sent_at  TIMESTAMPTZ,
+    checked_at     TIMESTAMPTZ,
+    created_at     TIMESTAMPTZ  NOT NULL DEFAULT now(),
+    updated_at     TIMESTAMPTZ  NOT NULL DEFAULT now(),
+    CONSTRAINT uk_node_reach_target UNIQUE (address, port, transport),
+    CONSTRAINT ck_node_reach_transport CHECK (transport IN ('tcp', 'udp')),
+    CONSTRAINT ck_node_reach_verdict CHECK (verdict IN ('pending', 'ok', 'partial', 'blocked', 'port_down', 'unknown')),
+    CONSTRAINT ck_node_reach_port CHECK (port BETWEEN 1 AND 65535)
 );
 
 -- 种子数据 ---------------------------------------------------------------------
