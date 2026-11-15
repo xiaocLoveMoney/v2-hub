@@ -7,11 +7,12 @@ import { useSession } from '../../auth/session-context'
 import { ErrorAlert } from '../../components/ErrorAlert'
 import { PagedTable } from '../../components/PagedTable'
 import { useCurrency } from '../../hooks/use-currency'
-import { useOpenGeneration } from '../../hooks/use-open-generation'
 import { useRowAction, useSubmit } from '../../hooks/use-submit'
 import { PERMISSIONS } from '../../menu'
 import { MAX_MONEY_AMOUNT, MONEY_PRECISION, amountToCents, formatMoney } from '../../money'
 import { formatTime } from '../system/format'
+import { PageHeader } from '../../components/PageHeader'
+import { FormModal } from '../../components/FormModal'
 
 const MAX_BATCH_COUNT = 500
 const MAX_BATCH_LEN = 64
@@ -112,14 +113,14 @@ export function TopupCodesPage() {
 
   return (
     <>
-      <Space className="page-header">
-        <Typography.Title level={3}>充值码</Typography.Title>
-        {canWrite && (
+      <PageHeader
+        title="充值码"
+        action={canWrite && (
           <Button type="primary" icon={<PlusOutlined />} onClick={() => setIsCreating(true)}>
             生成充值码
           </Button>
         )}
-      </Space>
+      />
       <PagedTable<TopupCode>
         load={load}
         columns={columns}
@@ -160,11 +161,10 @@ interface BatchModalProps {
 }
 
 function BatchModal({ isOpen, onClose, onGenerated }: BatchModalProps) {
-  const generation = useOpenGeneration(isOpen)
   return (
-    <Modal title="生成充值码" open={isOpen} onCancel={onClose} footer={null} destroyOnHidden>
-      <BatchFormBody key={generation} onGenerated={onGenerated} />
-    </Modal>
+    <FormModal title="生成充值码" isOpen={isOpen} onClose={onClose}>
+      {(generation) => <BatchFormBody key={generation} onGenerated={onGenerated} />}
+    </FormModal>
   )
 }
 

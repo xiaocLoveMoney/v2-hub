@@ -1,13 +1,15 @@
 import { PlusOutlined } from '@ant-design/icons'
-import { Alert, App, Button, Form, Input, Modal, Popconfirm, Select, Space, Switch, Table, Tag, Typography, type TableProps } from 'antd'
+import { App, Button, Form, Input, Modal, Popconfirm, Select, Space, Switch, Tag, Typography, type TableProps } from 'antd'
 import { useCallback, useState } from 'react'
-import { api, csrfHeader, type Admin, type ApiError, type PageData, type Role } from '../../api/client'
+import { api, csrfHeader, type Admin, type ApiError, type Role } from '../../api/client'
 import { useSession } from '../../auth/session-context'
 import { mutate, useRemote } from '../../hooks/use-remote'
 import { PERMISSIONS } from '../../menu'
-import { TABLE_SCROLL, formatTime } from './format'
+import { formatTime } from './format'
+import { ErrorAlert } from '../../components/ErrorAlert'
+import { PagedTable } from '../../components/PagedTable'
+import { PageHeader } from '../../components/PageHeader'
 
-const DEFAULT_PAGE_SIZE = 20
 const MIN_CREDENTIAL_LEN = 12
 const MAX_CREDENTIAL_LEN = 128
 const USERNAME_PATTERN = /^[a-zA-Z0-9_.-]{3,64}$/
@@ -40,18 +42,18 @@ export function AdminsPage() {
   const { can, session } = useSession()
   const { message } = App.useApp()
   const canWrite = can(PERMISSIONS.ADMIN_WRITE)
-  const [page, setPage] = useState(1)
-  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE)
   const [creating, setCreating] = useState(false)
   const [editing, setEditing] = useState<Admin | null>(null)
   const [resetting, setResetting] = useState<Admin | null>(null)
   const [formError, setFormError] = useState<ApiError | null>(null)
 
+  const [refreshKey, setRefreshKey] = useState(0)
+  const reload = () => setRefreshKey((k) => k + 1)
   const loadAdmins = useCallback(
-    (signal: AbortSignal) => api.GET('/api/admin/admins', { params: { query: { page, pageSize } }, signal }),
-    [page, pageSize],
+    (page: number, pageSize: number, signal: AbortSignal) =>
+      api.GET('/api/admin/admins', { params: { query: { page, pageSize } }, signal }),
+    [],
   )
-  const admins = useRemote<PageData<Admin>>(loadAdmins)
   const roles = useRemote<Role[]>(loadRoles)
   const roleOptions = (roles.data ?? []).map((r) => ({ value: r.code, label: `${r.name}（${r.code}）` }))
 
@@ -69,7 +71,7 @@ export function AdminsPage() {
     }
     void message.success(okText)
     closeModals()
-    admins.reload()
+    reload()
   }
 
   const handleCreate = async (values: CreateForm) => {
@@ -111,7 +113,7 @@ export function AdminsPage() {
       return
     }
     void message.success('已清除两步验证')
-    admins.reload()
+    reload()
   }
 
   const columns: TableProps<Admin>['columns'] = [
@@ -158,34 +160,22 @@ export function AdminsPage() {
 
   return (
     <>
-      <Space className="page-header">
-        <Typography.Title level={3}>管理员</Typography.Title>
-        {canWrite && (
+      <PageHeader
+        title="管理员"
+        action={canWrite && (
           <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreating(true)}>
             新建管理员
           </Button>
         )}
-      </Space>
-      {admins.error !== null && <Alert type="error" title={admins.error.message} showIcon className="page-alert" />}
-      <Table<Admin>
-        rowKey="id"
-        scroll={TABLE_SCROLL}
-        loading={admins.isLoading}
+      />
+      <PagedTable<Admin>
+        load={loadAdmins}
         columns={columns}
-        dataSource={admins.data?.items ?? []}
-        pagination={{
-          current: page,
-          pageSize,
-          total: admins.data?.total ?? 0,
-          onChange: (p, size) => {
-            setPage(p)
-            setPageSize(size)
-          },
-        }}
+        refreshKey={refreshKey}
       />
 
       <Modal title="新建管理员" open={creating} onCancel={closeModals} footer={null} destroyOnHidden>
-        {formError !== null && <Alert type="error" title={formError.message} showIcon className="page-alert" />}
+        <ErrorAlert error={formError} />
         <Form<CreateForm> layout="vertical" onFinish={handleCreate} initialValues={{ roles: [] }}>
           <Form.Item name="username" label="用户名" rules={[{ required: true, pattern: USERNAME_PATTERN, message: '3–64 位字母、数字或 _ . -' }]}>
             <Input autoComplete="off" />
@@ -203,7 +193,7 @@ export function AdminsPage() {
       </Modal>
 
       <Modal title={`编辑：${editing?.username ?? ''}`} open={editing !== null} onCancel={closeModals} footer={null} destroyOnHidden>
-        {formError !== null && <Alert type="error" title={formError.message} showIcon className="page-alert" />}
+        <ErrorAlert error={formError} />
         <Form<EditForm> layout="vertical" onFinish={handleEdit} initialValues={{ roles: editing?.roles ?? [], isDisabled: editing?.isDisabled ?? false }}>
           <Form.Item name="roles" label="角色">
             <Select mode="multiple" optionFilterProp="label" options={roleOptions} />
@@ -218,7 +208,7 @@ export function AdminsPage() {
       </Modal>
 
       <Modal title={`重置密码：${resetting?.username ?? ''}`} open={resetting !== null} onCancel={closeModals} footer={null} destroyOnHidden>
-        {formError !== null && <Alert type="error" title={formError.message} showIcon className="page-alert" />}
+        <ErrorAlert error={formError} />
         <Form<ResetForm> layout="vertical" onFinish={handleReset}>
           <Form.Item name="credential" label="新密码" rules={credentialRules}>
             <Input.Password autoComplete="new-password" />

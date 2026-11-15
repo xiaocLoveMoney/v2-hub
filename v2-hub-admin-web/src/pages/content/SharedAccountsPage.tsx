@@ -1,25 +1,23 @@
 import { PlusOutlined } from '@ant-design/icons'
-import { App, Button, Form, Input, InputNumber, Modal, Popconfirm, Select, Space, Switch, Table, Tag, Typography, type TableProps } from 'antd'
+import { App, Button, Form, Input, InputNumber, Popconfirm, Select, Space, Switch, Table, Tag, Typography, type TableProps } from 'antd'
 import { useState } from 'react'
 import { api, csrfHeader, toApiError, type Plan, type SharedAccount, type SharedAccountInput } from '../../api/client'
 import { useSession } from '../../auth/session-context'
 import { ErrorAlert } from '../../components/ErrorAlert'
-import { useOpenGeneration } from '../../hooks/use-open-generation'
 import { useRemote } from '../../hooks/use-remote'
 import { useRowAction, useSubmit } from '../../hooks/use-submit'
 import { PERMISSIONS } from '../../menu'
 import { TABLE_SCROLL } from '../system/format'
+import { MAX_NAME_LEN, MAX_SORT_ORDER } from '../form-limits'
+import { PageHeader } from '../../components/PageHeader'
+import { FormModal } from '../../components/FormModal'
 
-const MAX_NAME_LEN = 64
 const MAX_CATEGORY_LEN = 32
 const MAX_TEXT_LEN = 255
-const MAX_SORT_ORDER = 100000
 
 const loadAccounts = (signal: AbortSignal) => api.GET('/api/admin/shared-accounts', { signal })
 const loadPlans = (signal: AbortSignal) => api.GET('/api/admin/plans', { signal })
 const NO_PLANS: Plan[] = []
-// 没有 plan:read 时不请求套餐列表，“限定套餐”只显示 ID
-const loadNoPlans = () => Promise.resolve({ data: { data: NO_PLANS } })
 
 function formOf(a: SharedAccount | null): SharedAccountInput {
   if (a === null) {
@@ -36,7 +34,8 @@ export function SharedAccountsPage() {
   const { can } = useSession()
   const canWrite = can(PERMISSIONS.CONTENT_WRITE)
   const accounts = useRemote<SharedAccount[]>(loadAccounts)
-  const plans = useRemote<Plan[]>(can(PERMISSIONS.PLAN_READ) ? loadPlans : loadNoPlans)
+  // 没有 plan:read 时不请求套餐列表，“限定套餐”只显示 ID
+  const plans = useRemote<Plan[]>(loadPlans, can(PERMISSIONS.PLAN_READ))
   const act = useRowAction(accounts.reload)
   const [editing, setEditing] = useState<SharedAccount | null>(null)
   const [isOpen, setIsOpen] = useState(false)
@@ -48,14 +47,14 @@ export function SharedAccountsPage() {
 
   return (
     <>
-      <Space className="page-header">
-        <Typography.Title level={3}>共享账号</Typography.Title>
-        {canWrite && (
+      <PageHeader
+        title="共享账号"
+        action={canWrite && (
           <Button type="primary" icon={<PlusOutlined />} onClick={() => open(null)}>
             新建共享账号
           </Button>
         )}
-      </Space>
+      />
       <ErrorAlert error={accounts.error} />
       <AccountTable
         accounts={accounts.data ?? []}
@@ -177,11 +176,10 @@ interface AccountModalProps {
 }
 
 function AccountModal({ account, isOpen, plans, onClose, onSaved }: AccountModalProps) {
-  const generation = useOpenGeneration(isOpen)
   return (
-    <Modal title={account === null ? '新建共享账号' : `编辑共享账号：${account.name}`} open={isOpen} onCancel={onClose} footer={null} destroyOnHidden>
-      <AccountForm key={generation} account={account} plans={plans} onSaved={onSaved} />
-    </Modal>
+    <FormModal title={account === null ? '新建共享账号' : `编辑共享账号：${account.name}`} isOpen={isOpen} onClose={onClose}>
+      {(generation) => <AccountForm key={generation} account={account} plans={plans} onSaved={onSaved} />}
+    </FormModal>
   )
 }
 

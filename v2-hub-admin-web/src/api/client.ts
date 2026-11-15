@@ -12,19 +12,15 @@ export type Inbound = components['schemas']['Inbound']
 export type Endpoint = components['schemas']['Endpoint']
 export type PanelNode = components['schemas']['Node']
 export type NodeGroup = components['schemas']['NodeGroup']
-export type SyncResult = components['schemas']['SyncResult']
-export type InboundTemplate = components['schemas']['InboundTemplate']
 export type TlsMode = components['schemas']['TlsMode']
 export type ProviderType = components['schemas']['ServerConnInput']['providerType']
 export type Plan = components['schemas']['Plan']
 export type PlanInput = components['schemas']['PlanInput']
 export type EndUser = components['schemas']['User']
-export type UserQuotaInput = components['schemas']['UserQuotaInput']
 export type UserStatus = components['schemas']['UserStatus']
 export type TrafficReset = components['schemas']['TrafficReset']
 export type Provision = components['schemas']['Provision']
 export type Settings = components['schemas']['Settings']
-export type SettingsInput = components['schemas']['SettingsInput']
 export type RegisterMode = components['schemas']['RegisterMode']
 export type MailOutboxItem = components['schemas']['MailOutboxItem']
 export type MailStatus = components['schemas']['MailStatus']
@@ -74,7 +70,6 @@ export interface ApiError {
 const HEADER_CSRF = 'X-CSRF-Token'
 const SAFE_METHODS = new Set(['GET', 'HEAD'])
 const FALLBACK_MESSAGE = '网络异常，请稍后重试'
-export const CODE_UNAUTHENTICATED = 'unauthenticated'
 /** 密码正确但需要两步验证码（docs/03 §4.3）。 */
 export const CODE_TOTP_REQUIRED = 'totp_required'
 
@@ -138,6 +133,5 @@ export type AdminChainExitTestResult = components['schemas']['AdminChainExitTest
 export type ServerWebCert = components['schemas']['ServerWebCert']
 export type RealityScanResult = components['schemas']['RealityScanResult']
 export type AdminChainExitInput = components['schemas']['AdminChainExitInput']
-export type AdminChainExitUpdateInput = components['schemas']['AdminChainExitUpdateInput']
 export type ChainExitOwner = components['schemas']['ChainExitOwner']
 export type ChainExitAssignMode = components['schemas']['ChainExitAssignMode']

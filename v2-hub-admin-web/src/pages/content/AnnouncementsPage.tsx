@@ -1,17 +1,18 @@
 import { PlusOutlined } from '@ant-design/icons'
-import { App, Button, Form, Input, Modal, Popconfirm, Space, Switch, Table, Tag, Typography, type TableProps } from 'antd'
+import { App, Button, Form, Input, Popconfirm, Space, Switch, Tag, type TableProps } from 'antd'
 import { useCallback, useState } from 'react'
-import { api, csrfHeader, type Announcement, type AnnouncementInput, type PageData } from '../../api/client'
+import { api, csrfHeader, type Announcement, type AnnouncementInput } from '../../api/client'
 import { useSession } from '../../auth/session-context'
 import { ErrorAlert } from '../../components/ErrorAlert'
-import { useOpenGeneration } from '../../hooks/use-open-generation'
-import { mutate, useRemote } from '../../hooks/use-remote'
+import { PagedTable } from '../../components/PagedTable'
+import { mutate } from '../../hooks/use-remote'
 import { useRowAction, useSubmit } from '../../hooks/use-submit'
 import { PERMISSIONS } from '../../menu'
-import { TABLE_SCROLL, formatTime } from '../system/format'
+import { formatTime } from '../system/format'
 import { MARKDOWN_HINT, MAX_MARKDOWN_LEN } from './markdown'
+import { PageHeader } from '../../components/PageHeader'
+import { FormModal } from '../../components/FormModal'
 
-const DEFAULT_PAGE_SIZE = 20
 const MAX_TITLE_LEN = 100
 const CONTENT_ROWS = 14
 const MODAL_WIDTH = 720
@@ -28,16 +29,16 @@ export function AnnouncementsPage() {
   const { can } = useSession()
   const { message } = App.useApp()
   const canWrite = can(PERMISSIONS.CONTENT_WRITE)
-  const [page, setPage] = useState(1)
-  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE)
   const [editing, setEditing] = useState<Announcement | null>(null)
   const [isOpen, setIsOpen] = useState(false)
+  const [refreshKey, setRefreshKey] = useState(0)
+  const reload = () => setRefreshKey((k) => k + 1)
   const loadAnnouncements = useCallback(
-    (signal: AbortSignal) => api.GET('/api/admin/announcements', { params: { query: { page, pageSize } }, signal }),
-    [page, pageSize],
+    (page: number, pageSize: number, signal: AbortSignal) =>
+      api.GET('/api/admin/announcements', { params: { query: { page, pageSize } }, signal }),
+    [],
   )
-  const announcements = useRemote<PageData<Announcement>>(loadAnnouncements)
-  const act = useRowAction(announcements.reload)
+  const act = useRowAction(reload)
 
   const open = (a: Announcement | null) => {
     setEditing(a)
@@ -56,7 +57,7 @@ export function AnnouncementsPage() {
       return
     }
     void message.success(`已入发件箱 ${queued} 封`)
-    announcements.reload()
+    reload()
   }
 
   const columns: TableProps<Announcement>['columns'] = [
@@ -112,30 +113,18 @@ export function AnnouncementsPage() {
 
   return (
     <>
-      <Space className="page-header">
-        <Typography.Title level={3}>公告</Typography.Title>
-        {canWrite && (
+      <PageHeader
+        title="公告"
+        action={canWrite && (
           <Button type="primary" icon={<PlusOutlined />} onClick={() => open(null)}>
             新建公告
           </Button>
         )}
-      </Space>
-      <ErrorAlert error={announcements.error} />
-      <Table<Announcement>
-        rowKey="id"
-        scroll={TABLE_SCROLL}
-        loading={announcements.isLoading}
+      />
+      <PagedTable<Announcement>
+        load={loadAnnouncements}
         columns={columns}
-        dataSource={announcements.data?.items ?? []}
-        pagination={{
-          current: page,
-          pageSize,
-          total: announcements.data?.total ?? 0,
-          onChange: (p, size) => {
-            setPage(p)
-            setPageSize(size)
-          },
-        }}
+        refreshKey={refreshKey}
       />
       <AnnouncementModal
         announcement={editing}
@@ -143,7 +132,7 @@ export function AnnouncementsPage() {
         onClose={() => setIsOpen(false)}
         onSaved={() => {
           setIsOpen(false)
-          announcements.reload()
+          reload()
         }}
       />
     </>
@@ -159,11 +148,10 @@ interface AnnouncementModalProps {
 }
 
 function AnnouncementModal({ announcement, isOpen, onClose, onSaved }: AnnouncementModalProps) {
-  const generation = useOpenGeneration(isOpen)
   return (
-    <Modal title={announcement === null ? '新建公告' : '编辑公告'} open={isOpen} onCancel={onClose} footer={null} destroyOnHidden width={MODAL_WIDTH}>
-      <AnnouncementForm key={generation} announcement={announcement} onSaved={onSaved} />
-    </Modal>
+    <FormModal title={announcement === null ? '新建公告' : '编辑公告'} isOpen={isOpen} onClose={onClose} width={MODAL_WIDTH}>
+      {(generation) => <AnnouncementForm key={generation} announcement={announcement} onSaved={onSaved} />}
+    </FormModal>
   )
 }
 

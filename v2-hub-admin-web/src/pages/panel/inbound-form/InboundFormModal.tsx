@@ -1,7 +1,6 @@
-import { Alert, App, Button, Form, Input, InputNumber, Modal, Select, Space, Spin, Switch, Tabs } from 'antd'
+import { Alert, App, Button, Form, Input, InputNumber, Select, Space, Spin, Switch, Tabs } from 'antd'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { api, csrfHeader, toApiError, type ApiError, type Inbound } from '../../../api/client'
-import { useOpenGeneration } from '../../../hooks/use-open-generation'
 import { mutate } from '../../../hooks/use-remote'
 import type { Binder } from './fields'
 import { PROTOCOLS, fromPanelConfig, isKnownProtocol, newDraft, setAt, toConfig, withProtocol, wireguardKeypair, type InboundDraft, type JsonObject, type Path } from './model'
@@ -9,9 +8,11 @@ import { ProtocolTab, type KeyGen } from './protocol-tab'
 import type { RealityScanApi } from './reality-scan'
 import { SecurityTab, SniffingTab, type WebCertFetch } from './security-tab'
 import { TransportTab } from './transport-tab'
+import { ErrorAlert } from '../../../components/ErrorAlert'
+import { MAX_PORT } from '../../form-limits'
+import { FormModal } from '../../../components/FormModal'
 
 const MIN_PORT = 1
-const MAX_PORT = 65535
 const JSON_INDENT = 2
 const LABEL_COL = { flex: '150px' }
 const MODAL_WIDTH = 800
@@ -32,12 +33,11 @@ interface InboundFormModalProps {
  * 每次打开都重建表单（useOpenGeneration），上一次的草稿不会带到下一次。
  */
 export function InboundFormModal({ serverId, serverDomain, inbound, isOpen, onClose, onSaved }: InboundFormModalProps) {
-  const generation = useOpenGeneration(isOpen)
   const title = inbound === null ? '新建入站' : `编辑入站：${inbound.remark}`
   return (
-    <Modal title={title} open={isOpen} onCancel={onClose} footer={null} destroyOnHidden width={MODAL_WIDTH}>
-      <InboundFormBody key={generation} serverId={serverId} serverDomain={serverDomain} inbound={inbound} onClose={onClose} onSaved={onSaved} />
-    </Modal>
+    <FormModal title={title} isOpen={isOpen} onClose={onClose} width={MODAL_WIDTH}>
+      {(generation) => <InboundFormBody key={generation} serverId={serverId} serverDomain={serverDomain} inbound={inbound} onClose={onClose} onSaved={onSaved} />}
+    </FormModal>
   )
 }
 
@@ -295,7 +295,7 @@ function InboundFormBody({ serverId, serverDomain, inbound, onClose, onSaved }: 
 
   return (
     <>
-      {error !== null && <Alert type="error" title={error.message} showIcon className="page-alert" />}
+      <ErrorAlert error={error} />
       {!isFormCovered && <Alert type="warning" showIcon className="page-alert" title={`表单未覆盖 ${panelProtocol} 协议，请在“高级配置”里编辑`} />}
       {isEdit && <Alert type="info" showIcon className="page-alert" title="以下为面板上的实时配置（含私钥与密码）；入站上的用户由平台维护，保存时保持不变" />}
       <Form layout="horizontal" labelCol={LABEL_COL} labelWrap colon={false}>

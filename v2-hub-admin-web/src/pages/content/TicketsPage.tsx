@@ -1,14 +1,15 @@
-import { Button, Drawer, Form, Input, InputNumber, Popconfirm, Select, Space, Spin, Table, Tag, Typography, type TableProps } from 'antd'
+import { Button, Drawer, Form, Input, InputNumber, Popconfirm, Select, Space, Spin, Tag, Typography, type TableProps } from 'antd'
 import { useCallback, useState } from 'react'
-import { api, csrfHeader, type PageData, type Ticket, type TicketDetail, type TicketMessage, type TicketStatus } from '../../api/client'
+import { api, csrfHeader, type Ticket, type TicketDetail, type TicketMessage, type TicketStatus } from '../../api/client'
 import { useSession } from '../../auth/session-context'
 import { ErrorAlert } from '../../components/ErrorAlert'
+import { PagedTable } from '../../components/PagedTable'
 import { useRemote } from '../../hooks/use-remote'
 import { useSubmit } from '../../hooks/use-submit'
 import { PERMISSIONS } from '../../menu'
-import { TABLE_SCROLL, formatTime } from '../system/format'
+import { formatTime } from '../system/format'
+import { PageHeader } from '../../components/PageHeader'
 
-const DEFAULT_PAGE_SIZE = 20
 const MAX_CONTENT_LEN = 5000
 const REPLY_ROWS = 4
 
@@ -28,16 +29,16 @@ function StatusTag({ status }: { status: TicketStatus }) {
 export function TicketsPage() {
   const { can } = useSession()
   const canWrite = can(PERMISSIONS.TICKET_WRITE)
-  const [page, setPage] = useState(1)
-  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE)
   const [status, setStatus] = useState<TicketStatus | undefined>(undefined)
   const [userId, setUserId] = useState<number | undefined>(undefined)
   const [openedId, setOpenedId] = useState<number | null>(null)
+  const [refreshKey, setRefreshKey] = useState(0)
+  const reload = () => setRefreshKey((k) => k + 1)
   const loadTickets = useCallback(
-    (signal: AbortSignal) => api.GET('/api/admin/tickets', { params: { query: { page, pageSize, status, userId } }, signal }),
-    [page, pageSize, status, userId],
+    (page: number, pageSize: number, signal: AbortSignal) =>
+      api.GET('/api/admin/tickets', { params: { query: { page, pageSize, status, userId } }, signal }),
+    [status, userId],
   )
-  const tickets = useRemote<PageData<Ticket>>(loadTickets)
 
   const columns: TableProps<Ticket>['columns'] = [
     { title: '主题', dataIndex: 'subject' },
@@ -59,51 +60,35 @@ export function TicketsPage() {
   return (
     <>
       <Typography.Title level={3}>工单</Typography.Title>
-      <Space wrap className="page-filters">
-        <Select
-          allowClear
-          placeholder="按状态过滤"
-          aria-label="按状态过滤"
-          className="filter-select"
-          options={STATUS_OPTIONS}
-          value={status}
-          onChange={(v: TicketStatus | undefined) => {
-            setPage(1)
-            setStatus(v)
-          }}
-        />
-        <InputNumber
-          min={1}
-          precision={0}
-          placeholder="按用户 ID 过滤"
-          aria-label="按用户 ID 过滤"
-          className="filter-select"
-          value={userId}
-          onChange={(v) => {
-            setPage(1)
-            setUserId(v === null ? undefined : v)
-          }}
-        />
-      </Space>
-      <ErrorAlert error={tickets.error} />
-      <Table<Ticket>
-        rowKey="id"
-        scroll={TABLE_SCROLL}
-        loading={tickets.isLoading}
+      <PagedTable<Ticket>
+        load={loadTickets}
         columns={columns}
-        dataSource={tickets.data?.items ?? []}
-        pagination={{
-          current: page,
-          pageSize,
-          total: tickets.data?.total ?? 0,
-          onChange: (p, size) => {
-            setPage(p)
-            setPageSize(size)
-          },
-        }}
+        refreshKey={refreshKey}
+        filters={
+          <>
+            <Select
+              allowClear
+              placeholder="按状态过滤"
+              aria-label="按状态过滤"
+              className="filter-select"
+              options={STATUS_OPTIONS}
+              value={status}
+              onChange={(v: TicketStatus | undefined) => setStatus(v)}
+            />
+            <InputNumber
+              min={1}
+              precision={0}
+              placeholder="按用户 ID 过滤"
+              aria-label="按用户 ID 过滤"
+              className="filter-select"
+              value={userId}
+              onChange={(v) => setUserId(v === null ? undefined : v)}
+            />
+          </>
+        }
       />
       <Drawer title="工单详情" open={openedId !== null} onClose={() => setOpenedId(null)} size="large" destroyOnHidden>
-        {openedId !== null && <TicketBody key={openedId} ticketId={openedId} canWrite={canWrite} onChanged={tickets.reload} />}
+        {openedId !== null && <TicketBody key={openedId} ticketId={openedId} canWrite={canWrite} onChanged={reload} />}
       </Drawer>
     </>
   )
@@ -137,10 +122,11 @@ function TicketBody({ ticketId, canWrite, onChanged }: TicketBodyProps) {
   const detail = ticket.data
   return (
     <>
-      <Space className="page-header">
-        <Typography.Title level={5}>{detail.subject}</Typography.Title>
-        <StatusTag status={detail.status} />
-      </Space>
+      <PageHeader
+        title={detail.subject}
+        level={5}
+        action={<StatusTag status={detail.status} />}
+      />
       <Typography.Paragraph type="secondary">
         {detail.username ?? ''} #{detail.userId ?? ''} · 创建于 {formatTime(detail.createdAt)}
       </Typography.Paragraph>

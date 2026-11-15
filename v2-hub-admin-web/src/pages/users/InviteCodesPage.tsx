@@ -1,19 +1,19 @@
 import { PlusOutlined } from '@ant-design/icons'
-import { Button, DatePicker, Form, Input, InputNumber, Modal, Popconfirm, Select, Space, Switch, Table, Tag, Typography, type TableProps } from 'antd'
+import { Button, DatePicker, Form, Input, InputNumber, Popconfirm, Select, Space, Switch, Tag, Typography, type TableProps } from 'antd'
 import dayjs, { type Dayjs } from 'dayjs'
 import { useCallback, useState } from 'react'
-import { api, csrfHeader, type InviteCode, type InviteCodeInput, type PageData } from '../../api/client'
+import { api, csrfHeader, type InviteCode, type InviteCodeInput } from '../../api/client'
 import { useSession } from '../../auth/session-context'
 import { ErrorAlert } from '../../components/ErrorAlert'
-import { useOpenGeneration } from '../../hooks/use-open-generation'
-import { useRemote } from '../../hooks/use-remote'
+import { PagedTable } from '../../components/PagedTable'
 import { useRowAction, useSubmit } from '../../hooks/use-submit'
 import { PERMISSIONS } from '../../menu'
-import { TABLE_SCROLL, formatTime } from '../system/format'
+import { formatTime } from '../system/format'
+import { MAX_REMARK_LEN } from '../form-limits'
+import { PageHeader } from '../../components/PageHeader'
+import { FormModal } from '../../components/FormModal'
 
-const DEFAULT_PAGE_SIZE = 20
 const MAX_USES = 100000
-const MAX_REMARK_LEN = 255
 const UNLIMITED_USES = 0
 
 type InviteKind = InviteCode['kind']
@@ -44,17 +44,17 @@ function inputOf(v: InviteForm): InviteCodeInput {
 export function InviteCodesPage() {
   const { can } = useSession()
   const canWrite = can(PERMISSIONS.USER_WRITE)
-  const [page, setPage] = useState(1)
-  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE)
   const [kind, setKind] = useState<InviteKind | undefined>(undefined)
   const [editing, setEditing] = useState<InviteCode | null>(null)
   const [isOpen, setIsOpen] = useState(false)
+  const [refreshKey, setRefreshKey] = useState(0)
+  const reload = () => setRefreshKey((k) => k + 1)
   const loadCodes = useCallback(
-    (signal: AbortSignal) => api.GET('/api/admin/invite-codes', { params: { query: { page, pageSize, kind } }, signal }),
-    [page, pageSize, kind],
+    (page: number, pageSize: number, signal: AbortSignal) =>
+      api.GET('/api/admin/invite-codes', { params: { query: { page, pageSize, kind } }, signal }),
+    [kind],
   )
-  const codes = useRemote<PageData<InviteCode>>(loadCodes)
-  const act = useRowAction(codes.reload)
+  const act = useRowAction(reload)
 
   const open = (code: InviteCode | null) => {
     setEditing(code)
@@ -106,44 +106,29 @@ export function InviteCodesPage() {
 
   return (
     <>
-      <Space className="page-header">
-        <Typography.Title level={3}>邀请码</Typography.Title>
-        {canWrite && (
+      <PageHeader
+        title="邀请码"
+        action={canWrite && (
           <Button type="primary" icon={<PlusOutlined />} onClick={() => open(null)}>
             新建邀请码
           </Button>
         )}
-      </Space>
-      <Space wrap className="page-filters">
-        <Select
-          allowClear
-          placeholder="按类型过滤"
-          aria-label="按类型过滤"
-          className="filter-select"
-          options={KIND_OPTIONS}
-          value={kind}
-          onChange={(v: InviteKind | undefined) => {
-            setPage(1)
-            setKind(v)
-          }}
-        />
-      </Space>
-      <ErrorAlert error={codes.error} />
-      <Table<InviteCode>
-        rowKey="id"
-        scroll={TABLE_SCROLL}
-        loading={codes.isLoading}
+      />
+      <PagedTable<InviteCode>
+        load={loadCodes}
         columns={columns}
-        dataSource={codes.data?.items ?? []}
-        pagination={{
-          current: page,
-          pageSize,
-          total: codes.data?.total ?? 0,
-          onChange: (p, size) => {
-            setPage(p)
-            setPageSize(size)
-          },
-        }}
+        refreshKey={refreshKey}
+        filters={
+          <Select
+            allowClear
+            placeholder="按类型过滤"
+            aria-label="按类型过滤"
+            className="filter-select"
+            options={KIND_OPTIONS}
+            value={kind}
+            onChange={(v: InviteKind | undefined) => setKind(v)}
+          />
+        }
       />
       <InviteCodeModal
         code={editing}
@@ -151,7 +136,7 @@ export function InviteCodesPage() {
         onClose={() => setIsOpen(false)}
         onSaved={() => {
           setIsOpen(false)
-          codes.reload()
+          reload()
         }}
       />
     </>
@@ -167,11 +152,10 @@ interface InviteCodeModalProps {
 }
 
 function InviteCodeModal({ code, isOpen, onClose, onSaved }: InviteCodeModalProps) {
-  const generation = useOpenGeneration(isOpen)
   return (
-    <Modal title={code === null ? '新建邀请码' : `编辑邀请码：${code.code}`} open={isOpen} onCancel={onClose} footer={null} destroyOnHidden>
-      <InviteCodeForm key={generation} code={code} onSaved={onSaved} />
-    </Modal>
+    <FormModal title={code === null ? '新建邀请码' : `编辑邀请码：${code.code}`} isOpen={isOpen} onClose={onClose}>
+      {(generation) => <InviteCodeForm key={generation} code={code} onSaved={onSaved} />}
+    </FormModal>
   )
 }
 

@@ -1,5 +1,5 @@
 import { PlusOutlined } from '@ant-design/icons'
-import { Alert, App, Button, Descriptions, Popconfirm, Space, Switch, Table, Tag, Tooltip, Typography, type TableProps } from 'antd'
+import { App, Button, Descriptions, Popconfirm, Space, Switch, Table, Tag, Tooltip, Typography, type TableProps } from 'antd'
 import { useCallback, useState } from 'react'
 import { Link, useParams } from 'react-router'
 import { api, csrfHeader, type Endpoint, type Inbound, type Server } from '../../api/client'
@@ -13,6 +13,8 @@ import { InboundFormModal } from './inbound-form/InboundFormModal'
 import { serverDomainOf } from './inbound-form/model'
 import { ServerStatusTag } from './status'
 import { formatCountry } from './countries'
+import { ErrorAlert } from '../../components/ErrorAlert'
+import { PageHeader } from '../../components/PageHeader'
 
 interface EndpointTagProps {
   endpoint: Endpoint
@@ -177,7 +179,7 @@ export function ServerDetailPage() {
       <Typography.Paragraph>
         <Link to={ROUTES.SERVERS}>← 服务器</Link>
       </Typography.Paragraph>
-      {server.error !== null && <Alert type="error" title={server.error.message} showIcon className="page-alert" />}
+      <ErrorAlert error={server.error} />
       {srv !== null && (
         <Descriptions title={srv.name} size="small" column={{ xs: 1, md: 3 }} className="page-alert">
           <Descriptions.Item label="状态">
@@ -191,9 +193,10 @@ export function ServerDetailPage() {
         </Descriptions>
       )}
       {srv !== null && can(PERMISSIONS.SERVER_READ) && <ChainApplyCard serverId={serverId} />}
-      <Space className="page-header">
-        <Typography.Title level={4}>入站</Typography.Title>
-        {canWrite && (
+      <PageHeader
+        title="入站"
+        level={4}
+        action={canWrite && (
           <Space>
             <Button onClick={() => setIsAddingEndpoint(true)} disabled={(inbounds.data ?? []).length === 0}>
               添加对外地址
@@ -203,8 +206,8 @@ export function ServerDetailPage() {
             </Button>
           </Space>
         )}
-      </Space>
-      {inbounds.error !== null && <Alert type="error" title={inbounds.error.message} showIcon className="page-alert" />}
+      />
+      <ErrorAlert error={inbounds.error} />
       <Table<Inbound> rowKey="id" scroll={TABLE_SCROLL} loading={inbounds.isLoading} columns={columns} dataSource={inbounds.data ?? []} pagination={false} />
 
       <InboundFormModal

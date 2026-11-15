@@ -1,20 +1,20 @@
 import { PlusOutlined } from '@ant-design/icons'
-import { Button, Form, Input, InputNumber, Modal, Popconfirm, Space, Switch, Table, Tag, Typography, type TableProps } from 'antd'
+import { Button, Form, Input, InputNumber, Popconfirm, Space, Switch, Table, Tag, type TableProps } from 'antd'
 import { useState } from 'react'
 import { api, csrfHeader, type TrafficPack, type TrafficPackInput } from '../../api/client'
 import { useSession } from '../../auth/session-context'
 import { ErrorAlert } from '../../components/ErrorAlert'
 import { useCurrency } from '../../hooks/use-currency'
-import { useOpenGeneration } from '../../hooks/use-open-generation'
 import { useRemote } from '../../hooks/use-remote'
 import { useRowAction, useSubmit } from '../../hooks/use-submit'
 import { PERMISSIONS } from '../../menu'
 import { MAX_MONEY_AMOUNT, MONEY_PRECISION, amountToCents, centsToAmount, formatMoney } from '../../money'
 import { TABLE_SCROLL } from '../system/format'
 import { bytesToGb, formatBytes, gbToBytes } from '../users/quota'
+import { MAX_NAME_LEN, MAX_SORT_ORDER } from '../form-limits'
+import { PageHeader } from '../../components/PageHeader'
+import { FormModal } from '../../components/FormModal'
 
-const MAX_NAME_LEN = 64
-const MAX_SORT_ORDER = 100000
 const MIN_TRAFFIC_GB = 0.01
 const TRAFFIC_PRECISION = 2
 
@@ -87,14 +87,14 @@ export function TrafficPacksPage() {
 
   return (
     <>
-      <Space className="page-header">
-        <Typography.Title level={3}>流量包</Typography.Title>
-        {canWrite && (
+      <PageHeader
+        title="流量包"
+        action={canWrite && (
           <Button type="primary" icon={<PlusOutlined />} onClick={() => open(null)}>
             新建流量包
           </Button>
         )}
-      </Space>
+      />
       <ErrorAlert error={packs.error} />
       <Table<TrafficPack> rowKey="id" scroll={TABLE_SCROLL} loading={packs.isLoading} columns={columns} dataSource={packs.data ?? []} pagination={false} />
       <PackModal
@@ -119,11 +119,10 @@ interface PackModalProps {
 }
 
 function PackModal({ pack, isOpen, onClose, onSaved }: PackModalProps) {
-  const generation = useOpenGeneration(isOpen)
   return (
-    <Modal title={pack === null ? '新建流量包' : `编辑流量包：${pack.name}`} open={isOpen} onCancel={onClose} footer={null} destroyOnHidden>
-      <PackFormBody key={generation} pack={pack} onSaved={onSaved} />
-    </Modal>
+    <FormModal title={pack === null ? '新建流量包' : `编辑流量包：${pack.name}`} isOpen={isOpen} onClose={onClose}>
+      {(generation) => <PackFormBody key={generation} pack={pack} onSaved={onSaved} />}
+    </FormModal>
   )
 }
 

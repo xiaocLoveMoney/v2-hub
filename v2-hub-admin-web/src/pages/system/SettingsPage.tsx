@@ -8,6 +8,7 @@ import { useSubmit } from '../../hooks/use-submit'
 import { PERMISSIONS } from '../../menu'
 import { OpsSettingsCards, TestTelegramCard } from './OpsSettingsCards'
 import { SubPathFields } from './SubPathFields'
+import { MAX_EMAIL_LEN } from '../form-limits'
 
 // 取值范围与 hub-api.yaml 的 Settings 一致（docs/03 §5.6 设置清单）
 const MAX_SITE_NAME_LEN = 32
@@ -16,7 +17,6 @@ const MAX_EMAIL_DOMAINS = 100
 const MAX_DOMAIN_LEN = 253
 const MAX_INVITE_USES = 10000
 const MAX_CHECKIN_MB = 102400
-const MAX_EMAIL_LEN = 254
 const MAX_MAIL_RATE = 600
 const MAX_BASE_URL_LEN = 255
 const MAX_SUB_TITLE_LEN = 64

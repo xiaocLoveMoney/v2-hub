@@ -1,5 +1,5 @@
 import { PlusOutlined } from '@ant-design/icons'
-import { Alert, App, Button, Popconfirm, Space, Table, Typography, type TableProps } from 'antd'
+import { App, Button, Popconfirm, Space, Table, type TableProps } from 'antd'
 import { useState } from 'react'
 import { Link } from 'react-router'
 import { api, csrfHeader, toApiError, type Server } from '../../api/client'
@@ -10,6 +10,8 @@ import { TABLE_SCROLL, formatTime } from '../system/format'
 import { ServerFormModal } from './ServerFormModal'
 import { ServerStatusTag } from './status'
 import { formatCountry } from './countries'
+import { ErrorAlert } from '../../components/ErrorAlert'
+import { PageHeader } from '../../components/PageHeader'
 
 const loadServers = (signal: AbortSignal) => api.GET('/api/admin/servers', { signal })
 
@@ -90,15 +92,15 @@ export function ServersPage() {
 
   return (
     <>
-      <Space className="page-header">
-        <Typography.Title level={3}>服务器</Typography.Title>
-        {canWrite && (
+      <PageHeader
+        title="服务器"
+        action={canWrite && (
           <Button type="primary" icon={<PlusOutlined />} onClick={() => setIsCreating(true)}>
             接入服务器
           </Button>
         )}
-      </Space>
-      {servers.error !== null && <Alert type="error" title={servers.error.message} showIcon className="page-alert" />}
+      />
+      <ErrorAlert error={servers.error} />
       <Table<Server> rowKey="id" scroll={TABLE_SCROLL} loading={servers.isLoading} columns={columns} dataSource={servers.data ?? []} pagination={false} />
       <ServerFormModal
         server={editing}

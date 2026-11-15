@@ -1,11 +1,13 @@
 import { PlusOutlined } from '@ant-design/icons'
-import { Alert, App, Button, Checkbox, Form, Input, Modal, Popconfirm, Space, Table, Tag, Typography, type TableProps } from 'antd'
+import { App, Button, Checkbox, Form, Input, Modal, Popconfirm, Space, Table, Tag, Typography, type TableProps } from 'antd'
 import { useState } from 'react'
 import { api, csrfHeader, type ApiError, type Permission, type Role } from '../../api/client'
 import { useSession } from '../../auth/session-context'
 import { mutate, useRemote } from '../../hooks/use-remote'
 import { PERMISSIONS } from '../../menu'
 import { TABLE_SCROLL } from './format'
+import { ErrorAlert } from '../../components/ErrorAlert'
+import { PageHeader } from '../../components/PageHeader'
 
 const ROLE_CODE_PATTERN = /^[a-z][a-z0-9_]{2,63}$/
 const MAX_ROLE_NAME_LEN = 64
@@ -105,20 +107,20 @@ export function RolesPage() {
   const isOpen = isCreating || editing !== null
   return (
     <>
-      <Space className="page-header">
-        <Typography.Title level={3}>角色与权限</Typography.Title>
-        {canWrite && (
+      <PageHeader
+        title="角色与权限"
+        action={canWrite && (
           <Button type="primary" icon={<PlusOutlined />} onClick={() => setIsCreating(true)}>
             新建角色
           </Button>
         )}
-      </Space>
-      {roles.error !== null && <Alert type="error" title={roles.error.message} showIcon className="page-alert" />}
+      />
+      <ErrorAlert error={roles.error} />
       <Table<Role> rowKey="id"
         scroll={TABLE_SCROLL} loading={roles.isLoading} columns={columns} dataSource={roles.data ?? []} pagination={false} />
 
       <Modal title={editing === null ? '新建角色' : `编辑角色：${editing.name}`} open={isOpen} onCancel={close} footer={null} destroyOnHidden>
-        {formError !== null && <Alert type="error" title={formError.message} showIcon className="page-alert" />}
+        <ErrorAlert error={formError} />
         <Form<RoleForm>
           layout="vertical"
           onFinish={handleSubmit}
