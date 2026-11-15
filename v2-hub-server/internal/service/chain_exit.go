@@ -487,8 +487,8 @@ func (s *ChainService) ListExits(ctx context.Context, f ChainExitFilter, pq Page
 	default:
 		return nil, newError(CodeInvalidArgument, msgExitBadOwner)
 	}
-	userArg := pgtype.Int8{Int64: f.UserID, Valid: f.UserID > 0}
-	keywordArg := pgtype.Text{String: keyword, Valid: keyword != ""}
+	userArg := optionalID(f.UserID)
+	keywordArg := textOrNull(keyword)
 	total, err := s.q.CountAdminChainExits(ctx, sqlcgen.CountAdminChainExitsParams{IsPlatform: isPlatform, UserID: userArg, Keyword: keywordArg})
 	if err != nil {
 		return nil, fmt.Errorf("count chain exits: %w", err)

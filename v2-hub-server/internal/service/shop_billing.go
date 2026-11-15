@@ -118,12 +118,12 @@ func (s *ShopService) recordRebate(ctx context.Context, q *sqlcgen.Queries, cur 
 	rebateID, err := q.InsertRebate(ctx, sqlcgen.InsertRebateParams{
 		InviterID: pgtype.Int8{Int64: rel.InviterID, Valid: true}, InviterUsername: rel.InviterUsername,
 		InviteeID: pgtype.Int8{Int64: inviteeID, Valid: true}, InviteeUsername: rel.Username,
-		OrderID: orderID, OrderAmount: paid, Percent: int32(cur.Rebate.Percent), Amount: amount, CreatedAt: pgtype.Timestamptz{Time: now, Valid: true},
+		OrderID: orderID, OrderAmount: paid, Percent: int32(cur.Rebate.Percent), Amount: amount, CreatedAt: timestamptz(now),
 	})
 	if err != nil {
 		return fmt.Errorf("insert rebate for order %d: %w", orderID, err)
 	}
-	_, err = applyLedger(ctx, q, ledgerChange{UserID: rel.InviterID, Amount: amount, Kind: LedgerRebate, Ref: ledgerRef{Type: refRebate, ID: rebateID}}, now)
+	_, err = applyLedgerLocked(ctx, q, inviter, ledgerChange{UserID: rel.InviterID, Amount: amount, Kind: LedgerRebate, Ref: ledgerRef{Type: refRebate, ID: rebateID}}, now)
 	return err
 }
 
@@ -155,16 +155,18 @@ func (s *ShopService) RenewDue(ctx context.Context) error {
 		return nil
 	}
 	now := s.now()
-	ids, err := s.q.ListAutoRenewDueIDs(ctx, sqlcgen.ListAutoRenewDueIDsParams{Now: pgtype.Timestamptz{Time: now, Valid: true}, RowLimit: renewBatchSize})
+	ids, err := s.q.ListAutoRenewDueIDs(ctx, sqlcgen.ListAutoRenewDueIDsParams{Now: timestamptz(now), RowLimit: renewBatchSize})
 	if err != nil {
 		return fmt.Errorf("list auto renew due: %w", err)
 	}
+	// 时区整轮只解析一次，不在每个用户上重复
+	loc := cur.Location()
 	renewed := false
 	for _, id := range ids {
 		ok := false
 		err := s.inTx(ctx, func(q *sqlcgen.Queries) error {
 			var err error
-			ok, err = s.renewOne(ctx, q, cur, id, now)
+			ok, err = s.renewOne(ctx, q, cur, loc, id, now)
 			return err
 		})
 		if err != nil {
@@ -178,8 +180,8 @@ func (s *ShopService) RenewDue(ctx context.Context) error {
 	return nil
 }
 
-// renewOne 在事务里给一个用户做到期续费，返回是否续上。
-func (s *ShopService) renewOne(ctx context.Context, q *sqlcgen.Queries, cur Settings, userID int64, now time.Time) (bool, error) {
+// renewOne 在事务里给一个用户做到期续费，返回是否续上。loc 是站点时区，只用于通知邮件里的时间。
+func (s *ShopService) renewOne(ctx context.Context, q *sqlcgen.Queries, cur Settings, loc *time.Location, userID int64, now time.Time) (bool, error) {
 	row, err := lockUser(ctx, q, userID)
 	if errors.Is(err, ErrNotFound) {
 		return false, nil
@@ -202,21 +204,16 @@ func (s *ShopService) renewOne(ctx context.Context, q *sqlcgen.Queries, cur Sett
 	if !st.AutoRenew {
 		return false, nil
 	}
-	info, err := autoRenewInfo(ctx, q, st)
+	info, pp, err := autoRenewInfo(ctx, q, st)
 	if err != nil {
 		return false, err
 	}
-	loc := cur.Location()
 	if !info.Available {
 		return false, s.failRenew(ctx, q, cur, userID, info.PlanName, reasonRenewOffSale)
 	}
 	price := *info.Price
 	if st.Balance < price {
 		return false, s.failRenew(ctx, q, cur, userID, info.PlanName, reasonRenewNoBalance)
-	}
-	pp, err := q.GetPlanPriceForSale(ctx, st.PlanPriceID.Int64)
-	if err != nil {
-		return false, fmt.Errorf("get plan price %d: %w", st.PlanPriceID.Int64, err)
 	}
 
 	expiredAt := *qt.ExpiresAt
@@ -239,7 +236,7 @@ func (s *ShopService) renewOne(ctx context.Context, q *sqlcgen.Queries, cur Sett
 	if err != nil {
 		return false, fmt.Errorf("lock balance of user %d: %w", userID, err)
 	}
-	at := pgtype.Timestamptz{Time: now, Valid: true}
+	at := timestamptz(now)
 	orderID, err := q.InsertOrder(ctx, sqlcgen.InsertOrderParams{
 		OrderNo: orderNo, UserID: pgtype.Int8{Int64: userID, Valid: true}, Username: wallet.Username, Kind: OrderRenew,
 		PlanID: pgtype.Int8{Int64: pp.PlanID, Valid: true}, Item: item, AmountOriginal: price, AmountPaid: price, CreatedAt: at,
@@ -249,7 +246,7 @@ func (s *ShopService) renewOne(ctx context.Context, q *sqlcgen.Queries, cur Sett
 	}
 	balance := st.Balance
 	if price > 0 {
-		if balance, err = applyLedger(ctx, q, ledgerChange{UserID: userID, Amount: -price, Kind: LedgerRenew, Ref: ledgerRef{Type: refOrder, ID: orderID}, Remark: pp.Name}, now); err != nil {
+		if balance, err = applyLedgerLocked(ctx, q, wallet, ledgerChange{UserID: userID, Amount: -price, Kind: LedgerRenew, Ref: ledgerRef{Type: refOrder, ID: orderID}, Remark: pp.Name}, now); err != nil {
 			return false, err
 		}
 	}
@@ -317,7 +314,7 @@ func (s *ShopService) SendReminders(ctx context.Context) error {
 func (s *ShopService) remindExpiring(ctx context.Context, cur Settings, now time.Time) error {
 	until := now.AddDate(0, 0, cur.Notify.ExpireDays)
 	rows, err := s.q.ListExpiringUsers(ctx, sqlcgen.ListExpiringUsersParams{
-		Now: pgtype.Timestamptz{Time: now, Valid: true}, Until: pgtype.Timestamptz{Time: until, Valid: true}, RowLimit: notifyBatchSize,
+		Now: timestamptz(now), Until: timestamptz(until), RowLimit: notifyBatchSize,
 	})
 	if err != nil {
 		return fmt.Errorf("list expiring users: %w", err)

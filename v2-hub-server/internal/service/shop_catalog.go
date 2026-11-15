@@ -165,8 +165,7 @@ func (s *ShopService) CreateTrafficPack(ctx context.Context, actor *AdminPrincip
 			}
 			return fmt.Errorf("create traffic pack: %w", err)
 		}
-		return writeAudit(ctx, q, AuditEntry{ActorType: ActorAdmin, ActorID: actor.AdminID, Action: ActionTrafficPackCreate, TargetType: targetTrafficPack,
-			TargetID: fmt.Sprint(id), ClientIP: ip, Detail: map[string]any{"name": v.Name, "price": v.Price}})
+		return writeAudit(ctx, q, adminAudit(actor, ActionTrafficPackCreate, targetTrafficPack, id, ip, map[string]any{"name": v.Name, "price": v.Price}))
 	})
 	if err != nil {
 		return nil, err
@@ -198,8 +197,7 @@ func (s *ShopService) UpdateTrafficPack(ctx context.Context, actor *AdminPrincip
 			return fmt.Errorf("get traffic pack %d: %w", id, err)
 		}
 		createdAt = row.CreatedAt.Time
-		return writeAudit(ctx, q, AuditEntry{ActorType: ActorAdmin, ActorID: actor.AdminID, Action: ActionTrafficPackUpdate, TargetType: targetTrafficPack,
-			TargetID: fmt.Sprint(id), ClientIP: ip, Detail: map[string]any{"name": v.Name, "price": v.Price, "isOnSale": v.OnSale}})
+		return writeAudit(ctx, q, adminAudit(actor, ActionTrafficPackUpdate, targetTrafficPack, id, ip, map[string]any{"name": v.Name, "price": v.Price, "isOnSale": v.OnSale}))
 	})
 	if err != nil {
 		return nil, err
@@ -217,8 +215,7 @@ func (s *ShopService) DeleteTrafficPack(ctx context.Context, actor *AdminPrincip
 		if n == 0 {
 			return newError(CodeNotFound, msgTrafficPackNotFound)
 		}
-		return writeAudit(ctx, q, AuditEntry{ActorType: ActorAdmin, ActorID: actor.AdminID, Action: ActionTrafficPackDelete, TargetType: targetTrafficPack,
-			TargetID: fmt.Sprint(id), ClientIP: ip})
+		return writeAudit(ctx, q, adminAudit(actor, ActionTrafficPackDelete, targetTrafficPack, id, ip, nil))
 	})
 }
 
@@ -294,7 +291,7 @@ func optionalTime(t *time.Time) pgtype.Timestamptz {
 	if t == nil {
 		return pgtype.Timestamptz{}
 	}
-	return pgtype.Timestamptz{Time: *t, Valid: true}
+	return timestamptz(*t)
 }
 
 func couponFromRow(r sqlcgen.ListCouponsRow) Coupon {
@@ -373,8 +370,7 @@ func (s *ShopService) CreateCoupon(ctx context.Context, actor *AdminPrincipal, i
 		if out, err = getCoupon(ctx, q, id); err != nil {
 			return err
 		}
-		return writeAudit(ctx, q, AuditEntry{ActorType: ActorAdmin, ActorID: actor.AdminID, Action: ActionCouponCreate, TargetType: targetCoupon,
-			TargetID: fmt.Sprint(id), ClientIP: ip, Detail: map[string]any{"code": v.Code, "kind": v.Kind, "value": v.Value}})
+		return writeAudit(ctx, q, adminAudit(actor, ActionCouponCreate, targetCoupon, id, ip, map[string]any{"code": v.Code, "kind": v.Kind, "value": v.Value}))
 	})
 	return out, err
 }
@@ -407,8 +403,7 @@ func (s *ShopService) UpdateCoupon(ctx context.Context, actor *AdminPrincipal, i
 		if out, err = getCoupon(ctx, q, id); err != nil {
 			return err
 		}
-		return writeAudit(ctx, q, AuditEntry{ActorType: ActorAdmin, ActorID: actor.AdminID, Action: ActionCouponUpdate, TargetType: targetCoupon,
-			TargetID: fmt.Sprint(id), ClientIP: ip, Detail: map[string]any{"code": v.Code, "isDisabled": v.Disabled}})
+		return writeAudit(ctx, q, adminAudit(actor, ActionCouponUpdate, targetCoupon, id, ip, map[string]any{"code": v.Code, "isDisabled": v.Disabled}))
 	})
 	return out, err
 }
@@ -430,7 +425,6 @@ func (s *ShopService) DeleteCoupon(ctx context.Context, actor *AdminPrincipal, i
 			}
 			return newError(CodeConflict, msgCouponInUse)
 		}
-		return writeAudit(ctx, q, AuditEntry{ActorType: ActorAdmin, ActorID: actor.AdminID, Action: ActionCouponDelete, TargetType: targetCoupon,
-			TargetID: fmt.Sprint(id), ClientIP: ip})
+		return writeAudit(ctx, q, adminAudit(actor, ActionCouponDelete, targetCoupon, id, ip, nil))
 	})
 }

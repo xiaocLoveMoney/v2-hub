@@ -60,15 +60,29 @@ func (s *UserService) checkinSettings(ctx context.Context) (CheckinSettings, pgt
 	return cur.Checkin, pgtype.Date{Time: today, Valid: true}, nil
 }
 
-// checkinBlocker 返回不能签到的原因；可以签到时返回空串（docs/03 §5.11 条件）。
-func checkinBlocker(hasPlan bool, qt Quota, status string) string {
+// trafficTopUpMessages 是“给当前额度加流量”不可用时的三种提示：没有套餐、不限流量、账号状态不对。
+type trafficTopUpMessages struct {
+	noPlan    string
+	unlimited string
+	inactive  string
+}
+
+var (
+	// checkinBlockMessages 是签到的提示（docs/03 §5.11 条件）。
+	checkinBlockMessages = trafficTopUpMessages{noPlan: msgCheckinNoPlan, unlimited: msgCheckinUnlimited, inactive: msgCheckinInactive}
+	// packBlockMessages 是买流量包的提示（docs/03 §5.13 可买条件）。
+	packBlockMessages = trafficTopUpMessages{noPlan: msgPackNoPlan, unlimited: msgPackUnlimited, inactive: msgPackInactive}
+)
+
+// trafficTopUpBlocker 返回不能给当前额度加流量（签到、买流量包）的原因，文案取自 msgs；可以加时返回空串。
+func trafficTopUpBlocker(hasPlan bool, qt Quota, status string, msgs trafficTopUpMessages) string {
 	switch {
 	case !hasPlan:
-		return msgCheckinNoPlan
+		return msgs.noPlan
 	case qt.TrafficLimit == 0:
-		return msgCheckinUnlimited
+		return msgs.unlimited
 	case status != UserStatusActive && status != UserStatusLimited:
-		return msgCheckinInactive
+		return msgs.inactive
 	default:
 		return ""
 	}
@@ -104,7 +118,7 @@ func (s *UserService) GetCheckin(ctx context.Context, p *UserPrincipal) (*Checki
 		return nil, fmt.Errorf("get checkin state of user %d: %w", p.UserID, err)
 	}
 	qt := Quota{TrafficLimit: row.TrafficLimit, TrafficUsed: row.TrafficUsed, ExpiresAt: timePtr(row.ExpiresAt), Disabled: row.IsDisabled}
-	info.Reason = checkinBlocker(row.PlanID.Valid, qt, qt.Status(s.now()))
+	info.Reason = trafficTopUpBlocker(row.PlanID.Valid, qt, qt.Status(s.now()), checkinBlockMessages)
 	info.CanCheckin = info.Reason == ""
 	return info, nil
 }
@@ -133,11 +147,11 @@ func (s *UserService) Checkin(ctx context.Context, p *UserPrincipal) (*CheckinRe
 			return err
 		}
 		qt := quotaFromRow(row)
-		if reason := checkinBlocker(row.PlanID.Valid, qt, qt.Status(now)); reason != "" {
+		if reason := trafficTopUpBlocker(row.PlanID.Valid, qt, qt.Status(now), checkinBlockMessages); reason != "" {
 			return newError(CodeConflict, reason)
 		}
 		n, err := q.InsertCheckin(ctx, sqlcgen.InsertCheckinParams{
-			UserID: p.UserID, CheckinDate: today, RewardBytes: reward, CreatedAt: pgtype.Timestamptz{Time: now, Valid: true},
+			UserID: p.UserID, CheckinDate: today, RewardBytes: reward, CreatedAt: timestamptz(now),
 		})
 		if err != nil {
 			return fmt.Errorf("insert checkin of user %d: %w", p.UserID, err)

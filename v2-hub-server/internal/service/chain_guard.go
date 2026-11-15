@@ -15,6 +15,7 @@ import (
 	"time"
 	"unicode"
 
+	"v2-hub-server/internal/dao/sqlcgen"
 	"v2-hub-server/internal/manager/render"
 )
 
@@ -41,10 +42,6 @@ const (
 	maxLooseIDLen      = 30
 	realityKeyLen      = 32
 	maxRealityShortID  = 16
-	ssKeyLenAES128     = 16
-	ssKeyLenDefault    = 32
-	ss2022Prefix       = "2022-blake3-"
-	ss2022AES128       = "2022-blake3-aes-128-gcm"
 	ss2022KeySeparator = ":"
 
 	msgExitUnsupported = "这个出口的协议或传输方式不能用于服务端链式"
@@ -65,7 +62,7 @@ var (
 	exitVMessCiphers = []string{"", "auto", "aes-128-gcm", "chacha20-poly1305", "none", "zero"}
 	exitSSMethods    = []string{
 		"aes-128-gcm", "aes-256-gcm", "chacha20-poly1305", "chacha20-ietf-poly1305", "xchacha20-poly1305", "xchacha20-ietf-poly1305",
-		ss2022AES128, "2022-blake3-aes-256-gcm", "2022-blake3-chacha20-poly1305",
+		ss2022AES128Method, "2022-blake3-aes-256-gcm", "2022-blake3-chacha20-poly1305",
 	}
 )
 
@@ -137,12 +134,9 @@ func validSSKey(method, password string) bool {
 	if password == "" || !validExitText(password, maxExitSecretLen) {
 		return false
 	}
-	if !strings.HasPrefix(method, ss2022Prefix) {
+	want := ss2022KeyLen(method)
+	if want == 0 {
 		return true
-	}
-	want := ssKeyLenDefault
-	if method == ss2022AES128 {
-		want = ssKeyLenAES128
 	}
 	for _, part := range strings.Split(password, ss2022KeySeparator) {
 		key, err := base64.StdEncoding.DecodeString(part)
@@ -286,6 +280,8 @@ var (
 	errExitResolve = errors.New("resolve exit host")
 	// errExitPrivate 表示地址或解析结果里有非公网地址。
 	errExitPrivate = errors.New("exit host is not public")
+	// errExitPlatform 表示固定下来的地址是平台自己的服务器。
+	errExitPlatform = errors.New("exit host is a platform server")
 )
 
 // lookup 解析一个主机名；IP 字面量直接返回。
@@ -349,6 +345,47 @@ func (g *chainGuard) platformAddrs(ctx context.Context, hosts []string) map[neti
 		}
 	}
 	return out
+}
+
+// platformAddrCache 缓存一次算好的平台地址集合，让一轮下发里多个出口的复查共用（零值即可用，表示还没算）。
+type platformAddrCache struct {
+	addrs    map[netip.Addr]bool
+	isLoaded bool
+}
+
+// platformAddrSet 返回平台自己的地址集合；cache 不为 nil 时只在第一次查库并解析，之后复用。
+func (g *chainGuard) platformAddrSet(ctx context.Context, q *sqlcgen.Queries, cache *platformAddrCache) (map[netip.Addr]bool, error) {
+	if cache != nil && cache.isLoaded {
+		return cache.addrs, nil
+	}
+	hosts, err := q.ListPlatformHosts(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list platform hosts: %w", err)
+	}
+	lookupCtx, cancel := context.WithTimeout(ctx, platformLookupTimeout)
+	defer cancel()
+	addrs := g.platformAddrs(lookupCtx, hosts)
+	if cache != nil {
+		cache.addrs, cache.isLoaded = addrs, true
+	}
+	return addrs, nil
+}
+
+// pinOffPlatform 先用 pin 固定出口地址，再挡住指向平台自己服务器的地址。
+// 返回 pin 的 errExitResolve / errExitPrivate、指向平台时的 errExitPlatform，或查库失败的错误。cache 可为 nil（不缓存）。
+func (g *chainGuard) pinOffPlatform(ctx context.Context, q *sqlcgen.Queries, host string, previous *netip.Addr, cache *platformAddrCache) (netip.Addr, error) {
+	ip, err := g.pin(ctx, host, previous)
+	if err != nil {
+		return netip.Addr{}, err
+	}
+	platform, err := g.platformAddrSet(ctx, q, cache)
+	if err != nil {
+		return netip.Addr{}, err
+	}
+	if platform[ip] {
+		return netip.Addr{}, errExitPlatform
+	}
+	return ip, nil
 }
 
 // hostOf 从面板地址（URL）或对外地址（主机名 / IP）里取主机部分。

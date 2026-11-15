@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgtype"
 
 	"v2-hub-server/internal/dao/sqlcgen"
 )
@@ -43,7 +42,7 @@ type Dashboard struct {
 func (s *UserService) GetDashboard(ctx context.Context, p *UserPrincipal) (*Dashboard, error) {
 	now := s.now().In(s.cfg.Location)
 	dayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, s.cfg.Location)
-	row, err := s.q.GetUserDashboard(ctx, sqlcgen.GetUserDashboardParams{ID: p.UserID, DayStart: pgtype.Timestamptz{Time: dayStart, Valid: true}})
+	row, err := s.q.GetUserDashboard(ctx, sqlcgen.GetUserDashboardParams{ID: p.UserID, DayStart: timestamptz(dayStart)})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, newError(CodeNotFound, msgUserNotFound)
 	}
@@ -77,7 +76,7 @@ func (s *UserService) ListTraffic(ctx context.Context, p *UserPrincipal, hours i
 		return nil, newError(CodeInvalidArgument, fmt.Sprintf("hours 取 1–%d", maxTrafficHours))
 	}
 	since := hourOf(s.now()).Add(-time.Duration(hours-1) * time.Hour)
-	rows, err := s.q.ListUserTrafficHourly(ctx, sqlcgen.ListUserTrafficHourlyParams{UserID: p.UserID, Hour: pgtype.Timestamptz{Time: since, Valid: true}})
+	rows, err := s.q.ListUserTrafficHourly(ctx, sqlcgen.ListUserTrafficHourlyParams{UserID: p.UserID, Hour: timestamptz(since)})
 	if err != nil {
 		return nil, fmt.Errorf("list traffic of user %d: %w", p.UserID, err)
 	}

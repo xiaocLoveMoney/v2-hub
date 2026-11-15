@@ -91,7 +91,7 @@ func (s *TelegramService) Notify(ctx context.Context, q *sqlcgen.Queries, event,
 	if cur.Telegram.ChatID == "" || !eventOn(cur, event) {
 		return
 	}
-	queued := pgtype.Timestamptz{Time: s.now(), Valid: true}
+	queued := timestamptz(s.now())
 	if _, err := q.InsertTelegramOutbox(ctx, sqlcgen.InsertTelegramOutboxParams{ChatID: cur.Telegram.ChatID, Text: pgtype.Text{String: text, Valid: true}, QueuedAt: queued}); err != nil {
 		slog.Error("enqueue telegram", "event", event, "err", err)
 	}
@@ -109,8 +109,8 @@ func (s *TelegramService) ProcessOutbox(ctx context.Context) (int, error) {
 	}
 	now := s.now()
 	rows, err := s.q.ClaimDueTelegram(ctx, sqlcgen.ClaimDueTelegramParams{
-		LeaseUntil: pgtype.Timestamptz{Time: now.Add(telegramLease), Valid: true},
-		Now:        pgtype.Timestamptz{Time: now, Valid: true},
+		LeaseUntil: timestamptz(now.Add(telegramLease)),
+		Now:        timestamptz(now),
 		Batch:      telegramBatch,
 	})
 	if err != nil {
@@ -128,7 +128,7 @@ func (s *TelegramService) ProcessOutbox(ctx context.Context) (int, error) {
 func (s *TelegramService) deliver(ctx context.Context, row sqlcgen.ClaimDueTelegramRow) error {
 	sendErr := s.sender.SendMessage(ctx, row.ChatID, row.Text)
 	if sendErr == nil {
-		if err := s.q.MarkTelegramSent(ctx, sqlcgen.MarkTelegramSentParams{ID: row.ID, SentAt: pgtype.Timestamptz{Time: s.now(), Valid: true}}); err != nil {
+		if err := s.q.MarkTelegramSent(ctx, sqlcgen.MarkTelegramSentParams{ID: row.ID, SentAt: timestamptz(s.now())}); err != nil {
 			return fmt.Errorf("mark telegram %d sent: %w", row.ID, err)
 		}
 		return nil
@@ -143,7 +143,7 @@ func (s *TelegramService) deliver(ctx context.Context, row sqlcgen.ClaimDueTeleg
 	}
 	backoff := telegramRetryBase << (row.Attempts - 1)
 	if err := s.q.SetTelegramRetry(ctx, sqlcgen.SetTelegramRetryParams{
-		ID: row.ID, NextAttemptAt: pgtype.Timestamptz{Time: s.now().Add(backoff), Valid: true}, LastError: reason,
+		ID: row.ID, NextAttemptAt: timestamptz(s.now().Add(backoff)), LastError: reason,
 	}); err != nil {
 		return fmt.Errorf("schedule telegram %d retry: %w", row.ID, err)
 	}
@@ -172,7 +172,7 @@ func (s *TelegramService) SendTest(ctx context.Context, actor *AdminPrincipal, i
 
 // PurgeOutbox 删除 30 天前的记录，返回删除条数。
 func (s *TelegramService) PurgeOutbox(ctx context.Context) (int64, error) {
-	n, err := s.q.PurgeTelegramOutbox(ctx, pgtype.Timestamptz{Time: s.now().Add(-telegramRetention), Valid: true})
+	n, err := s.q.PurgeTelegramOutbox(ctx, timestamptz(s.now().Add(-telegramRetention)))
 	if err != nil {
 		return 0, fmt.Errorf("purge telegram outbox: %w", err)
 	}

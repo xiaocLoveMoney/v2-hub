@@ -13,7 +13,6 @@ import (
 	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgtype"
 
 	"v2-hub-server/internal/dao/sqlcgen"
 )
@@ -66,18 +65,28 @@ func normalizeInviteCode(raw string) string {
 	return v
 }
 
-func randomInviteCode() (string, error) {
+// randomString 用 crypto/rand 从 alphabet 里均匀地取 n 个字符拼成串（rand.Int 按字母表长度取值，无取模偏差）。
+// alphabet 须为非空的单字节字符集；返回的 error 来自 crypto/rand，由调用方加上下文。
+func randomString(alphabet string, n int) (string, error) {
 	var sb strings.Builder
-	sb.Grow(inviteCodeLen)
-	size := big.NewInt(int64(len(inviteAlphabet)))
-	for range inviteCodeLen {
-		n, err := rand.Int(rand.Reader, size)
+	sb.Grow(n)
+	size := big.NewInt(int64(len(alphabet)))
+	for range n {
+		i, err := rand.Int(rand.Reader, size)
 		if err != nil {
-			return "", fmt.Errorf("generate invite code: %w", err)
+			return "", err
 		}
-		sb.WriteByte(inviteAlphabet[n.Int64()])
+		sb.WriteByte(alphabet[i.Int64()])
 	}
 	return sb.String(), nil
+}
+
+func randomInviteCode() (string, error) {
+	code, err := randomString(inviteAlphabet, inviteCodeLen)
+	if err != nil {
+		return "", fmt.Errorf("generate invite code: %w", err)
+	}
+	return code, nil
 }
 
 // useInviteCode 在注册事务里校验邀请码并把已用次数加一，返回（邀请码 id，邀请人用户 id；管理员码的邀请人为 0）。
@@ -274,13 +283,6 @@ func (in InviteCodeInput) validate() error {
 	return nil
 }
 
-func timestamptzArg(t *time.Time) pgtype.Timestamptz {
-	if t == nil {
-		return pgtype.Timestamptz{}
-	}
-	return pgtype.Timestamptz{Time: *t, Valid: true}
-}
-
 func (s *AccountService) inviteFromRow(r sqlcgen.ListInviteCodesRow, cur Settings) InviteCode {
 	c := InviteCode{ID: r.ID, Code: r.Code, Kind: InviteKindAdmin, OwnerUsername: r.OwnerUsername, MaxUses: int(r.MaxUses), UsedCount: int(r.UsedCount),
 		ExpiresAt: timePtr(r.ExpiresAt), IsDisabled: r.IsDisabled, Remark: r.Remark, CreatedAt: r.CreatedAt.Time}
@@ -348,13 +350,12 @@ func (s *AccountService) CreateInviteCode(ctx context.Context, actor *AdminPrinc
 		var id int64
 		err = s.inTx(ctx, func(q *sqlcgen.Queries) error {
 			if id, err = q.CreateAdminInviteCode(ctx, sqlcgen.CreateAdminInviteCodeParams{
-				Code: code, MaxUses: int32(in.MaxUses), ExpiresAt: timestamptzArg(in.ExpiresAt), IsDisabled: in.IsDisabled, Remark: in.Remark,
+				Code: code, MaxUses: int32(in.MaxUses), ExpiresAt: optionalTime(in.ExpiresAt), IsDisabled: in.IsDisabled, Remark: in.Remark,
 				CreatedBy: int8Arg(actor.AdminID),
 			}); err != nil {
 				return err
 			}
-			return writeAudit(ctx, q, AuditEntry{ActorType: ActorAdmin, ActorID: actor.AdminID, Action: ActionInviteCreate, TargetType: targetInvite,
-				TargetID: fmt.Sprint(id), ClientIP: ip, Detail: map[string]any{"maxUses": in.MaxUses}})
+			return writeAudit(ctx, q, adminAudit(actor, ActionInviteCreate, targetInvite, id, ip, map[string]any{"maxUses": in.MaxUses}))
 		})
 		if err == nil {
 			return s.getInviteCode(ctx, id)
@@ -383,14 +384,13 @@ func (s *AccountService) UpdateInviteCode(ctx context.Context, actor *AdminPrinc
 			err = q.SetInviteCodeDisabled(ctx, sqlcgen.SetInviteCodeDisabledParams{ID: id, IsDisabled: in.IsDisabled})
 		} else {
 			err = q.UpdateAdminInviteCode(ctx, sqlcgen.UpdateAdminInviteCodeParams{
-				ID: id, MaxUses: int32(in.MaxUses), ExpiresAt: timestamptzArg(in.ExpiresAt), IsDisabled: in.IsDisabled, Remark: in.Remark,
+				ID: id, MaxUses: int32(in.MaxUses), ExpiresAt: optionalTime(in.ExpiresAt), IsDisabled: in.IsDisabled, Remark: in.Remark,
 			})
 		}
 		if err != nil {
 			return fmt.Errorf("update invite code %d: %w", id, err)
 		}
-		return writeAudit(ctx, q, AuditEntry{ActorType: ActorAdmin, ActorID: actor.AdminID, Action: ActionInviteUpdate, TargetType: targetInvite,
-			TargetID: fmt.Sprint(id), ClientIP: ip, Detail: map[string]any{"isDisabled": in.IsDisabled}})
+		return writeAudit(ctx, q, adminAudit(actor, ActionInviteUpdate, targetInvite, id, ip, map[string]any{"isDisabled": in.IsDisabled}))
 	})
 	if err != nil {
 		return nil, err
@@ -414,7 +414,6 @@ func (s *AccountService) DeleteInviteCode(ctx context.Context, actor *AdminPrinc
 		if err := q.DeleteInviteCode(ctx, id); err != nil {
 			return fmt.Errorf("delete invite code %d: %w", id, err)
 		}
-		return writeAudit(ctx, q, AuditEntry{ActorType: ActorAdmin, ActorID: actor.AdminID, Action: ActionInviteDelete, TargetType: targetInvite,
-			TargetID: fmt.Sprint(id), ClientIP: ip})
+		return writeAudit(ctx, q, adminAudit(actor, ActionInviteDelete, targetInvite, id, ip, nil))
 	})
 }

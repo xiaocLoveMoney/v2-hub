@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"v2-hub-server/internal/dao/sqlcgen"
@@ -78,7 +77,7 @@ func (s *OpsService) CheckAlerts(ctx context.Context) error {
 		return err
 	}
 	now := s.now()
-	due, err := s.q.ListAlertDueServers(ctx, pgtype.Timestamptz{Time: now.Add(-time.Duration(cur.Alert.OfflineMinutes) * time.Minute), Valid: true})
+	due, err := s.q.ListAlertDueServers(ctx, timestamptz(now.Add(-time.Duration(cur.Alert.OfflineMinutes)*time.Minute)))
 	if err != nil {
 		return fmt.Errorf("list alert due servers: %w", err)
 	}
@@ -86,7 +85,7 @@ func (s *OpsService) CheckAlerts(ctx context.Context) error {
 		title := fmt.Sprintf("服务器 %s 不在线", sv.Name)
 		body := fmt.Sprintf("状态：%s\n已持续：%s\n最近错误：%s", sv.Status, formatDuration(now.Sub(sv.OfflineSince.Time)), orDash(sv.LastError))
 		err := s.inTx(ctx, func(q *sqlcgen.Queries) error {
-			if err := q.MarkServerAlerted(ctx, sqlcgen.MarkServerAlertedParams{ID: sv.ID, AlertedAt: pgtype.Timestamptz{Time: now, Valid: true}}); err != nil {
+			if err := q.MarkServerAlerted(ctx, sqlcgen.MarkServerAlertedParams{ID: sv.ID, AlertedAt: timestamptz(now)}); err != nil {
 				return fmt.Errorf("mark server %d alerted: %w", sv.ID, err)
 			}
 			s.broadcast(ctx, q, cur, TelegramEventAlert, title, body)
@@ -136,10 +135,6 @@ func dayBounds(t time.Time, loc *time.Location) (time.Time, time.Time) {
 	return start, start.AddDate(0, 0, 1)
 }
 
-func ts(t time.Time) pgtype.Timestamptz {
-	return pgtype.Timestamptz{Time: t, Valid: true}
-}
-
 // DailyReport 到点后发前一自然日的运营日报，每天只发一次（docs/03 §5.20 运营日报）。返回是否发出。
 func (s *OpsService) DailyReport(ctx context.Context) (bool, error) {
 	cur, err := s.settings.Current(ctx)
@@ -183,50 +178,32 @@ func (s *OpsService) DailyReport(ctx context.Context) (bool, error) {
 
 // reportBody 汇总 [from, to) 的日报内容；金额按分换成元显示。
 func (s *OpsService) reportBody(ctx context.Context, from, to time.Time) (string, error) {
-	between := func(name string, fn func() (int64, error)) (int64, error) {
-		v, err := fn()
-		if err != nil {
-			return 0, fmt.Errorf("daily report %s: %w", name, err)
-		}
-		return v, nil
-	}
-	newUsers, err := between("new users", func() (int64, error) {
-		n, err := s.q.CountUsersCreatedBetween(ctx, sqlcgen.CountUsersCreatedBetweenParams{FromAt: ts(from), ToAt: ts(to)})
-		return int64(n), err
-	})
+	fromAt, toAt := timestamptz(from), timestamptz(to)
+	newUsers, err := s.q.CountUsersCreatedBetween(ctx, sqlcgen.CountUsersCreatedBetweenParams{FromAt: fromAt, ToAt: toAt})
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("daily report new users: %w", err)
 	}
-	traffic, err := between("traffic", func() (int64, error) {
-		return s.q.SumTrafficBetween(ctx, sqlcgen.SumTrafficBetweenParams{FromAt: ts(from), ToAt: ts(to)})
-	})
+	traffic, err := s.q.SumTrafficBetween(ctx, sqlcgen.SumTrafficBetweenParams{FromAt: fromAt, ToAt: toAt})
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("daily report traffic: %w", err)
 	}
-	spend, err := between("orders", func() (int64, error) {
-		return s.q.SumOrdersBetween(ctx, sqlcgen.SumOrdersBetweenParams{FromAt: ts(from), ToAt: ts(to)})
-	})
+	spend, err := s.q.SumOrdersBetween(ctx, sqlcgen.SumOrdersBetweenParams{FromAt: fromAt, ToAt: toAt})
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("daily report orders: %w", err)
 	}
-	topup, err := between("topups", func() (int64, error) {
-		return s.q.SumTopupsBetween(ctx, sqlcgen.SumTopupsBetweenParams{FromAt: ts(from), ToAt: ts(to)})
-	})
+	topup, err := s.q.SumTopupsBetween(ctx, sqlcgen.SumTopupsBetweenParams{FromAt: fromAt, ToAt: toAt})
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("daily report topups: %w", err)
 	}
-	tickets, err := between("tickets", func() (int64, error) {
-		n, err := s.q.CountTicketsCreatedBetween(ctx, sqlcgen.CountTicketsCreatedBetweenParams{FromAt: ts(from), ToAt: ts(to)})
-		return int64(n), err
-	})
+	tickets, err := s.q.CountTicketsCreatedBetween(ctx, sqlcgen.CountTicketsCreatedBetweenParams{FromAt: fromAt, ToAt: toAt})
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("daily report tickets: %w", err)
 	}
 	offline, err := s.q.CountOfflineServers(ctx)
 	if err != nil {
 		return "", fmt.Errorf("daily report offline servers: %w", err)
 	}
-	users, err := s.q.DashboardUsers(ctx, sqlcgen.DashboardUsersParams{TodayStart: ts(to), WeekStart: ts(to)})
+	users, err := s.q.DashboardUsers(ctx, sqlcgen.DashboardUsersParams{TodayStart: timestamptz(to), WeekStart: timestamptz(to)})
 	if err != nil {
 		return "", fmt.Errorf("daily report users: %w", err)
 	}
@@ -334,12 +311,12 @@ func (s *OpsService) Dashboard(ctx context.Context, p *AdminPrincipal) (*AdminDa
 
 func (s *OpsService) dashboardUsers(ctx context.Context, loc *time.Location, todayStart time.Time) (*DashboardUsers, *DashboardTraffic, error) {
 	weekStart := todayStart.AddDate(0, 0, -(dashboardTrafficDy - 1))
-	u, err := s.q.DashboardUsers(ctx, sqlcgen.DashboardUsersParams{TodayStart: ts(todayStart), WeekStart: ts(weekStart)})
+	u, err := s.q.DashboardUsers(ctx, sqlcgen.DashboardUsersParams{TodayStart: timestamptz(todayStart), WeekStart: timestamptz(weekStart)})
 	if err != nil {
 		return nil, nil, fmt.Errorf("dashboard users: %w", err)
 	}
 	users := &DashboardUsers{Total: int(u.Total), Active: int(u.Active), NewToday: int(u.NewToday), New7d: int(u.New7d), Online: int(u.Online)}
-	rows, err := s.q.DailyTraffic(ctx, sqlcgen.DailyTrafficParams{Tz: loc.String(), Since: ts(weekStart)})
+	rows, err := s.q.DailyTraffic(ctx, sqlcgen.DailyTrafficParams{Tz: loc.String(), Since: timestamptz(weekStart)})
 	if err != nil {
 		return nil, nil, fmt.Errorf("dashboard traffic: %w", err)
 	}
@@ -377,26 +354,19 @@ func (s *OpsService) dashboardServers(ctx context.Context) (*DashboardServers, e
 func (s *OpsService) dashboardFinance(ctx context.Context, loc *time.Location, now, todayStart time.Time) (*DashboardFinance, error) {
 	local := now.In(loc)
 	monthStart := time.Date(local.Year(), local.Month(), 1, 0, 0, 0, 0, loc)
-	end := todayStart.AddDate(0, 0, 1)
-	sum := func(fn func(sqlcgen.SumOrdersBetweenParams) (int64, error), from time.Time) (int64, error) {
-		return fn(sqlcgen.SumOrdersBetweenParams{FromAt: ts(from), ToAt: ts(end)})
-	}
-	orders := func(p sqlcgen.SumOrdersBetweenParams) (int64, error) { return s.q.SumOrdersBetween(ctx, p) }
-	topups := func(p sqlcgen.SumOrdersBetweenParams) (int64, error) {
-		return s.q.SumTopupsBetween(ctx, sqlcgen.SumTopupsBetweenParams{FromAt: p.FromAt, ToAt: p.ToAt})
-	}
+	todayAt, monthAt, endAt := timestamptz(todayStart), timestamptz(monthStart), timestamptz(todayStart.AddDate(0, 0, 1))
 	var out DashboardFinance
 	var err error
-	if out.TodaySpend, err = sum(orders, todayStart); err != nil {
+	if out.TodaySpend, err = s.q.SumOrdersBetween(ctx, sqlcgen.SumOrdersBetweenParams{FromAt: todayAt, ToAt: endAt}); err != nil {
 		return nil, fmt.Errorf("dashboard today spend: %w", err)
 	}
-	if out.TodayTopup, err = sum(topups, todayStart); err != nil {
+	if out.TodayTopup, err = s.q.SumTopupsBetween(ctx, sqlcgen.SumTopupsBetweenParams{FromAt: todayAt, ToAt: endAt}); err != nil {
 		return nil, fmt.Errorf("dashboard today topup: %w", err)
 	}
-	if out.MonthSpend, err = sum(orders, monthStart); err != nil {
+	if out.MonthSpend, err = s.q.SumOrdersBetween(ctx, sqlcgen.SumOrdersBetweenParams{FromAt: monthAt, ToAt: endAt}); err != nil {
 		return nil, fmt.Errorf("dashboard month spend: %w", err)
 	}
-	if out.MonthTopup, err = sum(topups, monthStart); err != nil {
+	if out.MonthTopup, err = s.q.SumTopupsBetween(ctx, sqlcgen.SumTopupsBetweenParams{FromAt: monthAt, ToAt: endAt}); err != nil {
 		return nil, fmt.Errorf("dashboard month topup: %w", err)
 	}
 	return &out, nil

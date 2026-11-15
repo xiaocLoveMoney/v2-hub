@@ -9,7 +9,6 @@ import (
 	"regexp"
 	"slices"
 	"sync"
-	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5/pgtype"
 
@@ -86,6 +85,8 @@ type desiredClient struct {
 	credVersion   int32
 	syncedVersion int32
 	hasLinks      bool
+	// retryCount 是这台面板上下发记录已失败的次数（没有记录为 0），本轮失败时 +1 写回
+	retryCount int32
 	// ssKeyLen 是这台服务器上该用户挂的 SS2022 入站要的密钥字节数（0 = 没有）；ssErr 非空表示 128 / 256 位混用（Ruling-60）
 	ssKeyLen int
 	ssErr    error
@@ -364,7 +365,7 @@ func (s *UserService) loadDesired(ctx context.Context, serverID int64, refLen ma
 		d := desiredClient{
 			userID: u.ID, email: clientEmail(u.ID, u.EmailCode), refs: refs[u.ID], enabled: u.Status == UserStatusActive,
 			limitIP: int(u.LimitIp), present: !u.IsDeleted && len(refs[u.ID]) > 0,
-			credVersion: u.CredVersion, hasLinks: synced[u.ID].HasLinks,
+			credVersion: u.CredVersion, hasLinks: synced[u.ID].HasLinks, retryCount: synced[u.ID].RetryCount,
 			// 0 是 M3 之前写入的下发记录，面板上是初始凭据，按版本 1 处理
 			syncedVersion: max(synced[u.ID].CredVersion, initialCredVersion),
 		}
@@ -398,22 +399,11 @@ func provisionError(err error) string {
 	if errors.As(err, &pe) {
 		msg = pe.Message
 	}
-	if utf8.RuneCountInString(msg) > maxProvisionErr {
-		msg = string([]rune(msg)[:maxProvisionErr])
-	}
-	return msg
+	return truncate(msg, maxProvisionErr)
 }
 
 // saveResults 写回 provision：应删除且已删掉的移除记录；其余记 synced 或 failed（重试次数 +1）。最后清理已删完的待删除用户。
 func (s *UserService) saveResults(ctx context.Context, serverID int64, desired []desiredClient, failures map[int64]error, links map[int64][]string) error {
-	prev, err := s.q.ListServerProvisions(ctx, serverID)
-	if err != nil {
-		return fmt.Errorf("list provisions of server %d: %w", serverID, err)
-	}
-	retries := make(map[int64]int32, len(prev))
-	for _, v := range prev {
-		retries[v.UserID] = v.RetryCount
-	}
 	now := pgtype.Timestamptz{Time: s.now(), Valid: true}
 	return s.inTx(ctx, func(q *sqlcgen.Queries) error {
 		for _, d := range desired {
@@ -427,7 +417,7 @@ func (s *UserService) saveResults(ctx context.Context, serverID int64, desired [
 			params := sqlcgen.UpsertProvisionParams{UserID: d.userID, ServerID: serverID, Email: d.email, Status: ProvisionSynced, SyncedAt: now, CredVersion: d.credVersion}
 			if opErr != nil {
 				params.Status, params.LastError, params.SyncedAt = ProvisionFailed, provisionError(opErr), pgtype.Timestamptz{}
-				params.RetryCount = retries[d.userID] + 1
+				params.RetryCount = d.retryCount + 1
 				slog.Warn("provision failed", "server_id", serverID, "user_id", d.userID, "err", opErr)
 			}
 			provisionID, err := q.UpsertProvision(ctx, params)

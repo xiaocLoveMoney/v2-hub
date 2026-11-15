@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/jackc/pgx/v5/pgtype"
-
 	"v2-hub-server/internal/dao/sqlcgen"
 	"v2-hub-server/internal/manager/panel"
 )
@@ -73,10 +71,10 @@ func (s *UserService) CollectServerTraffic(ctx context.Context, serverID int64) 
 			if err := saveQuota(ctx, q, row.ID, row.PlanID, qt, row.Status); err != nil {
 				return err
 			}
-			if err := q.TouchUserLastUsed(ctx, sqlcgen.TouchUserLastUsedParams{ID: row.ID, LastUsedAt: pgtype.Timestamptz{Time: now, Valid: true}}); err != nil {
+			if err := q.TouchUserLastUsed(ctx, sqlcgen.TouchUserLastUsedParams{ID: row.ID, LastUsedAt: timestamptz(now)}); err != nil {
 				return fmt.Errorf("touch last used of user %d: %w", row.ID, err)
 			}
-			return q.AddUserTraffic(ctx, sqlcgen.AddUserTrafficParams{UserID: row.ID, Hour: pgtype.Timestamptz{Time: hourOf(now), Valid: true}, Up: up, Down: down})
+			return q.AddUserTraffic(ctx, sqlcgen.AddUserTrafficParams{UserID: row.ID, Hour: timestamptz(hourOf(now)), Up: up, Down: down})
 		})
 		if err != nil {
 			return fmt.Errorf("account traffic of %s on server %d: %w", c.Email, serverID, err)

@@ -11,7 +11,6 @@ import (
 	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"v2-hub-server/internal/dao/sqlcgen"
@@ -111,10 +110,6 @@ func validTicketContent(s string) (string, error) {
 		return "", newError(CodeInvalidArgument, msgTicketBadContent)
 	}
 	return s, nil
-}
-
-func (s *TicketService) at(t time.Time) pgtype.Timestamptz {
-	return pgtype.Timestamptz{Time: t, Valid: true}
 }
 
 func (s *TicketService) list(ctx context.Context, arg sqlcgen.ListTicketsParams) ([]Ticket, error) {
@@ -261,17 +256,17 @@ func (s *TicketService) Create(ctx context.Context, p *UserPrincipal, subject, c
 		if open >= maxOpenTicketsPerUser {
 			return newError(CodeConflict, msgTicketTooMany)
 		}
-		recent, err := q.CountTicketsCreatedSince(ctx, sqlcgen.CountTicketsCreatedSinceParams{UserID: p.UserID, CreatedAt: s.at(now.Add(-time.Hour))})
+		recent, err := q.CountTicketsCreatedSince(ctx, sqlcgen.CountTicketsCreatedSinceParams{UserID: p.UserID, CreatedAt: timestamptz(now.Add(-time.Hour))})
 		if err != nil {
 			return fmt.Errorf("count recent tickets of user %d: %w", p.UserID, err)
 		}
 		if recent >= maxTicketsPerHour {
 			return newError(CodeRateLimited, msgTicketTooOften)
 		}
-		if id, err = q.CreateTicket(ctx, sqlcgen.CreateTicketParams{UserID: p.UserID, Subject: subject, Now: s.at(now)}); err != nil {
+		if id, err = q.CreateTicket(ctx, sqlcgen.CreateTicketParams{UserID: p.UserID, Subject: subject, Now: timestamptz(now)}); err != nil {
 			return fmt.Errorf("create ticket: %w", err)
 		}
-		if err := q.InsertTicketMessage(ctx, sqlcgen.InsertTicketMessageParams{TicketID: id, AuthorKind: TicketAuthorUser, Content: content, CreatedAt: s.at(now)}); err != nil {
+		if err := q.InsertTicketMessage(ctx, sqlcgen.InsertTicketMessageParams{TicketID: id, AuthorKind: TicketAuthorUser, Content: content, CreatedAt: timestamptz(now)}); err != nil {
 			return fmt.Errorf("insert first message of ticket %d: %w", id, err)
 		}
 		s.notifyAdmins(ctx, q, subject)
@@ -299,17 +294,17 @@ func (s *TicketService) ReplyOwn(ctx context.Context, p *UserPrincipal, id int64
 		if err != nil {
 			return err
 		}
-		recent, err := q.CountUserTicketMessagesSince(ctx, sqlcgen.CountUserTicketMessagesSinceParams{UserID: p.UserID, CreatedAt: s.at(now.Add(-time.Hour))})
+		recent, err := q.CountUserTicketMessagesSince(ctx, sqlcgen.CountUserTicketMessagesSinceParams{UserID: p.UserID, CreatedAt: timestamptz(now.Add(-time.Hour))})
 		if err != nil {
 			return fmt.Errorf("count recent replies of user %d: %w", p.UserID, err)
 		}
 		if recent >= maxTicketRepliesPerHour {
 			return newError(CodeRateLimited, msgTicketTooOften)
 		}
-		if err := q.InsertTicketMessage(ctx, sqlcgen.InsertTicketMessageParams{TicketID: id, AuthorKind: TicketAuthorUser, Content: content, CreatedAt: s.at(now)}); err != nil {
+		if err := q.InsertTicketMessage(ctx, sqlcgen.InsertTicketMessageParams{TicketID: id, AuthorKind: TicketAuthorUser, Content: content, CreatedAt: timestamptz(now)}); err != nil {
 			return fmt.Errorf("insert message of ticket %d: %w", id, err)
 		}
-		if err := q.SetTicketStatus(ctx, sqlcgen.SetTicketStatusParams{ID: id, Status: TicketOpen, TouchReply: true, Now: s.at(now)}); err != nil {
+		if err := q.SetTicketStatus(ctx, sqlcgen.SetTicketStatusParams{ID: id, Status: TicketOpen, TouchReply: true, Now: timestamptz(now)}); err != nil {
 			return fmt.Errorf("reopen ticket %d: %w", id, err)
 		}
 		s.notifyAdmins(ctx, q, row.Subject)
@@ -336,7 +331,7 @@ func (s *TicketService) CloseOwn(ctx context.Context, p *UserPrincipal, id int64
 }
 
 func (s *TicketService) close(ctx context.Context, q *sqlcgen.Queries, id int64) error {
-	if err := q.SetTicketStatus(ctx, sqlcgen.SetTicketStatusParams{ID: id, Status: TicketClosed, Now: s.at(s.now())}); err != nil {
+	if err := q.SetTicketStatus(ctx, sqlcgen.SetTicketStatusParams{ID: id, Status: TicketClosed, Now: timestamptz(s.now())}); err != nil {
 		return fmt.Errorf("close ticket %d: %w", id, err)
 	}
 	return nil
@@ -368,11 +363,11 @@ func (s *TicketService) Reply(ctx context.Context, actor *AdminPrincipal, id int
 			return err
 		}
 		if err := q.InsertTicketMessage(ctx, sqlcgen.InsertTicketMessageParams{
-			TicketID: id, AuthorKind: TicketAuthorAdmin, AdminID: int8Arg(actor.AdminID), Content: content, CreatedAt: s.at(now),
+			TicketID: id, AuthorKind: TicketAuthorAdmin, AdminID: int8Arg(actor.AdminID), Content: content, CreatedAt: timestamptz(now),
 		}); err != nil {
 			return fmt.Errorf("insert message of ticket %d: %w", id, err)
 		}
-		if err := q.SetTicketStatus(ctx, sqlcgen.SetTicketStatusParams{ID: id, Status: TicketAnswered, TouchReply: true, Now: s.at(now)}); err != nil {
+		if err := q.SetTicketStatus(ctx, sqlcgen.SetTicketStatusParams{ID: id, Status: TicketAnswered, TouchReply: true, Now: timestamptz(now)}); err != nil {
 			return fmt.Errorf("mark ticket %d answered: %w", id, err)
 		}
 		to, err := q.GetUserNotifyEmail(ctx, row.UserID)

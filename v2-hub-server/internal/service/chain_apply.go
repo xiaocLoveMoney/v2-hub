@@ -204,8 +204,8 @@ func (d desiredSet) latestChange() time.Time {
 
 // repinStale 复查一个用户的服务端规则引用的用户出口：固定的地址超过复查周期的重新解析（docs/03 §5.19 用户出口的地址限制）。
 // 仍在解析结果里就不变；解析结果里有非公网地址或指向平台自己的服务器则作废（规则随之阻断）；暂时解析不了保持原样。
-// 返回是否有出口的固定地址变了（调用方需要重读状态）。
-func (a *ChainApplier) repinStale(ctx context.Context, st *chainState) (bool, error) {
+// 返回是否有出口的固定地址变了（调用方需要重读状态）。platform 缓存本轮算好的平台地址，一轮下发只算一次。
+func (a *ChainApplier) repinStale(ctx context.Context, st *chainState, platform *platformAddrCache) (bool, error) {
 	now := a.now()
 	isChanged := false
 	isChecked := make(map[int64]bool, len(st.exits))
@@ -222,7 +222,7 @@ func (a *ChainApplier) repinStale(ctx context.Context, st *chainState) (bool, er
 		if _, err := netip.ParseAddr(sec.node.Address); err == nil {
 			continue
 		}
-		next, err := a.repinExit(ctx, sec)
+		next, err := a.repinExit(ctx, sec, platform)
 		if errors.Is(err, errExitResolve) {
 			next = sec.pinned
 		}
@@ -238,24 +238,19 @@ func (a *ChainApplier) repinStale(ctx context.Context, st *chainState) (bool, er
 }
 
 // repinExit 重新解析一个出口：返回新固定的地址；不再安全时返回 nil；暂时解析不了返回 errExitResolve。
-func (a *ChainApplier) repinExit(ctx context.Context, sec exitSecret) (*netip.Addr, error) {
-	ip, err := a.guard.pin(ctx, sec.node.Address, sec.pinned)
-	if errors.Is(err, errExitResolve) {
+// platform 缓存本轮算好的平台地址。
+func (a *ChainApplier) repinExit(ctx context.Context, sec exitSecret, platform *platformAddrCache) (*netip.Addr, error) {
+	ip, err := a.guard.pinOffPlatform(ctx, a.q, sec.node.Address, sec.pinned, platform)
+	switch {
+	case err == nil:
+		return &ip, nil
+	case errors.Is(err, errExitResolve):
+		return nil, err
+	case errors.Is(err, errExitPrivate), errors.Is(err, errExitPlatform):
+		return nil, nil
+	default:
 		return nil, err
 	}
-	if err != nil {
-		return nil, nil
-	}
-	hosts, err := a.q.ListPlatformHosts(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("list platform hosts: %w", err)
-	}
-	lookupCtx, cancel := context.WithTimeout(ctx, platformLookupTimeout)
-	defer cancel()
-	if a.guard.platformAddrs(lookupCtx, hosts)[ip] {
-		return nil, nil
-	}
-	return &ip, nil
 }
 
 // exitNodeFor 返回一条规则的落地写进面板时用的参数；平台节点取本人在落地面板上的参数（与订阅同源），还没同步到时返回 false。
@@ -280,7 +275,8 @@ func (a *ChainApplier) exitNodeFor(ctx context.Context, st *chainState, r ChainR
 }
 
 // userEntries 生成一个用户在这台服务器上的条目：每条有起飞入站在这里生效的规则一条（docs/03 §5.19 下发单位）。
-func (a *ChainApplier) userEntries(ctx context.Context, serverID, userID int64, coreServers map[int64]bool, isRepinAllowed bool, set *desiredSet) ([]chain.Entry, error) {
+// platform 是本轮共用的平台地址缓存，复查出口时用。
+func (a *ChainApplier) userEntries(ctx context.Context, serverID, userID int64, coreServers map[int64]bool, isRepinAllowed bool, set *desiredSet, platform *platformAddrCache) ([]chain.Entry, error) {
 	email, err := a.q.GetProvisionEmail(ctx, sqlcgen.GetProvisionEmailParams{UserID: userID, ServerID: serverID})
 	if errors.Is(err, pgx.ErrNoRows) || (err == nil && email == "") {
 		return nil, nil
@@ -293,7 +289,7 @@ func (a *ChainApplier) userEntries(ctx context.Context, serverID, userID int64, 
 		return nil, err
 	}
 	if isRepinAllowed {
-		isChanged, err := a.repinStale(ctx, st)
+		isChanged, err := a.repinStale(ctx, st, platform)
 		if err != nil {
 			return nil, err
 		}
@@ -347,8 +343,9 @@ func (a *ChainApplier) desired(ctx context.Context, serverID int64, isRepinAllow
 		return set, err
 	}
 	entries := make([]chain.Entry, 0, len(userIDs))
+	var platform platformAddrCache
 	for _, userID := range userIDs {
-		more, err := a.userEntries(ctx, serverID, userID, coreServers, isRepinAllowed, &set)
+		more, err := a.userEntries(ctx, serverID, userID, coreServers, isRepinAllowed, &set, &platform)
 		if err != nil {
 			return set, err
 		}
@@ -695,16 +692,11 @@ func sleepCtx(ctx context.Context, d time.Duration) error {
 
 // serverProviderType 返回服务器的面板类型；服务器不存在返回 404。
 func (a *ChainApplier) serverProviderType(ctx context.Context, serverID int64) (string, error) {
-	rows, err := a.q.ListServerProviderTypes(ctx)
+	srv, err := a.panels.GetServer(ctx, serverID)
 	if err != nil {
-		return "", fmt.Errorf("list server provider types: %w", err)
+		return "", err
 	}
-	for _, r := range rows {
-		if r.ID == serverID {
-			return r.ProviderType, nil
-		}
-	}
-	return "", newError(CodeNotFound, msgServerNotFound)
+	return srv.ProviderType, nil
 }
 
 // Status 返回一台服务器作为起飞服务器的下发状态（管理端，server:read）。

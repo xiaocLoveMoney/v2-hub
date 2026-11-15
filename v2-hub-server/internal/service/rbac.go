@@ -191,11 +191,8 @@ func (s *RBACService) CreateRole(ctx context.Context, actor *AdminPrincipal, in 
 		if err := q.InsertRolePermissions(ctx, sqlcgen.InsertRolePermissionsParams{RoleID: id, Codes: perms.Sorted()}); err != nil {
 			return fmt.Errorf("insert permissions of role %d: %w", id, err)
 		}
-		return writeAudit(ctx, q, AuditEntry{
-			ActorType: ActorAdmin, ActorID: actor.AdminID, Action: ActionRoleCreate,
-			TargetType: targetRole, TargetID: fmt.Sprint(id), ClientIP: ip,
-			Detail: map[string]any{"code": in.Code, "name": in.Name, "permissions": perms.Sorted()},
-		})
+		return writeAudit(ctx, q, adminAudit(actor, ActionRoleCreate, targetRole, id, ip,
+			map[string]any{"code": in.Code, "name": in.Name, "permissions": perms.Sorted()}))
 	})
 	if err != nil {
 		return nil, err
@@ -231,11 +228,8 @@ func (s *RBACService) UpdateRole(ctx context.Context, actor *AdminPrincipal, id 
 			return fmt.Errorf("insert permissions of role %d: %w", id, err)
 		}
 		updated = &Role{ID: id, Code: current.Code, Name: in.Name, Permissions: perms.Sorted()}
-		return writeAudit(ctx, q, AuditEntry{
-			ActorType: ActorAdmin, ActorID: actor.AdminID, Action: ActionRoleUpdate,
-			TargetType: targetRole, TargetID: fmt.Sprint(id), ClientIP: ip,
-			Detail: map[string]any{"name": in.Name, "before": current.Permissions, "after": perms.Sorted()},
-		})
+		return writeAudit(ctx, q, adminAudit(actor, ActionRoleUpdate, targetRole, id, ip,
+			map[string]any{"name": in.Name, "before": current.Permissions, "after": perms.Sorted()}))
 	})
 	if err != nil {
 		return nil, err
@@ -266,36 +260,49 @@ func (s *RBACService) DeleteRole(ctx context.Context, actor *AdminPrincipal, id 
 		if err := q.DeleteRole(ctx, id); err != nil {
 			return fmt.Errorf("delete role %d: %w", id, err)
 		}
-		return writeAudit(ctx, q, AuditEntry{
-			ActorType: ActorAdmin, ActorID: actor.AdminID, Action: ActionRoleDelete,
-			TargetType: targetRole, TargetID: fmt.Sprint(id), ClientIP: ip,
-			Detail: map[string]any{"code": current.Code},
-		})
+		return writeAudit(ctx, q, adminAudit(actor, ActionRoleDelete, targetRole, id, ip, map[string]any{"code": current.Code}))
 	})
 }
 
+// getRole 返回一个角色及其有效权限码；不存在返回 CodeNotFound。
 func getRole(ctx context.Context, q *sqlcgen.Queries, id int64) (*Role, error) {
-	row, err := q.GetRoleByID(ctx, id)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, newError(CodeNotFound, msgRoleNotFound)
-	}
-	if err != nil {
-		return nil, fmt.Errorf("get role %d: %w", id, err)
-	}
 	roles, err := listRoles(ctx, q)
 	if err != nil {
 		return nil, err
 	}
 	for i := range roles {
-		if roles[i].ID == row.ID {
+		if roles[i].ID == id {
 			return &roles[i], nil
 		}
 	}
 	return nil, newError(CodeNotFound, msgRoleNotFound)
 }
 
+// roleCache 让同一事务里的多次角色校验只查一次全部角色；零值可用，第一次用到时才查库。
+type roleCache struct {
+	roles  []Role
+	loaded bool
+}
+
+func (c *roleCache) get(ctx context.Context, q *sqlcgen.Queries) ([]Role, error) {
+	if c.loaded {
+		return c.roles, nil
+	}
+	roles, err := listRoles(ctx, q)
+	if err != nil {
+		return nil, err
+	}
+	c.roles, c.loaded = roles, true
+	return roles, nil
+}
+
 // resolveAssignableRoles 校验角色存在且操作者有权分配（R3），返回角色 ID 列表。
 func resolveAssignableRoles(ctx context.Context, q *sqlcgen.Queries, actor *AdminPrincipal, codes []string) ([]int64, error) {
+	return resolveAssignableRolesCached(ctx, q, actor, codes, &roleCache{})
+}
+
+// resolveAssignableRolesCached 同 resolveAssignableRoles，全部角色经 cache 读取，供同一事务里多次校验共用。
+func resolveAssignableRolesCached(ctx context.Context, q *sqlcgen.Queries, actor *AdminPrincipal, codes []string, cache *roleCache) ([]int64, error) {
 	if len(codes) > maxRolesPerAdmin {
 		return nil, newError(CodeInvalidArgument, "角色过多")
 	}
@@ -303,7 +310,7 @@ func resolveAssignableRoles(ctx context.Context, q *sqlcgen.Queries, actor *Admi
 	if len(unique) == 0 {
 		return []int64{}, nil
 	}
-	all, err := listRoles(ctx, q)
+	all, err := cache.get(ctx, q)
 	if err != nil {
 		return nil, err
 	}
@@ -368,11 +375,8 @@ func (s *RBACService) CreateAdmin(ctx context.Context, actor *AdminPrincipal, in
 			return err
 		}
 		created.Roles = NewPermissionSet(in.Roles).Sorted()
-		return writeAudit(ctx, q, AuditEntry{
-			ActorType: ActorAdmin, ActorID: actor.AdminID, Action: ActionAdminCreate,
-			TargetType: targetAdmin, TargetID: fmt.Sprint(created.ID), ClientIP: ip,
-			Detail: map[string]any{"username": in.Username, "roles": created.Roles},
-		})
+		return writeAudit(ctx, q, adminAudit(actor, ActionAdminCreate, targetAdmin, created.ID, ip,
+			map[string]any{"username": in.Username, "roles": created.Roles}))
 	})
 	if err != nil {
 		return nil, err
@@ -461,13 +465,9 @@ func (s *RBACService) ListAdmins(ctx context.Context, pq PageQuery) (*Page[Admin
 	}
 	items := make([]Admin, 0, len(rows))
 	for _, r := range rows {
-		a := Admin{ID: r.ID, Username: r.Username, IsDisabled: r.IsDisabled, TOTPEnabled: r.TotpEnabled, Roles: roles[r.ID], CreatedAt: r.CreatedAt.Time}
+		a := adminFromRow(r, roles[r.ID])
 		if a.Roles == nil {
 			a.Roles = []string{}
-		}
-		if r.LastLoginAt.Valid {
-			t := r.LastLoginAt.Time
-			a.LastLoginAt = &t
 		}
 		items = append(items, a)
 	}
@@ -496,10 +496,11 @@ func (s *RBACService) UpdateAdmin(ctx context.Context, actor *AdminPrincipal, id
 			return err
 		}
 		// R3：现有角色与新角色都必须是操作者可分配的，非超管因此无法改动超管
-		if _, err := resolveAssignableRoles(ctx, q, actor, currentRoles); err != nil {
+		var roles roleCache
+		if _, err := resolveAssignableRolesCached(ctx, q, actor, currentRoles, &roles); err != nil {
 			return err
 		}
-		newRoleIDs, err := resolveAssignableRoles(ctx, q, actor, in.Roles)
+		newRoleIDs, err := resolveAssignableRolesCached(ctx, q, actor, in.Roles, &roles)
 		if err != nil {
 			return err
 		}
@@ -531,11 +532,8 @@ func (s *RBACService) UpdateAdmin(ctx context.Context, actor *AdminPrincipal, id
 		target.IsDisabled = in.IsDisabled
 		target.Roles = newRoles
 		updated = target
-		return writeAudit(ctx, q, AuditEntry{
-			ActorType: ActorAdmin, ActorID: actor.AdminID, Action: ActionAdminUpdate,
-			TargetType: targetAdmin, TargetID: fmt.Sprint(id), ClientIP: ip,
-			Detail: map[string]any{"rolesBefore": currentRoles, "rolesAfter": newRoles, "isDisabled": in.IsDisabled},
-		})
+		return writeAudit(ctx, q, adminAudit(actor, ActionAdminUpdate, targetAdmin, id, ip,
+			map[string]any{"rolesBefore": currentRoles, "rolesAfter": newRoles, "isDisabled": in.IsDisabled}))
 	})
 	if err != nil {
 		return nil, err
@@ -568,10 +566,7 @@ func (s *RBACService) ResetAdminPassword(ctx context.Context, actor *AdminPrinci
 		if err := q.DeleteAdminSessionsByAdmin(ctx, id); err != nil {
 			return fmt.Errorf("revoke sessions of admin %d: %w", id, err)
 		}
-		return writeAudit(ctx, q, AuditEntry{
-			ActorType: ActorAdmin, ActorID: actor.AdminID, Action: ActionAdminPasswordReset,
-			TargetType: targetAdmin, TargetID: fmt.Sprint(id), ClientIP: ip,
-		})
+		return writeAudit(ctx, q, adminAudit(actor, ActionAdminPasswordReset, targetAdmin, id, ip, nil))
 	})
 }
 
@@ -588,12 +583,17 @@ func getAdminWithRoles(ctx context.Context, q *sqlcgen.Queries, id int64) (*Admi
 		return nil, nil, fmt.Errorf("list roles of admin %d: %w", id, err)
 	}
 	slices.Sort(roles)
-	a := &Admin{ID: row.ID, Username: row.Username, IsDisabled: row.IsDisabled, TOTPEnabled: row.TotpEnabled, Roles: roles, CreatedAt: row.CreatedAt.Time}
-	if row.LastLoginAt.Valid {
-		t := row.LastLoginAt.Time
-		a.LastLoginAt = &t
+	// 两条查询的行结构逐字段相同，可直接转换
+	a := adminFromRow(sqlcgen.ListAdminsRow(row), roles)
+	return &a, roles, nil
+}
+
+// adminFromRow 把管理员行与其角色码组装成 Admin；roles 原样放入，不做 nil 处理。
+func adminFromRow(r sqlcgen.ListAdminsRow, roles []string) Admin {
+	return Admin{
+		ID: r.ID, Username: r.Username, IsDisabled: r.IsDisabled, TOTPEnabled: r.TotpEnabled, Roles: roles,
+		LastLoginAt: timePtr(r.LastLoginAt), CreatedAt: r.CreatedAt.Time,
 	}
-	return a, roles, nil
 }
 
 // ensureOtherSuperAdmin 实现 R5：除 excludedID 外至少还有一个启用的超管。调用方须已锁 super_admin 角色行。

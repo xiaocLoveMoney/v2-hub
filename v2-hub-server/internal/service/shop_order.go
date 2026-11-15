@@ -116,19 +116,21 @@ type orderItem struct {
 
 // pricedOrder 是一次购买算好的全部结果，询价与下单共用同一段计算。
 type pricedOrder struct {
-	kind         string
-	item         orderItem
-	planID       int64
-	planPriceID  int64
-	packID       int64
-	trial        bool
-	renewal      bool
-	original     int64
-	discount     int64
-	couponID     int64
-	couponCode   string
-	balance      int64
-	username     string
+	kind        string
+	item        orderItem
+	planID      int64
+	planPriceID int64
+	packID      int64
+	trial       bool
+	renewal     bool
+	original    int64
+	discount    int64
+	couponID    int64
+	couponCode  string
+	balance     int64
+	username    string
+	// wallet 是 price 里锁用户余额时读到的行，下单扣款沿用这把锁
+	wallet       sqlcgen.LockUserBalanceRow
 	planRef      pgtype.Int8 // 下单后用户的 plan_id
 	quota        Quota       // 下单后的额度
 	statusBefore string
@@ -151,20 +153,6 @@ func violatedConstraint(err error) string {
 		return pgErr.ConstraintName
 	}
 	return ""
-}
-
-// packBlocker 返回不能买流量包的原因；可以买时为空串（docs/03 §5.13 可买条件）。
-func packBlocker(hasPlan bool, q Quota, status string) string {
-	switch {
-	case !hasPlan:
-		return msgPackNoPlan
-	case q.TrafficLimit == 0:
-		return msgPackUnlimited
-	case status != UserStatusActive && status != UserStatusLimited:
-		return msgPackInactive
-	default:
-		return ""
-	}
 }
 
 // trialBlocker 返回不能领试用的原因：已领过，或正持有未到期的其它套餐（docs/03 §5.12 试用）。
@@ -201,7 +189,7 @@ func (s *ShopService) price(ctx context.Context, q *sqlcgen.Queries, userID int6
 		return nil, fmt.Errorf("lock balance of user %d: %w", userID, err)
 	}
 	qt := quotaFromRow(row)
-	o := &pricedOrder{kind: in.Kind, balance: wallet.Balance, username: wallet.Username, statusBefore: row.Status, planRef: row.PlanID}
+	o := &pricedOrder{kind: in.Kind, balance: wallet.Balance, username: wallet.Username, wallet: wallet, statusBefore: row.Status, planRef: row.PlanID}
 	switch in.Kind {
 	case OrderPlan:
 		if err := s.pricePlan(ctx, q, userID, row, in, o, &qt, now); err != nil {
@@ -270,7 +258,7 @@ func pricePack(ctx context.Context, q *sqlcgen.Queries, row sqlcgen.GetUserQuota
 	if err != nil {
 		return fmt.Errorf("get traffic pack %d: %w", in.TrafficPackID, err)
 	}
-	if reason := packBlocker(row.PlanID.Valid, *qt, qt.Status(now)); reason != "" {
+	if reason := trafficTopUpBlocker(row.PlanID.Valid, *qt, qt.Status(now), packBlockMessages); reason != "" {
 		return newError(CodeConflict, reason)
 	}
 	// 只加额度不改到期；和签到奖励一样，续费 / 换购 / 管理员改额度时不保留（Ruling-26）
@@ -439,7 +427,7 @@ func (s *ShopService) placeOrder(ctx context.Context, q *sqlcgen.Queries, cur Se
 	if err != nil {
 		return nil, fmt.Errorf("encode order item: %w", err)
 	}
-	at := pgtype.Timestamptz{Time: now, Valid: true}
+	at := timestamptz(now)
 	user := pgtype.Int8{Int64: p.UserID, Valid: true}
 	orderID, err := q.InsertOrder(ctx, sqlcgen.InsertOrderParams{
 		OrderNo: orderNo, UserID: user, Username: o.username, Kind: o.kind,
@@ -454,7 +442,7 @@ func (s *ShopService) placeOrder(ctx context.Context, q *sqlcgen.Queries, cur Se
 		return nil, fmt.Errorf("insert order: %w", err)
 	}
 	if o.payable() > 0 {
-		if _, err := applyLedger(ctx, q, ledgerChange{UserID: p.UserID, Amount: -o.payable(), Kind: LedgerPurchase, Ref: ledgerRef{Type: refOrder, ID: orderID}, Remark: o.item.Name}, now); err != nil {
+		if _, err := applyLedgerLocked(ctx, q, o.wallet, ledgerChange{UserID: p.UserID, Amount: -o.payable(), Kind: LedgerPurchase, Ref: ledgerRef{Type: refOrder, ID: orderID}, Remark: o.item.Name}, now); err != nil {
 			return nil, err
 		}
 	}
@@ -602,6 +590,23 @@ func stateQuota(st sqlcgen.GetUserShopStateRow) Quota {
 	return Quota{TrafficLimit: st.TrafficLimit, TrafficUsed: st.TrafficUsed, ExpiresAt: timePtr(st.ExpiresAt), PendingDays: int(st.PendingDays), Disabled: st.IsDisabled}
 }
 
+// loadShopPlans 读出上架的套餐，以及在售的时长选项按套餐 id 归组的结果。
+func loadShopPlans(ctx context.Context, q *sqlcgen.Queries) ([]sqlcgen.ListShopPlansRow, map[int64][]PlanPrice, error) {
+	plans, err := q.ListShopPlans(ctx)
+	if err != nil {
+		return nil, nil, fmt.Errorf("list shop plans: %w", err)
+	}
+	prices, err := q.ListPlanPricesOnSale(ctx)
+	if err != nil {
+		return nil, nil, fmt.Errorf("list plan prices on sale: %w", err)
+	}
+	byPlan := make(map[int64][]PlanPrice, len(plans))
+	for _, pr := range prices {
+		byPlan[pr.PlanID] = append(byPlan[pr.PlanID], PlanPrice{ID: pr.ID, PlanPriceInput: PlanPriceInput{DurationDays: int(pr.DurationDays), Price: pr.Price}})
+	}
+	return plans, byPlan, nil
+}
+
 // GetShop 返回上架的套餐与流量包，以及本人对每个商品能不能买（docs/03 §5.12）。商店未开启返回 CodeFeatureDisabled。
 func (s *ShopService) GetShop(ctx context.Context, p *UserPrincipal) (*Shop, error) {
 	if _, err := requireShop(ctx, s.settings); err != nil {
@@ -614,17 +619,9 @@ func (s *ShopService) GetShop(ctx context.Context, p *UserPrincipal) (*Shop, err
 	if err != nil {
 		return nil, fmt.Errorf("get shop state of user %d: %w", p.UserID, err)
 	}
-	plans, err := s.q.ListShopPlans(ctx)
+	plans, byPlan, err := loadShopPlans(ctx, s.q)
 	if err != nil {
-		return nil, fmt.Errorf("list shop plans: %w", err)
-	}
-	prices, err := s.q.ListPlanPricesOnSale(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("list plan prices on sale: %w", err)
-	}
-	byPlan := make(map[int64][]PlanPrice, len(plans))
-	for _, pr := range prices {
-		byPlan[pr.PlanID] = append(byPlan[pr.PlanID], PlanPrice{ID: pr.ID, PlanPriceInput: PlanPriceInput{DurationDays: int(pr.DurationDays), Price: pr.Price}})
+		return nil, err
 	}
 	qt := stateQuota(st)
 	status := qt.Status(s.now())
@@ -646,7 +643,7 @@ func (s *ShopService) GetShop(ctx context.Context, p *UserPrincipal) (*Shop, err
 	if out.TrafficPacks, err = listTrafficPacks(ctx, s.q, true); err != nil {
 		return nil, err
 	}
-	out.TrafficPackReason = packBlocker(st.PlanID.Valid, qt, status)
+	out.TrafficPackReason = trafficTopUpBlocker(st.PlanID.Valid, qt, status, packBlockMessages)
 	out.CanBuyTrafficPack = out.TrafficPackReason == ""
 	return out, nil
 }
@@ -669,19 +666,21 @@ type Wallet struct {
 }
 
 // autoRenewInfo 判断用户现在能不能开自动续费（docs/03 §5.16）：买过某个时长选项、它还在售、不是试用、且仍是当前套餐。
-func autoRenewInfo(ctx context.Context, q *sqlcgen.Queries, st sqlcgen.GetUserShopStateRow) (AutoRenewInfo, error) {
+// 同时返回查到的时长选项行，供续费直接使用；info.Price 为 nil（没买过或已不存在）时该行为零值。
+func autoRenewInfo(ctx context.Context, q *sqlcgen.Queries, st sqlcgen.GetUserShopStateRow) (AutoRenewInfo, sqlcgen.GetPlanPriceForSaleRow, error) {
 	info := AutoRenewInfo{Enabled: st.AutoRenew}
+	var pp sqlcgen.GetPlanPriceForSaleRow
 	if !st.PlanPriceID.Valid {
 		info.Reason = msgAutoRenewNoOption
-		return info, nil
+		return info, pp, nil
 	}
 	pp, err := q.GetPlanPriceForSale(ctx, st.PlanPriceID.Int64)
 	if errors.Is(err, pgx.ErrNoRows) {
 		info.Reason = msgAutoRenewOffSale
-		return info, nil
+		return info, sqlcgen.GetPlanPriceForSaleRow{}, nil
 	}
 	if err != nil {
-		return info, fmt.Errorf("get plan price %d: %w", st.PlanPriceID.Int64, err)
+		return info, sqlcgen.GetPlanPriceForSaleRow{}, fmt.Errorf("get plan price %d: %w", st.PlanPriceID.Int64, err)
 	}
 	price := pp.Price
 	info.PlanName, info.DurationDays, info.Price = pp.Name, int(pp.DurationDays), &price
@@ -695,7 +694,7 @@ func autoRenewInfo(ctx context.Context, q *sqlcgen.Queries, st sqlcgen.GetUserSh
 	default:
 		info.Available = true
 	}
-	return info, nil
+	return info, pp, nil
 }
 
 // GetWallet 返回本人的余额、自动续费状态与累计返利；商店关闭时仍可查看（docs/03 §5.6 shop.enabled）。
@@ -711,7 +710,7 @@ func getWallet(ctx context.Context, q *sqlcgen.Queries, userID int64) (*Wallet, 
 	if err != nil {
 		return nil, fmt.Errorf("get shop state of user %d: %w", userID, err)
 	}
-	info, err := autoRenewInfo(ctx, q, st)
+	info, _, err := autoRenewInfo(ctx, q, st)
 	if err != nil {
 		return nil, err
 	}
@@ -760,17 +759,9 @@ func (s *ShopService) PublicPlans(ctx context.Context) ([]ShopPlan, error) {
 	if !cur.Landing.Enabled || !cur.Shop.Enabled {
 		return []ShopPlan{}, nil
 	}
-	plans, err := s.q.ListShopPlans(ctx)
+	plans, byPlan, err := loadShopPlans(ctx, s.q)
 	if err != nil {
-		return nil, fmt.Errorf("list shop plans: %w", err)
-	}
-	prices, err := s.q.ListPlanPricesOnSale(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("list plan prices on sale: %w", err)
-	}
-	byPlan := make(map[int64][]PlanPrice, len(plans))
-	for _, pr := range prices {
-		byPlan[pr.PlanID] = append(byPlan[pr.PlanID], PlanPrice{ID: pr.ID, PlanPriceInput: PlanPriceInput{DurationDays: int(pr.DurationDays), Price: pr.Price}})
+		return nil, err
 	}
 	out := make([]ShopPlan, 0, len(plans))
 	for _, r := range plans {
