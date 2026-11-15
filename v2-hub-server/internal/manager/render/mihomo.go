@@ -2,6 +2,7 @@ package render
 
 import (
 	"fmt"
+	"strings"
 
 	"go.yaml.in/yaml/v3"
 )
@@ -132,30 +133,15 @@ func Mihomo(nodes []ProxyNode, chains []Chain) ([]byte, error) {
 		p["dialer-proxy"] = c.entryName
 		proxies = append(proxies, p)
 	}
-	selectable := make([]string, 0, len(sel.names)+len(sel.chains)+1)
 	groups := make([]map[string]any, 0, 2)
-	if len(sel.realNames) > 0 {
-		selectable = append(selectable, GroupAuto)
-	}
-	selectable = append(selectable, sel.names...)
-	selectable = append(selectable, sel.chainNames()...)
-	if len(selectable) == 0 {
-		selectable = append(selectable, mihomoDirect)
-	}
-	groups = append(groups, map[string]any{"name": GroupSelect, "type": "select", "proxies": selectable})
+	groups = append(groups, map[string]any{"name": GroupSelect, "type": "select", "proxies": sel.selectorMembers(mihomoDirect)})
 	if len(sel.realNames) > 0 {
 		groups = append(groups, map[string]any{
 			"name": GroupAuto, "type": "url-test", "url": probeURL, "interval": probeIntervalSec, "proxies": sel.realNames,
 		})
 	}
-	rules := make([]string, 0, len(privateCIDRs)+2)
-	for _, cidr := range privateCIDRs {
-		kind := "IP-CIDR"
-		if isIPv6CIDR(cidr) {
-			kind = "IP-CIDR6"
-		}
-		rules = append(rules, fmt.Sprintf("%s,%s,%s,no-resolve", kind, cidr, mihomoDirect))
-	}
+	rules := make([]string, 0, len(mihomoPrivateRules)+2)
+	rules = append(rules, mihomoPrivateRules...)
 	rules = append(rules, mihomoGeoCN, "MATCH,"+GroupSelect)
 	cfg := map[string]any{
 		"mixed-port": mihomoMixedPort, "allow-lan": false, "mode": "rule", "log-level": "info",
@@ -168,11 +154,18 @@ func Mihomo(nodes []ProxyNode, chains []Chain) ([]byte, error) {
 	return out, nil
 }
 
-func isIPv6CIDR(cidr string) bool {
-	for _, c := range cidr {
-		if c == ':' {
-			return true
+// mihomoPrivateRules 由 privateCIDRs 一次算出，内容固定；Mihomo 每次渲染拷贝进自己的规则切片，不改动这里。
+var mihomoPrivateRules = buildMihomoPrivateRules()
+
+// buildMihomoPrivateRules 为每个私有网段生成一条直连规则，IPv6 网段用 IP-CIDR6。
+func buildMihomoPrivateRules() []string {
+	rules := make([]string, 0, len(privateCIDRs))
+	for _, cidr := range privateCIDRs {
+		kind := "IP-CIDR"
+		if strings.ContainsRune(cidr, ':') {
+			kind = "IP-CIDR6"
 		}
+		rules = append(rules, fmt.Sprintf("%s,%s,%s,no-resolve", kind, cidr, mihomoDirect))
 	}
-	return false
+	return rules
 }

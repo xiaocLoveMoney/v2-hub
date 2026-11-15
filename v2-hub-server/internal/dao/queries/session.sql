@@ -13,9 +13,6 @@ WHERE s.token_hash = $1;
 -- name: TouchAdminSession :exec
 UPDATE admin_session SET idle_until = $2 WHERE id = $1;
 
--- name: DeleteAdminSessionByTokenHash :exec
-DELETE FROM admin_session WHERE token_hash = $1;
-
 -- name: DeleteAdminSessionByID :exec
 DELETE FROM admin_session WHERE id = $1;
 

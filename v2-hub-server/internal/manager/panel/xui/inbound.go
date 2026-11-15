@@ -44,6 +44,12 @@ type configWire struct {
 	Sniffing       map[string]any `json:"sniffing"`
 }
 
+// inboundRecord 一次解出入站的平台字段与三段配置，避免对同一份 JSON 解码两遍。
+type inboundRecord struct {
+	inboundWire
+	configWire
+}
+
 // sensitivePaths 是缓存副本里要删除、编辑时要从面板补回的字段（Ruling-14）。
 // 每项是从 configWire 根开始的路径；"*" 表示数组的每个元素。
 var sensitivePaths = [][]string{
@@ -65,14 +71,11 @@ var keyGenPaths = map[panel.KeyKind]string{
 
 // toNeutral 把一条 3x-ui 入站 JSON 转成中立模型：计算摘要、删除敏感字段与 clients。
 func toNeutral(raw json.RawMessage) (panel.Inbound, error) {
-	var w inboundWire
-	if err := json.Unmarshal(raw, &w); err != nil {
+	var rec inboundRecord
+	if err := json.Unmarshal(raw, &rec); err != nil {
 		return panel.Inbound{}, fmt.Errorf("decode inbound: %w", err)
 	}
-	var cfg configWire
-	if err := json.Unmarshal(raw, &cfg); err != nil {
-		return panel.Inbound{}, fmt.Errorf("decode inbound config: %w", err)
-	}
+	w, cfg := rec.inboundWire, rec.configWire
 	clientCount := countClients(cfg.Settings)
 
 	// 摘要覆盖完整配置（含敏感字段，私钥被换也算面板侧改动），但不含 clients 与流量计数
@@ -85,10 +88,13 @@ func toNeutral(raw json.RawMessage) (panel.Inbound, error) {
 		return panel.Inbound{}, err
 	}
 
+	// cfg 是本函数刚解出的私有数据，摘要已算完，脱敏可直接在其上进行，无需再深拷贝；
+	// 只有缺省段落要补成空对象，与原先 deepCopy(nil) 的结果一致。
+	network, security := stringAt(cfg.StreamSettings, "network"), stringAt(cfg.StreamSettings, "security")
 	redacted := configWire{
-		Settings:       deepCopy(hashSettings),
-		StreamSettings: deepCopy(cfg.StreamSettings),
-		Sniffing:       deepCopy(cfg.Sniffing),
+		Settings:       hashSettings,
+		StreamSettings: orEmpty(cfg.StreamSettings),
+		Sniffing:       orEmpty(cfg.Sniffing),
 	}
 	root := map[string]any{keySettings: redacted.Settings, keyStreamSettings: redacted.StreamSettings}
 	for _, path := range sensitivePaths {
@@ -107,8 +113,8 @@ func toNeutral(raw json.RawMessage) (panel.Inbound, error) {
 		Tag:         w.Tag,
 		Remark:      w.Remark,
 		Enabled:     w.Enable,
-		Network:     stringAt(cfg.StreamSettings, "network"),
-		Security:    stringAt(cfg.StreamSettings, "security"),
+		Network:     network,
+		Security:    security,
 		CoreType:    panel.CoreXray,
 		Config:      configJSON,
 		ConfigHash:  hash,
@@ -142,9 +148,17 @@ func (c *Client) ListInbounds(ctx context.Context) ([]panel.Inbound, error) {
 	return out, nil
 }
 
-func (c *Client) getRaw(ctx context.Context, ref string) (map[string]any, error) {
+// checkRef 校验入站标识是 3x-ui 的数字 id；不合法按入站不存在处理。
+func checkRef(ref string) error {
 	if _, err := strconv.ParseInt(ref, 10, 64); err != nil {
-		return nil, &panel.Error{Kind: panel.KindNotFound, Message: "入站标识不合法"}
+		return &panel.Error{Kind: panel.KindNotFound, Message: "入站标识不合法"}
+	}
+	return nil
+}
+
+func (c *Client) getRaw(ctx context.Context, ref string) (map[string]any, error) {
+	if err := checkRef(ref); err != nil {
+		return nil, err
 	}
 	var raw map[string]any
 	if err := c.call(ctx, http.MethodGet, "/inbounds/get/"+ref, nil, &raw); err != nil {
@@ -175,14 +189,11 @@ func (c *Client) GetInboundConfig(ctx context.Context, ref string) (panel.Inboun
 	if err != nil {
 		return panel.InboundConfig{}, fmt.Errorf("encode inbound: %w", err)
 	}
-	var w inboundWire
-	var cfg configWire
-	if err := json.Unmarshal(encoded, &w); err != nil {
+	var rec inboundRecord
+	if err := json.Unmarshal(encoded, &rec); err != nil {
 		return panel.InboundConfig{}, &panel.Error{Kind: panel.KindUnreachable, Message: "面板返回的入站格式与预期不符", Err: err}
 	}
-	if err := json.Unmarshal(encoded, &cfg); err != nil {
-		return panel.InboundConfig{}, &panel.Error{Kind: panel.KindUnreachable, Message: "面板返回的入站格式与预期不符", Err: err}
-	}
+	w, cfg := rec.inboundWire, rec.configWire
 	cfg.Settings = withoutKeys(cfg.Settings, keyClients, keyPeers)
 	configJSON, err := json.Marshal(cfg)
 	if err != nil {
@@ -304,16 +315,16 @@ func (c *Client) UpdateInbound(ctx context.Context, ref string, spec panel.Inbou
 
 // SetInboundEnabled 实现 panel.Provider。
 func (c *Client) SetInboundEnabled(ctx context.Context, ref string, enabled bool) error {
-	if _, err := strconv.ParseInt(ref, 10, 64); err != nil {
-		return &panel.Error{Kind: panel.KindNotFound, Message: "入站标识不合法"}
+	if err := checkRef(ref); err != nil {
+		return err
 	}
 	return c.call(ctx, http.MethodPost, "/inbounds/setEnable/"+ref, map[string]bool{keyEnable: enabled}, nil)
 }
 
 // DeleteInbound 实现 panel.Provider。3x-ui 对不存在的入站也返回成功。
 func (c *Client) DeleteInbound(ctx context.Context, ref string) error {
-	if _, err := strconv.ParseInt(ref, 10, 64); err != nil {
-		return &panel.Error{Kind: panel.KindNotFound, Message: "入站标识不合法"}
+	if err := checkRef(ref); err != nil {
+		return err
 	}
 	return c.call(ctx, http.MethodPost, "/inbounds/del/"+ref, nil, nil)
 }

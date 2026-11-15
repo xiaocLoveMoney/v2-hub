@@ -3,7 +3,6 @@ package chain
 import (
 	"encoding/json"
 	"fmt"
-	"slices"
 )
 
 // BlockTag 是平台拦截规则的出站 tag 与路由 ruleTag（docs/03 §5.19 拦截规则，Ruling-55）。
@@ -29,11 +28,6 @@ var blockDomains = []string{
 	`regexp:\b([\w-]+\.)*((esu|zhina|nmsl)\.(wiki|dog|website|lol)|esuwiki\.org|t91y\.com)`,
 	`regexp:(.*\.||)(bot|hncb|scsb|taipeifubon|fubon|cathaybk|bok|tbb|tcbbank|hsbc|ktb|bop|ubot|feib|sinopac|dbs|ka-cn|wowoka|mycard520|btgamehk|i7391|omg|288game|gameplayplay|duogamecard|kaletou|158card|gameneed|520game|dacardba|gashpoint|gash|ecard|jhpoint|jiaoyimao|gamebsina|5658ka|ate91|8591|jp87|htmgame|ibon|8591|5173|yooek|4931|7881|cucu91|7nfun|laoyouka|kavip|uaka|youdianka|milandor|jkos|gamapay|opay|allpay|pay2go|taiwanpay|piapp|pchomepay|funcashier)\.(com|net|tw)`,
 	`regexp:(.*\.||)(metatrader4|metatrader5|mql5)\.(org|com|net)`,
-}
-
-// BlockDomains 返回拦截规则的域名条件（副本）。
-func BlockDomains() []string {
-	return slices.Clone(blockDomains)
 }
 
 // WithBlock 返回在平台条目最前面加上拦截条目（一个黑洞出站 + 一条按域名拦截的路由）后的新条目，原条目不变。

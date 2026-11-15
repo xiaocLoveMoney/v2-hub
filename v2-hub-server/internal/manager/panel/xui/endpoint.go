@@ -58,13 +58,9 @@ func (c *Client) listHostRows(ctx context.Context) ([]hostRow, error) {
 
 // CreateEndpoints 实现 panel.Provider：在面板上新建一个 Host 组，挂到给定入站。
 func (c *Client) CreateEndpoints(ctx context.Context, spec panel.EndpointSpec) error {
-	ids := make([]int64, 0, len(spec.InboundRefs))
-	for _, ref := range spec.InboundRefs {
-		id, err := strconv.ParseInt(ref, 10, 64)
-		if err != nil {
-			return &panel.Error{Kind: panel.KindRejected, Message: "入站标识不合法"}
-		}
-		ids = append(ids, id)
+	ids, err := refsToIDs(spec.InboundRefs)
+	if err != nil {
+		return err
 	}
 	// 3x-ui 要求 Host 组有备注（空备注返回 request body failed validation），平台侧备注可选，缺省用第一个地址
 	remark := spec.Remark

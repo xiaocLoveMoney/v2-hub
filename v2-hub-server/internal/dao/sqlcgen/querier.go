@@ -54,7 +54,6 @@ type Querier interface {
 	CountEmailCodesByIPSince(ctx context.Context, arg CountEmailCodesByIPSinceParams) (int64, error)
 	// 用于 R5：除 excluded_admin_id 外，仍持有该角色且启用的管理员数。
 	CountEnabledAdminsWithRoleExcluding(ctx context.Context, arg CountEnabledAdminsWithRoleExcludingParams) (int64, error)
-	CountGroupMembershipsByInbound(ctx context.Context, inboundID int64) (int64, error)
 	CountInviteCodes(ctx context.Context, kind string) (int64, error)
 	CountLedger(ctx context.Context, arg CountLedgerParams) (int64, error)
 	CountLiveUsersByIDs(ctx context.Context, ids []int64) (int64, error)
@@ -69,7 +68,6 @@ type Querier interface {
 	// 这个用户除本单以外实付 > 0 的订单数，用来判断是不是“首笔消费”
 	CountOtherPaidOrders(ctx context.Context, arg CountOtherPaidOrdersParams) (int64, error)
 	CountPayments(ctx context.Context, arg CountPaymentsParams) (int64, error)
-	CountPermissionsByCodes(ctx context.Context, codes []string) (int64, error)
 	CountPlansByIDs(ctx context.Context, ids []int64) (int64, error)
 	CountPublishedAnnouncements(ctx context.Context) (int64, error)
 	CountRebates(ctx context.Context, inviterID int64) (int64, error)
@@ -111,7 +109,6 @@ type Querier interface {
 	DashboardUsers(ctx context.Context, arg DashboardUsersParams) (DashboardUsersRow, error)
 	DeleteAdminRoles(ctx context.Context, adminID int64) error
 	DeleteAdminSessionByID(ctx context.Context, id int64) error
-	DeleteAdminSessionByTokenHash(ctx context.Context, tokenHash []byte) error
 	DeleteAdminSessionsByAdmin(ctx context.Context, adminID int64) error
 	DeleteAnnouncement(ctx context.Context, id int64) (int64, error)
 	DeleteChainExit(ctx context.Context, arg DeleteChainExitParams) (int64, error)
@@ -156,7 +153,6 @@ type Querier interface {
 	EnsureNode(ctx context.Context, arg EnsureNodeParams) error
 	// 首次查看时生成个人码；已有（或随机码撞了别人的）时什么都不做，由调用方重读
 	EnsureUserInviteCode(ctx context.Context, arg EnsureUserInviteCodeParams) error
-	ExistsCheckin(ctx context.Context, arg ExistsCheckinParams) (bool, error)
 	// 邮箱是否已被占用：等于某个用户的邮箱，或等于某个（存量、含 @ 的）用户名（docs/03 §5.8 冲突）
 	ExistsEndUserIdentity(ctx context.Context, email string) (bool, error)
 	ExistsPlan(ctx context.Context, id int64) (bool, error)
@@ -352,7 +348,6 @@ type Querier interface {
 	ListRoleCodesForAdmin(ctx context.Context, adminID int64) ([]string, error)
 	ListRolePermissionCodes(ctx context.Context) ([]ListRolePermissionCodesRow, error)
 	ListRoles(ctx context.Context) ([]ListRolesRow, error)
-	ListRolesByCodes(ctx context.Context, codes []string) ([]ListRolesByCodesRow, error)
 	// 这些服务器上全部对外地址（含未授权的），用来判断一条链接是不是某个对外地址的
 	ListServerEndpointAddrs(ctx context.Context, serverIds []int64) ([]ListServerEndpointAddrsRow, error)
 	// 5 分钟采样原值（近 24 小时趋势）
@@ -467,7 +462,6 @@ type Querier interface {
 	// 失败隔离（docs/03 §5.19）：记下当时的内容指纹；内容变化后指纹对不上即视为解除
 	SetChainRouteQuarantine(ctx context.Context, arg SetChainRouteQuarantineParams) error
 	SetExpireNotified(ctx context.Context, arg SetExpireNotifiedParams) error
-	SetInboundEnabledLocal(ctx context.Context, arg SetInboundEnabledLocalParams) error
 	SetInviteCodeDisabled(ctx context.Context, arg SetInviteCodeDisabledParams) error
 	SetMailRetry(ctx context.Context, arg SetMailRetryParams) error
 	SetProvisionCounters(ctx context.Context, arg SetProvisionCountersParams) error

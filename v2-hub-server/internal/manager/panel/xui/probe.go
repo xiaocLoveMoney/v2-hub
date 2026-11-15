@@ -102,10 +102,8 @@ func neutralMode(reported string, asked panel.OutboundTestMode) panel.OutboundTe
 // 只有面板连不上或 token 无效才返回错误。
 func (c *Client) TestOutbound(ctx context.Context, outbound json.RawMessage, mode panel.OutboundTestMode) (panel.OutboundTestResult, error) {
 	form := url.Values{formOutbound: {string(outbound)}, formMode: {xuiMode(mode)}}
-	slow := *c.http
-	slow.Timeout = outboundTestTimeout
 	var resp testOutboundResp
-	err := c.sendWith(ctx, &slow, http.MethodPost, pathTestOutbound, contentTypeForm, []byte(form.Encode()), &resp)
+	err := c.callFormSlow(ctx, pathTestOutbound, form, outboundTestTimeout, &resp)
 	if pe := panel.AsError(err); pe != nil && pe.Kind == panel.KindRejected {
 		return panel.OutboundTestResult{Mode: mode, Failure: panel.OutboundFailOther, Message: pe.Message}, nil
 	}
@@ -191,12 +189,6 @@ func (r realityScanResp) neutral() panel.RealityScan {
 	}
 }
 
-func (c *Client) scanForm(ctx context.Context, path string, form url.Values, out any) error {
-	slow := *c.http
-	slow.Timeout = realityScanTimeout
-	return c.sendWith(ctx, &slow, http.MethodPost, path, contentTypeForm, []byte(form.Encode()), out)
-}
-
 // ScanRealityTarget 实现 panel.RealityScanner。
 func (c *Client) ScanRealityTarget(ctx context.Context, target, sni string, xver int) (panel.RealityScan, error) {
 	form := url.Values{formTarget: {target}}
@@ -207,7 +199,7 @@ func (c *Client) ScanRealityTarget(ctx context.Context, target, sni string, xver
 		form.Set(formXver, strconv.Itoa(xver))
 	}
 	var resp realityScanResp
-	if err := c.scanForm(ctx, pathScanRealityTarget, form, &resp); err != nil {
+	if err := c.callFormSlow(ctx, pathScanRealityTarget, form, realityScanTimeout, &resp); err != nil {
 		return panel.RealityScan{}, err
 	}
 	return resp.neutral(), nil
@@ -220,7 +212,7 @@ func (c *Client) ScanRealityTargets(ctx context.Context, targets []string) ([]pa
 		form.Set(formTargets, strings.Join(targets, targetSeparator))
 	}
 	var resp []realityScanResp
-	if err := c.scanForm(ctx, pathScanRealityTargets, form, &resp); err != nil {
+	if err := c.callFormSlow(ctx, pathScanRealityTargets, form, realityScanTimeout, &resp); err != nil {
 		return nil, err
 	}
 	out := make([]panel.RealityScan, 0, len(resp))

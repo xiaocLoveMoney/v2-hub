@@ -46,9 +46,6 @@ WHERE id = $1 AND NOT is_missing;
 UPDATE inbound SET is_missing = TRUE, updated_at = now()
 WHERE server_id = sqlc.arg(server_id) AND NOT is_missing AND NOT (remote_ref = ANY(sqlc.arg(present_refs)::text[]));
 
--- name: SetInboundEnabledLocal :exec
-UPDATE inbound SET is_enabled = $2, updated_at = now() WHERE id = $1;
-
 -- name: DeleteInbound :exec
 DELETE FROM inbound WHERE id = $1;
 

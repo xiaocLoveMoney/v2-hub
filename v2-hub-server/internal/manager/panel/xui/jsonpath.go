@@ -91,6 +91,14 @@ func deepCopy(m map[string]any) map[string]any {
 	return out
 }
 
+// orEmpty 把 nil 换成空对象，其余原样返回。
+func orEmpty(m map[string]any) map[string]any {
+	if m == nil {
+		return map[string]any{}
+	}
+	return m
+}
+
 func stringAt(m map[string]any, key string) string {
 	s, _ := m[key].(string)
 	return s

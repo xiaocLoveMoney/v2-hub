@@ -20,17 +20,6 @@ func (q *Queries) ClearNodeGroupItems(ctx context.Context, nodeGroupID int64) er
 	return err
 }
 
-const countGroupMembershipsByInbound = `-- name: CountGroupMembershipsByInbound :one
-SELECT COUNT(*) FROM node_group_item gi JOIN node n ON n.id = gi.node_id WHERE n.inbound_id = $1
-`
-
-func (q *Queries) CountGroupMembershipsByInbound(ctx context.Context, inboundID int64) (int64, error) {
-	row := q.db.QueryRow(ctx, countGroupMembershipsByInbound, inboundID)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
-}
-
 const countNodes = `-- name: CountNodes :one
 SELECT COUNT(*)
 FROM node n
