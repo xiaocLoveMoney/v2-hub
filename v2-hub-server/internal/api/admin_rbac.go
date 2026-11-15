@@ -62,11 +62,6 @@ type auditLogVO struct {
 	CreatedAt  time.Time       `json:"createdAt"`
 }
 
-type pageVO[T any] struct {
-	Items []T   `json:"items"`
-	Total int64 `json:"total"`
-}
-
 func toRoleVO(r service.Role) roleVO {
 	return roleVO{ID: r.ID, Code: r.Code, Name: r.Name, IsBuiltin: r.IsBuiltin, Permissions: r.Permissions}
 }
@@ -91,14 +86,6 @@ func toAuditLogVO(l service.AuditLog) auditLogVO {
 		vo.ClientIP = &s
 	}
 	return vo
-}
-
-func mapSlice[S, T any](in []S, f func(S) T) []T {
-	out := make([]T, 0, len(in))
-	for _, v := range in {
-		out = append(out, f(v))
-	}
-	return out
 }
 
 // ---- 请求体 ----
@@ -159,13 +146,9 @@ func (h *handlers) createRole(w http.ResponseWriter, r *http.Request, p *service
 }
 
 func (h *handlers) updateRole(w http.ResponseWriter, r *http.Request, p *service.AdminPrincipal) {
-	id, err := pathID(r)
-	if err != nil {
-		writeError(w, r, err)
-		return
-	}
 	var req roleRequest
-	if err := decodeJSON(w, r, &req); err != nil {
+	id, err := decodeWithID(w, r, &req)
+	if err != nil {
 		writeError(w, r, err)
 		return
 	}
@@ -201,7 +184,7 @@ func (h *handlers) listAdmins(w http.ResponseWriter, r *http.Request, _ *service
 		writeError(w, r, err)
 		return
 	}
-	writeOK(w, pageVO[adminVO]{Items: mapSlice(page.Items, toAdminVO), Total: page.Total})
+	writeOK(w, toPageVO(page, toAdminVO))
 }
 
 func (h *handlers) createAdmin(w http.ResponseWriter, r *http.Request, p *service.AdminPrincipal) {
@@ -222,13 +205,9 @@ func (h *handlers) createAdmin(w http.ResponseWriter, r *http.Request, p *servic
 }
 
 func (h *handlers) updateAdmin(w http.ResponseWriter, r *http.Request, p *service.AdminPrincipal) {
-	id, err := pathID(r)
-	if err != nil {
-		writeError(w, r, err)
-		return
-	}
 	var req adminUpdateRequest
-	if err := decodeJSON(w, r, &req); err != nil {
+	id, err := decodeWithID(w, r, &req)
+	if err != nil {
 		writeError(w, r, err)
 		return
 	}
@@ -241,13 +220,9 @@ func (h *handlers) updateAdmin(w http.ResponseWriter, r *http.Request, p *servic
 }
 
 func (h *handlers) resetAdminCredential(w http.ResponseWriter, r *http.Request, p *service.AdminPrincipal) {
-	id, err := pathID(r)
-	if err != nil {
-		writeError(w, r, err)
-		return
-	}
 	var req credentialRequest
-	if err := decodeJSON(w, r, &req); err != nil {
+	id, err := decodeWithID(w, r, &req)
+	if err != nil {
 		writeError(w, r, err)
 		return
 	}
@@ -269,7 +244,7 @@ func (h *handlers) listAuditLogs(w http.ResponseWriter, r *http.Request, _ *serv
 		writeError(w, r, err)
 		return
 	}
-	writeOK(w, pageVO[auditLogVO]{Items: mapSlice(page.Items, toAuditLogVO), Total: page.Total})
+	writeOK(w, toPageVO(page, toAuditLogVO))
 }
 
 func (h *handlers) resetAdminTOTP(w http.ResponseWriter, r *http.Request, p *service.AdminPrincipal) {

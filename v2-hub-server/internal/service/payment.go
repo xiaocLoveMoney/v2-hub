@@ -123,7 +123,7 @@ func (s *PayService) CreatePayment(ctx context.Context, p *UserPrincipal, gatewa
 		err = s.inTx(ctx, func(q *sqlcgen.Queries) error {
 			id, err := q.InsertPayment(ctx, sqlcgen.InsertPaymentParams{
 				TradeNo: tradeNo, UserID: pgtype.Int8{Int64: p.UserID, Valid: true}, Username: p.Username, Gateway: gateway.Code(), Amount: amount,
-				ExpiresAt: pgtype.Timestamptz{Time: expiresAt, Valid: true}, CreatedAt: pgtype.Timestamptz{Time: now, Valid: true},
+				ExpiresAt: timestamptz(expiresAt), CreatedAt: timestamptz(now),
 			})
 			if err != nil {
 				return err
@@ -196,7 +196,7 @@ func (s *PayService) confirm(ctx context.Context, gatewayCode string, n *pay.Not
 			return nil
 		}
 		err = q.MarkPaymentPaid(ctx, sqlcgen.MarkPaymentPaidParams{
-			ID: row.ID, GatewayTradeNo: pgtype.Text{String: n.GatewayTradeNo, Valid: true}, PaidAt: pgtype.Timestamptz{Time: now, Valid: true},
+			ID: row.ID, GatewayTradeNo: pgtype.Text{String: n.GatewayTradeNo, Valid: true}, PaidAt: timestamptz(now),
 		})
 		if err != nil {
 			if isUniqueViolation(err) {
@@ -219,7 +219,7 @@ func (s *PayService) confirm(ctx context.Context, gatewayCode string, n *pay.Not
 
 // ExpirePayments 把超过 30 分钟仍未支付的充值单置为过期，返回处理的张数（定时任务调用）。
 func (s *PayService) ExpirePayments(ctx context.Context) (int64, error) {
-	n, err := s.q.ExpirePayments(ctx, pgtype.Timestamptz{Time: s.now(), Valid: true})
+	n, err := s.q.ExpirePayments(ctx, timestamptz(s.now()))
 	if err != nil {
 		return 0, fmt.Errorf("expire payments: %w", err)
 	}

@@ -3,7 +3,6 @@ package api
 import (
 	"context"
 	"net/http"
-	"strconv"
 	"time"
 
 	"v2-hub-server/internal/service"
@@ -139,22 +138,17 @@ func (h *handlers) getPublicPlans(w http.ResponseWriter, r *http.Request) {
 
 // financeQuery 解析收支统计的查询参数（granularity、days、months）；范围由 service 校验。
 func financeQuery(r *http.Request) (service.FinanceQuery, error) {
-	q := r.URL.Query()
-	fq := service.FinanceQuery{Granularity: q.Get(queryGranularity)}
-	if raw := q.Get(queryDays); raw != "" {
-		v, err := strconv.Atoi(raw)
-		if err != nil || v < 1 {
-			return fq, badRequest(msgBadDays)
-		}
-		fq.Days = v
+	fq := service.FinanceQuery{Granularity: r.URL.Query().Get(queryGranularity)}
+	days, err := optionalPositiveInt(r, queryDays, msgBadDays)
+	if err != nil {
+		return fq, err
 	}
-	if raw := q.Get(queryMonths); raw != "" {
-		v, err := strconv.Atoi(raw)
-		if err != nil || v < 1 {
-			return fq, badRequest(msgBadMonths)
-		}
-		fq.Months = v
+	fq.Days = days
+	months, err := optionalPositiveInt(r, queryMonths, msgBadMonths)
+	if err != nil {
+		return fq, err
 	}
+	fq.Months = months
 	return fq, nil
 }
 

@@ -84,15 +84,17 @@ type loginRequest struct {
 // adminHandler 是已认证管理员接口的处理函数。
 type adminHandler func(w http.ResponseWriter, r *http.Request, p *service.AdminPrincipal)
 
-func (h *handlers) login(w http.ResponseWriter, r *http.Request) {
+// parseLoginInput 解码并校验登录请求体，组装成 service.LoginInput（管理端与用户端共用）；
+// 失败时已写出错误响应，返回 false。
+func (h *handlers) parseLoginInput(w http.ResponseWriter, r *http.Request) (service.LoginInput, bool) {
 	var req loginRequest
 	if err := decodeJSON(w, r, &req); err != nil {
 		writeError(w, r, err)
-		return
+		return service.LoginInput{}, false
 	}
 	if req.Username == "" || req.Credential == "" {
 		writeError(w, r, badRequest(msgEmptyLogin))
-		return
+		return service.LoginInput{}, false
 	}
 	in := service.LoginInput{
 		Username:  req.Username,
@@ -102,6 +104,14 @@ func (h *handlers) login(w http.ResponseWriter, r *http.Request) {
 	}
 	pw := req.Credential
 	in.Password = pw
+	return in, true
+}
+
+func (h *handlers) login(w http.ResponseWriter, r *http.Request) {
+	in, ok := h.parseLoginInput(w, r)
+	if !ok {
+		return
+	}
 	res, err := h.auth.Login(r.Context(), in)
 	if err != nil {
 		writeError(w, r, err)
@@ -116,9 +126,7 @@ func (h *handlers) logout(w http.ResponseWriter, r *http.Request, p *service.Adm
 		writeError(w, r, err)
 		return
 	}
-	expired := h.sessionCookie("", time.Unix(0, 0))
-	expired.MaxAge = -1
-	http.SetCookie(w, expired)
+	http.SetCookie(w, h.expiredCookie(adminSessionCookie, adminCookiePath))
 	writeOK(w, nil)
 }
 
@@ -127,15 +135,27 @@ func (h *handlers) me(w http.ResponseWriter, r *http.Request, p *service.AdminPr
 }
 
 func (h *handlers) sessionCookie(value string, expires time.Time) *http.Cookie {
+	return h.newSessionCookie(adminSessionCookie, adminCookiePath, value, expires)
+}
+
+// newSessionCookie 构造会话 Cookie：HttpOnly、SameSite=Lax，Secure 取配置（管理端与用户端只有名称与路径不同）。
+func (h *handlers) newSessionCookie(name, path, value string, expires time.Time) *http.Cookie {
 	return &http.Cookie{
-		Name:     adminSessionCookie,
+		Name:     name,
 		Value:    value,
-		Path:     adminCookiePath,
+		Path:     path,
 		Expires:  expires,
 		HttpOnly: true,
 		Secure:   h.cookie.Secure,
 		SameSite: http.SameSiteLaxMode,
 	}
+}
+
+// expiredCookie 构造让浏览器立即删除会话 Cookie 的同名 Cookie（空值、Expires 为 Unix 零点、MaxAge=-1）。
+func (h *handlers) expiredCookie(name, path string) *http.Cookie {
+	expired := h.newSessionCookie(name, path, "", time.Unix(0, 0))
+	expired.MaxAge = -1
+	return expired
 }
 
 // requireAdmin 校验会话、CSRF（非 GET/HEAD）与权限码（perm 为空表示只需登录），见 docs/03 §4.1 R1、§4.2。

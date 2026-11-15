@@ -70,35 +70,34 @@ func xrayOutbound(n ProxyNode, tag string) map[string]any {
 			user["flow"] = n.Flow
 		}
 		o["protocol"] = "vless"
-		o["settings"] = map[string]any{"vnext": []map[string]any{{"address": n.Address, "port": n.Port, "users": []map[string]any{user}}}}
+		o["settings"] = xrayVnext(n, user)
 	case ProtoVMess:
 		user := map[string]any{"id": n.UUID, "alterId": n.AlterID, "security": orDefault(n.Method, vmessDefaultCipher)}
 		o["protocol"] = "vmess"
-		o["settings"] = map[string]any{"vnext": []map[string]any{{"address": n.Address, "port": n.Port, "users": []map[string]any{user}}}}
+		o["settings"] = xrayVnext(n, user)
 	case ProtoTrojan:
 		o["protocol"] = "trojan"
 		o["settings"] = map[string]any{"servers": []map[string]any{{"address": n.Address, "port": n.Port, "password": n.Password}}}
 	case ProtoShadowsocks:
 		o["protocol"] = "shadowsocks"
 		o["settings"] = map[string]any{"servers": []map[string]any{{"address": n.Address, "port": n.Port, "method": n.Method, "password": n.Password}}}
-	case ProtoSocks:
+	case ProtoSocks, ProtoHTTP:
+		// 两者在 Xray 里的出站形状相同，协议名与 ProxyNode.Protocol 取值一致
 		server := map[string]any{"address": n.Address, "port": n.Port}
 		if n.Username != "" {
 			server["users"] = []map[string]any{{"user": n.Username, "pass": n.Password}}
 		}
-		o["protocol"] = "socks"
-		o["settings"] = map[string]any{"servers": []map[string]any{server}}
-	case ProtoHTTP:
-		server := map[string]any{"address": n.Address, "port": n.Port}
-		if n.Username != "" {
-			server["users"] = []map[string]any{{"user": n.Username, "pass": n.Password}}
-		}
-		o["protocol"] = "http"
+		o["protocol"] = n.Protocol
 		o["settings"] = map[string]any{"servers": []map[string]any{server}}
 	default:
 		// xraySupports 已排除其余协议
 	}
 	return o
+}
+
+// xrayVnext 拼 vless / vmess 出站的 settings：单个服务器、单个用户。
+func xrayVnext(n ProxyNode, user map[string]any) map[string]any {
+	return map[string]any{"vnext": []map[string]any{{"address": n.Address, "port": n.Port, "users": []map[string]any{user}}}}
 }
 
 // Xray 渲染一个 JSON 数组，每个节点一份完整的 Xray 客户端配置（remarks 为节点名），

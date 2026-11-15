@@ -4,8 +4,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/jackc/pgx/v5/pgtype"
-
 	"v2-hub-server/internal/dao/sqlcgen"
 )
 
@@ -36,9 +34,9 @@ func (s *ChainService) ListRoutes(ctx context.Context, f ChainRouteFilter, pq Pa
 	if !isKnownKind {
 		return nil, newError(CodeInvalidArgument, msgChainBadKindFilter)
 	}
-	kindArg := pgtype.Text{String: f.Kind, Valid: f.Kind != ""}
-	userArg := pgtype.Int8{Int64: f.UserID, Valid: f.UserID > 0}
-	serverArg := pgtype.Int8{Int64: f.ServerID, Valid: f.ServerID > 0}
+	kindArg := textOrNull(f.Kind)
+	userArg := optionalID(f.UserID)
+	serverArg := optionalID(f.ServerID)
 	total, err := s.q.CountAdminChainRoutes(ctx, sqlcgen.CountAdminChainRoutesParams{Kind: kindArg, UserID: userArg, ServerID: serverArg})
 	if err != nil {
 		return nil, fmt.Errorf("count admin chain routes: %w", err)

@@ -58,11 +58,6 @@ type FinanceStats struct {
 	Rebate      int64
 }
 
-// FinanceStats 返回最近 days 天按天的充值、消费与返利合计（旧的在前，没有流水的日期也给 0）；days 为 0 取默认 30。
-func (s *ShopService) FinanceStats(ctx context.Context, days int) (*FinanceStats, error) {
-	return s.FinanceStatsBy(ctx, FinanceQuery{Granularity: StatsByDay, Days: days})
-}
-
 // FinanceStatsBy 按日或按月返回收支统计（docs/03 §5.20 财务报表）：按日最多 366 天，按月最多 24 个月；口径同 M5。
 func (s *ShopService) FinanceStatsBy(ctx context.Context, fq FinanceQuery) (*FinanceStats, error) {
 	if fq.Granularity == "" {

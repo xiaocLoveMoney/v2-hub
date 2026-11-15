@@ -11,6 +11,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"time"
 
 	"v2-hub-server/internal/manager/panel"
 )
@@ -61,7 +62,7 @@ func New(cfg panel.ConnConfig) (panel.Provider, error) {
 
 // Capabilities 实现 panel.Provider。
 func (c *Client) Capabilities() panel.Capabilities {
-	return panel.Capabilities{CoreType: panel.CoreXray, Endpoints: true, MultiInboundClients: true, OnlineClients: true, CoreConfig: true}
+	return panel.Capabilities{CoreType: panel.CoreXray, Endpoints: true, OnlineClients: true, CoreConfig: true}
 }
 
 // call 发起一次 API 调用，校验信封并把 obj 解到 out（out 为 nil 时忽略）。
@@ -87,9 +88,11 @@ func (c *Client) send(ctx context.Context, method, path, contentType string, rea
 	return c.sendVia(ctx, c.http, method, path, contentType, reader, out)
 }
 
-// sendWith 用指定的 HTTP 客户端发一次带请求体的调用（个别接口需要更长的时限）。
-func (c *Client) sendWith(ctx context.Context, hc *http.Client, method, path, contentType string, body []byte, out any) error {
-	return c.sendVia(ctx, hc, method, path, contentType, bytes.NewReader(body), out)
+// callFormSlow 同 callForm，但用 timeout 作请求时限（个别接口比普通调用慢）；只改本次调用的副本，不动共享的 HTTP 客户端。
+func (c *Client) callFormSlow(ctx context.Context, path string, form url.Values, timeout time.Duration, out any) error {
+	slow := *c.http
+	slow.Timeout = timeout
+	return c.sendVia(ctx, &slow, http.MethodPost, path, contentTypeForm, bytes.NewReader([]byte(form.Encode())), out)
 }
 
 func (c *Client) sendVia(ctx context.Context, hc *http.Client, method, path, contentType string, reader io.Reader, out any) (retErr error) {

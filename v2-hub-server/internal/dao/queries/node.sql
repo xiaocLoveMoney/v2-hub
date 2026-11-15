@@ -50,9 +50,6 @@ WHERE id = $1;
 -- name: CountNodesByIDs :one
 SELECT COUNT(*) FROM node WHERE id = ANY(sqlc.arg(ids)::bigint[]);
 
--- name: CountGroupMembershipsByInbound :one
-SELECT COUNT(*) FROM node_group_item gi JOIN node n ON n.id = gi.node_id WHERE n.inbound_id = $1;
-
 -- name: ListNodeGroups :many
 SELECT g.id, g.name, g.remark,
        COALESCE((SELECT array_agg(gi.node_id ORDER BY gi.node_id)

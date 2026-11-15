@@ -4,7 +4,6 @@ import (
 	"context"
 	"log/slog"
 	"net/netip"
-	"sync"
 	"time"
 
 	"v2-hub-server/internal/service"
@@ -55,29 +54,7 @@ func forEachServer(ctx context.Context, poller PanelPoller, concurrency int, kin
 		slog.Error("panel poll: list servers", "kind", kind, "err", err)
 		return
 	}
-	sem := make(chan struct{}, max(concurrency, 1))
-	var wg sync.WaitGroup
-	for _, id := range ids {
-		select {
-		case <-ctx.Done():
-			wg.Wait()
-			return
-		case sem <- struct{}{}:
-		}
-		wg.Add(1)
-		go func(id int64) {
-			defer wg.Done()
-			defer func() { <-sem }()
-			defer func() {
-				if r := recover(); r != nil {
-					slog.Error("panel poll panicked", "kind", kind, "server_id", id, "panic", r)
-				}
-			}()
-			// 探测失败已按转移表落库，这里只记调试日志，避免离线服务器刷屏
-			if err := fn(id); err != nil {
-				slog.Debug("panel poll failed", "kind", kind, "server_id", id, "err", err)
-			}
-		}(id)
-	}
-	wg.Wait()
+	// 探测失败已按转移表落库，这里只记调试日志，避免离线服务器刷屏
+	logs := fanOutLog{kind: kind, panicMsg: "panel poll panicked", failMsg: "panel poll failed", failLevel: slog.LevelDebug}
+	fanOut(ctx, ids, concurrency, logs, fn)
 }

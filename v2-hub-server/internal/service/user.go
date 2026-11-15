@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math/big"
 	"net/netip"
 	"regexp"
 	"strings"
@@ -358,8 +357,7 @@ func (s *UserService) CreatePlan(ctx context.Context, actor *AdminPrincipal, in 
 		if err := setPlanPrices(ctx, q, id, v.Prices); err != nil {
 			return err
 		}
-		return writeAudit(ctx, q, AuditEntry{ActorType: ActorAdmin, ActorID: actor.AdminID, Action: ActionPlanCreate, TargetType: targetPlan,
-			TargetID: fmt.Sprint(id), ClientIP: ip, Detail: map[string]any{"name": v.Name}})
+		return writeAudit(ctx, q, adminAudit(actor, ActionPlanCreate, targetPlan, id, ip, map[string]any{"name": v.Name}))
 	})
 	if err != nil {
 		return nil, err
@@ -396,8 +394,7 @@ func (s *UserService) UpdatePlan(ctx context.Context, actor *AdminPrincipal, id 
 		if err := setPlanPrices(ctx, q, id, v.Prices); err != nil {
 			return err
 		}
-		return writeAudit(ctx, q, AuditEntry{ActorType: ActorAdmin, ActorID: actor.AdminID, Action: ActionPlanUpdate, TargetType: targetPlan,
-			TargetID: fmt.Sprint(id), ClientIP: ip, Detail: map[string]any{"name": v.Name, "nodeGroups": len(v.NodeGroupIDs)}})
+		return writeAudit(ctx, q, adminAudit(actor, ActionPlanUpdate, targetPlan, id, ip, map[string]any{"name": v.Name, "nodeGroups": len(v.NodeGroupIDs)}))
 	})
 	if err != nil {
 		return nil, err
@@ -416,7 +413,7 @@ func (s *UserService) DeletePlan(ctx context.Context, actor *AdminPrincipal, id 
 		if n == 0 {
 			return newError(CodeNotFound, msgPlanNotFound)
 		}
-		return writeAudit(ctx, q, AuditEntry{ActorType: ActorAdmin, ActorID: actor.AdminID, Action: ActionPlanDelete, TargetType: targetPlan, TargetID: fmt.Sprint(id), ClientIP: ip})
+		return writeAudit(ctx, q, adminAudit(actor, ActionPlanDelete, targetPlan, id, ip, nil))
 	})
 	if err == nil {
 		s.TriggerReconcile()
@@ -479,16 +476,11 @@ func credentialAAD(userID int64) []byte {
 }
 
 func randomEmailCode() (string, error) {
-	var b strings.Builder
-	limit := big.NewInt(int64(len(emailCodeAlphabet)))
-	for range emailCodeLen {
-		n, err := rand.Int(rand.Reader, limit)
-		if err != nil {
-			return "", fmt.Errorf("random email code: %w", err)
-		}
-		b.WriteByte(emailCodeAlphabet[n.Int64()])
+	code, err := randomString(emailCodeAlphabet, emailCodeLen)
+	if err != nil {
+		return "", fmt.Errorf("random email code: %w", err)
 	}
-	return b.String(), nil
+	return code, nil
 }
 
 func newClientCredential() (clientCredential, error) {
@@ -532,16 +524,13 @@ func quotaFromRow(r sqlcgen.GetUserQuotaRow) Quota {
 }
 
 func saveQuota(ctx context.Context, q *sqlcgen.Queries, id int64, planID pgtype.Int8, qt Quota, status string) error {
-	var expires pgtype.Timestamptz
-	if qt.ExpiresAt != nil {
-		expires = pgtype.Timestamptz{Time: *qt.ExpiresAt, Valid: true}
-	}
+	expires := optionalTime(qt.ExpiresAt)
 	err := q.SaveUserQuota(ctx, sqlcgen.SaveUserQuotaParams{
 		ID: id, PlanID: planID, TrafficLimit: qt.TrafficLimit, TrafficUsed: qt.TrafficUsed, ExpiresAt: expires,
 		PendingDays: int32(qt.PendingDays), LimitIp: int32(qt.LimitIP), RenewEveryDays: int32(qt.RenewEveryDays),
 		RenewMonthDay: int32(qt.RenewMonthDay), RenewWeekday: int32(qt.RenewWeekday), RenewMax: int32(qt.RenewMax),
 		RenewCount: int32(qt.RenewCount), TrafficReset: qt.TrafficReset, TrafficResetDay: int32(qt.TrafficResetDay),
-		LastTrafficResetAt: pgtype.Timestamptz{Time: qt.LastTrafficResetAt, Valid: true}, IsDisabled: qt.Disabled, Status: status,
+		LastTrafficResetAt: timestamptz(qt.LastTrafficResetAt), IsDisabled: qt.Disabled, Status: status,
 	})
 	if err != nil {
 		return fmt.Errorf("save user %d quota: %w", id, err)
@@ -689,8 +678,7 @@ func (s *UserService) CreateUser(ctx context.Context, actor *AdminPrincipal, in 
 		if id, err = s.createUserTx(ctx, q, spec, s.now()); err != nil {
 			return err
 		}
-		return writeAudit(ctx, q, AuditEntry{ActorType: ActorAdmin, ActorID: actor.AdminID, Action: ActionUserCreate, TargetType: targetUser,
-			TargetID: fmt.Sprint(id), ClientIP: ip, Detail: map[string]any{"username": in.Username, "planId": in.PlanID}})
+		return writeAudit(ctx, q, adminAudit(actor, ActionUserCreate, targetUser, id, ip, map[string]any{"username": in.Username, "planId": in.PlanID}))
 	})
 	if err != nil {
 		return nil, err
@@ -885,8 +873,7 @@ func (s *UserService) afterQuotaChange(ctx context.Context, q *sqlcgen.Queries, 
 		}
 		s.TriggerReconcile()
 	}
-	return writeAudit(ctx, q, AuditEntry{ActorType: ActorAdmin, ActorID: actor.AdminID, Action: action, TargetType: targetUser,
-		TargetID: fmt.Sprint(id), ClientIP: ip, Detail: detail})
+	return writeAudit(ctx, q, adminAudit(actor, action, targetUser, id, ip, detail))
 }
 
 // AssignPlan 分配或续费套餐（U6）。停用的用户须先启用（409）。
@@ -995,13 +982,13 @@ func (s *UserService) ResetUserPassword(ctx context.Context, actor *AdminPrincip
 		if err := q.DeleteUserSessionsByUser(ctx, id); err != nil {
 			return fmt.Errorf("revoke sessions of user %d: %w", id, err)
 		}
-		return writeAudit(ctx, q, AuditEntry{ActorType: ActorAdmin, ActorID: actor.AdminID, Action: ActionUserPasswordReset, TargetType: targetUser, TargetID: fmt.Sprint(id), ClientIP: ip})
+		return writeAudit(ctx, q, adminAudit(actor, ActionUserPasswordReset, targetUser, id, ip, nil))
 	})
 }
 
 // DeleteUser 把用户标为待删除；对账删掉各面板 client 后再删记录（docs/03 §5.2）。
 func (s *UserService) DeleteUser(ctx context.Context, actor *AdminPrincipal, id int64, ip *netip.Addr) error {
-	return s.deleteUser(ctx, id, AuditEntry{ActorType: ActorAdmin, ActorID: actor.AdminID, Action: ActionUserDelete, TargetType: targetUser, TargetID: fmt.Sprint(id), ClientIP: ip})
+	return s.deleteUser(ctx, id, adminAudit(actor, ActionUserDelete, targetUser, id, ip, nil))
 }
 
 // deleteUser 把用户标记为待删除并触发各面板清理（docs/03 §5.2 删除用户）；管理员删除与本人注销共用，audit 由调用方给出。

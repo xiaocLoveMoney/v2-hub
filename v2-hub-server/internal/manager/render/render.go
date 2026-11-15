@@ -126,6 +126,20 @@ func (s selection) chainNames() []string {
 	return out
 }
 
+// selectorMembers 返回手动选择组的成员：有可连通节点时先放自动测速组，再放各节点与链路；一个都没有时只放 fallback。
+func (s selection) selectorMembers(fallback string) []string {
+	members := make([]string, 0, len(s.names)+len(s.chains)+1)
+	if len(s.realNames) > 0 {
+		members = append(members, GroupAuto)
+	}
+	members = append(members, s.names...)
+	members = append(members, s.chainNames()...)
+	if len(members) == 0 {
+		members = append(members, fallback)
+	}
+	return members
+}
+
 // selectNodes 按 keep 筛出该格式支持的节点并定好名称；链路只在入口与落地都被 keep 认可、且入口是可连通节点时保留。
 func selectNodes(nodes []ProxyNode, chains []Chain, keep func(ProxyNode) bool) selection {
 	sel := selection{

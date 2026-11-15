@@ -369,20 +369,6 @@ func (q *Queries) RetireInboundByRef(ctx context.Context, arg RetireInboundByRef
 	return items, nil
 }
 
-const setInboundEnabledLocal = `-- name: SetInboundEnabledLocal :exec
-UPDATE inbound SET is_enabled = $2, updated_at = now() WHERE id = $1
-`
-
-type SetInboundEnabledLocalParams struct {
-	ID        int64
-	IsEnabled bool
-}
-
-func (q *Queries) SetInboundEnabledLocal(ctx context.Context, arg SetInboundEnabledLocalParams) error {
-	_, err := q.db.Exec(ctx, setInboundEnabledLocal, arg.ID, arg.IsEnabled)
-	return err
-}
-
 const updateInboundFromSync = `-- name: UpdateInboundFromSync :exec
 UPDATE inbound
 SET protocol = $2, port = $3, listen = $4, tag = $5, remark = $6, is_enabled = $7, network = $8,

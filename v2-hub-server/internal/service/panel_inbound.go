@@ -400,9 +400,7 @@ func (s *PanelService) ListServerInbounds(ctx context.Context, serverID int64) (
 	}
 	byInbound := make(map[int64][]Endpoint, len(rows))
 	for _, e := range eps {
-		byInbound[e.InboundID] = append(byInbound[e.InboundID], Endpoint{
-			ID: e.ID, Address: e.Address, Port: int(e.Port), Remark: e.Remark, IsDisabled: e.IsDisabled, IsMissing: e.IsMissing,
-		})
+		byInbound[e.InboundID] = append(byInbound[e.InboundID], endpointFromRow(e))
 	}
 	out := make([]Inbound, 0, len(rows))
 	for _, r := range rows {
@@ -414,6 +412,10 @@ func (s *PanelService) ListServerInbounds(ctx context.Context, serverID int64) (
 		out = append(out, in)
 	}
 	return out, nil
+}
+
+func endpointFromRow(e sqlcgen.ListEndpointsByServerRow) Endpoint {
+	return Endpoint{ID: e.ID, Address: e.Address, Port: int(e.Port), Remark: e.Remark, IsDisabled: e.IsDisabled, IsMissing: e.IsMissing}
 }
 
 func inboundFromRow(r sqlcgen.GetInboundRow) Inbound {
@@ -435,16 +437,18 @@ func (s *PanelService) GetInbound(ctx context.Context, id int64) (*Inbound, erro
 	if err != nil {
 		return nil, fmt.Errorf("get inbound %d: %w", id, err)
 	}
-	list, err := s.ListServerInbounds(ctx, row.ServerID)
+	eps, err := s.q.ListEndpointsByServer(ctx, row.ServerID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("list endpoints of server %d: %w", row.ServerID, err)
 	}
-	for i := range list {
-		if list[i].ID == id {
-			return &list[i], nil
+	in := inboundFromRow(row)
+	for _, e := range eps {
+		if e.InboundID != row.ID {
+			continue
 		}
+		in.Endpoints = append(in.Endpoints, endpointFromRow(e))
 	}
-	return nil, newError(CodeNotFound, msgInboundNotFound)
+	return &in, nil
 }
 
 func (s *PanelService) loadInbound(ctx context.Context, id int64) (sqlcgen.GetInboundRow, error) {

@@ -4,7 +4,6 @@ import (
 	"context"
 	"net/http"
 	"net/netip"
-	"strconv"
 	"time"
 
 	"v2-hub-server/internal/service"
@@ -33,15 +32,7 @@ type WalletManager interface {
 
 // optionalUserID 读取可选的 userId 查询参数；省略返回 0。
 func optionalUserID(r *http.Request) (int64, error) {
-	raw := r.URL.Query().Get(queryUserID)
-	if raw == "" {
-		return 0, nil
-	}
-	id, err := strconv.ParseInt(raw, 10, 64)
-	if err != nil || id < 1 {
-		return 0, badRequest(msgBadUserFilter)
-	}
-	return id, nil
+	return optionalPositiveInt64(r, queryUserID, msgBadUserFilter)
 }
 
 // ledgerEntryVO 对应 hub-api.yaml LedgerEntry；用户侧不带 userId / username / adminUsername。
@@ -57,14 +48,8 @@ type ledgerEntryVO struct {
 	AdminUsername *string   `json:"adminUsername,omitempty"`
 }
 
-type ledgerPageVO struct {
-	Items []ledgerEntryVO `json:"items"`
-	Total int64           `json:"total"`
-}
-
-func toLedgerPageVO(page *service.Page[service.LedgerEntry], isAdmin bool) ledgerPageVO {
-	out := ledgerPageVO{Items: make([]ledgerEntryVO, 0, len(page.Items)), Total: page.Total}
-	for _, e := range page.Items {
+func toLedgerPageVO(page *service.Page[service.LedgerEntry], isAdmin bool) pageVO[ledgerEntryVO] {
+	return toPageVO(page, func(e service.LedgerEntry) ledgerEntryVO {
 		vo := ledgerEntryVO{ID: e.ID, Kind: e.Kind, Amount: e.Amount, BalanceAfter: e.BalanceAfter, Remark: e.Remark, CreatedAt: e.CreatedAt}
 		if isAdmin {
 			vo.Username, vo.AdminUsername = &e.Username, &e.AdminUsername
@@ -72,9 +57,8 @@ func toLedgerPageVO(page *service.Page[service.LedgerEntry], isAdmin bool) ledge
 				vo.UserID = &e.UserID
 			}
 		}
-		out.Items = append(out.Items, vo)
-	}
-	return out
+		return vo
+	})
 }
 
 func (h *handlers) listWalletLedger(w http.ResponseWriter, r *http.Request, _ *service.AdminPrincipal) {
@@ -117,13 +101,9 @@ type balanceAdjustBody struct {
 }
 
 func (h *handlers) adjustUserBalance(w http.ResponseWriter, r *http.Request, p *service.AdminPrincipal) {
-	id, err := pathID(r)
-	if err != nil {
-		writeError(w, r, err)
-		return
-	}
 	var req balanceAdjustBody
-	if err := decodeJSON(w, r, &req); err != nil {
+	id, err := decodeWithID(w, r, &req)
+	if err != nil {
 		writeError(w, r, err)
 		return
 	}
@@ -177,11 +157,6 @@ func toTopupCodeVO(c service.TopupCode) topupCodeVO {
 	return vo
 }
 
-type topupCodePageVO struct {
-	Items []topupCodeVO `json:"items"`
-	Total int64         `json:"total"`
-}
-
 func (h *handlers) listTopupCodes(w http.ResponseWriter, r *http.Request, _ *service.AdminPrincipal) {
 	pq, err := pageQuery(r)
 	if err != nil {
@@ -194,11 +169,7 @@ func (h *handlers) listTopupCodes(w http.ResponseWriter, r *http.Request, _ *ser
 		writeError(w, r, err)
 		return
 	}
-	out := topupCodePageVO{Items: make([]topupCodeVO, 0, len(page.Items)), Total: page.Total}
-	for _, c := range page.Items {
-		out.Items = append(out.Items, toTopupCodeVO(c))
-	}
-	writeOK(w, out)
+	writeOK(w, toPageVO(page, toTopupCodeVO))
 }
 
 func (h *handlers) createTopupCodes(w http.ResponseWriter, r *http.Request, p *service.AdminPrincipal) {
@@ -222,13 +193,9 @@ type topupUpdateBody struct {
 }
 
 func (h *handlers) updateTopupCode(w http.ResponseWriter, r *http.Request, p *service.AdminPrincipal) {
-	id, err := pathID(r)
-	if err != nil {
-		writeError(w, r, err)
-		return
-	}
 	var req topupUpdateBody
-	if err := decodeJSON(w, r, &req); err != nil {
+	id, err := decodeWithID(w, r, &req)
+	if err != nil {
 		writeError(w, r, err)
 		return
 	}

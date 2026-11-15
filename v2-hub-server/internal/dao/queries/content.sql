@@ -201,9 +201,6 @@ INSERT INTO checkin_log (user_id, checkin_date, reward_bytes, created_at)
 VALUES ($1, $2, $3, $4)
 ON CONFLICT (user_id, checkin_date) DO NOTHING;
 
--- name: ExistsCheckin :one
-SELECT EXISTS (SELECT 1 FROM checkin_log WHERE user_id = $1 AND checkin_date = $2);
-
 -- name: ListCheckins :many
 SELECT checkin_date, reward_bytes FROM checkin_log WHERE user_id = $1 ORDER BY checkin_date DESC LIMIT $2;
 

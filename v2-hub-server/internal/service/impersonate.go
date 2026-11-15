@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgtype"
 
 	"v2-hub-server/internal/dao/sqlcgen"
 	"v2-hub-server/internal/manager/crypto"
@@ -64,13 +63,12 @@ func (s *PortalAuthService) IssueImpersonateTicket(ctx context.Context, actor *A
 		}
 		err = q.InsertImpersonateTicket(ctx, sqlcgen.InsertImpersonateTicketParams{
 			TicketHash: crypto.SHA256(ticket), AdminID: actor.AdminID, UserID: userID,
-			ExpiresAt: pgtype.Timestamptz{Time: expiresAt, Valid: true}, CreatedAt: pgtype.Timestamptz{Time: now, Valid: true},
+			ExpiresAt: timestamptz(expiresAt), CreatedAt: timestamptz(now),
 		})
 		if err != nil {
 			return fmt.Errorf("insert impersonate ticket: %w", err)
 		}
-		return writeAudit(ctx, q, AuditEntry{ActorType: ActorAdmin, ActorID: actor.AdminID, Action: ActionImpersonateStart, TargetType: targetUser,
-			TargetID: fmt.Sprint(userID), ClientIP: ip, Detail: map[string]any{"username": u.Username}})
+		return writeAudit(ctx, q, adminAudit(actor, ActionImpersonateStart, targetUser, userID, ip, map[string]any{"username": u.Username}))
 	})
 	if err != nil {
 		return nil, err
@@ -114,7 +112,7 @@ func (s *PortalAuthService) RedeemImpersonateTicket(ctx context.Context, ticket 
 		if err != nil {
 			return fmt.Errorf("get user %d: %w", row.UserID, err)
 		}
-		if err := q.MarkImpersonateTicketUsed(ctx, sqlcgen.MarkImpersonateTicketUsedParams{ID: row.ID, UsedAt: pgtype.Timestamptz{Time: now, Valid: true}}); err != nil {
+		if err := q.MarkImpersonateTicketUsed(ctx, sqlcgen.MarkImpersonateTicketUsedParams{ID: row.ID, UsedAt: timestamptz(now)}); err != nil {
 			return fmt.Errorf("mark impersonate ticket %d used: %w", row.ID, err)
 		}
 		principal := &UserPrincipal{

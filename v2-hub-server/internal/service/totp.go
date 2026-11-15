@@ -127,10 +127,7 @@ func (s *AuthService) EnableTOTP(ctx context.Context, p *AdminPrincipal, code st
 		if err := q.EnableAdminTOTP(ctx, sqlcgen.EnableAdminTOTPParams{ID: p.AdminID, TotpSecretEnc: sealed, TotpLastStep: step}); err != nil {
 			return fmt.Errorf("enable totp of admin %d: %w", p.AdminID, err)
 		}
-		return writeAudit(ctx, q, AuditEntry{
-			ActorType: ActorAdmin, ActorID: p.AdminID, Action: ActionAdminTOTPEnable,
-			TargetType: targetAdmin, TargetID: fmt.Sprint(p.AdminID), ClientIP: ip,
-		})
+		return writeAudit(ctx, q, adminAudit(p, ActionAdminTOTPEnable, targetAdmin, p.AdminID, ip, nil))
 	})
 }
 
@@ -163,10 +160,7 @@ func (s *AuthService) DisableTOTP(ctx context.Context, p *AdminPrincipal, code s
 		if _, err := q.ClearAdminTOTP(ctx, p.AdminID); err != nil {
 			return fmt.Errorf("clear totp of admin %d: %w", p.AdminID, err)
 		}
-		return writeAudit(ctx, q, AuditEntry{
-			ActorType: ActorAdmin, ActorID: p.AdminID, Action: ActionAdminTOTPDisable,
-			TargetType: targetAdmin, TargetID: fmt.Sprint(p.AdminID), ClientIP: ip,
-		})
+		return writeAudit(ctx, q, adminAudit(p, ActionAdminTOTPDisable, targetAdmin, p.AdminID, ip, nil))
 	})
 }
 
@@ -189,9 +183,6 @@ func (s *RBACService) ResetAdminTOTP(ctx context.Context, actor *AdminPrincipal,
 		if err := q.DeleteAdminSessionsByAdmin(ctx, id); err != nil {
 			return fmt.Errorf("revoke sessions of admin %d: %w", id, err)
 		}
-		return writeAudit(ctx, q, AuditEntry{
-			ActorType: ActorAdmin, ActorID: actor.AdminID, Action: ActionAdminTOTPReset,
-			TargetType: targetAdmin, TargetID: fmt.Sprint(id), ClientIP: ip,
-		})
+		return writeAudit(ctx, q, adminAudit(actor, ActionAdminTOTPReset, targetAdmin, id, ip, nil))
 	})
 }

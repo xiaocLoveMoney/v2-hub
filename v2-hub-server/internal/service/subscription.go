@@ -450,12 +450,13 @@ func (s *UserService) RenderSubscription(ctx context.Context, req SubscriptionRe
 	var items []subItem
 	var chains []subChain
 	if user.Status == UserStatusActive {
-		if items, err = s.loadSubItems(ctx, user.ID); err != nil {
+		var nodes []sqlcgen.ListUserSubNodesRow
+		if items, nodes, err = s.loadSubItemsWithNodes(ctx, user.ID); err != nil {
 			return nil, err
 		}
 		// Base64 表达不了链路（Ruling-36），不必为它读规则
 		if format != render.FormatBase64 {
-			if chains, err = s.loadSubChains(ctx, user.ID, items); err != nil {
+			if chains, err = s.loadSubChains(ctx, user.ID, items, nodes); err != nil {
 				return nil, err
 			}
 		}
@@ -568,13 +569,13 @@ const chainNameSep = " · "
 
 // loadSubChains 取用户启用且通畅的客户端规则，把每个生效的（起飞，落地）组合对到本次要输出的节点上（docs/03 §5.18 订阅输出）。
 // 起飞或落地这次没有可输出的链接（如面板还没同步到）的组合跳过；出口的链接解不开或解析不了时跳过（读取处已留痕），
-// 不让一条坏规则拖垮整份订阅。
-func (s *UserService) loadSubChains(ctx context.Context, userID int64, items []subItem) ([]subChain, error) {
+// 不让一条坏规则拖垮整份订阅。nodes 是 loadSubItemsWithNodes 一并返回的可用节点。
+func (s *UserService) loadSubChains(ctx context.Context, userID int64, items []subItem, nodes []sqlcgen.ListUserSubNodesRow) ([]subChain, error) {
 	if len(items) == 0 {
 		return nil, nil
 	}
 	// 订阅只关心客户端规则，不需要各面板能否改内核配置
-	st, err := loadChainState(ctx, s.q, s.sealer, nil, userID)
+	st, err := loadClientChainState(ctx, s.q, s.sealer, userID, nodes)
 	if err != nil {
 		return nil, err
 	}
@@ -626,12 +627,18 @@ type subItem struct {
 
 // loadSubItems 把用户在各面板上缓存的分享链接对应到节点目录（docs/03 §5.4 节点与链接对应），按节点排序输出。
 func (s *UserService) loadSubItems(ctx context.Context, userID int64) ([]subItem, error) {
+	items, _, err := s.loadSubItemsWithNodes(ctx, userID)
+	return items, err
+}
+
+// loadSubItemsWithNodes 同 loadSubItems，另返回查到的可用节点，供随后算链路时复用。
+func (s *UserService) loadSubItemsWithNodes(ctx context.Context, userID int64) ([]subItem, []sqlcgen.ListUserSubNodesRow, error) {
 	nodes, err := s.q.ListUserSubNodes(ctx, userID)
 	if err != nil {
-		return nil, fmt.Errorf("list sub nodes of user %d: %w", userID, err)
+		return nil, nil, fmt.Errorf("list sub nodes of user %d: %w", userID, err)
 	}
 	if len(nodes) == 0 {
-		return nil, nil
+		return nil, nodes, nil
 	}
 	serverIDs := make([]int64, 0, 4)
 	seen := make(map[int64]bool, 4)
@@ -643,25 +650,25 @@ func (s *UserService) loadSubItems(ctx context.Context, userID int64) ([]subItem
 	}
 	epRows, err := s.q.ListServerEndpointAddrs(ctx, serverIDs)
 	if err != nil {
-		return nil, fmt.Errorf("list endpoint addrs: %w", err)
+		return nil, nil, fmt.Errorf("list endpoint addrs: %w", err)
 	}
 	provs, err := s.q.ListUserProvisionLinks(ctx, userID)
 	if err != nil {
-		return nil, fmt.Errorf("list provision links of user %d: %w", userID, err)
+		return nil, nil, fmt.Errorf("list provision links of user %d: %w", userID, err)
 	}
 	linksByServer := make(map[int64][]string, len(provs))
 	for _, v := range provs {
 		plain, err := s.sealer.Open(v.LinksEnc, linksAAD(v.ID))
 		if err != nil {
-			return nil, fmt.Errorf("open links of provision %d: %w", v.ID, err)
+			return nil, nil, fmt.Errorf("open links of provision %d: %w", v.ID, err)
 		}
 		var links []string
 		if err := json.Unmarshal(plain, &links); err != nil {
-			return nil, fmt.Errorf("decode links of provision %d: %w", v.ID, err)
+			return nil, nil, fmt.Errorf("decode links of provision %d: %w", v.ID, err)
 		}
 		linksByServer[v.ServerID] = links
 	}
-	return matchLinks(nodes, epRows, linksByServer), nil
+	return matchLinks(nodes, epRows, linksByServer), nodes, nil
 }
 
 type endpointKey struct {

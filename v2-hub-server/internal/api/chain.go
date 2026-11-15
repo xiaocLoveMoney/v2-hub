@@ -213,13 +213,9 @@ func (h *handlers) createChainRoute(w http.ResponseWriter, r *http.Request, p *s
 }
 
 func (h *handlers) updateChainRoute(w http.ResponseWriter, r *http.Request, p *service.UserPrincipal) {
-	id, err := pathID(r)
-	if err != nil {
-		writeError(w, r, err)
-		return
-	}
 	var req chainRouteRequest
-	if err := decodeJSON(w, r, &req); err != nil {
+	id, err := decodeWithID(w, r, &req)
+	if err != nil {
 		writeError(w, r, err)
 		return
 	}
@@ -273,13 +269,9 @@ func (h *handlers) createChainExit(w http.ResponseWriter, r *http.Request, p *se
 }
 
 func (h *handlers) updateChainExit(w http.ResponseWriter, r *http.Request, p *service.UserPrincipal) {
-	id, err := pathID(r)
-	if err != nil {
-		writeError(w, r, err)
-		return
-	}
 	var req chainExitRequest
-	if err := decodeJSON(w, r, &req); err != nil {
+	id, err := decodeWithID(w, r, &req)
+	if err != nil {
 		writeError(w, r, err)
 		return
 	}
@@ -342,13 +334,9 @@ func toChainExitTestVO(r *service.ExitTestResult) chainExitTestVO {
 }
 
 func (h *handlers) testChainExit(w http.ResponseWriter, r *http.Request, p *service.UserPrincipal) {
-	id, err := pathID(r)
-	if err != nil {
-		writeError(w, r, err)
-		return
-	}
 	var req chainExitTestRequest
-	if err := decodeJSON(w, r, &req); err != nil {
+	id, err := decodeWithID(w, r, &req)
+	if err != nil {
 		writeError(w, r, err)
 		return
 	}

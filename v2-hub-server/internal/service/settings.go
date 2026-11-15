@@ -2,10 +2,8 @@ package service
 
 import (
 	"context"
-	"crypto/rand"
 	"encoding/json"
 	"fmt"
-	"math/big"
 	"net/mail"
 	"net/netip"
 	"net/url"
@@ -82,6 +80,7 @@ const (
 	maxSupportLabelLen      = 16
 	defaultSupportLabel     = "在线客服"
 	httpsScheme             = "https"
+	httpScheme              = "http"
 	defaultNotifyExpireDays = 3
 	defaultNotifyTrafficPct = 10
 
@@ -131,6 +130,10 @@ type Settings struct {
 	Support      SupportSettings
 	Routing      RoutingSettings
 	Menu         MenuSettings
+
+	// loc 是 Site.Timezone 解析出的时区，由 load / Update 填入，免得每次 Location 都查时区库；
+	// 与 Site.Timezone 不一致（未填入或之后改过时区）时 Location 现场解析。
+	loc *time.Location
 }
 
 // MenuSettings 是侧栏菜单顺序（docs/03 §5.6 菜单顺序，Ruling-57）：菜单键按期望顺序排成的列表，空 = 默认顺序。
@@ -270,7 +273,15 @@ func (s SubscriptionSettings) AcceptsSubPath(path string, now time.Time) bool {
 
 // Location 返回 site.timezone 对应的时区；设置写入时已校验，解析失败只可能是运行环境缺时区库，此时退回 UTC。
 func (s Settings) Location() *time.Location {
-	loc, err := time.LoadLocation(s.Site.Timezone)
+	if s.loc != nil && s.loc.String() == s.Site.Timezone {
+		return s.loc
+	}
+	return loadSiteLocation(s.Site.Timezone)
+}
+
+// loadSiteLocation 解析时区名，失败时退回 UTC（见 Location）。
+func loadSiteLocation(name string) *time.Location {
+	loc, err := time.LoadLocation(name)
 	if err != nil {
 		return time.UTC
 	}
@@ -331,7 +342,7 @@ func validBaseURL(v string) bool {
 		return true
 	}
 	u, err := url.Parse(v)
-	return err == nil && len(v) <= maxSubBaseURLLen && (u.Scheme == "https" || u.Scheme == "http") && u.Host != "" && u.RawQuery == "" && u.Fragment == ""
+	return err == nil && len(v) <= maxSubBaseURLLen && (u.Scheme == httpsScheme || u.Scheme == httpScheme) && u.Host != "" && u.RawQuery == "" && u.Fragment == ""
 }
 
 func validOptionalEmail(v string) bool {
@@ -399,16 +410,11 @@ func validOldSubPath(v string) bool {
 
 // randomSubPath 生成订阅路径前缀：16 位小写字母与数字。
 func randomSubPath() (string, error) {
-	var b strings.Builder
-	limit := big.NewInt(int64(len(subPathAlphabet)))
-	for range subPathLen {
-		n, err := rand.Int(rand.Reader, limit)
-		if err != nil {
-			return "", fmt.Errorf("random subscription path: %w", err)
-		}
-		b.WriteByte(subPathAlphabet[n.Int64()])
+	path, err := randomString(subPathAlphabet, subPathLen)
+	if err != nil {
+		return "", fmt.Errorf("random subscription path: %w", err)
 	}
-	return b.String(), nil
+	return path, nil
 }
 
 func validIntro(v string) bool {
@@ -798,6 +804,11 @@ func (s *SettingsService) load(ctx context.Context, q *sqlcgen.Queries) (Setting
 	if err != nil {
 		return Settings{}, fmt.Errorf("list settings: %w", err)
 	}
+	return s.fromRows(rows)
+}
+
+// fromRows 是 load 的叠加部分：以默认值为底叠加已读出的设置行。
+func (s *SettingsService) fromRows(rows []sqlcgen.ListSettingsRow) (Settings, error) {
 	cur := s.defaults
 	cur.Register.EmailAllow = slices.Clone(s.defaults.Register.EmailAllow)
 	cur.Register.EmailBlock = slices.Clone(s.defaults.Register.EmailBlock)
@@ -812,6 +823,7 @@ func (s *SettingsService) load(ctx context.Context, q *sqlcgen.Queries) (Setting
 			return Settings{}, fmt.Errorf("stored setting %s is invalid: %w", row.Key, err)
 		}
 	}
+	cur.loc = loadSiteLocation(cur.Site.Timezone)
 	return cur, nil
 }
 
@@ -847,18 +859,13 @@ func (s *SettingsService) Update(ctx context.Context, actor *AdminPrincipal, pat
 		if err := s.checkCrossFields(ctx, q, next); err != nil {
 			return err
 		}
+		next.loc = loadSiteLocation(next.Site.Timezone)
 		if next.Subscription.Path != cur.Subscription.Path {
 			next.Subscription.OldPath, next.Subscription.OldPathUntil = oldSubPath(cur.Subscription.Path, next.Subscription.PathGraceDays, s.now())
 			writes = append(slices.Clone(keys), keySubOldPath, keySubOldPathUntil)
 		}
-		for _, k := range writes {
-			raw, err := json.Marshal(settingDefs[k].get(&next))
-			if err != nil {
-				return fmt.Errorf("marshal setting %s: %w", k, err)
-			}
-			if err := q.UpsertSetting(ctx, sqlcgen.UpsertSettingParams{Key: k, Value: raw, UpdatedBy: pgtype.Int8{Int64: actor.AdminID, Valid: true}}); err != nil {
-				return fmt.Errorf("upsert setting %s: %w", k, err)
-			}
+		if err := writeSettings(ctx, q, &next, writes, pgtype.Int8{Int64: actor.AdminID, Valid: true}); err != nil {
+			return err
 		}
 		// 审计只记键名，不记值（docs/03 §5.6 修改）
 		return writeAudit(ctx, q, AuditEntry{ActorType: ActorAdmin, ActorID: actor.AdminID, Action: ActionSettingUpdate, TargetType: targetSetting,
@@ -871,6 +878,20 @@ func (s *SettingsService) Update(ctx context.Context, actor *AdminPrincipal, pat
 	s.cached, s.cachedAt = next, s.now()
 	s.mu.Unlock()
 	return next, nil
+}
+
+// writeSettings 把 next 里 keys 对应的值逐个序列化并写库；updatedBy 无效（零值）表示由后端写入、没有操作人。
+func writeSettings(ctx context.Context, q *sqlcgen.Queries, next *Settings, keys []string, updatedBy pgtype.Int8) error {
+	for _, k := range keys {
+		raw, err := json.Marshal(settingDefs[k].get(next))
+		if err != nil {
+			return fmt.Errorf("marshal setting %s: %w", k, err)
+		}
+		if err := q.UpsertSetting(ctx, sqlcgen.UpsertSettingParams{Key: k, Value: raw, UpdatedBy: updatedBy}); err != nil {
+			return fmt.Errorf("upsert setting %s: %w", k, err)
+		}
+	}
+	return nil
 }
 
 // oldSubPath 返回改前缀后的旧前缀与失效时间：过渡期为 0 时不留旧前缀（docs/03 §5.4 订阅路径）。
@@ -898,23 +919,15 @@ func (s *SettingsService) EnsureSubscriptionPath(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		cur, err := s.load(ctx, q)
+		// 同一事务里刚读出的行就是 load 会读到的内容，直接叠加，不再查一次
+		cur, err := s.fromRows(rows)
 		if err != nil {
 			return err
 		}
 		next := cur
 		next.Subscription.Path = path
 		next.Subscription.OldPath, next.Subscription.OldPathUntil = oldSubPath(LegacySubPath, cur.Subscription.PathGraceDays, s.now())
-		for _, k := range []string{keySubPath, keySubOldPath, keySubOldPathUntil} {
-			raw, err := json.Marshal(settingDefs[k].get(&next))
-			if err != nil {
-				return fmt.Errorf("marshal setting %s: %w", k, err)
-			}
-			if err := q.UpsertSetting(ctx, sqlcgen.UpsertSettingParams{Key: k, Value: raw}); err != nil {
-				return fmt.Errorf("upsert setting %s: %w", k, err)
-			}
-		}
-		return nil
+		return writeSettings(ctx, q, &next, []string{keySubPath, keySubOldPath, keySubOldPathUntil}, pgtype.Int8{})
 	})
 	if err != nil {
 		return err

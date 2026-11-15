@@ -4,7 +4,6 @@ import (
 	"context"
 	"net/http"
 	"net/netip"
-	"strconv"
 	"time"
 
 	"v2-hub-server/internal/service"
@@ -103,14 +102,10 @@ type trafficPointVO struct {
 }
 
 func (h *handlers) listUserTraffic(w http.ResponseWriter, r *http.Request, p *service.UserPrincipal) {
-	hours := 0
-	if raw := r.URL.Query().Get(queryHours); raw != "" {
-		v, err := strconv.Atoi(raw)
-		if err != nil || v < 1 {
-			writeError(w, r, badRequest(msgBadHours))
-			return
-		}
-		hours = v
+	hours, err := optionalPositiveInt(r, queryHours, msgBadHours)
+	if err != nil {
+		writeError(w, r, err)
+		return
 	}
 	points, err := h.portal.ListTraffic(r.Context(), p, hours)
 	if err != nil {

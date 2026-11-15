@@ -47,7 +47,6 @@ const (
 	maxSharedSecret       = 255
 	maxSharedRemark       = 255
 	maxSharedPlans        = 100
-	schemeHTTPSOnly       = "https"
 
 	ActionAnnouncementCreate = "announcement.create"
 	ActionAnnouncementUpdate = "announcement.update"
@@ -100,10 +99,6 @@ func NewContentService(pool *pgxpool.Pool, sealer *crypto.Sealer, settings *Sett
 		now = time.Now
 	}
 	return &ContentService{store: newStore(pool), sealer: sealer, settings: settings, mail: mailSvc, now: now}
-}
-
-func (s *ContentService) nowArg() pgtype.Timestamptz {
-	return pgtype.Timestamptz{Time: s.now(), Valid: true}
 }
 
 func adminAudit(actor *AdminPrincipal, action, targetType string, id int64, ip *netip.Addr, detail map[string]any) AuditEntry {
@@ -192,7 +187,7 @@ func (s *ContentService) CreateAnnouncement(ctx context.Context, actor *AdminPri
 	if err := in.validate(); err != nil {
 		return nil, err
 	}
-	now := s.nowArg()
+	now := timestamptz(s.now())
 	var id int64
 	err := s.inTx(ctx, func(q *sqlcgen.Queries) error {
 		var err error
@@ -217,7 +212,7 @@ func (s *ContentService) UpdateAnnouncement(ctx context.Context, actor *AdminPri
 	if err := in.validate(); err != nil {
 		return nil, err
 	}
-	now := s.nowArg()
+	now := timestamptz(s.now())
 	err := s.inTx(ctx, func(q *sqlcgen.Queries) error {
 		row, err := q.GetAnnouncementForUpdate(ctx, id)
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -299,7 +294,7 @@ func (s *ContentService) MailAnnouncement(ctx context.Context, actor *AdminPrinc
 			}
 		}
 		queued = len(emails)
-		if err := q.MarkAnnouncementMailed(ctx, sqlcgen.MarkAnnouncementMailedParams{ID: id, MailedAt: s.nowArg()}); err != nil {
+		if err := q.MarkAnnouncementMailed(ctx, sqlcgen.MarkAnnouncementMailedParams{ID: id, MailedAt: timestamptz(s.now())}); err != nil {
 			return fmt.Errorf("mark announcement %d mailed: %w", id, err)
 		}
 		return writeAudit(ctx, q, adminAudit(actor, ActionAnnouncementMail, targetAnnouncement, id, ip, map[string]any{"queued": queued}))
@@ -412,7 +407,7 @@ func (in *TutorialInput) validate() error {
 		l.Label, l.URL = strings.TrimSpace(l.Label), strings.TrimSpace(l.URL)
 		u, err := url.Parse(l.URL)
 		// 下载地址只收 https，杜绝 javascript: 等协议进到用户页面的链接里
-		if err != nil || u.Scheme != schemeHTTPSOnly || u.Host == "" || len(l.URL) > maxTutorialLinkURL || !lenBetween(l.Label, 1, maxTutorialLinkLabel) {
+		if err != nil || u.Scheme != httpsScheme || u.Host == "" || len(l.URL) > maxTutorialLinkURL || !lenBetween(l.Label, 1, maxTutorialLinkLabel) {
 			return newError(CodeInvalidArgument, msgTutorialBadLinks)
 		}
 		in.Links[i] = l
@@ -477,7 +472,7 @@ func (s *ContentService) CreateTutorial(ctx context.Context, actor *AdminPrincip
 	err = s.inTx(ctx, func(q *sqlcgen.Queries) error {
 		id, err = q.CreateTutorial(ctx, sqlcgen.CreateTutorialParams{
 			Platform: in.Platform, ClientName: in.ClientName, Summary: in.Summary, Links: links, Content: in.Content,
-			SortOrder: int32(in.SortOrder), IsPublished: in.IsPublished, Now: s.nowArg(),
+			SortOrder: int32(in.SortOrder), IsPublished: in.IsPublished, Now: timestamptz(s.now()),
 		})
 		if err != nil {
 			return fmt.Errorf("create tutorial: %w", err)
@@ -502,7 +497,7 @@ func (s *ContentService) UpdateTutorial(ctx context.Context, actor *AdminPrincip
 	err = s.inTx(ctx, func(q *sqlcgen.Queries) error {
 		n, err := q.UpdateTutorial(ctx, sqlcgen.UpdateTutorialParams{
 			ID: id, Platform: in.Platform, ClientName: in.ClientName, Summary: in.Summary, Links: links, Content: in.Content,
-			SortOrder: int32(in.SortOrder), IsPublished: in.IsPublished, Now: s.nowArg(),
+			SortOrder: int32(in.SortOrder), IsPublished: in.IsPublished, Now: timestamptz(s.now()),
 		})
 		if err != nil {
 			return fmt.Errorf("update tutorial %d: %w", id, err)
@@ -658,7 +653,7 @@ func (s *ContentService) CreateSharedAccount(ctx context.Context, actor *AdminPr
 		var err error
 		id, err = q.CreateSharedAccount(ctx, sqlcgen.CreateSharedAccountParams{
 			Name: in.Name, Category: in.Category, Account: in.Account, Remark: in.Remark, SortOrder: int32(in.SortOrder),
-			IsPublished: in.IsPublished, Now: s.nowArg(),
+			IsPublished: in.IsPublished, Now: timestamptz(s.now()),
 		})
 		if err != nil {
 			return fmt.Errorf("create shared account: %w", err)
@@ -682,7 +677,7 @@ func (s *ContentService) UpdateSharedAccount(ctx context.Context, actor *AdminPr
 	err := s.inTx(ctx, func(q *sqlcgen.Queries) error {
 		n, err := q.UpdateSharedAccount(ctx, sqlcgen.UpdateSharedAccountParams{
 			ID: id, Name: in.Name, Category: in.Category, Account: in.Account, Remark: in.Remark, SortOrder: int32(in.SortOrder),
-			IsPublished: in.IsPublished, Now: s.nowArg(),
+			IsPublished: in.IsPublished, Now: timestamptz(s.now()),
 		})
 		if err != nil {
 			return fmt.Errorf("update shared account %d: %w", id, err)

@@ -48,8 +48,6 @@ type Capabilities struct {
 	CoreType string
 	// Endpoints 表示支持对外地址覆盖（3x-ui 的 Host）。
 	Endpoints bool
-	// MultiInboundClients 表示一个 client 可挂到多个入站（M2 使用）。
-	MultiInboundClients bool
 	// OnlineClients 表示能列出当前在线的 client（docs/03 §5.5）。
 	OnlineClients bool
 	// CoreConfig 表示实现了 CoreConfigurator，可读写内核配置模板（服务端链式，docs/03 §5.19）。

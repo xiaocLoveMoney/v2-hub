@@ -105,7 +105,7 @@ func TestShopEndpoints(t *testing.T) {
 
 	orders := root.do(http.MethodGet, "/api/admin/orders?kind=plan", nil)
 	expectStatus(t, orders, http.StatusOK, codeOK)
-	var page orderPageVO
+	var page pageVO[orderVO]
 	if err := json.Unmarshal(orders.Data, &page); err != nil || page.Total != 1 || page.Items[0].Username == nil || *page.Items[0].Username != "alice" {
 		t.Fatalf("admin orders = %+v, %v", page, err)
 	}

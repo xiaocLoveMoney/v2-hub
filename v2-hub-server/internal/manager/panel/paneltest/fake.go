@@ -95,7 +95,7 @@ func (f *Fake) enter(method string) error {
 
 // Capabilities 实现 panel.Provider。
 func (f *Fake) Capabilities() panel.Capabilities {
-	return panel.Capabilities{OnlineClients: true, CoreType: panel.CoreXray, Endpoints: true, MultiInboundClients: true, CoreConfig: true}
+	return panel.Capabilities{OnlineClients: true, CoreType: panel.CoreXray, Endpoints: true, CoreConfig: true}
 }
 
 // FakePublicIP 是假面板默认自报的公网 IP（文档地址段之外的公网地址，位置扫描测试用）。

@@ -20,17 +20,6 @@ func (q *Queries) CountAdminsByRole(ctx context.Context, roleID int64) (int64, e
 	return count, err
 }
 
-const countPermissionsByCodes = `-- name: CountPermissionsByCodes :one
-SELECT COUNT(*) FROM permission WHERE code = ANY($1::text[])
-`
-
-func (q *Queries) CountPermissionsByCodes(ctx context.Context, codes []string) (int64, error) {
-	row := q.db.QueryRow(ctx, countPermissionsByCodes, codes)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
-}
-
 const createRole = `-- name: CreateRole :one
 INSERT INTO role (code, name) VALUES ($1, $2) RETURNING id
 `
@@ -264,42 +253,6 @@ func (q *Queries) ListRoles(ctx context.Context) ([]ListRolesRow, error) {
 	items := []ListRolesRow{}
 	for rows.Next() {
 		var i ListRolesRow
-		if err := rows.Scan(
-			&i.ID,
-			&i.Code,
-			&i.Name,
-			&i.IsBuiltin,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listRolesByCodes = `-- name: ListRolesByCodes :many
-SELECT id, code, name, is_builtin FROM role WHERE code = ANY($1::text[])
-`
-
-type ListRolesByCodesRow struct {
-	ID        int64
-	Code      string
-	Name      string
-	IsBuiltin bool
-}
-
-func (q *Queries) ListRolesByCodes(ctx context.Context, codes []string) ([]ListRolesByCodesRow, error) {
-	rows, err := q.db.Query(ctx, listRolesByCodes, codes)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []ListRolesByCodesRow{}
-	for rows.Next() {
-		var i ListRolesByCodesRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.Code,

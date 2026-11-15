@@ -204,11 +204,16 @@ func availableNodes(ctx context.Context, q *sqlcgen.Queries, userID int64) ([]sq
 	if err != nil {
 		return nil, nil, fmt.Errorf("list available nodes of user %d: %w", userID, err)
 	}
+	return rows, nodesByID(rows), nil
+}
+
+// nodesByID 把可用节点按 id 索引。
+func nodesByID(rows []sqlcgen.ListUserSubNodesRow) map[int64]sqlcgen.ListUserSubNodesRow {
 	byID := make(map[int64]sqlcgen.ListUserSubNodesRow, len(rows))
 	for _, r := range rows {
 		byID[r.ID] = r
 	}
-	return rows, byID, nil
+	return byID
 }
 
 // coreConfigServers 返回各服务器的面板是否支持改内核配置；applier 为 nil 时都不支持。
@@ -382,20 +387,52 @@ func chainRouteFromRow(r sqlcgen.ListChainRoutesRow) ChainRoute {
 	return route
 }
 
-// loadChainState 读一个用户的全部规则并算好状态。coreServers 为 nil 时服务端规则的起飞节点一律算不可用
-// （只关心客户端规则的调用方，如订阅渲染）。
-func loadChainState(ctx context.Context, q *sqlcgen.Queries, sealer *crypto.Sealer, coreServers map[int64]bool, userID int64) (*chainState, error) {
+// loadChainBase 只读校验规则用到的部分：链式开关、可用节点与被授权的平台出口，不读规则本身（routes、exits 为空）。
+func loadChainBase(ctx context.Context, q *sqlcgen.Queries, userID int64) (*chainState, error) {
+	return loadChainBaseWithNodes(ctx, q, userID, nil, false)
+}
+
+// loadChainBaseWithNodes 同 loadChainBase；hasNodes 为 true 时用调用方传入的可用节点（刚用 ListUserSubNodes 查过，免得重查）。
+func loadChainBaseWithNodes(ctx context.Context, q *sqlcgen.Queries, userID int64, nodes []sqlcgen.ListUserSubNodesRow, hasNodes bool) (*chainState, error) {
 	st := &chainState{}
 	var err error
 	if st.flags, err = chainFlags(ctx, q, userID); err != nil {
 		return nil, err
 	}
-	if st.nodes, st.available, err = availableNodes(ctx, q, userID); err != nil {
+	if hasNodes {
+		st.nodes, st.available = nodes, nodesByID(nodes)
+	} else if st.nodes, st.available, err = availableNodes(ctx, q, userID); err != nil {
 		return nil, err
 	}
 	if st.platformExits, err = q.ListUserPlatformExits(ctx, userID); err != nil {
 		return nil, fmt.Errorf("list platform exits of user %d: %w", userID, err)
 	}
+	return st, nil
+}
+
+// loadChainState 读一个用户的全部规则并算好状态。coreServers 为 nil 时服务端规则的起飞节点一律算不可用、
+// 阻断原因不可信（只关心客户端规则的调用方，如订阅渲染）。
+func loadChainState(ctx context.Context, q *sqlcgen.Queries, sealer *crypto.Sealer, coreServers map[int64]bool, userID int64) (*chainState, error) {
+	st, err := loadChainBase(ctx, q, userID)
+	if err != nil {
+		return nil, err
+	}
+	return loadChainRoutes(ctx, q, sealer, coreServers, userID, st)
+}
+
+// loadClientChainState 读一个用户的全部规则，只保证客户端规则的状态准确：服务端规则的起飞节点一律算不可用、
+// 阻断原因不可信（见 loadChainRoutes）。nodes 是调用方刚用 ListUserSubNodes 查到的可用节点。
+func loadClientChainState(ctx context.Context, q *sqlcgen.Queries, sealer *crypto.Sealer, userID int64, nodes []sqlcgen.ListUserSubNodesRow) (*chainState, error) {
+	st, err := loadChainBaseWithNodes(ctx, q, userID, nodes, true)
+	if err != nil {
+		return nil, err
+	}
+	return loadChainRoutes(ctx, q, sealer, nil, userID, st)
+}
+
+// loadChainRoutes 在 st（已有 loadChainBase 的部分）上读规则与出口并算好状态。coreServers 为 nil 时跳过服务端规则的
+// 出口安全检查、内容指纹与下发记录：此时服务端起飞节点本就一律不可用，客户端规则的计算不依赖这几项。
+func loadChainRoutes(ctx context.Context, q *sqlcgen.Queries, sealer *crypto.Sealer, coreServers map[int64]bool, userID int64, st *chainState) (*chainState, error) {
 	userIDs := []int64{userID}
 	rows, err := q.ListChainRoutes(ctx, userIDs)
 	if err != nil {
@@ -432,6 +469,10 @@ func loadChainState(ctx context.Context, q *sqlcgen.Queries, sealer *crypto.Seal
 	}
 	for _, x := range st.platformExits {
 		env.platformExits[x.ID] = true
+	}
+	if coreServers == nil {
+		resolveRoutes(st.routes, env)
+		return st, nil
 	}
 	for _, r := range st.routes {
 		isOwnServer := r.Kind == ChainKindServer && r.Exit.Kind == ChainExitOwn
@@ -584,20 +625,17 @@ func (s *ChainService) pinExitNode(ctx context.Context, node render.ProxyNode, p
 	if err := validateExitFields(node); err != nil {
 		return netip.Addr{}, err
 	}
-	ip, err := s.guard.pin(ctx, node.Address, previous)
-	if err != nil {
-		return netip.Addr{}, guardError(err)
-	}
-	hosts, err := s.q.ListPlatformHosts(ctx)
-	if err != nil {
-		return netip.Addr{}, fmt.Errorf("list platform hosts: %w", err)
-	}
-	lookupCtx, cancel := context.WithTimeout(ctx, platformLookupTimeout)
-	defer cancel()
-	if s.guard.platformAddrs(lookupCtx, hosts)[ip] {
+	ip, err := s.guard.pinOffPlatform(ctx, s.q, node.Address, previous, nil)
+	switch {
+	case err == nil:
+		return ip, nil
+	case errors.Is(err, errExitPlatform):
 		return netip.Addr{}, newError(CodeInvalidArgument, msgExitPlatform)
+	case errors.Is(err, errExitResolve), errors.Is(err, errExitPrivate):
+		return netip.Addr{}, guardError(err)
+	default:
+		return netip.Addr{}, err
 	}
-	return ip, nil
 }
 
 // storeOwnExitPin 在事务内落库固定的地址；出口在校验之后被改过链接则让用户重试。
@@ -620,8 +658,13 @@ func (s *ChainService) storeOwnExitPin(ctx context.Context, q *sqlcgen.Queries, 
 }
 
 // checkRouteTarget 在事务内校验起飞节点与落地（授权、协议、防环）。selfID 是正在修改的规则 id，新建时为 0。
+// 只用到开关、可用节点与平台出口，所以不读规则（规则由随后的 reloadRoute 读）。
 func (s *ChainService) checkRouteTarget(ctx context.Context, q *sqlcgen.Queries, userID, selfID int64, in ChainRouteInput) error {
-	st, coreServers, err := s.loadState(ctx, q, userID)
+	coreServers, err := coreConfigServers(ctx, q, s.applier)
+	if err != nil {
+		return err
+	}
+	st, err := loadChainBase(ctx, q, userID)
 	if err != nil {
 		return err
 	}
@@ -932,20 +975,26 @@ func (s *ChainService) ReorderRoutes(ctx context.Context, p *UserPrincipal, kind
 		if err := lockChainOwner(ctx, q, p.UserID); err != nil {
 			return err
 		}
-		st, _, err := s.loadState(ctx, q, p.UserID)
+		flags, err := chainFlags(ctx, q, p.UserID)
 		if err != nil {
 			return err
 		}
-		if !st.flags.isKindAllowed(kind) {
+		if !flags.isKindAllowed(kind) {
 			if isServer {
 				return newError(CodeFeatureDisabled, msgServerChainNotAllowed)
 			}
 			return newError(CodeFeatureDisabled, msgChainNotAllowed)
 		}
-		current := st.routesOf(kind)
-		want := make([]int64, 0, len(current))
-		for _, r := range current {
-			want = append(want, r.ID)
+		// 校验排列只需要该类型规则的 id，不必算状态；调整后再整体重读
+		rows, err := q.ListChainRoutes(ctx, []int64{p.UserID})
+		if err != nil {
+			return fmt.Errorf("list chain routes of user %d: %w", p.UserID, err)
+		}
+		want := make([]int64, 0, len(rows))
+		for _, r := range rows {
+			if r.Kind == kind {
+				want = append(want, r.ID)
+			}
 		}
 		got := slices.Clone(ids)
 		slices.Sort(want)
@@ -963,7 +1012,7 @@ func (s *ChainService) ReorderRoutes(ctx context.Context, p *UserPrincipal, kind
 				return newError(CodeInvalidArgument, msgChainBadOrder)
 			}
 		}
-		st, _, err = s.loadState(ctx, q, p.UserID)
+		st, _, err := s.loadState(ctx, q, p.UserID)
 		if err != nil {
 			return err
 		}

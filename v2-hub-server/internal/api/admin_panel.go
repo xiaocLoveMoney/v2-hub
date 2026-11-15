@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/netip"
-	"strconv"
 	"time"
 
 	"v2-hub-server/internal/manager/inboundtpl"
@@ -310,13 +309,9 @@ func (h *handlers) createServer(w http.ResponseWriter, r *http.Request, p *servi
 }
 
 func (h *handlers) updateServer(w http.ResponseWriter, r *http.Request, p *service.AdminPrincipal) {
-	id, err := pathID(r)
-	if err != nil {
-		writeError(w, r, err)
-		return
-	}
 	var req serverRequest
-	if err := decodeJSON(w, r, &req); err != nil {
+	id, err := decodeWithID(w, r, &req)
+	if err != nil {
 		writeError(w, r, err)
 		return
 	}
@@ -370,13 +365,9 @@ func (h *handlers) listServerInbounds(w http.ResponseWriter, r *http.Request, _ 
 }
 
 func (h *handlers) createInbound(w http.ResponseWriter, r *http.Request, p *service.AdminPrincipal) {
-	id, err := pathID(r)
-	if err != nil {
-		writeError(w, r, err)
-		return
-	}
 	var req inboundCreateRequest
-	if err := decodeJSON(w, r, &req); err != nil {
+	id, err := decodeWithID(w, r, &req)
+	if err != nil {
 		writeError(w, r, err)
 		return
 	}
@@ -407,13 +398,9 @@ func (h *handlers) getInbound(w http.ResponseWriter, r *http.Request, _ *service
 }
 
 func (h *handlers) updateInbound(w http.ResponseWriter, r *http.Request, p *service.AdminPrincipal) {
-	id, err := pathID(r)
-	if err != nil {
-		writeError(w, r, err)
-		return
-	}
 	var req inboundUpdateRequest
-	if err := decodeJSON(w, r, &req); err != nil {
+	id, err := decodeWithID(w, r, &req)
+	if err != nil {
 		writeError(w, r, err)
 		return
 	}
@@ -428,13 +415,9 @@ func (h *handlers) updateInbound(w http.ResponseWriter, r *http.Request, p *serv
 }
 
 func (h *handlers) setInboundEnabled(w http.ResponseWriter, r *http.Request, p *service.AdminPrincipal) {
-	id, err := pathID(r)
-	if err != nil {
-		writeError(w, r, err)
-		return
-	}
 	var req enabledRequest
-	if err := decodeJSON(w, r, &req); err != nil {
+	id, err := decodeWithID(w, r, &req)
+	if err != nil {
 		writeError(w, r, err)
 		return
 	}
@@ -489,13 +472,9 @@ type panelKeysRequest struct {
 }
 
 func (h *handlers) generatePanelKeys(w http.ResponseWriter, r *http.Request, p *service.AdminPrincipal) {
-	id, err := pathID(r)
-	if err != nil {
-		writeError(w, r, err)
-		return
-	}
 	var req panelKeysRequest
-	if err := decodeJSON(w, r, &req); err != nil {
+	id, err := decodeWithID(w, r, &req)
+	if err != nil {
 		writeError(w, r, err)
 		return
 	}
@@ -570,13 +549,9 @@ func toRealityScanVO(r panel.RealityScan) realityScanVO {
 }
 
 func (h *handlers) scanRealityTarget(w http.ResponseWriter, r *http.Request, _ *service.AdminPrincipal) {
-	id, err := pathID(r)
-	if err != nil {
-		writeError(w, r, err)
-		return
-	}
 	var req realityScanRequest
-	if err := decodeJSON(w, r, &req); err != nil {
+	id, err := decodeWithID(w, r, &req)
+	if err != nil {
 		writeError(w, r, err)
 		return
 	}
@@ -589,13 +564,9 @@ func (h *handlers) scanRealityTarget(w http.ResponseWriter, r *http.Request, _ *
 }
 
 func (h *handlers) scanRealityTargets(w http.ResponseWriter, r *http.Request, _ *service.AdminPrincipal) {
-	id, err := pathID(r)
-	if err != nil {
-		writeError(w, r, err)
-		return
-	}
 	var req realityTargetsRequest
-	if err := decodeJSON(w, r, &req); err != nil {
+	id, err := decodeWithID(w, r, &req)
+	if err != nil {
 		writeError(w, r, err)
 		return
 	}
@@ -625,13 +596,9 @@ func (h *handlers) deleteInbound(w http.ResponseWriter, r *http.Request, p *serv
 }
 
 func (h *handlers) createEndpoints(w http.ResponseWriter, r *http.Request, p *service.AdminPrincipal) {
-	id, err := pathID(r)
-	if err != nil {
-		writeError(w, r, err)
-		return
-	}
 	var req endpointRequest
-	if err := decodeJSON(w, r, &req); err != nil {
+	id, err := decodeWithID(w, r, &req)
+	if err != nil {
 		writeError(w, r, err)
 		return
 	}
@@ -658,15 +625,7 @@ func (h *handlers) deleteEndpoint(w http.ResponseWriter, r *http.Request, p *ser
 }
 
 func optionalQueryID(r *http.Request, name string) (int64, error) {
-	raw := r.URL.Query().Get(name)
-	if raw == "" {
-		return 0, nil
-	}
-	id, err := strconv.ParseInt(raw, 10, 64)
-	if err != nil || id < 1 {
-		return 0, badRequest(msgBadFilter)
-	}
-	return id, nil
+	return optionalPositiveInt64(r, name, msgBadFilter)
 }
 
 func (h *handlers) listNodes(w http.ResponseWriter, r *http.Request, _ *service.AdminPrincipal) {
@@ -707,13 +666,9 @@ func (h *handlers) listNodes(w http.ResponseWriter, r *http.Request, _ *service.
 }
 
 func (h *handlers) updateNode(w http.ResponseWriter, r *http.Request, p *service.AdminPrincipal) {
-	id, err := pathID(r)
-	if err != nil {
-		writeError(w, r, err)
-		return
-	}
 	var req nodeRequest
-	if err := decodeJSON(w, r, &req); err != nil {
+	id, err := decodeWithID(w, r, &req)
+	if err != nil {
 		writeError(w, r, err)
 		return
 	}
@@ -758,13 +713,9 @@ func (h *handlers) createNodeGroup(w http.ResponseWriter, r *http.Request, p *se
 }
 
 func (h *handlers) updateNodeGroup(w http.ResponseWriter, r *http.Request, p *service.AdminPrincipal) {
-	id, err := pathID(r)
-	if err != nil {
-		writeError(w, r, err)
-		return
-	}
 	var req nodeGroupRequest
-	if err := decodeJSON(w, r, &req); err != nil {
+	id, err := decodeWithID(w, r, &req)
+	if err != nil {
 		writeError(w, r, err)
 		return
 	}

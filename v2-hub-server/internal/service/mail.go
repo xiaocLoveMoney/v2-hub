@@ -12,7 +12,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"v2-hub-server/internal/dao/sqlcgen"
@@ -120,7 +119,7 @@ func (s *MailService) enqueue(ctx context.Context, q *sqlcgen.Queries, to string
 	}
 	if _, err := q.InsertMailOutbox(ctx, sqlcgen.InsertMailOutboxParams{
 		AadKey: aadKey, Recipient: to, Subject: c.Subject, BodyEnc: sealed, Priority: priority,
-		QueuedAt: pgtype.Timestamptz{Time: s.now(), Valid: true},
+		QueuedAt: timestamptz(s.now()),
 	}); err != nil {
 		return fmt.Errorf("insert mail outbox: %w", err)
 	}
@@ -143,8 +142,8 @@ func (s *MailService) ProcessOutbox(ctx context.Context, window time.Duration) (
 	}
 	now := s.now()
 	rows, err := s.q.ClaimDueMail(ctx, sqlcgen.ClaimDueMailParams{
-		LeaseUntil: pgtype.Timestamptz{Time: now.Add(mailLease), Valid: true},
-		Now:        pgtype.Timestamptz{Time: now, Valid: true},
+		LeaseUntil: timestamptz(now.Add(mailLease)),
+		Now:        timestamptz(now),
 		Batch:      batch,
 	})
 	if err != nil {
@@ -182,7 +181,7 @@ func (s *MailService) deliver(ctx context.Context, row sqlcgen.ClaimDueMailRow) 
 	}
 	backoff := mailRetryBase << (row.Attempts - 1)
 	if err := s.q.SetMailRetry(ctx, sqlcgen.SetMailRetryParams{
-		ID: row.ID, NextAttemptAt: pgtype.Timestamptz{Time: s.now().Add(backoff), Valid: true}, LastError: reason,
+		ID: row.ID, NextAttemptAt: timestamptz(s.now().Add(backoff)), LastError: reason,
 	}); err != nil {
 		return fmt.Errorf("schedule mail %d retry: %w", row.ID, err)
 	}
@@ -248,25 +247,20 @@ func (s *MailService) ListOutbox(ctx context.Context, status string, pq PageQuer
 	}
 	items := make([]MailOutboxItem, 0, len(rows))
 	for _, r := range rows {
-		item := MailOutboxItem{ID: r.ID, Recipient: r.Recipient, Subject: r.Subject, Status: r.Status, Attempts: int(r.Attempts),
-			LastError: r.LastError, CreatedAt: r.CreatedAt.Time}
-		if r.SentAt.Valid {
-			t := r.SentAt.Time
-			item.SentAt = &t
-		}
-		items = append(items, item)
+		items = append(items, MailOutboxItem{ID: r.ID, Recipient: r.Recipient, Subject: r.Subject, Status: r.Status, Attempts: int(r.Attempts),
+			LastError: r.LastError, SentAt: timePtr(r.SentAt), CreatedAt: r.CreatedAt.Time})
 	}
 	return &Page[MailOutboxItem]{Items: items, Total: total}, nil
 }
 
 // PurgeOutbox 删除超过保留期的发件箱记录与过期已久的验证码，返回删除的行数。
 func (s *MailService) PurgeOutbox(ctx context.Context) (int64, error) {
-	cutoff := pgtype.Timestamptz{Time: s.now().Add(-mailOutboxRetention), Valid: true}
+	cutoff := timestamptz(s.now().Add(-mailOutboxRetention))
 	mails, err := s.q.PurgeMailOutbox(ctx, cutoff)
 	if err != nil {
 		return 0, fmt.Errorf("purge mail outbox: %w", err)
 	}
-	codes, err := s.q.PurgeEmailCodes(ctx, pgtype.Timestamptz{Time: s.now().Add(-emailCodeRetention), Valid: true})
+	codes, err := s.q.PurgeEmailCodes(ctx, timestamptz(s.now().Add(-emailCodeRetention)))
 	if err != nil {
 		return mails, fmt.Errorf("purge email codes: %w", err)
 	}
@@ -275,11 +269,7 @@ func (s *MailService) PurgeOutbox(ctx context.Context) (int64, error) {
 
 // sanitizeMailError 把发送错误压成一行、截断到库列长度；SMTP 错误不含密码。
 func sanitizeMailError(err error) string {
-	msg := strings.Join(strings.Fields(err.Error()), " ")
-	if r := []rune(msg); len(r) > mailErrorMaxLen {
-		msg = string(r[:mailErrorMaxLen])
-	}
-	return msg
+	return truncate(strings.Join(strings.Fields(err.Error()), " "), mailErrorMaxLen)
 }
 
 // maskEmail 返回日志与审计用的打码邮箱：a***@example.com。

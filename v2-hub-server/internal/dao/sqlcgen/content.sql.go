@@ -277,22 +277,6 @@ func (q *Queries) DeleteUnclosedTicketsByUser(ctx context.Context, userID int64)
 	return err
 }
 
-const existsCheckin = `-- name: ExistsCheckin :one
-SELECT EXISTS (SELECT 1 FROM checkin_log WHERE user_id = $1 AND checkin_date = $2)
-`
-
-type ExistsCheckinParams struct {
-	UserID      int64
-	CheckinDate pgtype.Date
-}
-
-func (q *Queries) ExistsCheckin(ctx context.Context, arg ExistsCheckinParams) (bool, error) {
-	row := q.db.QueryRow(ctx, existsCheckin, arg.UserID, arg.CheckinDate)
-	var exists bool
-	err := row.Scan(&exists)
-	return exists, err
-}
-
 const getAnnouncementForUpdate = `-- name: GetAnnouncementForUpdate :one
 SELECT id, title, content, published_at, mailed_at FROM announcement WHERE id = $1 FOR UPDATE
 `

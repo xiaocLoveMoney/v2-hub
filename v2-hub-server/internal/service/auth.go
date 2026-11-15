@@ -162,10 +162,7 @@ func (s *AuthService) Login(ctx context.Context, in LoginInput) (*LoginResult, e
 		p.CSRFToken = csrf
 		p.TOTPEnabled = admin.TotpSecretEnc != nil
 		principal = p
-		return writeAudit(ctx, q, AuditEntry{
-			ActorType: ActorAdmin, ActorID: admin.ID, Action: ActionAdminLogin,
-			TargetType: targetAdmin, TargetID: fmt.Sprint(admin.ID), ClientIP: in.ClientIP,
-		})
+		return writeAudit(ctx, q, adminAudit(p, ActionAdminLogin, targetAdmin, admin.ID, in.ClientIP, nil))
 	})
 	if err != nil {
 		return nil, err
@@ -249,10 +246,7 @@ func (s *AuthService) Logout(ctx context.Context, p *AdminPrincipal, clientIP *n
 		if err := q.DeleteAdminSessionByID(ctx, p.SessionID); err != nil {
 			return fmt.Errorf("delete session %d: %w", p.SessionID, err)
 		}
-		return writeAudit(ctx, q, AuditEntry{
-			ActorType: ActorAdmin, ActorID: p.AdminID, Action: ActionAdminLogout,
-			TargetType: targetAdmin, TargetID: fmt.Sprint(p.AdminID), ClientIP: clientIP,
-		})
+		return writeAudit(ctx, q, adminAudit(p, ActionAdminLogout, targetAdmin, p.AdminID, clientIP, nil))
 	})
 }
 
@@ -270,15 +264,19 @@ func loadPrincipal(ctx context.Context, q *sqlcgen.Queries, adminID int64, usern
 	if err != nil {
 		return nil, fmt.Errorf("list roles of admin %d: %w", adminID, err)
 	}
-	perms, err := q.ListPermissionCodesForAdmin(ctx, adminID)
-	if err != nil {
-		return nil, fmt.Errorf("list permissions of admin %d: %w", adminID, err)
-	}
 	isSuper := false
 	for _, r := range roles {
 		if r == RoleSuperAdmin {
 			isSuper = true
 			break
+		}
+	}
+	// 超管的权限集固定为全部权限（effectivePermissions 不看 codes），不必再查权限码
+	var perms []string
+	if !isSuper {
+		perms, err = q.ListPermissionCodesForAdmin(ctx, adminID)
+		if err != nil {
+			return nil, fmt.Errorf("list permissions of admin %d: %w", adminID, err)
 		}
 	}
 	return &AdminPrincipal{

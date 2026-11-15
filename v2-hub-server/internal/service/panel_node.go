@@ -203,14 +203,7 @@ func validateGroupInput(ctx context.Context, q *sqlcgen.Queries, in NodeGroupInp
 	if len(in.NodeIDs) > maxGroupNodes {
 		return in, newError(CodeInvalidArgument, "节点过多")
 	}
-	unique := make([]int64, 0, len(in.NodeIDs))
-	seen := make(map[int64]struct{}, len(in.NodeIDs))
-	for _, id := range in.NodeIDs {
-		if _, ok := seen[id]; !ok {
-			seen[id] = struct{}{}
-			unique = append(unique, id)
-		}
-	}
+	unique := dedupeIDs(in.NodeIDs)
 	in.NodeIDs = unique
 	if len(unique) == 0 {
 		return in, nil

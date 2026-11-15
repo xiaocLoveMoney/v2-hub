@@ -43,11 +43,6 @@ func toInviteCodeVO(c service.InviteCode) inviteCodeVO {
 		UsedCount: c.UsedCount, ExpiresAt: c.ExpiresAt, IsDisabled: c.IsDisabled, Remark: c.Remark, CreatedAt: c.CreatedAt}
 }
 
-type inviteCodePageVO struct {
-	Items []inviteCodeVO `json:"items"`
-	Total int64          `json:"total"`
-}
-
 func (h *handlers) listInviteCodes(w http.ResponseWriter, r *http.Request, _ *service.AdminPrincipal) {
 	pq, err := pageQuery(r)
 	if err != nil {
@@ -59,11 +54,7 @@ func (h *handlers) listInviteCodes(w http.ResponseWriter, r *http.Request, _ *se
 		writeError(w, r, err)
 		return
 	}
-	out := inviteCodePageVO{Items: make([]inviteCodeVO, 0, len(page.Items)), Total: page.Total}
-	for _, c := range page.Items {
-		out.Items = append(out.Items, toInviteCodeVO(c))
-	}
-	writeOK(w, out)
+	writeOK(w, toPageVO(page, toInviteCodeVO))
 }
 
 func (h *handlers) createInviteCode(w http.ResponseWriter, r *http.Request, p *service.AdminPrincipal) {
@@ -81,13 +72,9 @@ func (h *handlers) createInviteCode(w http.ResponseWriter, r *http.Request, p *s
 }
 
 func (h *handlers) updateInviteCode(w http.ResponseWriter, r *http.Request, p *service.AdminPrincipal) {
-	id, err := pathID(r)
-	if err != nil {
-		writeError(w, r, err)
-		return
-	}
 	var req inviteCodeBody
-	if err := decodeJSON(w, r, &req); err != nil {
+	id, err := decodeWithID(w, r, &req)
+	if err != nil {
 		writeError(w, r, err)
 		return
 	}

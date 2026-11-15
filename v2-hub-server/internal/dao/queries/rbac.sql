@@ -1,9 +1,6 @@
 -- name: ListPermissions :many
 SELECT code, name FROM permission ORDER BY id;
 
--- name: CountPermissionsByCodes :one
-SELECT COUNT(*) FROM permission WHERE code = ANY(sqlc.arg(codes)::text[]);
-
 -- name: ListRoles :many
 SELECT id, code, name, is_builtin FROM role ORDER BY id;
 
@@ -12,9 +9,6 @@ SELECT id, code, name, is_builtin FROM role WHERE id = $1;
 
 -- name: GetRoleByCode :one
 SELECT id, code, name, is_builtin FROM role WHERE code = $1;
-
--- name: ListRolesByCodes :many
-SELECT id, code, name, is_builtin FROM role WHERE code = ANY(sqlc.arg(codes)::text[]);
 
 -- name: CreateRole :one
 INSERT INTO role (code, name) VALUES ($1, $2) RETURNING id;

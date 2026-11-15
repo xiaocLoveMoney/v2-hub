@@ -128,16 +128,7 @@ func singBoxOutbound(n ProxyNode, tag string) map[string]any {
 func SingBox(nodes []ProxyNode, chains []Chain) ([]byte, error) {
 	sel := selectNodes(nodes, chains, singBoxSupports)
 	outbounds := make([]map[string]any, 0, len(sel.nodes)+len(sel.chains)+3)
-	selectable := make([]string, 0, len(sel.names)+len(sel.chains)+1)
-	if len(sel.realNames) > 0 {
-		selectable = append(selectable, GroupAuto)
-	}
-	selectable = append(selectable, sel.names...)
-	selectable = append(selectable, sel.chainNames()...)
-	if len(selectable) == 0 {
-		selectable = append(selectable, tagDirect)
-	}
-	outbounds = append(outbounds, map[string]any{"type": "selector", "tag": GroupSelect, "outbounds": selectable})
+	outbounds = append(outbounds, map[string]any{"type": "selector", "tag": GroupSelect, "outbounds": sel.selectorMembers(tagDirect)})
 	if len(sel.realNames) > 0 {
 		outbounds = append(outbounds, map[string]any{
 			"type": "urltest", "tag": GroupAuto, "outbounds": sel.realNames, "url": probeURL, "interval": fmt.Sprintf("%ds", probeIntervalSec),

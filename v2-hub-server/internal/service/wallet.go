@@ -2,10 +2,8 @@ package service
 
 import (
 	"context"
-	"crypto/rand"
 	"errors"
 	"fmt"
-	"math/big"
 	"net/netip"
 	"regexp"
 	"strings"
@@ -128,6 +126,12 @@ func applyLedger(ctx context.Context, q *sqlcgen.Queries, c ledgerChange, now ti
 	if err != nil {
 		return 0, fmt.Errorf("lock balance of user %d: %w", c.UserID, err)
 	}
+	return applyLedgerLocked(ctx, q, u, c, now)
+}
+
+// applyLedgerLocked 同 applyLedger，但用户行已由调用方在同一事务里用 LockUserBalance 锁住，u 是锁住时读到的行。
+// 调用方须保证加锁之后、调用之前没有改过该用户的余额。
+func applyLedgerLocked(ctx context.Context, q *sqlcgen.Queries, u sqlcgen.LockUserBalanceRow, c ledgerChange, now time.Time) (int64, error) {
 	after := u.Balance + c.Amount
 	if after < 0 {
 		return 0, &Error{Code: CodeInsufficientBalance, Message: "余额不足", Data: map[string]int64{"shortfall": -after}}
@@ -138,10 +142,10 @@ func applyLedger(ctx context.Context, q *sqlcgen.Queries, c ledgerChange, now ti
 	if err := q.SetUserBalance(ctx, sqlcgen.SetUserBalanceParams{ID: c.UserID, Balance: after}); err != nil {
 		return 0, fmt.Errorf("set balance of user %d: %w", c.UserID, err)
 	}
-	_, err = q.InsertLedger(ctx, sqlcgen.InsertLedgerParams{
+	_, err := q.InsertLedger(ctx, sqlcgen.InsertLedgerParams{
 		UserID: pgtype.Int8{Int64: c.UserID, Valid: true}, Username: u.Username, Kind: c.Kind, Amount: c.Amount, BalanceAfter: after,
 		RefType: c.Ref.Type, RefID: pgtype.Int8{Int64: c.Ref.ID, Valid: c.Ref.ID != 0}, Remark: c.Remark,
-		AdminID: pgtype.Int8{Int64: c.AdminID, Valid: c.AdminID != 0}, CreatedAt: pgtype.Timestamptz{Time: now, Valid: true},
+		AdminID: pgtype.Int8{Int64: c.AdminID, Valid: c.AdminID != 0}, CreatedAt: timestamptz(now),
 	})
 	if err != nil {
 		return 0, fmt.Errorf("insert ledger for user %d: %w", c.UserID, err)
@@ -161,7 +165,7 @@ func forfeitBalance(ctx context.Context, q *sqlcgen.Queries, userID int64, now t
 	if u.Balance == 0 {
 		return nil
 	}
-	_, err = applyLedger(ctx, q, ledgerChange{UserID: userID, Amount: -u.Balance, Kind: LedgerForfeit, Remark: forfeitRemark}, now)
+	_, err = applyLedgerLocked(ctx, q, u, ledgerChange{UserID: userID, Amount: -u.Balance, Kind: LedgerForfeit, Remark: forfeitRemark}, now)
 	return err
 }
 
@@ -281,8 +285,7 @@ func (s *WalletService) AdjustBalance(ctx context.Context, actor *AdminPrincipal
 		if err != nil {
 			return err
 		}
-		return writeAudit(ctx, q, AuditEntry{ActorType: ActorAdmin, ActorID: actor.AdminID, Action: ActionBalanceAdjust, TargetType: targetUser,
-			TargetID: fmt.Sprint(userID), ClientIP: ip, Detail: map[string]any{"amount": amount, "balanceAfter": after, "remark": remark}})
+		return writeAudit(ctx, q, adminAudit(actor, ActionBalanceAdjust, targetUser, userID, ip, map[string]any{"amount": amount, "balanceAfter": after, "remark": remark}))
 	})
 }
 
@@ -318,17 +321,11 @@ type TopupFilter struct {
 }
 
 func randomTopupCode() (string, error) {
-	var sb strings.Builder
-	sb.Grow(topupCodeLen)
-	size := big.NewInt(int64(len(inviteAlphabet)))
-	for range topupCodeLen {
-		n, err := rand.Int(rand.Reader, size)
-		if err != nil {
-			return "", fmt.Errorf("generate topup code: %w", err)
-		}
-		sb.WriteByte(inviteAlphabet[n.Int64()])
+	code, err := randomString(inviteAlphabet, topupCodeLen)
+	if err != nil {
+		return "", fmt.Errorf("generate topup code: %w", err)
 	}
-	return sb.String(), nil
+	return code, nil
 }
 
 // normalizeTopupCode 去掉分组用的空格与连字符并转大写；形状不对时返回空串（不必查库）。
@@ -369,10 +366,7 @@ func (s *WalletService) CreateTopupCodes(ctx context.Context, actor *AdminPrinci
 	if in.ExpiresAt != nil && !in.ExpiresAt.After(now) {
 		return nil, newError(CodeInvalidArgument, "到期时间须晚于现在")
 	}
-	var expires pgtype.Timestamptz
-	if in.ExpiresAt != nil {
-		expires = pgtype.Timestamptz{Time: *in.ExpiresAt, Valid: true}
-	}
+	expires := optionalTime(in.ExpiresAt)
 	codes := make([]string, 0, in.Count)
 	err := s.inTx(ctx, func(q *sqlcgen.Queries) error {
 		for range in.Count {
@@ -392,7 +386,7 @@ func (s *WalletService) CreateTopupCodes(ctx context.Context, actor *AdminPrinci
 			err = q.InsertTopupCode(ctx, sqlcgen.InsertTopupCodeParams{
 				CodeHash: s.sealer.MAC(topupMACPurpose, []byte(code)), CodeEnc: sealed, AadKey: aadKey, CodeTail: code[topupCodeLen-topupCodeTailLen:],
 				Amount: in.Amount, Batch: in.Batch, ExpiresAt: expires, CreatedBy: pgtype.Int8{Int64: actor.AdminID, Valid: true},
-				CreatedAt: pgtype.Timestamptz{Time: now, Valid: true},
+				CreatedAt: timestamptz(now),
 			})
 			if err != nil {
 				return fmt.Errorf("insert topup code: %w", err)
@@ -421,7 +415,7 @@ func (s *WalletService) ListTopupCodes(ctx context.Context, f TopupFilter, pq Pa
 		return nil, newError(CodeInvalidArgument, msgTopupBatchLong)
 	}
 	now := s.now()
-	at := pgtype.Timestamptz{Time: now, Valid: true}
+	at := timestamptz(now)
 	rows, err := s.q.ListTopupCodes(ctx, sqlcgen.ListTopupCodesParams{Batch: f.Batch, Status: f.Status, Now: at, RowLimit: limit, RowOffset: offset})
 	if err != nil {
 		return nil, fmt.Errorf("list topup codes: %w", err)
@@ -471,8 +465,7 @@ func (s *WalletService) SetTopupCodeDisabled(ctx context.Context, actor *AdminPr
 			ID: row.ID, CodeTail: row.CodeTail, Amount: row.Amount, Batch: row.Batch, Status: topupStatus(disabled, row.UsedAt, row.ExpiresAt, s.now()),
 			ExpiresAt: timePtr(row.ExpiresAt), Disabled: disabled, CreatedAt: row.CreatedAt.Time,
 		}
-		return writeAudit(ctx, q, AuditEntry{ActorType: ActorAdmin, ActorID: actor.AdminID, Action: ActionTopupUpdate, TargetType: targetTopupCode,
-			TargetID: fmt.Sprint(id), ClientIP: ip, Detail: map[string]any{"isDisabled": disabled}})
+		return writeAudit(ctx, q, adminAudit(actor, ActionTopupUpdate, targetTopupCode, id, ip, map[string]any{"isDisabled": disabled}))
 	})
 	if err != nil {
 		return nil, err
@@ -490,8 +483,7 @@ func (s *WalletService) DeleteTopupCode(ctx context.Context, actor *AdminPrincip
 		if err := q.DeleteTopupCode(ctx, id); err != nil {
 			return fmt.Errorf("delete topup code %d: %w", id, err)
 		}
-		return writeAudit(ctx, q, AuditEntry{ActorType: ActorAdmin, ActorID: actor.AdminID, Action: ActionTopupDelete, TargetType: targetTopupCode,
-			TargetID: fmt.Sprint(id), ClientIP: ip, Detail: map[string]any{"amount": row.Amount, "batch": row.Batch}})
+		return writeAudit(ctx, q, adminAudit(actor, ActionTopupDelete, targetTopupCode, id, ip, map[string]any{"amount": row.Amount, "batch": row.Batch}))
 	})
 }
 
@@ -511,8 +503,7 @@ func (s *WalletService) RevealTopupCode(ctx context.Context, actor *AdminPrincip
 			return fmt.Errorf("open topup code %d: %w", id, err)
 		}
 		code = string(plain)
-		return writeAudit(ctx, q, AuditEntry{ActorType: ActorAdmin, ActorID: actor.AdminID, Action: ActionTopupReveal, TargetType: targetTopupCode,
-			TargetID: fmt.Sprint(id), ClientIP: ip})
+		return writeAudit(ctx, q, adminAudit(actor, ActionTopupReveal, targetTopupCode, id, ip, nil))
 	})
 	return code, err
 }
@@ -562,7 +553,7 @@ func (s *WalletService) Redeem(ctx context.Context, p *UserPrincipal, rawCode st
 			return err
 		}
 		err = q.MarkTopupCodeUsed(ctx, sqlcgen.MarkTopupCodeUsedParams{
-			ID: row.ID, UsedBy: pgtype.Int8{Int64: p.UserID, Valid: true}, UsedByUsername: p.Username, UsedAt: pgtype.Timestamptz{Time: now, Valid: true},
+			ID: row.ID, UsedBy: pgtype.Int8{Int64: p.UserID, Valid: true}, UsedByUsername: p.Username, UsedAt: timestamptz(now),
 		})
 		if err != nil {
 			return fmt.Errorf("mark topup code %d used: %w", row.ID, err)

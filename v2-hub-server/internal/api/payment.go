@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"net/netip"
 	"net/url"
-	"strconv"
 	"strings"
 	"time"
 
@@ -38,7 +37,6 @@ type PayManager interface {
 
 // FinanceManager 是收支统计与返利列表的业务接口，由 service.ShopService 实现。
 type FinanceManager interface {
-	FinanceStats(ctx context.Context, days int) (*service.FinanceStats, error)
 	FinanceStatsBy(ctx context.Context, fq service.FinanceQuery) (*service.FinanceStats, error)
 	ExportFinanceCSV(ctx context.Context, actor *service.AdminPrincipal, fq service.FinanceQuery, ip *netip.Addr) ([]byte, string, error)
 	ListRebates(ctx context.Context, inviterID int64, pq service.PageQuery) (*service.Page[service.RebateRecord], error)
@@ -112,11 +110,6 @@ type paymentVO struct {
 	Username  string     `json:"username"`
 }
 
-type paymentPageVO struct {
-	Items []paymentVO `json:"items"`
-	Total int64       `json:"total"`
-}
-
 func (h *handlers) listPayments(w http.ResponseWriter, r *http.Request, _ *service.AdminPrincipal) {
 	pq, err := pageQuery(r)
 	if err != nil {
@@ -133,15 +126,13 @@ func (h *handlers) listPayments(w http.ResponseWriter, r *http.Request, _ *servi
 		writeError(w, r, err)
 		return
 	}
-	out := paymentPageVO{Items: make([]paymentVO, 0, len(page.Items)), Total: page.Total}
-	for _, p := range page.Items {
+	writeOK(w, toPageVO(page, func(p service.Payment) paymentVO {
 		vo := paymentVO{ID: p.ID, TradeNo: p.TradeNo, Gateway: p.Gateway, Amount: p.Amount, Status: p.Status, PaidAt: p.PaidAt, CreatedAt: p.CreatedAt, Username: p.Username}
 		if p.UserID != 0 {
 			vo.UserID = &p.UserID
 		}
-		out.Items = append(out.Items, vo)
-	}
-	writeOK(w, out)
+		return vo
+	}))
 }
 
 // rebateVO 对应 hub-api.yaml Rebate。
@@ -156,35 +147,26 @@ type rebateVO struct {
 	CreatedAt       time.Time `json:"createdAt"`
 }
 
-type rebatePageVO struct {
-	Items []rebateVO `json:"items"`
-	Total int64      `json:"total"`
-}
-
 func (h *handlers) listRebates(w http.ResponseWriter, r *http.Request, _ *service.AdminPrincipal) {
 	pq, err := pageQuery(r)
 	if err != nil {
 		writeError(w, r, err)
 		return
 	}
-	var inviterID int64
-	if raw := r.URL.Query().Get(queryInviterID); raw != "" {
-		if inviterID, err = strconv.ParseInt(raw, 10, 64); err != nil || inviterID < 1 {
-			writeError(w, r, badRequest(msgBadInviter))
-			return
-		}
+	inviterID, err := optionalPositiveInt64(r, queryInviterID, msgBadInviter)
+	if err != nil {
+		writeError(w, r, err)
+		return
 	}
 	page, err := h.finance.ListRebates(r.Context(), inviterID, pq)
 	if err != nil {
 		writeError(w, r, err)
 		return
 	}
-	out := rebatePageVO{Items: make([]rebateVO, 0, len(page.Items)), Total: page.Total}
-	for _, rb := range page.Items {
-		out.Items = append(out.Items, rebateVO{ID: rb.ID, InviterUsername: rb.InviterUsername, InviteeUsername: rb.InviteeUsername, OrderNo: rb.OrderNo,
-			OrderAmount: rb.OrderAmount, Percent: rb.Percent, Amount: rb.Amount, CreatedAt: rb.CreatedAt})
-	}
-	writeOK(w, out)
+	writeOK(w, toPageVO(page, func(rb service.RebateRecord) rebateVO {
+		return rebateVO{ID: rb.ID, InviterUsername: rb.InviterUsername, InviteeUsername: rb.InviteeUsername, OrderNo: rb.OrderNo,
+			OrderAmount: rb.OrderAmount, Percent: rb.Percent, Amount: rb.Amount, CreatedAt: rb.CreatedAt}
+	}))
 }
 
 type dayStatsVO struct {

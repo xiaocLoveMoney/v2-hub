@@ -101,35 +101,14 @@ func (h *handlers) requireUser(allowDisabled bool, next userHandler) http.Handle
 }
 
 func (h *handlers) userSessionCookie(value string, expires time.Time) *http.Cookie {
-	return &http.Cookie{
-		Name:     userSessionCookie,
-		Value:    value,
-		Path:     userCookiePath,
-		Expires:  expires,
-		HttpOnly: true,
-		Secure:   h.cookie.Secure,
-		SameSite: http.SameSiteLaxMode,
-	}
+	return h.newSessionCookie(userSessionCookie, userCookiePath, value, expires)
 }
 
 func (h *handlers) userLogin(w http.ResponseWriter, r *http.Request) {
-	var req loginRequest
-	if err := decodeJSON(w, r, &req); err != nil {
-		writeError(w, r, err)
+	in, ok := h.parseLoginInput(w, r)
+	if !ok {
 		return
 	}
-	if req.Username == "" || req.Credential == "" {
-		writeError(w, r, badRequest(msgEmptyLogin))
-		return
-	}
-	in := service.LoginInput{
-		Username:  req.Username,
-		TOTPCode:  req.TOTPCode,
-		ClientIP:  clientIP(r, h.trustedProxies),
-		UserAgent: r.Header.Get(headerUserAgent),
-	}
-	pw := req.Credential
-	in.Password = pw
 	res, err := h.portalAuth.Login(r.Context(), in)
 	if err != nil {
 		writeError(w, r, err)
@@ -144,9 +123,7 @@ func (h *handlers) userLogout(w http.ResponseWriter, r *http.Request, p *service
 		writeError(w, r, err)
 		return
 	}
-	expired := h.userSessionCookie("", time.Unix(0, 0))
-	expired.MaxAge = -1
-	http.SetCookie(w, expired)
+	http.SetCookie(w, h.expiredCookie(userSessionCookie, userCookiePath))
 	writeOK(w, nil)
 }
 

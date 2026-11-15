@@ -12,7 +12,7 @@ const regexpPrefix = "regexp:"
 // Xray 按 Go 正则编译 regexp: 条件，编译不过内核起不来：这里先编译一遍。
 func TestBlockDomainsCompile(t *testing.T) {
 	count := 0
-	for _, d := range BlockDomains() {
+	for _, d := range blockDomains {
 		pattern, ok := strings.CutPrefix(d, regexpPrefix)
 		if !ok {
 			continue
