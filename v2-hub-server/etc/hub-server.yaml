@@ -56,6 +56,20 @@ reach:
   apiUrl: https://api.globalping.io
   timeout: 40s
   checkInterval: 1m
+# SSH 托管与面板部署，语义见 docs/03 §5.22：同时执行的主机任务数、领取排队任务的间隔、SSH 连接 / 普通动作 / 安装升级的时限、
+# 每个管理员做连接测试与发起动作的频率、一次批量新建的上限。allowLoopback 只给联调用，这里必须是 false。
+deploy:
+  concurrency: 3
+  pollInterval: 5s
+  connectTimeout: 15s
+  commandTimeout: 3m
+  installTimeout: 20m
+  testLimit: 20
+  testWindow: 10m
+  actionLimit: 60
+  actionWindow: 10m
+  maxBatch: 50
+  allowLoopback: false
 # 终端用户会话，语义见 docs/03 §5.3；登录频控与 Cookie 的 Secure 沿用 auth 段
 portal:
   sessionIdleTimeout: 168h

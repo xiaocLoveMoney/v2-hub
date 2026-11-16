@@ -71,6 +71,18 @@ const (
 	defaultReachAPIURL        = "https://api.globalping.io"
 	defaultReachTimeout       = 40 * time.Second
 	defaultReachCheckInterval = time.Minute
+
+	// SSH 托管与面板部署，语义见 docs/03 §5.22（Ruling-68、Ruling-71）
+	defaultDeployConcurrency    = 3
+	defaultDeployPollInterval   = 5 * time.Second
+	defaultDeployConnectTimeout = 15 * time.Second
+	defaultDeployCommandTimeout = 3 * time.Minute
+	defaultDeployInstallTimeout = 20 * time.Minute
+	defaultDeployTestLimit      = 20
+	defaultDeployTestWindow     = 10 * time.Minute
+	defaultDeployActionLimit    = 60
+	defaultDeployActionWindow   = 10 * time.Minute
+	defaultDeployMaxBatch       = 50
 )
 
 // ErrInvalidConfig 表示配置内容不合法。
@@ -89,6 +101,8 @@ type Config struct {
 	// Analytics 是总览分析（docs/03 §5.20，Ruling-66）；Reach 是大陆连通检测（Ruling-67）。
 	Analytics AnalyticsConfig `yaml:"analytics"`
 	Reach     ReachConfig     `yaml:"reach"`
+	// Deploy 是 SSH 托管与面板部署（docs/03 §5.22）。
+	Deploy DeployConfig `yaml:"deploy"`
 	// Subscription 是订阅设置（docs/03 §5.4）；M4 起移入系统设置表。
 	Subscription SubscriptionConfig `yaml:"subscription"`
 }
@@ -124,6 +138,24 @@ type ReachConfig struct {
 	APIURL        string        `yaml:"apiUrl"`
 	Timeout       time.Duration `yaml:"timeout"`
 	CheckInterval time.Duration `yaml:"checkInterval"`
+}
+
+// DeployConfig 是 SSH 托管与面板部署（docs/03 §5.22）：Concurrency 是同时执行的主机任务数，PollInterval 是后台领取排队任务的间隔；
+// ConnectTimeout 是 SSH 连接加握手的时限，CommandTimeout 是普通动作的总时限，InstallTimeout 是安装与升级的总时限；
+// TestLimit / TestWindow 是每个管理员做连接测试的频率，ActionLimit / ActionWindow 是每个管理员发起动作的频率；
+// MaxBatch 是一次批量新建的主机数上限；AllowLoopback 允许连回环地址，只给联调用，生产必须为 false。
+type DeployConfig struct {
+	Concurrency    int           `yaml:"concurrency"`
+	PollInterval   time.Duration `yaml:"pollInterval"`
+	ConnectTimeout time.Duration `yaml:"connectTimeout"`
+	CommandTimeout time.Duration `yaml:"commandTimeout"`
+	InstallTimeout time.Duration `yaml:"installTimeout"`
+	TestLimit      int           `yaml:"testLimit"`
+	TestWindow     time.Duration `yaml:"testWindow"`
+	ActionLimit    int           `yaml:"actionLimit"`
+	ActionWindow   time.Duration `yaml:"actionWindow"`
+	MaxBatch       int           `yaml:"maxBatch"`
+	AllowLoopback  bool          `yaml:"allowLoopback"`
 }
 
 // SubscriptionConfig 是订阅的系统级设置。
@@ -273,6 +305,17 @@ func defaults() Config {
 		APIURL:        defaultReachAPIURL,
 		Timeout:       defaultReachTimeout,
 		CheckInterval: defaultReachCheckInterval,
+	}, Deploy: DeployConfig{
+		Concurrency:    defaultDeployConcurrency,
+		PollInterval:   defaultDeployPollInterval,
+		ConnectTimeout: defaultDeployConnectTimeout,
+		CommandTimeout: defaultDeployCommandTimeout,
+		InstallTimeout: defaultDeployInstallTimeout,
+		TestLimit:      defaultDeployTestLimit,
+		TestWindow:     defaultDeployTestWindow,
+		ActionLimit:    defaultDeployActionLimit,
+		ActionWindow:   defaultDeployActionWindow,
+		MaxBatch:       defaultDeployMaxBatch,
 	}, Subscription: SubscriptionConfig{
 		Title:               defaultSubscriptionTitle,
 		UpdateIntervalHours: defaultSubscriptionIntervalHours,
@@ -326,6 +369,13 @@ func (c Config) validate() error {
 	}
 	if c.Reach.APIURL == "" || c.Reach.Timeout <= 0 || c.Reach.CheckInterval <= 0 {
 		return fmt.Errorf("%w: reach.apiUrl, reach.timeout and reach.checkInterval must be set", ErrInvalidConfig)
+	}
+	dc := c.Deploy
+	if dc.Concurrency <= 0 || dc.PollInterval <= 0 || dc.ConnectTimeout <= 0 || dc.CommandTimeout <= 0 || dc.InstallTimeout <= 0 {
+		return fmt.Errorf("%w: deploy concurrency, interval and timeouts must be positive", ErrInvalidConfig)
+	}
+	if dc.TestLimit <= 0 || dc.TestWindow <= 0 || dc.ActionLimit <= 0 || dc.ActionWindow <= 0 || dc.MaxBatch <= 0 {
+		return fmt.Errorf("%w: deploy limits and windows must be positive", ErrInvalidConfig)
 	}
 	po := c.Portal
 	if po.SessionIdleTimeout <= a.SessionTouchInterval || po.SessionMaxAge < po.SessionIdleTimeout || po.LoginLogRetention <= 0 {

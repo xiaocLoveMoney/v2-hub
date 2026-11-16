@@ -26,12 +26,15 @@ import (
 	"v2-hub-server/internal/dao"
 	"v2-hub-server/internal/job"
 	"v2-hub-server/internal/manager/crypto"
+	"v2-hub-server/internal/manager/deploy"
+	deployxui "v2-hub-server/internal/manager/deploy/xui"
 	"v2-hub-server/internal/manager/geoip"
 	"v2-hub-server/internal/manager/mail"
 	"v2-hub-server/internal/manager/panel"
 	"v2-hub-server/internal/manager/panel/xui"
 	"v2-hub-server/internal/manager/pay"
 	"v2-hub-server/internal/manager/reach"
+	"v2-hub-server/internal/manager/remote"
 	"v2-hub-server/internal/manager/telegram"
 	"v2-hub-server/internal/service"
 )
@@ -66,6 +69,9 @@ const (
 	// telegramOutboxInterval 是 Telegram 发件箱任务的周期；opsInterval 是掉线告警与日报的检查周期。
 	telegramOutboxInterval = 10 * time.Second
 	opsInterval            = time.Minute
+	// 面板重启后等它回来：最多探测 panelWaitAttempts 次，每次间隔 panelWaitInterval（docs/03 §5.22）。
+	panelWaitAttempts = 15
+	panelWaitInterval = 2 * time.Second
 
 	cmdAdminCreate  = "admin-create"
 	flagConfig      = "f"
@@ -224,6 +230,19 @@ func runServer(args []string) error {
 		ExitTestLimit: cfg.Chain.UserTestLimit, ExitTestWindow: cfg.Chain.UserTestWindow,
 	})
 
+	// SSH 托管与面板部署（docs/03 §5.22）：新增面板类型的部署实现只在这里加一行（Ruling-69）
+	deployers := deploy.NewRegistry(map[string]deploy.Deployer{deployxui.ProviderType: deployxui.New()})
+	hosts := service.NewHostService(pool, sealer,
+		remote.NewSSHDialer(remote.Config{ConnectTimeout: cfg.Deploy.ConnectTimeout, AllowLoopback: cfg.Deploy.AllowLoopback}),
+		deployers, panels, service.HostConfig{
+			CommandTimeout: cfg.Deploy.CommandTimeout, InstallTimeout: cfg.Deploy.InstallTimeout,
+			TestLimit: cfg.Deploy.TestLimit, TestWindow: cfg.Deploy.TestWindow,
+			ActionLimit: cfg.Deploy.ActionLimit, ActionWindow: cfg.Deploy.ActionWindow,
+			MaxBatch: cfg.Deploy.MaxBatch, AllowLoopback: cfg.Deploy.AllowLoopback,
+			PanelWaitAttempts: panelWaitAttempts, PanelWaitInterval: panelWaitInterval,
+		})
+	go job.RunHostTasks(ctx, hosts, cfg.Deploy.PollInterval, cfg.Deploy.Concurrency)
+
 	srv := &http.Server{
 		Addr: cfg.Server.ListenAddr,
 		Handler: api.NewRouter(api.Deps{
@@ -251,6 +270,7 @@ func runServer(args []string) error {
 			Ops:            ops,
 			Analytics:      analytics,
 			Reach:          reachSvc,
+			Hosts:          hosts,
 			Cookie:         api.CookieConfig{Secure: secureCookie},
 			TrustedProxies: trusted,
 		}),

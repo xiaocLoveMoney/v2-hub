@@ -4,7 +4,8 @@
 SELECT s.id, s.name, s.provider_type, s.base_url, s.tls_mode, s.cert_pin_sha256, s.region, s.remark,
        s.is_disabled, s.status, s.last_error, s.last_seen_at, s.panel_version, s.status_snapshot,
        s.last_synced_at, s.created_at,
-       (SELECT COUNT(*) FROM inbound i WHERE i.server_id = s.id AND NOT i.is_missing)::int AS inbound_count
+       (SELECT COUNT(*) FROM inbound i WHERE i.server_id = s.id AND NOT i.is_missing)::int AS inbound_count,
+       coalesce((SELECT h.id FROM server_host h WHERE h.server_id = s.id), 0)::bigint AS host_id
 FROM server s
 ORDER BY s.id;
 
@@ -12,7 +13,8 @@ ORDER BY s.id;
 SELECT s.id, s.name, s.provider_type, s.base_url, s.tls_mode, s.cert_pin_sha256, s.region, s.remark,
        s.is_disabled, s.status, s.last_error, s.last_seen_at, s.panel_version, s.status_snapshot,
        s.last_synced_at, s.created_at,
-       (SELECT COUNT(*) FROM inbound i WHERE i.server_id = s.id AND NOT i.is_missing)::int AS inbound_count
+       (SELECT COUNT(*) FROM inbound i WHERE i.server_id = s.id AND NOT i.is_missing)::int AS inbound_count,
+       coalesce((SELECT h.id FROM server_host h WHERE h.server_id = s.id), 0)::bigint AS host_id
 FROM server s
 WHERE s.id = $1;
 

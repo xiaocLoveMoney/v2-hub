@@ -79,7 +79,8 @@ const getServer = `-- name: GetServer :one
 SELECT s.id, s.name, s.provider_type, s.base_url, s.tls_mode, s.cert_pin_sha256, s.region, s.remark,
        s.is_disabled, s.status, s.last_error, s.last_seen_at, s.panel_version, s.status_snapshot,
        s.last_synced_at, s.created_at,
-       (SELECT COUNT(*) FROM inbound i WHERE i.server_id = s.id AND NOT i.is_missing)::int AS inbound_count
+       (SELECT COUNT(*) FROM inbound i WHERE i.server_id = s.id AND NOT i.is_missing)::int AS inbound_count,
+       coalesce((SELECT h.id FROM server_host h WHERE h.server_id = s.id), 0)::bigint AS host_id
 FROM server s
 WHERE s.id = $1
 `
@@ -102,6 +103,7 @@ type GetServerRow struct {
 	LastSyncedAt   pgtype.Timestamptz
 	CreatedAt      pgtype.Timestamptz
 	InboundCount   int32
+	HostID         int64
 }
 
 func (q *Queries) GetServer(ctx context.Context, id int64) (GetServerRow, error) {
@@ -125,6 +127,7 @@ func (q *Queries) GetServer(ctx context.Context, id int64) (GetServerRow, error)
 		&i.LastSyncedAt,
 		&i.CreatedAt,
 		&i.InboundCount,
+		&i.HostID,
 	)
 	return i, err
 }
@@ -275,7 +278,8 @@ const listServers = `-- name: ListServers :many
 SELECT s.id, s.name, s.provider_type, s.base_url, s.tls_mode, s.cert_pin_sha256, s.region, s.remark,
        s.is_disabled, s.status, s.last_error, s.last_seen_at, s.panel_version, s.status_snapshot,
        s.last_synced_at, s.created_at,
-       (SELECT COUNT(*) FROM inbound i WHERE i.server_id = s.id AND NOT i.is_missing)::int AS inbound_count
+       (SELECT COUNT(*) FROM inbound i WHERE i.server_id = s.id AND NOT i.is_missing)::int AS inbound_count,
+       coalesce((SELECT h.id FROM server_host h WHERE h.server_id = s.id), 0)::bigint AS host_id
 FROM server s
 ORDER BY s.id
 `
@@ -298,6 +302,7 @@ type ListServersRow struct {
 	LastSyncedAt   pgtype.Timestamptz
 	CreatedAt      pgtype.Timestamptz
 	InboundCount   int32
+	HostID         int64
 }
 
 // 服务器（docs/03 §2、§3 T1–T4、§5.1）---------------------------------------
@@ -328,6 +333,7 @@ func (q *Queries) ListServers(ctx context.Context) ([]ListServersRow, error) {
 			&i.LastSyncedAt,
 			&i.CreatedAt,
 			&i.InboundCount,
+			&i.HostID,
 		); err != nil {
 			return nil, err
 		}

@@ -73,6 +73,8 @@ type serverVO struct {
 	StatusSnapshot json.RawMessage `json:"statusSnapshot"`
 	InboundCount   int             `json:"inboundCount"`
 	CreatedAt      time.Time       `json:"createdAt"`
+	// HostID 是关联的托管主机（docs/03 §5.22）；没有为 null。
+	HostID *int64 `json:"hostId"`
 	// Reach 是这台服务器上大陆连通检测的目标数（Ruling-67）；功能没开为 null。
 	Reach *serverReachVO `json:"reach"`
 }
@@ -83,7 +85,7 @@ func toServerVO(s service.Server, reach map[int64]service.ReachCount) serverVO {
 		ID: s.ID, Name: s.Name, ProviderType: s.ProviderType, BaseURL: s.BaseURL, TLSMode: s.TLSMode,
 		CertPinSHA256: s.CertPinSHA256, Region: s.Region, Remark: s.Remark, IsDisabled: s.IsDisabled,
 		Status: s.Status, LastError: s.LastError, LastSeenAt: s.LastSeenAt, LastSyncedAt: s.LastSyncedAt,
-		PanelVersion: s.PanelVersion, InboundCount: s.InboundCount, CreatedAt: s.CreatedAt,
+		PanelVersion: s.PanelVersion, InboundCount: s.InboundCount, CreatedAt: s.CreatedAt, HostID: s.HostID,
 	}
 	if len(s.StatusSnapshot) > 0 {
 		vo.StatusSnapshot = s.StatusSnapshot

@@ -60,14 +60,19 @@ type Querier interface {
 	AnalyticsUserBreakdown(ctx context.Context, arg AnalyticsUserBreakdownParams) (AnalyticsUserBreakdownRow, error)
 	// 总览分析（docs/03 §5.20 总览分析，Ruling-66）。时间范围由 service 校验（7 / 30 / 90 天），自然日按传入的时区。
 	AnalyticsUserGrowth(ctx context.Context, arg AnalyticsUserGrowthParams) ([]AnalyticsUserGrowthRow, error)
+	// 日志上限 64 KB，超出截掉最早的部分
+	AppendHostTaskLog(ctx context.Context, arg AppendHostTaskLogParams) error
 	BumpCouponUse(ctx context.Context, id int64) error
 	// 校验失败计一次；达到上限即作废
 	BumpEmailCodeAttempts(ctx context.Context, arg BumpEmailCodeAttemptsParams) error
 	BumpInviteCodeUse(ctx context.Context, id int64) error
+	CancelHostTask(ctx context.Context, id int64) (int64, error)
 	// 领取到期的待发邮件并顺延下次尝试时间（租约），发送在事务外进行；并发的任务实例不会领到同一封
 	ClaimDueMail(ctx context.Context, arg ClaimDueMailParams) ([]ClaimDueMailRow, error)
 	// 领取到期的待发消息并顺延下次尝试时间（租约），发送在事务外进行
 	ClaimDueTelegram(ctx context.Context, arg ClaimDueTelegramParams) ([]ClaimDueTelegramRow, error)
+	// 领取排队的任务：按先后取至多 N 条置为进行中；SKIP LOCKED 让并发领取互不等待
+	ClaimQueuedHostTasks(ctx context.Context, limit int32) ([]int64, error)
 	ClearAdminTOTP(ctx context.Context, id int64) (int64, error)
 	ClearCouponPlans(ctx context.Context, couponID int64) error
 	ClearNodeGroupItems(ctx context.Context, nodeGroupID int64) error
@@ -78,6 +83,7 @@ type Querier interface {
 	ClearUserTOTP(ctx context.Context, id int64) (int64, error)
 	ClearUserTrafficNotified(ctx context.Context, id int64) error
 	ConsumeEmailCode(ctx context.Context, arg ConsumeEmailCodeParams) (int64, error)
+	CountActiveHostTasks(ctx context.Context, hostID int64) (int64, error)
 	CountActiveUsersBetween(ctx context.Context, arg CountActiveUsersBetweenParams) (int32, error)
 	// 管理端：出口 ------------------------------------------------------------------------------
 	// 关键字按子串匹配名称或地址（strpos，不当通配符解释；出口表很小，不需要索引）
@@ -115,6 +121,8 @@ type Querier interface {
 	CountPublishedAnnouncements(ctx context.Context) (int64, error)
 	CountRebates(ctx context.Context, inviterID int64) (int64, error)
 	CountServerRoutesByExit(ctx context.Context, exitID pgtype.Int8) (int64, error)
+	// 新建主机时名称不能与已有服务器重名（部署成功后主机名就是服务器名）
+	CountServersByName(ctx context.Context, name string) (int64, error)
 	CountSubscribeLogs(ctx context.Context, userID pgtype.Int8) (int64, error)
 	CountTickets(ctx context.Context, arg CountTicketsParams) (int64, error)
 	CountTicketsCreatedBetween(ctx context.Context, arg CountTicketsCreatedBetweenParams) (int32, error)
@@ -131,11 +139,15 @@ type Querier interface {
 	CreateAdminSession(ctx context.Context, arg CreateAdminSessionParams) error
 	CreateAnnouncement(ctx context.Context, arg CreateAnnouncementParams) (int64, error)
 	CreateCoupon(ctx context.Context, arg CreateCouponParams) (int64, error)
+	CreateHostTask(ctx context.Context, arg CreateHostTaskParams) (int64, error)
 	CreateNodeGroup(ctx context.Context, arg CreateNodeGroupParams) (int64, error)
 	CreatePlan(ctx context.Context, arg CreatePlanParams) (int64, error)
 	CreateRole(ctx context.Context, arg CreateRoleParams) (int64, error)
+	// 密文依赖 id 作关联数据，先写占位，同一事务内再 SetSSHCredentialSecret
+	CreateSSHCredential(ctx context.Context, arg CreateSSHCredentialParams) (int64, error)
 	// token 密文依赖 id 作关联数据，先写占位，同一事务内再 SetServerToken
 	CreateServer(ctx context.Context, arg CreateServerParams) (int64, error)
+	CreateServerHost(ctx context.Context, arg CreateServerHostParams) (int64, error)
 	CreateSharedAccount(ctx context.Context, arg CreateSharedAccountParams) (int64, error)
 	// ---- 工单 ----
 	CreateTicket(ctx context.Context, arg CreateTicketParams) (int64, error)
@@ -177,7 +189,9 @@ type Querier interface {
 	DeleteReachTargets(ctx context.Context, ids []int64) error
 	DeleteRole(ctx context.Context, id int64) error
 	DeleteRolePermissions(ctx context.Context, roleID int64) error
+	DeleteSSHCredential(ctx context.Context, id int64) (int64, error)
 	DeleteServer(ctx context.Context, id int64) (int64, error)
+	DeleteServerHost(ctx context.Context, id int64) (int64, error)
 	DeleteSharedAccount(ctx context.Context, id int64) (int64, error)
 	DeleteStaleImpersonateTickets(ctx context.Context, expiresAt pgtype.Timestamptz) (int64, error)
 	DeleteTopupCode(ctx context.Context, id int64) error
@@ -202,8 +216,11 @@ type Querier interface {
 	ExistsEndUserIdentity(ctx context.Context, email string) (bool, error)
 	ExistsPlan(ctx context.Context, id int64) (bool, error)
 	ExpirePayments(ctx context.Context, expiresAt pgtype.Timestamptz) (int64, error)
+	// 进程重启后，上次没跑完的任务一律记为失败（Ruling-71）
+	FailRunningHostTasks(ctx context.Context, arg FailRunningHostTasksParams) (int64, error)
 	// 扫描结果只填进仍为空的位置，不覆盖管理员这期间的选择（Ruling-65）
 	FillServerRegion(ctx context.Context, arg FillServerRegionParams) (int64, error)
+	FinishHostTask(ctx context.Context, arg FinishHostTaskParams) (int64, error)
 	GetActiveEmailCodeForUpdate(ctx context.Context, arg GetActiveEmailCodeForUpdateParams) (GetActiveEmailCodeForUpdateRow, error)
 	GetAdminByID(ctx context.Context, id int64) (GetAdminByIDRow, error)
 	GetAdminByUsername(ctx context.Context, username string) (GetAdminByUsernameRow, error)
@@ -227,6 +244,7 @@ type Querier interface {
 	GetEndUserIDByEmail(ctx context.Context, email string) (int64, error)
 	GetEndUserLoginSecretHash(ctx context.Context, id int64) (string, error)
 	GetEndpoint(ctx context.Context, id int64) (GetEndpointRow, error)
+	GetHostTask(ctx context.Context, id int64) (GetHostTaskRow, error)
 	// 兑换时锁住票据行，一张票只能换一次会话
 	GetImpersonateTicketForUpdate(ctx context.Context, ticketHash []byte) (GetImpersonateTicketForUpdateRow, error)
 	GetInbound(ctx context.Context, id int64) (GetInboundRow, error)
@@ -245,8 +263,11 @@ type Querier interface {
 	GetReachTarget(ctx context.Context, arg GetReachTargetParams) (GetReachTargetRow, error)
 	GetRoleByCode(ctx context.Context, code string) (GetRoleByCodeRow, error)
 	GetRoleByID(ctx context.Context, id int64) (GetRoleByIDRow, error)
+	GetSSHCredential(ctx context.Context, id int64) (GetSSHCredentialRow, error)
+	GetSSHCredentialSecret(ctx context.Context, id int64) (GetSSHCredentialSecretRow, error)
 	GetServer(ctx context.Context, id int64) (GetServerRow, error)
 	GetServerConn(ctx context.Context, id int64) (GetServerConnRow, error)
+	GetServerHost(ctx context.Context, id int64) (GetServerHostRow, error)
 	// 影响分享链接的入站与对外地址摘要；变了就要重新向面板取全部链接（docs/03 §5.4 节点来源）
 	GetServerLinkFingerprint(ctx context.Context, serverID int64) (string, error)
 	GetSharedAccountCredential(ctx context.Context, id int64) ([]byte, error)
@@ -360,11 +381,15 @@ type Querier interface {
 	ListExitUsers(ctx context.Context, exitIds []int64) ([]ListExitUsersRow, error)
 	// 临近到期、还没为这个到期时间提醒过、没有设免费续期的用户；price 是自动续费对象的现价（没有则为 NULL）
 	ListExpiringUsers(ctx context.Context, arg ListExpiringUsersParams) ([]ListExpiringUsersRow, error)
+	// 不带日志；新的在前
+	ListHostTasks(ctx context.Context, arg ListHostTasksParams) ([]ListHostTasksRow, error)
 	ListInboundsByIDs(ctx context.Context, ids []int64) ([]ListInboundsByIDsRow, error)
 	// 入站与对外地址缓存（docs/03 §5.1）------------------------------------------
 	ListInboundsByServer(ctx context.Context, serverID int64) ([]ListInboundsByServerRow, error)
 	ListInviteCodes(ctx context.Context, arg ListInviteCodesParams) ([]ListInviteCodesRow, error)
 	ListInvitees(ctx context.Context, arg ListInviteesParams) ([]ListInviteesRow, error)
+	// 每台主机最近的一条任务，供主机列表显示
+	ListLatestHostTasks(ctx context.Context) ([]ListLatestHostTasksRow, error)
 	ListLedger(ctx context.Context, arg ListLedgerParams) ([]ListLedgerRow, error)
 	ListLowTrafficUsers(ctx context.Context, arg ListLowTrafficUsersParams) ([]ListLowTrafficUsersRow, error)
 	ListMailOutbox(ctx context.Context, arg ListMailOutboxParams) ([]ListMailOutboxRow, error)
@@ -399,8 +424,11 @@ type Querier interface {
 	ListRoleCodesForAdmin(ctx context.Context, adminID int64) ([]string, error)
 	ListRolePermissionCodes(ctx context.Context) ([]ListRolePermissionCodesRow, error)
 	ListRoles(ctx context.Context) ([]ListRolesRow, error)
+	// SSH 托管与面板部署（docs/03 §5.22，Ruling-68 – Ruling-71）----------------------
+	ListSSHCredentials(ctx context.Context) ([]ListSSHCredentialsRow, error)
 	// 这些服务器上全部对外地址（含未授权的），用来判断一条链接是不是某个对外地址的
 	ListServerEndpointAddrs(ctx context.Context, serverIds []int64) ([]ListServerEndpointAddrsRow, error)
+	ListServerHosts(ctx context.Context) ([]ListServerHostsRow, error)
 	// 5 分钟采样原值（近 24 小时趋势）
 	ListServerMetrics(ctx context.Context, arg ListServerMetricsParams) ([]ListServerMetricsRow, error)
 	// 按小时平均（近 7 天趋势）；cpu_samples 为 0 表示该小时 CPU 全为空（此时 cpu 无意义）
@@ -417,6 +445,8 @@ type Querier interface {
 	ListServerShadowsocksInbounds(ctx context.Context, serverID int64) ([]ListServerShadowsocksInboundsRow, error)
 	// 服务器（docs/03 §2、§3 T1–T4、§5.1）---------------------------------------
 	ListServers(ctx context.Context) ([]ListServersRow, error)
+	// 面板标识相同的服务器；部署任务再比对地址，同一台才关联而不重复新建
+	ListServersByPanelGUID(ctx context.Context, panelGuid string) ([]ListServersByPanelGUIDRow, error)
 	// 系统设置、发件箱与邮箱验证码（docs/03 §5.6、§5.7）。
 	ListSettings(ctx context.Context) ([]ListSettingsRow, error)
 	// ---- 共享账号 ----
@@ -516,10 +546,15 @@ type Querier interface {
 	// 失败隔离（docs/03 §5.19）：记下当时的内容指纹；内容变化后指纹对不上即视为解除
 	SetChainRouteQuarantine(ctx context.Context, arg SetChainRouteQuarantineParams) error
 	SetExpireNotified(ctx context.Context, arg SetExpireNotifiedParams) error
+	SetHostTaskStep(ctx context.Context, arg SetHostTaskStepParams) error
 	SetInviteCodeDisabled(ctx context.Context, arg SetInviteCodeDisabledParams) error
 	SetMailRetry(ctx context.Context, arg SetMailRetryParams) error
 	SetProvisionCounters(ctx context.Context, arg SetProvisionCountersParams) error
 	SetProvisionLinks(ctx context.Context, arg SetProvisionLinksParams) error
+	SetSSHCredentialSecret(ctx context.Context, arg SetSSHCredentialSecretParams) error
+	SetServerHostDetection(ctx context.Context, arg SetServerHostDetectionParams) error
+	SetServerHostKey(ctx context.Context, arg SetServerHostKeyParams) error
+	SetServerHostServer(ctx context.Context, arg SetServerHostServerParams) error
 	SetServerOnlineClients(ctx context.Context, arg SetServerOnlineClientsParams) error
 	// T1–T3 的落库：status、last_error 由调用方按转移表算好；is_online 时才刷新版本、GUID、快照与最近在线时间。
 	// 不在线起始时间（docs/03 §5.20 掉线告警）：回到 online 清空，离开 online 时记下第一次的时刻
@@ -567,7 +602,12 @@ type Querier interface {
 	UpdatePlan(ctx context.Context, arg UpdatePlanParams) (int64, error)
 	UpdatePlatformChainExit(ctx context.Context, arg UpdatePlatformChainExitParams) (int64, error)
 	UpdateRoleName(ctx context.Context, arg UpdateRoleNameParams) error
+	UpdateSSHCredential(ctx context.Context, arg UpdateSSHCredentialParams) (int64, error)
 	UpdateServer(ctx context.Context, arg UpdateServerParams) (int64, error)
+	// 部署与运维任务改写服务器的接入信息（重签令牌、配置证书、接管已知面板）；令牌另由 SetServerToken 写
+	UpdateServerConn(ctx context.Context, arg UpdateServerConnParams) (int64, error)
+	// 改了地址或端口就清空已固定的主机密钥，下次连接重新记录
+	UpdateServerHost(ctx context.Context, arg UpdateServerHostParams) (int64, error)
 	UpdateSharedAccount(ctx context.Context, arg UpdateSharedAccountParams) (int64, error)
 	UpdateTrafficPack(ctx context.Context, arg UpdateTrafficPackParams) (int64, error)
 	UpdateTutorial(ctx context.Context, arg UpdateTutorialParams) (int64, error)
