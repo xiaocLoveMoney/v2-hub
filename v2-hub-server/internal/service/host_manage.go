@@ -33,12 +33,19 @@ type ServerHost struct {
 	// ServerID 是已关联的服务器；nil 表示还没接入。
 	ServerID   *int64
 	ServerName string
+	// DNSAccountID 是申请公开证书用的 DNS 账号；nil 表示不申请，面板用自签证书。Domain 与它同有同无。
+	DNSAccountID   *int64
+	DNSAccountName string
+	Domain         string
+	// CertNotAfter 是平台申请的证书的到期时间；nil 表示还没申请到。
+	CertNotAfter *time.Time
 	// LastTask 是最近一条任务；只在列表与详情里带，没有任务为 nil。
 	LastTask  *HostTask
 	CreatedAt time.Time
 }
 
-// ServerHostInput 是修改一台主机的输入。
+// ServerHostInput 是修改一台主机的输入。DNSAccountID 为 nil 表示不用 DNS 账号，此时 Domain 必须为空；
+// 选了 DNS 账号而 Domain 为空时由平台按名称生成。
 type ServerHostInput struct {
 	Name         string
 	Address      string
@@ -46,21 +53,25 @@ type ServerHostInput struct {
 	CredentialID int64
 	Region       string
 	PanelPort    *int
+	DNSAccountID *int64
+	Domain       string
 }
 
-// HostBatchItem 是批量新建里的一行。
+// HostBatchItem 是批量新建里的一行；Domain 的规则同 ServerHostInput。
 type HostBatchItem struct {
 	Address string
 	Name    string
 	Region  string
+	Domain  string
 }
 
-// HostBatchInput 是批量新建主机的输入：整批共用凭据、端口与面板类型。
+// HostBatchInput 是批量新建主机的输入：整批共用凭据、端口、面板类型与 DNS 账号。
 type HostBatchInput struct {
 	CredentialID int64
 	SSHPort      int
 	ProviderType string
 	PanelPort    *int
+	DNSAccountID *int64
 	Hosts        []HostBatchItem
 }
 
@@ -90,6 +101,11 @@ func hostFromRow(r sqlcgen.GetServerHostRow) ServerHost {
 		ID: r.ID, Name: r.Name, Address: r.Address, SSHPort: int(r.SshPort), CredentialID: r.CredentialID, CredentialName: r.CredentialName,
 		ProviderType: r.ProviderType, Region: r.Region, HostKeySHA256: r.HostKeySha256, OSID: r.OsID, Arch: r.Arch,
 		ServerName: r.ServerName, CreatedAt: r.CreatedAt.Time,
+		DNSAccountName: r.DnsAccountName, Domain: r.Domain, CertNotAfter: timePtr(r.CertNotAfter),
+	}
+	if r.DnsAccountID.Valid {
+		id := r.DnsAccountID.Int64
+		h.DNSAccountID = &id
 	}
 	if r.PanelPort.Valid {
 		port := int(r.PanelPort.Int32)
@@ -221,7 +237,7 @@ func (s *HostService) normalizeBatch(in HostBatchInput) (HostBatchInput, error) 
 			return in, newError(CodeInvalidArgument, fmt.Sprintf("第 %d 行与前面的行重名或地址重复", row))
 		}
 		names[name], addresses[address] = struct{}{}, struct{}{}
-		hosts = append(hosts, HostBatchItem{Address: address, Name: name, Region: item.Region})
+		hosts = append(hosts, HostBatchItem{Address: address, Name: name, Region: item.Region, Domain: item.Domain})
 	}
 	in.Hosts = hosts
 	return in, nil
@@ -246,7 +262,7 @@ func (s *HostService) CreateHosts(ctx context.Context, actor *AdminPrincipal, in
 		for _, item := range in.Hosts {
 			id, err := s.createHost(ctx, q, actor, ip, createHostParams{
 				item: item, credentialID: in.CredentialID, sshPort: in.SSHPort, providerType: in.ProviderType,
-				panelPort: in.PanelPort, kind: HostTaskProvision, action: ActionHostCreate,
+				panelPort: in.PanelPort, dnsAccountID: in.DNSAccountID, kind: HostTaskProvision, action: ActionHostCreate,
 			})
 			if err != nil {
 				return err
@@ -276,6 +292,8 @@ type createHostParams struct {
 	sshPort      int
 	providerType string
 	panelPort    *int
+	// dnsAccountID 为 nil 表示不申请公开证书。
+	dnsAccountID *int64
 	// serverID 非 0 表示给已接入的服务器绑定。
 	serverID int64
 	kind     string
@@ -294,10 +312,15 @@ func (s *HostService) createHost(ctx context.Context, q *sqlcgen.Queries, actor 
 			return 0, newError(CodeConflict, msgHostNameIsServer+"："+p.item.Name)
 		}
 	}
+	dnsAccountID, domain, err := hostDomain(ctx, q, p.dnsAccountID, p.item.Domain, p.item.Name, p.item.Address)
+	if err != nil {
+		return 0, err
+	}
 	id, err := q.CreateServerHost(ctx, sqlcgen.CreateServerHostParams{
 		Name: p.item.Name, Address: p.item.Address, SshPort: int32(p.sshPort), //nolint:gosec // 端口已校验在 1–65535
 		CredentialID: p.credentialID, ProviderType: p.providerType, Region: p.item.Region,
 		PanelPort: int4OrNull(p.panelPort), ServerID: pgtype.Int8{Int64: p.serverID, Valid: p.serverID != 0},
+		DnsAccountID: dnsAccountID, Domain: domain,
 	})
 	if isUniqueViolation(err) {
 		if p.serverID != 0 {
@@ -311,12 +334,12 @@ func (s *HostService) createHost(ctx context.Context, q *sqlcgen.Queries, actor 
 	if err != nil {
 		return 0, fmt.Errorf("create server host: %w", err)
 	}
-	if _, err := s.insertTask(ctx, q, actor, ip, id, p.kind); err != nil {
+	if _, err := s.insertTask(ctx, q, adminOrigin(actor, ip), id, p.kind); err != nil {
 		return 0, err
 	}
 	return id, writeAudit(ctx, q, AuditEntry{
 		ActorType: ActorAdmin, ActorID: actor.AdminID, Action: p.action, TargetType: targetHost, TargetID: fmt.Sprint(id), ClientIP: ip,
-		Detail: map[string]any{"name": p.item.Name, "address": p.item.Address, "sshPort": p.sshPort, "credentialId": p.credentialID, "serverId": p.serverID},
+		Detail: map[string]any{"name": p.item.Name, "address": p.item.Address, "sshPort": p.sshPort, "credentialId": p.credentialID, "serverId": p.serverID, "domain": domain},
 	})
 }
 
@@ -354,9 +377,14 @@ func (s *HostService) UpdateHost(ctx context.Context, actor *AdminPrincipal, id 
 		if err := s.ensureIdle(ctx, q, id); err != nil {
 			return err
 		}
+		dnsAccountID, domain, err := hostDomain(ctx, q, in.DNSAccountID, in.Domain, name, address)
+		if err != nil {
+			return err
+		}
 		n, err := q.UpdateServerHost(ctx, sqlcgen.UpdateServerHostParams{
 			ID: id, Name: name, Address: address, SshPort: int32(in.SSHPort), //nolint:gosec // 端口已校验在 1–65535
 			CredentialID: in.CredentialID, Region: in.Region, PanelPort: int4OrNull(in.PanelPort),
+			DnsAccountID: dnsAccountID, Domain: domain,
 		})
 		if isUniqueViolation(err) {
 			return newError(CodeConflict, msgHostTaken)
@@ -372,7 +400,7 @@ func (s *HostService) UpdateHost(ctx context.Context, actor *AdminPrincipal, id 
 		}
 		return writeAudit(ctx, q, AuditEntry{
 			ActorType: ActorAdmin, ActorID: actor.AdminID, Action: ActionHostUpdate, TargetType: targetHost, TargetID: fmt.Sprint(id), ClientIP: ip,
-			Detail: map[string]any{"name": name, "address": address, "sshPort": in.SSHPort, "credentialId": in.CredentialID},
+			Detail: map[string]any{"name": name, "address": address, "sshPort": in.SSHPort, "credentialId": in.CredentialID, "domain": domain},
 		})
 	})
 	if err != nil {

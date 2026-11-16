@@ -129,6 +129,20 @@ systemctl restart x-ui
 cat "$d/panel.crt"
 `
 
+// installCertScript 把已上传的证书与私钥换进面板的证书目录并设给面板：%[1]s 证书临时文件，%[2]s 私钥临时文件（都已转义）。
+// 先写成 .new 再改名，中途失败不会留下半份证书；临时文件无论成败都删掉。
+const installCertScript = `set -e
+trap 'rm -f %[1]s %[2]s' EXIT
+d=/etc/x-ui/hub-tls
+install -d -m 700 "$d"
+install -m 600 %[1]s "$d/panel.crt.new"
+install -m 600 %[2]s "$d/panel.key.new"
+mv -f "$d/panel.crt.new" "$d/panel.crt"
+mv -f "$d/panel.key.new" "$d/panel.key"
+/usr/local/x-ui/x-ui cert -webCert "$d/panel.crt" -webCertKey "$d/panel.key" 2>&1 | grep -c 'success' >/dev/null
+systemctl restart x-ui
+`
+
 // firewallScript 只在主机自带防火墙开着时放行端口：%[1]d 端口。
 const firewallScript = `p=%[1]d
 if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q '^Status: active'; then ufw allow "$p"/tcp >/dev/null || exit 1; fi
@@ -416,6 +430,19 @@ func (d *Deployer) EnableTLS(ctx context.Context, r remote.Runner, address strin
 		return "", commandError(msgTLSFailed)
 	}
 	return pin, nil
+}
+
+// InstallCert 见 deploy.Deployer。
+func (d *Deployer) InstallCert(ctx context.Context, r remote.Runner, certPEM, keyPEM []byte) error {
+	certPath, err := r.Upload(ctx, certPEM)
+	if err != nil {
+		return err
+	}
+	keyPath, err := r.Upload(ctx, keyPEM)
+	if err != nil {
+		return err
+	}
+	return expectOK(ctx, r, fmt.Sprintf(installCertScript, remote.Quote(certPath), remote.Quote(keyPath)), msgTLSFailed)
 }
 
 func subjectAltName(address string) (string, error) {

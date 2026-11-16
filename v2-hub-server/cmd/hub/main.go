@@ -25,9 +25,12 @@ import (
 	"v2-hub-server/internal/config"
 	"v2-hub-server/internal/dao"
 	"v2-hub-server/internal/job"
+	"v2-hub-server/internal/manager/acmecert"
 	"v2-hub-server/internal/manager/crypto"
 	"v2-hub-server/internal/manager/deploy"
 	deployxui "v2-hub-server/internal/manager/deploy/xui"
+	"v2-hub-server/internal/manager/dns"
+	"v2-hub-server/internal/manager/dns/cloudflare"
 	"v2-hub-server/internal/manager/geoip"
 	"v2-hub-server/internal/manager/mail"
 	"v2-hub-server/internal/manager/panel"
@@ -232,16 +235,28 @@ func runServer(args []string) error {
 
 	// SSH 托管与面板部署（docs/03 §5.22）：新增面板类型的部署实现只在这里加一行（Ruling-69）
 	deployers := deploy.NewRegistry(map[string]deploy.Deployer{deployxui.ProviderType: deployxui.New()})
-	hosts := service.NewHostService(pool, sealer,
-		remote.NewSSHDialer(remote.Config{ConnectTimeout: cfg.Deploy.ConnectTimeout, AllowLoopback: cfg.Deploy.AllowLoopback}),
-		deployers, panels, service.HostConfig{
+	// 公开证书：新增 DNS 服务商只在这里加一行（Ruling-72）；签发方默认 Let's Encrypt（Ruling-73）
+	acmeCfg := cfg.Deploy.ACME
+	hosts := service.NewHostService(pool, sealer, service.HostDeps{
+		Dialer:    remote.NewSSHDialer(remote.Config{ConnectTimeout: cfg.Deploy.ConnectTimeout, AllowLoopback: cfg.Deploy.AllowLoopback}),
+		Deployers: deployers,
+		DNS:       dns.NewRegistry(map[string]dns.Factory{cloudflare.ProviderType: cloudflare.NewFactory(cloudflare.Config{BaseURL: cfg.Deploy.CloudflareAPIURL})}),
+		Issuer: acmecert.New(acmecert.Config{
+			DirectoryURL: acmeCfg.DirectoryURL, PropagationTimeout: acmeCfg.PropagationTimeout,
+			PropagationInterval: acmeCfg.PropagationInterval, Resolvers: acmeCfg.Resolvers,
+		}),
+		Panels: panels,
+	},
+		service.HostConfig{
 			CommandTimeout: cfg.Deploy.CommandTimeout, InstallTimeout: cfg.Deploy.InstallTimeout,
+			CertTimeout: acmeCfg.Timeout, RenewBefore: acmeCfg.RenewBefore,
 			TestLimit: cfg.Deploy.TestLimit, TestWindow: cfg.Deploy.TestWindow,
 			ActionLimit: cfg.Deploy.ActionLimit, ActionWindow: cfg.Deploy.ActionWindow,
 			MaxBatch: cfg.Deploy.MaxBatch, AllowLoopback: cfg.Deploy.AllowLoopback,
 			PanelWaitAttempts: panelWaitAttempts, PanelWaitInterval: panelWaitInterval,
 		})
 	go job.RunHostTasks(ctx, hosts, cfg.Deploy.PollInterval, cfg.Deploy.Concurrency)
+	go job.RunCertRenewal(ctx, hosts, acmeCfg.RenewInterval)
 
 	srv := &http.Server{
 		Addr: cfg.Server.ListenAddr,

@@ -18,6 +18,7 @@ import (
 	"v2-hub-server/internal/dao/sqlcgen"
 	"v2-hub-server/internal/manager/crypto"
 	"v2-hub-server/internal/manager/deploy"
+	"v2-hub-server/internal/manager/dns"
 	"v2-hub-server/internal/manager/ratelimit"
 	"v2-hub-server/internal/manager/remote"
 )
@@ -57,7 +58,7 @@ const (
 	msgCredentialNameTaken = "凭据名称已存在"
 	msgHostNotFound        = "主机不存在"
 	msgHostBusy            = "该主机有未结束的任务"
-	msgHostTaken           = "主机名称或“地址 + 端口”已存在"
+	msgHostTaken           = "主机名称、“地址 + 端口”或域名已存在"
 	msgHostNameIsServer    = "已有同名的服务器"
 	msgHostRateLimited     = "操作太频繁，请稍后再试"
 	msgServerHasHost       = "这台服务器已绑定 SSH"
@@ -83,6 +84,9 @@ type HostConfig struct {
 	MaxBatch int
 	// AllowLoopback 允许回环地址，只给联调用。
 	AllowLoopback bool
+	// CertTimeout 是申请公开证书的任务的总时限（改解析、等签发、装证书）；RenewBefore 是证书离到期多久开始自动续期。
+	CertTimeout time.Duration
+	RenewBefore time.Duration
 	// PanelWaitAttempts / PanelWaitInterval 是面板重启后等它回来的探测次数与间隔。
 	PanelWaitAttempts int
 	PanelWaitInterval time.Duration
@@ -90,13 +94,25 @@ type HostConfig struct {
 	Now func() time.Time
 }
 
-// HostService 负责 SSH 凭据、托管主机与主机任务（docs/03 §5.22，Ruling-68 – Ruling-71）。
+// HostDeps 是 HostService 依赖的外部能力；都以接口或注册表的形式注入，单测里换成假的。
+type HostDeps struct {
+	Dialer    remote.Dialer
+	Deployers *deploy.Registry
+	// DNS 是 DNS 服务商的注册表，Issuer 向签发方申请证书（Ruling-72、Ruling-73）。
+	DNS    *dns.Registry
+	Issuer CertIssuer
+	Panels *PanelService
+}
+
+// HostService 负责 SSH 凭据、DNS 账号、托管主机与主机任务（docs/03 §5.22，Ruling-68 – Ruling-73）。
 // 只经 remote.Dialer 连主机、经 deploy.Deployer 执行动作，自己不拼任何命令行。
 type HostService struct {
 	store
 	sealer    *crypto.Sealer
 	dialer    remote.Dialer
 	deployers *deploy.Registry
+	dns       *dns.Registry
+	issuer    CertIssuer
 	panels    *PanelService
 	cfg       HostConfig
 	tests     *ratelimit.FailureGuard
@@ -108,7 +124,7 @@ type HostService struct {
 }
 
 // NewHostService 创建 SSH 托管业务服务。
-func NewHostService(pool *pgxpool.Pool, sealer *crypto.Sealer, dialer remote.Dialer, deployers *deploy.Registry, panels *PanelService, cfg HostConfig) *HostService {
+func NewHostService(pool *pgxpool.Pool, sealer *crypto.Sealer, deps HostDeps, cfg HostConfig) *HostService {
 	now := cfg.Now
 	if now == nil {
 		now = time.Now
@@ -117,7 +133,8 @@ func NewHostService(pool *pgxpool.Pool, sealer *crypto.Sealer, dialer remote.Dia
 		return ratelimit.NewFailureGuard(ratelimit.FailureGuardConfig{MaxFailures: limit, Window: window, Lockout: window, MaxKeys: hostGuardMaxKeys}, now)
 	}
 	return &HostService{
-		store: newStore(pool), sealer: sealer, dialer: dialer, deployers: deployers, panels: panels, cfg: cfg,
+		store: newStore(pool), sealer: sealer, dialer: deps.Dialer, deployers: deps.Deployers, dns: deps.DNS, issuer: deps.Issuer,
+		panels: deps.Panels, cfg: cfg,
 		tests: guard(cfg.TestLimit, cfg.TestWindow), actions: guard(cfg.ActionLimit, cfg.ActionWindow),
 		logins: newExitTestLocks(), kick: make(chan struct{}, 1), now: now,
 	}

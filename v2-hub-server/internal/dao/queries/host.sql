@@ -39,30 +39,37 @@ DELETE FROM ssh_credential WHERE id = $1;
 -- name: ListServerHosts :many
 SELECT h.id, h.name, h.address, h.ssh_port, h.credential_id, h.provider_type, h.region, h.panel_port,
        h.host_key_sha256, h.os_id, h.arch, h.server_id, h.created_at,
-       c.name AS credential_name, coalesce(s.name, '')::varchar AS server_name
+       c.name AS credential_name, coalesce(s.name, '')::varchar AS server_name,
+       h.dns_account_id, h.domain, h.cert_not_after, coalesce(d.name, '')::varchar AS dns_account_name
 FROM server_host h
 JOIN ssh_credential c ON c.id = h.credential_id
 LEFT JOIN server s ON s.id = h.server_id
+LEFT JOIN dns_account d ON d.id = h.dns_account_id
 ORDER BY h.id;
 
 -- name: GetServerHost :one
 SELECT h.id, h.name, h.address, h.ssh_port, h.credential_id, h.provider_type, h.region, h.panel_port,
        h.host_key_sha256, h.os_id, h.arch, h.server_id, h.created_at,
-       c.name AS credential_name, coalesce(s.name, '')::varchar AS server_name
+       c.name AS credential_name, coalesce(s.name, '')::varchar AS server_name,
+       h.dns_account_id, h.domain, h.cert_not_after, coalesce(d.name, '')::varchar AS dns_account_name
 FROM server_host h
 JOIN ssh_credential c ON c.id = h.credential_id
 LEFT JOIN server s ON s.id = h.server_id
+LEFT JOIN dns_account d ON d.id = h.dns_account_id
 WHERE h.id = $1;
 
 -- name: CreateServerHost :one
-INSERT INTO server_host (name, address, ssh_port, credential_id, provider_type, region, panel_port, server_id)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+INSERT INTO server_host (name, address, ssh_port, credential_id, provider_type, region, panel_port, server_id, dns_account_id, domain)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 RETURNING id;
 
 -- name: UpdateServerHost :execrows
--- 改了地址或端口就清空已固定的主机密钥，下次连接重新记录
+-- 改了地址或端口就清空已固定的主机密钥，下次连接重新记录；改了域名或 DNS 账号就清空证书到期时间，不再自动续期，
+-- 直到再做一次“配置证书”
 UPDATE server_host
 SET name = sqlc.arg(name), credential_id = sqlc.arg(credential_id), region = sqlc.arg(region), panel_port = sqlc.narg(panel_port),
+    cert_not_after = CASE WHEN domain = sqlc.arg(domain) AND dns_account_id IS NOT DISTINCT FROM sqlc.narg(dns_account_id) THEN cert_not_after END,
+    dns_account_id = sqlc.narg(dns_account_id), domain = sqlc.arg(domain),
     host_key_sha256 = CASE WHEN address = sqlc.arg(address) AND ssh_port = sqlc.arg(ssh_port) THEN host_key_sha256 ELSE '' END,
     address = sqlc.arg(address), ssh_port = sqlc.arg(ssh_port), updated_at = now()
 WHERE id = sqlc.arg(id);
@@ -163,3 +170,60 @@ WHERE status = 'running';
 -- name: CountServersByName :one
 -- 新建主机时名称不能与已有服务器重名（部署成功后主机名就是服务器名）
 SELECT COUNT(*) FROM server WHERE name = $1;
+
+-- name: SetServerHostCert :exec
+UPDATE server_host SET cert_not_after = $2, updated_at = now() WHERE id = $1;
+
+-- name: ListHostsDueForCertRenewal :many
+-- 平台申请的证书快到期、已接入且没有未结束任务的主机；到期早的在前
+SELECT h.id
+FROM server_host h
+WHERE h.dns_account_id IS NOT NULL AND h.server_id IS NOT NULL AND h.cert_not_after < $1
+  AND NOT EXISTS (SELECT 1 FROM host_task t WHERE t.host_id = h.id AND t.status IN ('queued', 'running'))
+ORDER BY h.cert_not_after
+LIMIT $2;
+
+-- DNS 账号与 ACME 账号（docs/03 §5.22，Ruling-72、Ruling-73）-----------------------
+
+-- name: ListDNSAccounts :many
+SELECT a.id, a.name, a.provider_type, a.zone, a.remark, a.created_at, a.updated_at,
+       (SELECT COUNT(*) FROM server_host h WHERE h.dns_account_id = a.id)::int AS host_count
+FROM dns_account a
+ORDER BY a.id;
+
+-- name: GetDNSAccount :one
+SELECT a.id, a.name, a.provider_type, a.zone, a.remark, a.created_at, a.updated_at,
+       (SELECT COUNT(*) FROM server_host h WHERE h.dns_account_id = a.id)::int AS host_count
+FROM dns_account a
+WHERE a.id = $1;
+
+-- name: GetDNSAccountSecret :one
+SELECT id, provider_type, zone, token_enc
+FROM dns_account
+WHERE id = $1;
+
+-- name: CreateDNSAccount :one
+-- 密文依赖 id 作关联数据，先写占位，同一事务内再 SetDNSAccountToken
+INSERT INTO dns_account (name, provider_type, zone, token_enc, remark)
+VALUES ($1, $2, $3, '\x00', $4)
+RETURNING id;
+
+-- name: SetDNSAccountToken :exec
+UPDATE dns_account SET token_enc = $2, updated_at = now() WHERE id = $1;
+
+-- name: UpdateDNSAccount :execrows
+UPDATE dns_account
+SET name = $2, provider_type = $3, zone = $4, remark = $5, updated_at = now()
+WHERE id = $1;
+
+-- name: DeleteDNSAccount :execrows
+DELETE FROM dns_account WHERE id = $1;
+
+-- name: GetACMEAccountKey :one
+SELECT key_enc FROM acme_account WHERE directory_url = $1;
+
+-- name: CreateACMEAccount :exec
+-- 两个任务同时首次申请时只留先写入的那把密钥，后到的丢弃自己生成的、回读先到的
+INSERT INTO acme_account (directory_url, key_enc)
+VALUES ($1, $2)
+ON CONFLICT (directory_url) DO NOTHING;

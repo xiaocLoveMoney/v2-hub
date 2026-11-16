@@ -10,6 +10,12 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+type AcmeAccount struct {
+	DirectoryUrl string
+	KeyEnc       []byte
+	CreatedAt    pgtype.Timestamptz
+}
+
 type Admin struct {
 	ID             int64
 	Username       string
@@ -160,6 +166,17 @@ type CouponUsage struct {
 	UserID    pgtype.Int8
 	OrderID   int64
 	CreatedAt pgtype.Timestamptz
+}
+
+type DnsAccount struct {
+	ID           int64
+	Name         string
+	ProviderType string
+	Zone         string
+	TokenEnc     []byte
+	Remark       string
+	CreatedAt    pgtype.Timestamptz
+	UpdatedAt    pgtype.Timestamptz
 }
 
 type EmailCode struct {
@@ -501,6 +518,9 @@ type ServerHost struct {
 	OsID          string
 	Arch          string
 	ServerID      pgtype.Int8
+	DnsAccountID  pgtype.Int8
+	Domain        string
+	CertNotAfter  pgtype.Timestamptz
 	CreatedAt     pgtype.Timestamptz
 	UpdatedAt     pgtype.Timestamptz
 }

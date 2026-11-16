@@ -108,3 +108,36 @@ func TestRunHostTasksLimitsConcurrencyAndSurvivesPanic(t *testing.T) {
 		t.Fatal("RunHostTasks did not stop after cancel")
 	}
 }
+
+type fakeCertRenewer struct {
+	rounds chan struct{}
+}
+
+func (f *fakeCertRenewer) QueueCertRenewals(context.Context) (int, error) {
+	f.rounds <- struct{}{}
+	return 1, nil
+}
+
+// 启动时先检查一次，之后每个间隔再检查；ctx 取消后退出。
+func TestRunCertRenewal(t *testing.T) {
+	renewer := &fakeCertRenewer{rounds: make(chan struct{}, 8)}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		RunCertRenewal(ctx, renewer, 5*time.Millisecond)
+	}()
+	for range 3 {
+		select {
+		case <-renewer.rounds:
+		case <-time.After(2 * time.Second):
+			t.Fatal("renewal check did not run")
+		}
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("RunCertRenewal did not stop after cancel")
+	}
+}

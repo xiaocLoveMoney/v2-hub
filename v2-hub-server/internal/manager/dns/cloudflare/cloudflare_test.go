@@ -1,0 +1,259 @@
+package cloudflare
+
+import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"sync"
+	"testing"
+
+	"v2-hub-server/internal/manager/dns"
+)
+
+const (
+	testZone   = "example.com"
+	testZoneID = "zone123"
+	testSecret = "cf-test-value"
+)
+
+// fakeAPI 是内存里的 Cloudflare DNS 记录接口。
+type fakeAPI struct {
+	mu      sync.Mutex
+	records map[string]record
+	nextID  int
+	calls   []string
+}
+
+func newFakeAPI() *fakeAPI { return &fakeAPI{records: map[string]record{}} }
+
+func (f *fakeAPI) write(w http.ResponseWriter, status int, result any, errs ...apiError) {
+	raw, _ := json.Marshal(result)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(envelope{Success: len(errs) == 0, Errors: errs, Result: raw})
+}
+
+func (f *fakeAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls = append(f.calls, r.Method+" "+r.URL.Path)
+	if r.Header.Get("Authorization") != "Bearer "+testSecret {
+		f.write(w, http.StatusForbidden, nil, apiError{Code: 9109, Message: "Invalid access token"})
+		return
+	}
+	base := "/zones/" + testZoneID + "/dns_records"
+	switch {
+	case r.Method == http.MethodGet && r.URL.Path == "/zones":
+		zones := []map[string]string{}
+		if r.URL.Query().Get("name") == testZone {
+			zones = append(zones, map[string]string{"id": testZoneID, "name": testZone})
+		}
+		f.write(w, http.StatusOK, zones)
+	case r.Method == http.MethodGet && r.URL.Path == base:
+		out := []record{}
+		for _, rec := range f.records {
+			if rec.Name == r.URL.Query().Get("name") {
+				out = append(out, rec)
+			}
+		}
+		f.write(w, http.StatusOK, out)
+	case r.Method == http.MethodPost && r.URL.Path == base:
+		var rec record
+		if err := json.NewDecoder(r.Body).Decode(&rec); err != nil {
+			f.write(w, http.StatusBadRequest, nil, apiError{Code: 1, Message: "bad json"})
+			return
+		}
+		if rec.Type == "TXT" && !strings.HasPrefix(rec.Content, `"`) {
+			f.write(w, http.StatusBadRequest, nil, apiError{Code: 9000, Message: "TXT content must be quoted"})
+			return
+		}
+		f.nextID++
+		rec.ID = "rec" + string(rune('0'+f.nextID))
+		f.records[rec.ID] = rec
+		f.write(w, http.StatusOK, rec)
+	case r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, base+"/"):
+		id := strings.TrimPrefix(r.URL.Path, base+"/")
+		if _, ok := f.records[id]; !ok {
+			f.write(w, http.StatusNotFound, nil, apiError{Code: 81044, Message: "Record does not exist."})
+			return
+		}
+		delete(f.records, id)
+		f.write(w, http.StatusOK, map[string]string{"id": id})
+	default:
+		f.write(w, http.StatusNotFound, nil, apiError{Code: 7003, Message: "no route"})
+	}
+}
+
+func (f *fakeAPI) seed(rec record) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.records[rec.ID] = rec
+}
+
+func (f *fakeAPI) named(name string) []record {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []record
+	for _, rec := range f.records {
+		if rec.Name == name {
+			out = append(out, rec)
+		}
+	}
+	return out
+}
+
+func open(t *testing.T, api *fakeAPI, zone, token string) dns.Provider {
+	t.Helper()
+	srv := httptest.NewServer(api)
+	t.Cleanup(srv.Close)
+	p, err := NewFactory(Config{BaseURL: srv.URL})(dns.Account{Zone: zone, Token: token})
+	if err != nil {
+		t.Fatalf("open provider: %v", err)
+	}
+	return p
+}
+
+func TestCheckZone(t *testing.T) {
+	ctx := context.Background()
+	if err := open(t, newFakeAPI(), testZone, testSecret).CheckZone(ctx); err != nil {
+		t.Fatalf("CheckZone: %v", err)
+	}
+	err := open(t, newFakeAPI(), "other.org", testSecret).CheckZone(ctx)
+	if de := dns.AsError(err); de == nil || de.Kind != dns.KindZone {
+		t.Fatalf("unknown zone: want KindZone, got %v", err)
+	}
+	err = open(t, newFakeAPI(), testZone, "wrong").CheckZone(ctx)
+	de := dns.AsError(err)
+	if de == nil || de.Kind != dns.KindAuth {
+		t.Fatalf("bad token: want KindAuth, got %v", err)
+	}
+	if strings.Contains(err.Error(), "wrong") {
+		t.Fatalf("error leaks the token: %v", err)
+	}
+}
+
+func TestPointToCreatesByTargetKind(t *testing.T) {
+	cases := []struct{ name, target, wantType, wantContent string }{
+		{"v4.example.com", "203.0.113.7", "A", "203.0.113.7"},
+		{"v6.example.com", "2001:db8::1", "AAAA", "2001:db8::1"},
+		{"cn.example.com", "origin.example.net", "CNAME", "origin.example.net"},
+	}
+	api := newFakeAPI()
+	p := open(t, api, testZone, testSecret)
+	for _, tc := range cases {
+		if err := p.PointTo(context.Background(), tc.name, tc.target); err != nil {
+			t.Fatalf("PointTo %s: %v", tc.name, err)
+		}
+		got := api.named(tc.name)
+		if len(got) != 1 || got[0].Type != tc.wantType || got[0].Content != tc.wantContent || got[0].Proxied {
+			t.Fatalf("%s: got %+v", tc.name, got)
+		}
+	}
+}
+
+func TestPointToReplacesOtherAddressRecords(t *testing.T) {
+	api := newFakeAPI()
+	const name = "node.example.com"
+	api.seed(record{ID: "old1", Type: "A", Name: name, Content: "198.51.100.1"})
+	api.seed(record{ID: "old2", Type: "CNAME", Name: name, Content: "elsewhere.example.net"})
+	api.seed(record{ID: "keep", Type: "TXT", Name: name, Content: `"note"`})
+	p := open(t, api, testZone, testSecret)
+	if err := p.PointTo(context.Background(), name, "203.0.113.7"); err != nil {
+		t.Fatalf("PointTo: %v", err)
+	}
+	var address, txt int
+	for _, rec := range api.named(name) {
+		switch rec.Type {
+		case "A":
+			address++
+			if rec.Content != "203.0.113.7" {
+				t.Fatalf("stale A record left: %+v", rec)
+			}
+		case "TXT":
+			txt++
+		default:
+			t.Fatalf("unexpected record left: %+v", rec)
+		}
+	}
+	if address != 1 || txt != 1 {
+		t.Fatalf("want one A and the untouched TXT, got A=%d TXT=%d", address, txt)
+	}
+}
+
+func TestPointToIsIdempotent(t *testing.T) {
+	api := newFakeAPI()
+	const name = "node.example.com"
+	p := open(t, api, testZone, testSecret)
+	for range 2 {
+		if err := p.PointTo(context.Background(), name, "203.0.113.7"); err != nil {
+			t.Fatalf("PointTo: %v", err)
+		}
+	}
+	var posts int
+	for _, call := range api.calls {
+		if strings.HasPrefix(call, http.MethodPost) {
+			posts++
+		}
+	}
+	if got := api.named(name); len(got) != 1 || posts != 1 {
+		t.Fatalf("want one record created once, got %d records and %d posts", len(got), posts)
+	}
+}
+
+func TestPointToReplacesProxiedRecord(t *testing.T) {
+	api := newFakeAPI()
+	const name = "node.example.com"
+	api.seed(record{ID: "prox", Type: "A", Name: name, Content: "203.0.113.7", Proxied: true})
+	p := open(t, api, testZone, testSecret)
+	if err := p.PointTo(context.Background(), name, "203.0.113.7"); err != nil {
+		t.Fatalf("PointTo: %v", err)
+	}
+	if got := api.named(name); len(got) != 1 || got[0].Proxied {
+		t.Fatalf("proxied record should be replaced by a dns-only one, got %+v", got)
+	}
+}
+
+func TestSetTXTAndRemove(t *testing.T) {
+	api := newFakeAPI()
+	const name = "_acme-challenge.node.example.com"
+	p := open(t, api, testZone, testSecret)
+	remove, err := p.SetTXT(context.Background(), name, "abc-DEF_123")
+	if err != nil {
+		t.Fatalf("SetTXT: %v", err)
+	}
+	got := api.named(name)
+	if len(got) != 1 || got[0].Type != "TXT" || got[0].Content != `"abc-DEF_123"` || got[0].TTL != txtTTL {
+		t.Fatalf("txt record: %+v", got)
+	}
+	if err := remove(context.Background()); err != nil {
+		t.Fatalf("remove: %v", err)
+	}
+	if got := api.named(name); len(got) != 0 {
+		t.Fatalf("txt record not removed: %+v", got)
+	}
+}
+
+func TestRejectedCarriesProviderMessage(t *testing.T) {
+	api := newFakeAPI()
+	p := open(t, api, testZone, testSecret)
+	remove, err := p.SetTXT(context.Background(), "_acme-challenge.x.example.com", "v")
+	if err != nil {
+		t.Fatalf("SetTXT: %v", err)
+	}
+	if err := remove(context.Background()); err != nil {
+		t.Fatalf("first remove: %v", err)
+	}
+	err = remove(context.Background())
+	de := dns.AsError(err)
+	if de == nil || de.Kind != dns.KindRejected || !strings.Contains(de.Message, "Record does not exist") {
+		t.Fatalf("want KindRejected with provider message, got %v", err)
+	}
+}
+
+func TestFactoryRequiresZoneAndToken(t *testing.T) {
+	if _, err := NewFactory(Config{})(dns.Account{Zone: testZone}); err == nil {
+		t.Fatal("want error without token")
+	}
+}

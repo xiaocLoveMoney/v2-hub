@@ -42,6 +42,32 @@ func RunHostTasks(ctx context.Context, r HostTaskRunner, interval time.Duration,
 	}
 }
 
+// CertRenewer 能给证书快到期的主机排续期任务（由 service.HostService 实现）。
+type CertRenewer interface {
+	QueueCertRenewals(ctx context.Context) (int, error)
+}
+
+// RunCertRenewal 启动时检查一次，之后按 interval 周期检查平台申请的面板证书，给快到期的排“配置证书”任务
+// （docs/03 §5.22 “证书自动续期”，Ruling-73），阻塞到 ctx 取消。任务本身由 RunHostTasks 执行。
+func RunCertRenewal(ctx context.Context, r CertRenewer, interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		guarded("cert renewal", func() error {
+			n, err := r.QueueCertRenewals(ctx)
+			if n > 0 {
+				slog.Info("cert renewal: queued tasks", "count", n)
+			}
+			return err
+		})
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
 // claimHostTasks 按空闲的名额领取任务，每条各起一个 goroutine；名额占满时这一轮什么都不领。
 func claimHostTasks(ctx context.Context, r HostTaskRunner, slots, freed chan struct{}, running *sync.WaitGroup) {
 	free := cap(slots) - len(slots)
