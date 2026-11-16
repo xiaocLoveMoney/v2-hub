@@ -70,7 +70,7 @@ M9 链式改造（docs/03 §5.18、§5.19、§5.21）在 `internal/service` 里�
 
 M11 SSH 托管（docs/03 §5.22）的分工：`manager/remote` 只管“连上去、跑一段脚本、传一个文件”，不认识面板；
 `manager/deploy` 定义 `Deployer`（检测、安装、接管、重签令牌、重启、升级、配置证书、查看状态、重置登录口令）与中立结果，
-按 `provider_type` 注册（Ruling-69），3x-ui 实现在 `deploy/xui`，上游脚本快照由 `make gen-upstream` 从 `contract/upstream/3x-ui/` 拷入后内嵌；
+按 `provider_type` 注册（Ruling-69），3x-ui 实现在 `deploy/xui`；部署时远端要做哪些事、先后顺序如何由各实现的 `Provision` 自己排，`service` 不编排，各原因的说明文案也由实现给出，上游脚本快照由 `make gen-upstream` 从 `contract/upstream/3x-ui/` 拷入后内嵌；
 `service/ssh_credential.go` 管凭据，`service/host.go` 管主机与连接测试，`service/host_task.go` 是任务状态机与各种任务的步骤，
 部署成功后调 `PanelService` 现有的接入逻辑；后台任务 `job.RunHostTasks` 领取排队的任务并限并发。
 `service` 只依赖 `deploy.Deployer` 与 `remote.Dialer` 接口，单测用脚本化的假执行器，不发真实 SSH。
