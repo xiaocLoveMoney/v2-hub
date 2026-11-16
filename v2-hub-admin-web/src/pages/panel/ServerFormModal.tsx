@@ -3,10 +3,10 @@ import { useState } from 'react'
 import { api, csrfHeader, toApiError, type ApiError, type ProviderType, type Server, type TlsMode } from '../../api/client'
 import { mutate } from '../../hooks/use-remote'
 import { COUNTRY_OPTIONS, countryName } from './countries'
+import { PROVIDER_OPTIONS } from './providers'
 import { ErrorAlert } from '../../components/ErrorAlert'
 import { FormModal } from '../../components/FormModal'
 
-const PROVIDER_OPTIONS: { value: ProviderType; label: string }[] = [{ value: 'xui', label: '3x-ui（v3.x）' }]
 const TLS_VERIFY: TlsMode = 'verify'
 const TLS_PIN: TlsMode = 'pin'
 const TLS_SKIP: TlsMode = 'skip'

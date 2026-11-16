@@ -1,4 +1,5 @@
 import { Tag, Tooltip } from 'antd'
+import { PLAIN_HTTP_TAG, PLAIN_HTTP_WARNING, isPlainHttpUrl } from './host-labels'
 
 /** 服务器状态展示，取值与 docs/03 §2 一致。 */
 const STATUS_VIEW: Record<string, { color: string; label: string }> = {
@@ -22,4 +23,16 @@ export function ServerStatusTag({ status, lastError, isDisabled }: ServerStatusT
   const view = STATUS_VIEW[status] ?? STATUS_VIEW.unknown
   const tag = <Tag color={view.color}>{view.label}</Tag>
   return lastError === '' ? tag : <Tooltip title={lastError}>{tag}</Tooltip>
+}
+
+/** 面板地址是明文 HTTP 时的警告标签，悬停说明风险与处理办法（docs/03 §5.22 接管）；不是明文 HTTP 不渲染。 */
+export function PlainHttpTag({ baseUrl }: { baseUrl: string }) {
+  if (!isPlainHttpUrl(baseUrl)) {
+    return null
+  }
+  return (
+    <Tooltip title={PLAIN_HTTP_WARNING}>
+      <Tag color="orange">{PLAIN_HTTP_TAG}</Tag>
+    </Tooltip>
+  )
 }

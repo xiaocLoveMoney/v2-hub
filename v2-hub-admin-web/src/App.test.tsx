@@ -55,8 +55,8 @@ describe('visibleMenu', () => {
     const keys = visibleMenu(all, order).map((e) => e.key)
     // 系统组因 security 排第一而整组提前；节点组次之，组内 chain-exits、servers 在前；我的组第三，tickets 在组内最前
     expect(keys.slice(0, 8)).toEqual(['security', 'admins', 'roles', 'audit-logs', 'settings', 'menu-order', 'mail-outbox', 'chain-exits'])
-    expect(keys.slice(8, 11)).toEqual(['servers', 'nodes', 'chain-routes'])
-    expect(keys.slice(11, 16)).toEqual(['tickets', 'dashboard', 'announcements', 'tutorials', 'shared-accounts'])
+    expect(keys.slice(8, 12)).toEqual(['servers', 'hosts', 'nodes', 'chain-routes'])
+    expect(keys.slice(12, 17)).toEqual(['tickets', 'dashboard', 'announcements', 'tutorials', 'shared-accounts'])
     expect(keys).toHaveLength(MENU.length)
     expect(visibleMenu(all).map((e) => e.key)).toEqual(MENU.map((e) => e.key))
   })
