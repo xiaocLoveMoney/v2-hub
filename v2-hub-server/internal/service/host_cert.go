@@ -28,6 +28,9 @@ const (
 
 	// certRenewBatch 是一轮自动续期最多排的任务数；剩下的等下一轮，避免一次把签发方的额度用光。
 	certRenewBatch = int32(20)
+	// certFallbackTimeout 是“按域名连不上、退回指纹接入”这一步自己的时限：走到这里时任务的时限可能已经用完，
+	// 而证书已经换了，不退回的话服务器会一直对不上原来固定的指纹。
+	certFallbackTimeout = time.Minute
 
 	msgCertDomainDown  = "证书已装好，但平台按域名连不上面板（解析可能还没传到平台所在的网络），暂按证书指纹接入；稍后重做“配置证书”"
 	msgCertAfterAttach = "面板已接入，但公开证书没有申请成功；排除问题后在 SSH 运维里重做“配置证书”，不需要重新部署"
@@ -184,7 +187,10 @@ func (t *taskRun) installCert(ctx context.Context, d deploy.Deployer, r remote.R
 	if err := d.InstallCert(ctx, r, cert.CertPEM, cert.KeyPEM); err != nil {
 		return err
 	}
-	err = t.svc.q.SetServerHostCert(ctx, sqlcgen.SetServerHostCertParams{ID: t.host.ID, CertNotAfter: pgtype.Timestamptz{Time: cert.NotAfter, Valid: true}})
+	// 证书已经换到面板上了：从这里起的收尾（记到期时间、必要时退回指纹接入）不能因为任务超时而半途而废，各自另起时限
+	wctx, cancelWrite := context.WithTimeout(context.WithoutCancel(ctx), taskWriteTimeout)
+	defer cancelWrite()
+	err = t.svc.q.SetServerHostCert(wctx, sqlcgen.SetServerHostCertParams{ID: t.host.ID, CertNotAfter: pgtype.Timestamptz{Time: cert.NotAfter, Valid: true}})
 	if err != nil {
 		return fmt.Errorf("save cert expiry of host %d: %w", t.host.ID, err)
 	}
@@ -195,14 +201,16 @@ func (t *taskRun) installCert(ctx context.Context, d deploy.Deployer, r remote.R
 		t.logf("面板已换成公开证书，平台按 %s 接入", t.host.Domain)
 		return nil
 	}
+	slog.Warn("panel unreachable by domain after installing certificate", "host_id", t.host.ID, "domain", t.host.Domain, "err", err)
+	// 原来固定的指纹已经对不上新证书；先按新证书的指纹接入，保住在线
+	fctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), certFallbackTimeout)
+	defer cancel()
+	pinned := ServerConnInput{ProviderType: srv.ProviderType, BaseURL: byAddress, TLSMode: panel.TLSPin, CertPinSHA256: leafPin(cert.Leaf)}
+	if err := t.svc.waitFor(fctx, func() error { return t.svc.panels.ReplaceServerConn(fctx, t.adminID, serverID, pinned) }); err != nil {
+		return attachError(err)
+	}
 	if ctx.Err() != nil {
 		return ctx.Err()
-	}
-	slog.Warn("panel unreachable by domain after installing certificate", "host_id", t.host.ID, "domain", t.host.Domain, "err", err)
-	// 证书已经换了，原来固定的指纹不再对得上；先按新证书的指纹接入，保住在线
-	pinned := ServerConnInput{ProviderType: srv.ProviderType, BaseURL: byAddress, TLSMode: panel.TLSPin, CertPinSHA256: leafPin(cert.Leaf)}
-	if err := t.svc.waitFor(ctx, func() error { return t.svc.panels.ReplaceServerConn(ctx, t.adminID, serverID, pinned) }); err != nil {
-		return attachError(err)
 	}
 	return deploy.NewError(deploy.ReasonPanelUnreachable, msgCertDomainDown)
 }
