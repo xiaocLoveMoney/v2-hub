@@ -24,6 +24,7 @@ import { SecurityPage } from './pages/SecurityPage'
 import { NodesPage } from './pages/panel/NodesPage'
 import { ChainExitsPage } from './pages/panel/ChainExitsPage'
 import { ChainRoutesPage } from './pages/panel/ChainRoutesPage'
+import { HostsPage } from './pages/panel/HostsPage'
 import { ServerDetailPage } from './pages/panel/ServerDetailPage'
 import { ServersPage } from './pages/panel/ServersPage'
 import { InviteCodesPage } from './pages/users/InviteCodesPage'
@@ -38,6 +39,7 @@ const PAGE_BY_PATH: Record<string, ReactNode> = {
   [ROUTES.SHARED_ACCOUNTS]: <SharedAccountsPage />,
   [ROUTES.TICKETS]: <TicketsPage />,
   [ROUTES.SERVERS]: <ServersPage />,
+  [ROUTES.HOSTS]: <HostsPage />,
   [ROUTES.NODES]: <NodesPage />,
   [ROUTES.CHAIN_EXITS]: <ChainExitsPage />,
   [ROUTES.CHAIN_ROUTES]: <ChainRoutesPage />,

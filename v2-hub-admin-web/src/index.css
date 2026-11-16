@@ -273,6 +273,37 @@ body {
   font-family: ui-monospace, 'SFMono-Regular', Menlo, monospace;
 }
 
+/* 表格单元格里当链接用的按钮：去掉左右内边距，与同列文字对齐 */
+.link-button {
+  padding-inline: 0;
+}
+
+/* 主机任务（M11）：失败原因说明限宽换行，日志等宽、可滚动 */
+.host-task-error {
+  display: block;
+  max-width: 320px;
+  font-size: 12px;
+  white-space: normal;
+}
+
+.host-task-log {
+  max-height: 420px;
+  margin: 8px 0 0;
+  padding: 12px;
+  overflow: auto;
+  font-family: ui-monospace, 'SFMono-Regular', Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  background: var(--hub-code-bg);
+  border-radius: var(--hub-radius);
+}
+
+.host-ops-actions {
+  margin-bottom: 16px;
+}
+
 .modal-footer {
   display: flex;
   justify-content: flex-end;

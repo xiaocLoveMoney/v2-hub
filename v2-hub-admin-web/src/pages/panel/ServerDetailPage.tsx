@@ -1,5 +1,5 @@
 import { PlusOutlined } from '@ant-design/icons'
-import { App, Button, Descriptions, Popconfirm, Space, Switch, Table, Tag, Tooltip, Typography, type TableProps } from 'antd'
+import { Alert, App, Button, Descriptions, Popconfirm, Space, Switch, Table, Tag, Tooltip, Typography, type TableProps } from 'antd'
 import { useCallback, useState } from 'react'
 import { Link, useParams } from 'react-router'
 import { api, csrfHeader, type Endpoint, type Inbound, type Server } from '../../api/client'
@@ -8,6 +8,8 @@ import { mutate, useRemote } from '../../hooks/use-remote'
 import { PERMISSIONS, ROUTES } from '../../menu'
 import { TABLE_SCROLL, formatTime } from '../system/format'
 import { ChainApplyCard } from './ChainApplyCard'
+import { HostOpsCard } from './HostOpsCard'
+import { PLAIN_HTTP_TAG, PLAIN_HTTP_WARNING, isPlainHttpUrl } from './host-labels'
 import { EndpointModal } from './InboundModals'
 import { InboundFormModal } from './inbound-form/InboundFormModal'
 import { serverDomainOf } from './inbound-form/model'
@@ -192,7 +194,9 @@ export function ServerDetailPage() {
           <Descriptions.Item label="备注">{srv.remark || '—'}</Descriptions.Item>
         </Descriptions>
       )}
+      {srv !== null && isPlainHttpUrl(srv.baseUrl) && <Alert type="warning" showIcon className="page-alert" title={`${PLAIN_HTTP_TAG}：${PLAIN_HTTP_WARNING}`} />}
       {srv !== null && can(PERMISSIONS.SERVER_READ) && <ChainApplyCard serverId={serverId} />}
+      {srv !== null && can(PERMISSIONS.HOST_READ) && <HostOpsCard server={srv} onChanged={reloadAll} />}
       <PageHeader
         title="入站"
         level={4}

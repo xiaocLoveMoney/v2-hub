@@ -4,6 +4,7 @@ import {
   BarChartOutlined,
   BookOutlined,
   BranchesOutlined,
+  CloudServerOutlined,
   ClusterOutlined,
   CreditCardOutlined,
   CustomerServiceOutlined,
@@ -41,6 +42,7 @@ export const ROUTES = {
   TICKETS: '/tickets',
   SERVERS: '/servers',
   SERVER_DETAIL: '/servers/:id',
+  HOSTS: '/hosts',
   NODES: '/nodes',
   CHAIN_EXITS: '/chain-exits',
   CHAIN_ROUTES: '/chain-routes',
@@ -89,6 +91,8 @@ export const PERMISSIONS = {
   FINANCE_READ: 'finance:read',
   FINANCE_WRITE: 'finance:write',
   IMPERSONATE_WRITE: 'impersonate:write',
+  HOST_READ: 'host:read',
+  HOST_WRITE: 'host:write',
 } as const
 
 /** 一个菜单项；permission 为空表示登录即可见。 */
@@ -118,6 +122,7 @@ export const MENU: readonly MenuEntry[] = [
   { key: 'shared-accounts', path: ROUTES.SHARED_ACCOUNTS, label: '共享账号', icon: <KeyOutlined />, permission: PERMISSIONS.CONTENT_READ, group: GROUP_MINE },
   { key: 'tickets', path: ROUTES.TICKETS, label: '工单', icon: <CustomerServiceOutlined />, permission: PERMISSIONS.TICKET_READ, group: GROUP_MINE },
   { key: 'servers', path: ROUTES.SERVERS, label: '服务器', icon: <ClusterOutlined />, permission: PERMISSIONS.SERVER_READ, group: GROUP_NODES },
+  { key: 'hosts', path: ROUTES.HOSTS, label: 'SSH 托管', icon: <CloudServerOutlined />, permission: PERMISSIONS.HOST_READ, group: GROUP_NODES },
   { key: 'nodes', path: ROUTES.NODES, label: '节点', icon: <DeploymentUnitOutlined />, permission: PERMISSIONS.NODE_READ, group: GROUP_NODES },
   { key: 'chain-exits', path: ROUTES.CHAIN_EXITS, label: '链式出口', icon: <ExportOutlined />, permission: PERMISSIONS.NODE_READ, group: GROUP_NODES },
   { key: 'chain-routes', path: ROUTES.CHAIN_ROUTES, label: '链式规则', icon: <BranchesOutlined />, permission: PERMISSIONS.SERVER_READ, group: GROUP_NODES },
