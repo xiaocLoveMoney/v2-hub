@@ -139,6 +139,8 @@ describe('HostsPage', () => {
 
     current = hostOf()
     expect(await screen.findByText('成功')).toBeDefined()
+    // 页面显示“成功”到定时器被清掉之间还可能多发一次，先等这一次落地再记数
+    await sleep(QUIET_MS)
     const settled = listCalls()
     await sleep(QUIET_MS)
     expect(listCalls()).toBe(settled)
