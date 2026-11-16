@@ -433,6 +433,44 @@ a.hub-btn {
   margin: 0 0 10px;
 }
 
+/* 平台出口：只读，整行置灰；与自己的出口之间留一条分隔 */
+.hub-chain-platform-exits {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--hub-divider);
+}
+
+.hub-chain-platform-exits:first-child {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
+}
+
+.hub-chain-subtitle {
+  margin: 0 0 4px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--hub-heading);
+}
+
+.hub-chain-subtitle + .hub-field-hint {
+  margin: 0 0 6px;
+}
+
+.hub-chain-exit-readonly .hub-shared-name,
+.hub-chain-exit-readonly .hub-field-hint {
+  color: var(--hub-muted);
+}
+
+.hub-chain-exit-readonly .hub-chain-node-head + .hub-field-hint {
+  margin-bottom: 0;
+}
+
+.hub-chain-platform-exits .hub-shared-item:first-of-type {
+  padding-top: 8px;
+  border-top: 0;
+}
+
 /* 链接可能很长且无空格：按字符折行，不撑破卡片 */
 .hub-chain-link {
   margin-bottom: 10px;
