@@ -20,6 +20,8 @@ type Fake struct {
 	Diagnosis   string
 	Login       deploy.PanelLogin
 	Errors      map[string]error
+	// OnCall 非 nil 时在每个方法开始时调用，参数是方法名；用来在某一步前后插入动作（如取消 ctx）。
+	OnCall func(method string)
 
 	mu    sync.Mutex
 	calls []string
@@ -33,6 +35,9 @@ func (f *Fake) enter(method string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls = append(f.calls, method)
+	if f.OnCall != nil {
+		f.OnCall(method)
+	}
 	return f.Errors[method]
 }
 

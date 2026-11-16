@@ -511,3 +511,38 @@ func TestDefaultDomain(t *testing.T) {
 		}
 	}
 }
+
+// 证书换到面板上之后任务被取消或超时：收尾仍要做完——记下到期时间，并按新证书的指纹接入，不能把服务器留在对不上的旧指纹上。
+func TestCertificateSettlesAfterDeadline(t *testing.T) {
+	f := newHostFixture(t)
+	ctx := context.Background()
+	f.freshInstall()
+	account := f.createDNSAccount(t)
+	host := f.createHostWithDNS(t, hostAddrA, "node-a", account.ID)
+
+	taskCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	f.deployer.OnCall = func(method string) {
+		if method == "InstallCert" {
+			cancel()
+		}
+	}
+	ids, err := f.hosts.ClaimTasks(ctx, 1)
+	if err != nil || len(ids) != 1 {
+		t.Fatalf("ClaimTasks = %v, err = %v", ids, err)
+	}
+	f.hosts.RunTask(taskCtx, ids[0])
+	task, err := f.hosts.GetTask(ctx, ids[0])
+	if err != nil || task.Status != HostTaskFailed {
+		t.Fatalf("task = %+v, err = %v", task, err)
+	}
+	got, err := f.hosts.GetHost(ctx, host.ID)
+	if err != nil || got.ServerID == nil || got.CertNotAfter == nil {
+		t.Fatalf("the installed certificate's expiry must be recorded: %+v, err = %v", got, err)
+	}
+	srv, err := f.panels.GetServer(ctx, *got.ServerID)
+	wantPin := leafPin([]byte("leaf " + domainNodeA))
+	if err != nil || srv.BaseURL != urlHTTPSHostA || srv.TLSMode != panel.TLSPin || srv.CertPinSHA256 == nil || *srv.CertPinSHA256 != wantPin {
+		t.Fatalf("server must be pinned to the new certificate: %+v, err = %v", srv, err)
+	}
+}
