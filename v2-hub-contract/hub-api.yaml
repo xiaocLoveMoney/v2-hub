@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: v2-hub API
-  version: 0.12.0
+  version: 0.13.0
   description: |
     v2-hub 对外接口契约（hub-server 提供，v2-hub-admin-web / v2-hub-user-web 消费）。
     - 管理端接口前缀 /api/admin，客户端接口前缀 /api/user，订阅端点前缀 /sub。
@@ -1438,6 +1438,96 @@ paths:
       tags: [admin-hosts]
       operationId: deleteSshCredential
       summary: 删除 SSH 凭据（host:write）；仍被主机引用时返回 409
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      responses:
+        "200": { $ref: "#/components/responses/Ok" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /api/admin/dns-accounts:
+    get:
+      tags: [admin-hosts]
+      operationId: listDnsAccounts
+      summary: 全部 DNS 账号（host:read；docs/03 §5.22，0.13.0）；不返回令牌
+      responses:
+        "200":
+          description: DNS 账号列表
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: "#/components/schemas/DnsAccount" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+    post:
+      tags: [admin-hosts]
+      operationId: createDnsAccount
+      summary: 新建 DNS 账号（host:write）；保存前用令牌在线查一次根域名，查不到或被拒返回 502
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DnsAccountInput" }
+      responses:
+        "200":
+          description: 新建的 DNS 账号
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/DnsAccount" }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "502": { $ref: "#/components/responses/UpstreamUnavailable" }
+  /api/admin/dns-accounts/{id}:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    put:
+      tags: [admin-hosts]
+      operationId: updateDnsAccount
+      summary: 修改 DNS 账号（host:write）；token 留空表示沿用原值，改了令牌或根域名会重新在线校验；仍被主机引用时不能改根域名（409）
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DnsAccountInput" }
+      responses:
+        "200":
+          description: 修改后的 DNS 账号
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/DnsAccount" }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "502": { $ref: "#/components/responses/UpstreamUnavailable" }
+    delete:
+      tags: [admin-hosts]
+      operationId: deleteDnsAccount
+      summary: 删除 DNS 账号（host:write）；仍被主机引用时返回 409
       parameters:
         - $ref: "#/components/parameters/CsrfHeader"
       responses:
@@ -5219,6 +5309,34 @@ components:
         secret: { type: string, maxLength: 16384, description: 只写。私钥（OpenSSH / PEM）或密码；新建必填，更新时留空表示沿用原值 }
         passphrase: { type: string, maxLength: 255, description: 只写。私钥口令；更新时留空表示沿用原值，随新私钥一起提交时以提交的为准 }
         remark: { type: string, maxLength: 255 }
+    DnsProviderType:
+      type: string
+      enum: [cloudflare]
+    DnsAccount:
+      type: object
+      required: [id, name, providerType, zone, remark, hostCount, createdAt, updatedAt]
+      properties:
+        id: { type: integer, format: int64 }
+        name: { type: string }
+        providerType: { $ref: "#/components/schemas/DnsProviderType" }
+        zone: { type: string, description: 根域名，如 example.com }
+        remark: { type: string }
+        hostCount: { type: integer, description: 引用这个账号的主机数 }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    DnsAccountInput:
+      type: object
+      required: [name, providerType, zone]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 64 }
+        providerType: { $ref: "#/components/schemas/DnsProviderType" }
+        zone: { type: string, minLength: 1, maxLength: 255, description: 根域名；保存时转小写 }
+        token: { type: string, maxLength: 255, description: 只写。服务商的 API 令牌，须能读这个域名并编辑它的 DNS 记录；新建必填，更新时留空表示沿用原值 }
+        remark: { type: string, maxLength: 255 }
+    HostDomain:
+      type: string
+      maxLength: 255
+      description: 面板用的域名，须是所选 DNS 账号的根域名或其子域名；选了 DNS 账号而留空时由平台按主机名称生成；没选 DNS 账号时必须为空串
     HostAddress:
       type: string
       minLength: 1
@@ -5236,7 +5354,7 @@ components:
     HostErrorCode:
       type: string
       enum: ["", unsupported_os, no_systemd, no_root, nonstandard_install, listen_local, version_too_old, download_failed,
-             panel_unreachable, auth_failed, unreachable, host_key_changed, name_taken, interrupted, command_failed]
+             panel_unreachable, auth_failed, unreachable, host_key_changed, name_taken, dns_failed, cert_failed, interrupted, command_failed]
       description: 失败或不能部署的原因大类（docs/03 §5.22），空串为没有
     HostTask:
       type: object
@@ -5246,10 +5364,10 @@ components:
         hostId: { type: integer, format: int64 }
         kind: { $ref: "#/components/schemas/HostTaskKind" }
         status: { $ref: "#/components/schemas/HostTaskStatus" }
-        step: { type: string, description: "当前或最后所在的步骤：connect、detect、install、adopt、register、run，还没开始为空串" }
+        step: { type: string, description: "当前或最后所在的步骤：connect、detect、install、adopt、register、run、dns、issue、install_cert，还没开始为空串" }
         errorCode: { $ref: "#/components/schemas/HostErrorCode" }
         lastError: { type: string, description: 脱敏后的失败摘要，没有为空串 }
-        createdByName: { type: string, description: 发起任务的管理员用户名；管理员已被删除为空串 }
+        createdByName: { type: string, description: 发起任务的管理员用户名；系统发起（证书自动续期）或管理员已被删除为空串 }
         createdAt: { type: string, format: date-time }
         startedAt: { type: [string, "null"], format: date-time }
         finishedAt: { type: [string, "null"], format: date-time }
@@ -5262,7 +5380,7 @@ components:
             log: { type: string, description: 脱敏后的步骤日志，最多 64 KB }
     ServerHost:
       type: object
-      required: [id, name, address, sshPort, credentialId, credentialName, providerType, region, panelPort, hostKeySha256, osId, arch, serverId, serverName, lastTask, createdAt]
+      required: [id, name, address, sshPort, credentialId, credentialName, providerType, region, panelPort, hostKeySha256, osId, arch, serverId, serverName, dnsAccountId, dnsAccountName, domain, certNotAfter, lastTask, createdAt]
       properties:
         id: { type: integer, format: int64 }
         name: { type: string }
@@ -5278,6 +5396,10 @@ components:
         arch: { type: string }
         serverId: { type: [integer, "null"], format: int64, description: 已关联的服务器 }
         serverName: { type: string, description: 已关联服务器的名称，没有为空串 }
+        dnsAccountId: { type: [integer, "null"], format: int64, description: 申请公开证书用的 DNS 账号；null 为不申请，面板用自签证书 }
+        dnsAccountName: { type: string, description: DNS 账号的名称，没有为空串 }
+        domain: { type: string, description: 面板用的域名，没有为空串 }
+        certNotAfter: { type: [string, "null"], format: date-time, description: 平台申请的证书的到期时间；null 为还没申请到 }
         lastTask:
           oneOf:
             - $ref: "#/components/schemas/HostTask"
@@ -5293,6 +5415,8 @@ components:
         credentialId: { type: integer, format: int64, minimum: 1 }
         region: { $ref: "#/components/schemas/CountryCode" }
         panelPort: { type: [integer, "null"], minimum: 1, maximum: 65535 }
+        dnsAccountId: { type: [integer, "null"], format: int64, minimum: 1, description: null 或不带表示不用 DNS 账号 }
+        domain: { $ref: "#/components/schemas/HostDomain" }
     ServerHostBatchInput:
       type: object
       required: [credentialId, providerType, hosts]
@@ -5301,6 +5425,7 @@ components:
         sshPort: { type: integer, minimum: 1, maximum: 65535, default: 22 }
         providerType: { type: string, enum: [xui] }
         panelPort: { type: [integer, "null"], minimum: 1, maximum: 65535, description: 安装时用的面板端口，整批相同；null 为各自随机 }
+        dnsAccountId: { type: [integer, "null"], format: int64, minimum: 1, description: 整批共用的 DNS 账号；null 或不带表示不申请公开证书 }
         hosts:
           type: array
           minItems: 1
@@ -5312,6 +5437,7 @@ components:
               address: { $ref: "#/components/schemas/HostAddress" }
               name: { type: string, minLength: 1, maxLength: 64 }
               region: { $ref: "#/components/schemas/CountryCode" }
+              domain: { $ref: "#/components/schemas/HostDomain" }
     ServerHostTestInput:
       type: object
       required: [address, credentialId, providerType]
