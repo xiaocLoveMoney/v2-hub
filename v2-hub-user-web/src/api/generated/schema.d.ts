@@ -887,6 +887,248 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/admin/ssh-credentials": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 全部 SSH 凭据（host:read；docs/03 §5.22，0.12.0）；不返回私钥、密码与口令 */
+        get: operations["listSshCredentials"];
+        put?: never;
+        /** 新建 SSH 凭据（host:write）；私钥在保存时解析校验 */
+        post: operations["createSshCredential"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/ssh-credentials/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /** 修改 SSH 凭据（host:write）；secret、passphrase 留空表示沿用原值，改认证方式时 secret 必填 */
+        put: operations["updateSshCredential"];
+        post?: never;
+        /** 删除 SSH 凭据（host:write）；仍被主机引用时返回 409 */
+        delete: operations["deleteSshCredential"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/server-hosts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 全部托管主机及各自最近一条任务（host:read） */
+        get: operations["listServerHosts"];
+        put?: never;
+        /**
+         * 批量新建托管主机并各排一条部署任务（host:write）
+         * @description 一次最多 50 台，共用同一份凭据、端口与面板类型；整批校验，任一行不合法都不保存。名称或（地址，端口）已存在返回 409。
+         */
+        post: operations["createServerHosts"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/server-hosts/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 用未保存的信息连一次主机并检测（host:write）；不落库，按管理员频控
+         * @description SSH 连不上或认证失败返回 502，message 给出脱敏后的原因。
+         */
+        post: operations["testServerHost"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/server-hosts/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        /** 主机详情（host:read） */
+        get: operations["getServerHost"];
+        /** 修改主机（host:write）；改了地址或端口会清空已固定的主机密钥。有未结束的任务时返回 409 */
+        put: operations["updateServerHost"];
+        post?: never;
+        /** 删除主机（host:write）；只删平台记录与任务历史，不动目标机与关联的服务器。有未结束的任务时返回 409 */
+        delete: operations["deleteServerHost"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/server-hosts/{id}/reset-host-key": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 清空已固定的主机密钥，下次连接时重新记录（host:write） */
+        post: operations["resetServerHostKey"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/server-hosts/{id}/tasks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        /** 该主机最近 20 条任务，新的在前（host:read）；不带日志 */
+        get: operations["listServerHostTasks"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/server-hosts/{id}/actions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 对主机发起一个动作，排成一条任务（host:write）
+         * @description provision 只在主机还没关联服务器时可用，其余动作（diagnose 除外）只在已关联服务器时可用，否则 409； 该主机已有未结束的任务时 409。按管理员频控。写审计。
+         */
+        post: operations["createServerHostAction"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/server-hosts/{id}/panel-login/reset": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 重置面板网页的登录用户名与口令（host:write）；结果只在本次响应里返回，不落库
+         * @description 只对已关联服务器的主机可用；有未结束的任务时 409。SSH 或命令失败返回 502。写审计（不含口令）。
+         */
+        post: operations["resetServerHostPanelLogin"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/host-tasks/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        /** 任务详情，带脱敏后的日志（host:read） */
+        get: operations["getHostTask"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/host-tasks/{id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 取消一条还在排队的任务（host:write）；已开始或已结束的返回 409 */
+        post: operations["cancelHostTask"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/servers/{id}/host": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * 给已接入的服务器绑定 SSH（host:write），并排一条校验连接的任务
+         * @description 主机名取服务器名，面板类型取服务器的类型。该服务器已关联主机时返回 409。
+         */
+        put: operations["bindServerHost"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/admin/endpoints/{id}": {
         parameters: {
             query?: never;
@@ -3111,6 +3353,11 @@ export interface components {
             inboundCount: number;
             /** Format: date-time */
             createdAt: string;
+            /**
+             * Format: int64
+             * @description 关联的托管主机（0.12.0，docs/03 §5.22）；没有为 null
+             */
+            hostId: number | null;
             /** @description 这台服务器上的大陆连通检测目标数（0.11.0，Ruling-67）；功能没开为 null */
             reach: {
                 /** @description 这台服务器上的检测目标数 */
@@ -3123,6 +3370,171 @@ export interface components {
         };
         ServerEnvelope: components["schemas"]["Envelope"] & {
             data?: components["schemas"]["Server"];
+        };
+        /** @enum {string} */
+        SshAuthType: "key" | "password";
+        SshCredential: {
+            /** Format: int64 */
+            id: number;
+            name: string;
+            username: string;
+            authType: components["schemas"]["SshAuthType"];
+            /** @description 公钥指纹（SHA256:…），只用于展示；密码认证为空串 */
+            keyFingerprint: string;
+            remark: string;
+            /** @description 引用这份凭据的主机数 */
+            hostCount: number;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+        };
+        SshCredentialInput: {
+            name: string;
+            username: string;
+            authType: components["schemas"]["SshAuthType"];
+            /** @description 只写。私钥（OpenSSH / PEM）或密码；新建必填，更新时留空表示沿用原值 */
+            secret?: string;
+            /** @description 只写。私钥口令；更新时留空表示沿用原值，随新私钥一起提交时以提交的为准 */
+            passphrase?: string;
+            remark?: string;
+        };
+        /** @description IP 或域名；不能是回环或未指定地址 */
+        HostAddress: string;
+        /**
+         * @description provision 部署（安装或接管）、verify 校验连接、restart_panel 重启面板、restart_core 重启内核、 upgrade 升级或修复到平台基线版本、reissue_token 重签令牌、enable_tls 配置证书、diagnose 查看状态与最近日志
+         * @enum {string}
+         */
+        HostTaskKind: "provision" | "verify" | "restart_panel" | "restart_core" | "upgrade" | "reissue_token" | "enable_tls" | "diagnose";
+        /** @enum {string} */
+        HostTaskStatus: "queued" | "running" | "succeeded" | "failed" | "canceled";
+        /**
+         * @description 失败或不能部署的原因大类（docs/03 §5.22），空串为没有
+         * @enum {string}
+         */
+        HostErrorCode: "" | "unsupported_os" | "no_systemd" | "no_root" | "nonstandard_install" | "listen_local" | "version_too_old" | "download_failed" | "panel_unreachable" | "auth_failed" | "unreachable" | "host_key_changed" | "name_taken" | "interrupted" | "command_failed";
+        HostTask: {
+            /** Format: int64 */
+            id: number;
+            /** Format: int64 */
+            hostId: number;
+            kind: components["schemas"]["HostTaskKind"];
+            status: components["schemas"]["HostTaskStatus"];
+            /** @description 当前或最后所在的步骤：connect、detect、install、adopt、register、run，还没开始为空串 */
+            step: string;
+            errorCode: components["schemas"]["HostErrorCode"];
+            /** @description 脱敏后的失败摘要，没有为空串 */
+            lastError: string;
+            /** @description 发起任务的管理员用户名；管理员已被删除为空串 */
+            createdByName: string;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            startedAt: string | null;
+            /** Format: date-time */
+            finishedAt: string | null;
+        };
+        HostTaskDetail: components["schemas"]["HostTask"] & {
+            /** @description 脱敏后的步骤日志，最多 64 KB */
+            log: string;
+        };
+        ServerHost: {
+            /** Format: int64 */
+            id: number;
+            name: string;
+            address: string;
+            sshPort: number;
+            /** Format: int64 */
+            credentialId: number;
+            credentialName: string;
+            providerType: string;
+            region: string;
+            /** @description 安装时指定的面板端口，null 为随机 */
+            panelPort: number | null;
+            /** @description 已固定的主机公钥指纹（SHA256:…），空串为还没记录 */
+            hostKeySha256: string;
+            /** @description 最近一次检测到的发行版标识，如 debian；未检测为空串 */
+            osId: string;
+            arch: string;
+            /**
+             * Format: int64
+             * @description 已关联的服务器
+             */
+            serverId: number | null;
+            /** @description 已关联服务器的名称，没有为空串 */
+            serverName: string;
+            lastTask: components["schemas"]["HostTask"] | null;
+            /** Format: date-time */
+            createdAt: string;
+        };
+        ServerHostInput: {
+            name: string;
+            address: components["schemas"]["HostAddress"];
+            sshPort: number;
+            /** Format: int64 */
+            credentialId: number;
+            region?: components["schemas"]["CountryCode"];
+            panelPort?: number | null;
+        };
+        ServerHostBatchInput: {
+            /** Format: int64 */
+            credentialId: number;
+            /** @default 22 */
+            sshPort: number;
+            /** @enum {string} */
+            providerType: "xui";
+            /** @description 安装时用的面板端口，整批相同；null 为各自随机 */
+            panelPort?: number | null;
+            hosts: {
+                address: components["schemas"]["HostAddress"];
+                name: string;
+                region?: components["schemas"]["CountryCode"];
+            }[];
+        };
+        ServerHostTestInput: {
+            address: components["schemas"]["HostAddress"];
+            /** @default 22 */
+            sshPort: number;
+            /** Format: int64 */
+            credentialId: number;
+            /** @enum {string} */
+            providerType: "xui";
+        };
+        ServerHostBindInput: {
+            address: components["schemas"]["HostAddress"];
+            /** @default 22 */
+            sshPort: number;
+            /** Format: int64 */
+            credentialId: number;
+        };
+        HostDetection: {
+            /** @description 本次连接看到的主机公钥指纹（SHA256:…） */
+            hostKeySha256: string;
+            osId: string;
+            arch: string;
+            /** @description 登录用户是 root 或能免密 sudo */
+            isPrivileged: boolean;
+            /**
+             * @description 没有面板 / 标准安装的面板 / 非标准安装（如 Docker）
+             * @enum {string}
+             */
+            panelState: "none" | "standard" | "nonstandard";
+            /** @description 已有面板的版本，没有为空串 */
+            panelVersion: string;
+            /**
+             * @description 部署时会走安装还是接管；不能部署为空串
+             * @enum {string}
+             */
+            plan: "" | "install" | "adopt";
+            reason: components["schemas"]["HostErrorCode"];
+        };
+        HostActionInput: {
+            /** @enum {string} */
+            action: "provision" | "restart_panel" | "restart_core" | "upgrade" | "reissue_token" | "enable_tls" | "diagnose";
+        };
+        PanelLogin: {
+            username: string;
+            password: string;
         };
         SyncResult: {
             /** @description 面板上的入站总数 */
@@ -7124,6 +7536,504 @@ export interface operations {
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             502: components["responses"]["UpstreamUnavailable"];
+        };
+    };
+    listSshCredentials: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 凭据列表 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["SshCredential"][];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+        };
+    };
+    createSshCredential: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SshCredentialInput"];
+            };
+        };
+        responses: {
+            /** @description 新建的凭据 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["SshCredential"];
+                    };
+                };
+            };
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    updateSshCredential: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SshCredentialInput"];
+            };
+        };
+        responses: {
+            /** @description 修改后的凭据 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["SshCredential"];
+                    };
+                };
+            };
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    deleteSshCredential: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["Ok"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    listServerHosts: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 主机列表 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["ServerHost"][];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+        };
+    };
+    createServerHosts: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ServerHostBatchInput"];
+            };
+        };
+        responses: {
+            /** @description 新建的主机（已各有一条排队中的部署任务） */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["ServerHost"][];
+                    };
+                };
+            };
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    testServerHost: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ServerHostTestInput"];
+            };
+        };
+        responses: {
+            /** @description 检测结果 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["HostDetection"];
+                    };
+                };
+            };
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            429: components["responses"]["RateLimited"];
+            502: components["responses"]["UpstreamUnavailable"];
+        };
+    };
+    getServerHost: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 主机 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["ServerHost"];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    updateServerHost: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ServerHostInput"];
+            };
+        };
+        responses: {
+            /** @description 修改后的主机 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["ServerHost"];
+                    };
+                };
+            };
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    deleteServerHost: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["Ok"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    resetServerHostKey: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 修改后的主机 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["ServerHost"];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    listServerHostTasks: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 任务列表 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["HostTask"][];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    createServerHostAction: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["HostActionInput"];
+            };
+        };
+        responses: {
+            /** @description 排队中的任务 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["HostTask"];
+                    };
+                };
+            };
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    resetServerHostPanelLogin: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 新的面板登录信息 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["PanelLogin"];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            429: components["responses"]["RateLimited"];
+            502: components["responses"]["UpstreamUnavailable"];
+        };
+    };
+    getHostTask: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 任务 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["HostTaskDetail"];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    cancelHostTask: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 取消后的任务 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["HostTask"];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    bindServerHost: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ServerHostBindInput"];
+            };
+        };
+        responses: {
+            /** @description 新建的主机（已有一条排队中的 verify 任务） */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["ServerHost"];
+                    };
+                };
+            };
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
         };
     };
     deleteEndpoint: {
