@@ -5,6 +5,7 @@ import { ErrorAlert } from '../../components/ErrorAlert'
 import { FormModal } from '../../components/FormModal'
 import { mutate } from '../../hooks/use-remote'
 import { MAX_PORT, MIN_PORT } from '../form-limits'
+import { DnsAccountSelect } from './DnsAccountSelect'
 import { HostDetectionResult } from './HostDetectionResult'
 import { DEFAULT_SSH_PORT, MAX_HOST_BATCH, formatHostListErrors, parseHostList } from './host-list'
 import { DEFAULT_PROVIDER, PROVIDER_OPTIONS } from './providers'
@@ -21,6 +22,7 @@ interface HostCreateForm {
   providerType: ServerHostBatchInput['providerType']
   sshPort: number
   panelPort?: number | null
+  dnsAccountId?: number | null
   hostsText: string
 }
 
@@ -105,7 +107,14 @@ function HostCreateBody({ onSaved }: { onSaved: () => void }) {
     const err = await mutate(() =>
       api.POST('/api/admin/server-hosts', {
         params: csrfHeader(),
-        body: { credentialId: v.credentialId, sshPort: v.sshPort, providerType: v.providerType, panelPort: v.panelPort ?? null, hosts },
+        body: {
+          credentialId: v.credentialId,
+          sshPort: v.sshPort,
+          providerType: v.providerType,
+          panelPort: v.panelPort ?? null,
+          dnsAccountId: v.dnsAccountId ?? null,
+          hosts,
+        },
       }),
     )
     setIsBusy(false)
@@ -137,6 +146,13 @@ function HostCreateBody({ onSaved }: { onSaved: () => void }) {
         </Form.Item>
         <Form.Item name="panelPort" label="指定面板端口" extra="安装面板时用的端口，整批相同；留空则每台各自随机。接管已有面板时不改它的端口">
           <InputNumber min={MIN_PORT} max={MAX_PORT} precision={0} className="full-width" placeholder="留空 = 随机" />
+        </Form.Item>
+        <Form.Item
+          name="dnsAccountId"
+          label="DNS 账号"
+          extra="选了就给每台主机申请公开可信的证书（Let’s Encrypt）：域名自动取“名称.根域名”，名称转不成域名时取地址，之后可在编辑主机时改。不选则面板用自签证书"
+        >
+          <DnsAccountSelect />
         </Form.Item>
         <Form.Item
           name="hostsText"

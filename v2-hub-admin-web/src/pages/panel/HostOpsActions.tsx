@@ -29,18 +29,36 @@ const OPS_ACTIONS: readonly OpsAction[] = [
     description: '重新签发面板上名为 v2-hub 的令牌并更新这台服务器的接入信息，原来的同名令牌作废；用于面板状态是“token 失效”时',
   },
   { action: 'diagnose', label: '查看状态与日志', title: '查看状态与最近日志？', description: '只读取面板的状态与最近日志，不改动机器；结果在任务日志里看' },
-  {
-    action: ACTION_ENABLE_TLS,
-    label: '配置证书',
-    title: '给面板配置证书？',
-    description: '生成自签证书设给面板，并把这台服务器改成 https + 固定证书指纹接入，面板令牌不再明文传输',
-  },
 ]
+
+/** “配置证书”的三种说法：没配 DNS 账号时生成自签证书；配了的申请公开证书，已有证书时是续期（docs/03 §5.22 运维动作）。 */
+const TLS_SELF_SIGNED: OpsAction = {
+  action: ACTION_ENABLE_TLS,
+  label: '配置证书',
+  title: '给面板配置证书？',
+  description: '生成自签证书设给面板，并把这台服务器改成 https + 固定证书指纹接入，面板令牌不再明文传输',
+}
+const PUBLIC_CERT_DESCRIPTION =
+  '平台把域名解析到这台主机，向 Let’s Encrypt 申请证书并装到面板上，服务器改成按域名接入；面板会重启一次，整个过程通常要一两分钟'
+const TLS_ISSUE: OpsAction = { action: ACTION_ENABLE_TLS, label: '申请证书', title: '给面板申请公开证书？', description: PUBLIC_CERT_DESCRIPTION }
+const TLS_RENEW: OpsAction = { action: ACTION_ENABLE_TLS, label: '续期证书', title: '现在就续期面板证书？', description: PUBLIC_CERT_DESCRIPTION }
+
+/** 证书动作：主机配了域名就是申请或续期公开证书；没配时只有明文 HTTP 的面板才能生成自签证书，其余没有这个动作。 */
+function tlsAction(hasDomain: boolean, hasCert: boolean, isPlainHttp: boolean): OpsAction | null {
+  if (hasDomain) {
+    return hasCert ? TLS_RENEW : TLS_ISSUE
+  }
+  return isPlainHttp ? TLS_SELF_SIGNED : null
+}
 
 interface HostOpsActionsProps {
   hostId: number
-  /** 面板地址是明文 HTTP 时才出现“配置证书”。 */
+  /** 面板地址是明文 HTTP：没配域名的主机这时才出现“配置证书”（自签）。 */
   isPlainHttp: boolean
+  /** 主机配了 DNS 账号与域名：证书由平台申请。 */
+  hasDomain: boolean
+  /** 平台已经给这台主机申请到过证书。 */
+  hasCert: boolean
   /** 主机有未结束的任务：按钮不可点（再发起后端会回 409）。 */
   isBusy: boolean
   /** 动作已排成任务后调用（打开任务抽屉看进度）。 */
@@ -51,12 +69,13 @@ interface HostOpsActionsProps {
  * 已绑定 SSH 的服务器的运维动作（都要 host:write，由调用方判断后才渲染）：每个动作二次确认并写清影响，
  * 发起后排成一条任务；“重置面板登录口令”直接执行，结果只在弹窗里显示一次（docs/03 §5.22 运维动作、重置面板登录口令）。
  */
-export function HostOpsActions({ hostId, isPlainHttp, isBusy, onStarted }: HostOpsActionsProps) {
+export function HostOpsActions({ hostId, isPlainHttp, hasDomain, hasCert, isBusy, onStarted }: HostOpsActionsProps) {
   const { message } = App.useApp()
   const [isResetting, setIsResetting] = useState(false)
   // 新的面板登录信息只放在这个组件的内存里：关掉弹窗即丢，不进任何存储
   const [panelLogin, setPanelLogin] = useState<PanelLogin | null>(null)
-  const actions = OPS_ACTIONS.filter((a) => a.action !== ACTION_ENABLE_TLS || isPlainHttp)
+  const tls = tlsAction(hasDomain, hasCert, isPlainHttp)
+  const actions = tls === null ? OPS_ACTIONS : [...OPS_ACTIONS, tls]
 
   const handleAction = async (action: HostAction) => {
     const result = await startHostAction(hostId, action)

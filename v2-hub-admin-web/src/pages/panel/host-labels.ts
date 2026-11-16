@@ -1,4 +1,4 @@
-import type { HostDetection, HostErrorCode, HostTask, HostTaskKind, HostTaskStatus, SshAuthType } from '../../api/client'
+import type { DnsProviderType, HostDetection, HostErrorCode, HostTask, HostTaskKind, HostTaskStatus, SshAuthType } from '../../api/client'
 import type { TagMeta } from './chain-labels'
 
 /** 没有值时的占位。 */
@@ -33,6 +33,9 @@ const HOST_TASK_STEP_LABELS: Record<string, string> = {
   adopt: '接管面板',
   register: '接入平台',
   run: '执行动作',
+  dns: '设置解析',
+  issue: '申请证书',
+  install_cert: '安装证书',
 }
 
 const STEP_NOT_STARTED = '未开始'
@@ -59,6 +62,8 @@ const HOST_ERROR_TEXT: Record<Exclude<HostErrorCode, ''>, string> = {
   unreachable: 'SSH 连不上；请检查地址、SSH 端口，以及目标机防火墙是否放行平台的 IP',
   host_key_changed: '主机密钥与上次记录的不一致；确认机器确实重装过后，先重置主机密钥',
   name_taken: '服务器名已被占用；请把主机名称改成别的，再重新部署',
+  dns_failed: 'DNS 服务商拒绝了请求，或解析记录迟迟没有生效；请检查 DNS 账号的令牌权限与根域名，再重做“配置证书”',
+  cert_failed: '证书签发方拒绝或超时，详见失败摘要；被限流时过一段时间再重做“配置证书”',
   interrupted: '平台重启时任务被中断；重新发起即可',
   command_failed: '命令执行失败，详见日志；排除问题后重新发起',
 }
@@ -82,6 +87,22 @@ export function isHostTaskActive(task: Pick<HostTask, 'status'> | null | undefin
 export const SSH_AUTH_TYPE_LABELS: Record<SshAuthType, string> = {
   key: '私钥',
   password: '密码',
+}
+
+/** DNS 服务商的显示名（docs/03 §5.22 DNS 账号）。 */
+export const DNS_PROVIDER_LABELS: Record<DnsProviderType, string> = {
+  cloudflare: 'Cloudflare',
+}
+
+const ISO_DATE_LEN = 10
+const CERT_NOT_ISSUED = '还没申请到证书'
+
+/**
+ * 主机上平台申请的证书的到期说明：有到期时间取它的日期（UTC），没有则说明还没申请到。
+ * @param notAfter 契约里的 certNotAfter
+ */
+export function certExpiryText(notAfter: string | null): string {
+  return notAfter === null ? CERT_NOT_ISSUED : `证书到期 ${notAfter.slice(0, ISO_DATE_LEN)}`
 }
 
 /** 连接测试里“已有面板”的显示名。 */

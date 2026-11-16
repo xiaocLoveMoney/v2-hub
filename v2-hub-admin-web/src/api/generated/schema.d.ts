@@ -925,6 +925,44 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/admin/dns-accounts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 全部 DNS 账号（host:read；docs/03 §5.22，0.13.0）；不返回令牌 */
+        get: operations["listDnsAccounts"];
+        put?: never;
+        /** 新建 DNS 账号（host:write）；保存前用令牌在线查一次根域名，查不到或被拒返回 502 */
+        post: operations["createDnsAccount"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/dns-accounts/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /** 修改 DNS 账号（host:write）；token 留空表示沿用原值，改了令牌或根域名会重新在线校验；仍被主机引用时不能改根域名（409） */
+        put: operations["updateDnsAccount"];
+        post?: never;
+        /** 删除 DNS 账号（host:write）；仍被主机引用时返回 409 */
+        delete: operations["deleteDnsAccount"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/admin/server-hosts": {
         parameters: {
             query?: never;
@@ -3399,6 +3437,34 @@ export interface components {
             passphrase?: string;
             remark?: string;
         };
+        /** @enum {string} */
+        DnsProviderType: "cloudflare";
+        DnsAccount: {
+            /** Format: int64 */
+            id: number;
+            name: string;
+            providerType: components["schemas"]["DnsProviderType"];
+            /** @description 根域名，如 example.com */
+            zone: string;
+            remark: string;
+            /** @description 引用这个账号的主机数 */
+            hostCount: number;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+        };
+        DnsAccountInput: {
+            name: string;
+            providerType: components["schemas"]["DnsProviderType"];
+            /** @description 根域名；保存时转小写 */
+            zone: string;
+            /** @description 只写。服务商的 API 令牌，须能读这个域名并编辑它的 DNS 记录；新建必填，更新时留空表示沿用原值 */
+            token?: string;
+            remark?: string;
+        };
+        /** @description 面板用的域名，须是所选 DNS 账号的根域名或其子域名；选了 DNS 账号而留空时由平台按主机名称生成；没选 DNS 账号时必须为空串 */
+        HostDomain: string;
         /** @description IP 或域名；不能是回环或未指定地址 */
         HostAddress: string;
         /**
@@ -3412,7 +3478,7 @@ export interface components {
          * @description 失败或不能部署的原因大类（docs/03 §5.22），空串为没有
          * @enum {string}
          */
-        HostErrorCode: "" | "unsupported_os" | "no_systemd" | "no_root" | "nonstandard_install" | "listen_local" | "version_too_old" | "download_failed" | "panel_unreachable" | "auth_failed" | "unreachable" | "host_key_changed" | "name_taken" | "interrupted" | "command_failed";
+        HostErrorCode: "" | "unsupported_os" | "no_systemd" | "no_root" | "nonstandard_install" | "listen_local" | "version_too_old" | "download_failed" | "panel_unreachable" | "auth_failed" | "unreachable" | "host_key_changed" | "name_taken" | "dns_failed" | "cert_failed" | "interrupted" | "command_failed";
         HostTask: {
             /** Format: int64 */
             id: number;
@@ -3420,12 +3486,12 @@ export interface components {
             hostId: number;
             kind: components["schemas"]["HostTaskKind"];
             status: components["schemas"]["HostTaskStatus"];
-            /** @description 当前或最后所在的步骤：connect、detect、install、adopt、register、run，还没开始为空串 */
+            /** @description 当前或最后所在的步骤：connect、detect、install、adopt、register、run、dns、issue、install_cert，还没开始为空串 */
             step: string;
             errorCode: components["schemas"]["HostErrorCode"];
             /** @description 脱敏后的失败摘要，没有为空串 */
             lastError: string;
-            /** @description 发起任务的管理员用户名；管理员已被删除为空串 */
+            /** @description 发起任务的管理员用户名；系统发起（证书自动续期）或管理员已被删除为空串 */
             createdByName: string;
             /** Format: date-time */
             createdAt: string;
@@ -3463,6 +3529,20 @@ export interface components {
             serverId: number | null;
             /** @description 已关联服务器的名称，没有为空串 */
             serverName: string;
+            /**
+             * Format: int64
+             * @description 申请公开证书用的 DNS 账号；null 为不申请，面板用自签证书
+             */
+            dnsAccountId: number | null;
+            /** @description DNS 账号的名称，没有为空串 */
+            dnsAccountName: string;
+            /** @description 面板用的域名，没有为空串 */
+            domain: string;
+            /**
+             * Format: date-time
+             * @description 平台申请的证书的到期时间；null 为还没申请到
+             */
+            certNotAfter: string | null;
             lastTask: components["schemas"]["HostTask"] | null;
             /** Format: date-time */
             createdAt: string;
@@ -3475,6 +3555,12 @@ export interface components {
             credentialId: number;
             region?: components["schemas"]["CountryCode"];
             panelPort?: number | null;
+            /**
+             * Format: int64
+             * @description null 或不带表示不用 DNS 账号
+             */
+            dnsAccountId?: number | null;
+            domain?: components["schemas"]["HostDomain"];
         };
         ServerHostBatchInput: {
             /** Format: int64 */
@@ -3485,10 +3571,16 @@ export interface components {
             providerType: "xui";
             /** @description 安装时用的面板端口，整批相同；null 为各自随机 */
             panelPort?: number | null;
+            /**
+             * Format: int64
+             * @description 整批共用的 DNS 账号；null 或不带表示不申请公开证书
+             */
+            dnsAccountId?: number | null;
             hosts: {
                 address: components["schemas"]["HostAddress"];
                 name: string;
                 region?: components["schemas"]["CountryCode"];
+                domain?: components["schemas"]["HostDomain"];
             }[];
         };
         ServerHostTestInput: {
@@ -7630,6 +7722,119 @@ export interface operations {
         };
     };
     deleteSshCredential: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["Ok"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    listDnsAccounts: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description DNS 账号列表 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["DnsAccount"][];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+        };
+    };
+    createDnsAccount: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DnsAccountInput"];
+            };
+        };
+        responses: {
+            /** @description 新建的 DNS 账号 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["DnsAccount"];
+                    };
+                };
+            };
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            409: components["responses"]["Conflict"];
+            502: components["responses"]["UpstreamUnavailable"];
+        };
+    };
+    updateDnsAccount: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DnsAccountInput"];
+            };
+        };
+        responses: {
+            /** @description 修改后的 DNS 账号 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["DnsAccount"];
+                    };
+                };
+            };
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            502: components["responses"]["UpstreamUnavailable"];
+        };
+    };
+    deleteDnsAccount: {
         parameters: {
             query?: never;
             header: {

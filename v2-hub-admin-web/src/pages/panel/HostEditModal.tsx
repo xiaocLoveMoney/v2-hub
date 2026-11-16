@@ -5,6 +5,7 @@ import { FormModal } from '../../components/FormModal'
 import { useSubmit } from '../../hooks/use-submit'
 import { MAX_NAME_LEN, MAX_PORT, MIN_PORT } from '../form-limits'
 import { COUNTRY_OPTIONS } from './countries'
+import { DnsAccountSelect } from './DnsAccountSelect'
 import { MAX_HOST_ADDRESS_LEN, validateHostAddressField } from './host-list'
 import { SshCredentialSelect } from './SshCredentialSelect'
 
@@ -15,7 +16,12 @@ interface HostEditForm {
   credentialId: number
   region?: string
   panelPort?: number | null
+  dnsAccountId?: number | null
+  domain?: string
 }
+
+/** 域名的最大长度（hub-api.yaml HostDomain）。 */
+const MAX_DOMAIN_LEN = 255
 
 interface HostEditModalProps {
   /** 要编辑的主机；null 时弹窗关闭。 */
@@ -37,6 +43,8 @@ export function HostEditModal({ host, onClose, onSaved }: HostEditModalProps) {
 function HostEditBody({ host, onSaved }: { host: ServerHost; onSaved: () => void }) {
   const [form] = Form.useForm<HostEditForm>()
   const submit = useSubmit('已保存', onSaved)
+  const dnsAccountId = Form.useWatch('dnsAccountId', form) ?? null
+  const hasDnsAccount = dnsAccountId !== null
 
   const handleFinish = (v: HostEditForm) =>
     submit.run(() =>
@@ -49,6 +57,9 @@ function HostEditBody({ host, onSaved }: { host: ServerHost; onSaved: () => void
           credentialId: v.credentialId,
           region: v.region ?? '',
           panelPort: v.panelPort ?? null,
+          dnsAccountId: v.dnsAccountId ?? null,
+          // 没选 DNS 账号时域名必须为空（docs/03 §5.22 域名）
+          domain: (v.dnsAccountId ?? null) === null ? '' : (v.domain ?? '').trim(),
         },
       }),
     )
@@ -68,6 +79,8 @@ function HostEditBody({ host, onSaved }: { host: ServerHost; onSaved: () => void
           credentialId: host.credentialId,
           region: host.region === '' ? undefined : host.region,
           panelPort: host.panelPort,
+          dnsAccountId: host.dnsAccountId,
+          domain: host.domain,
         }}
       >
         <Form.Item name="name" label="名称" extra="接入时用作服务器名" rules={[{ required: true, whitespace: true, max: MAX_NAME_LEN, message: `1–${MAX_NAME_LEN} 个字符` }]}>
@@ -93,6 +106,18 @@ function HostEditBody({ host, onSaved }: { host: ServerHost; onSaved: () => void
         <Form.Item name="panelPort" label="指定面板端口" extra="安装面板时用的端口；留空则随机">
           <InputNumber min={MIN_PORT} max={MAX_PORT} precision={0} className="full-width" placeholder="留空 = 随机" />
         </Form.Item>
+        <Form.Item name="dnsAccountId" label="DNS 账号" extra="选了就由平台给面板申请公开可信的证书并自动续期；不选则面板用自签证书">
+          <DnsAccountSelect />
+        </Form.Item>
+        {hasDnsAccount && (
+          <Form.Item
+            name="domain"
+            label="域名"
+            extra="须是所选 DNS 账号的根域名或它的子域名；留空则按名称自动生成。改了域名或 DNS 账号后，要在 SSH 运维里重做一次“申请证书”才生效"
+          >
+            <Input autoComplete="off" maxLength={MAX_DOMAIN_LEN} placeholder="如 hk-01.example.com" />
+          </Form.Item>
+        )}
         <Button type="primary" htmlType="submit" loading={submit.isBusy}>
           保存
         </Button>

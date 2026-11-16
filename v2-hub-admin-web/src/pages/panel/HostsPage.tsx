@@ -1,5 +1,5 @@
 import { PlusOutlined } from '@ant-design/icons'
-import { App, Button, Popconfirm, Space, Table, type TableProps } from 'antd'
+import { App, Button, Popconfirm, Space, Table, Typography, type TableProps } from 'antd'
 import { useState } from 'react'
 import { Link } from 'react-router'
 import { api, csrfHeader, type HostAction, type HostTask, type ServerHost } from '../../api/client'
@@ -11,13 +11,14 @@ import { useRemote } from '../../hooks/use-remote'
 import { useRowAction } from '../../hooks/use-submit'
 import { PERMISSIONS, ROUTES } from '../../menu'
 import { TABLE_SCROLL } from '../system/format'
+import { DnsAccountsModal } from './DnsAccountsModal'
 import { HostCreateModal } from './HostCreateModal'
 import { HostEditModal } from './HostEditModal'
 import { HostTaskDrawer } from './HostTaskDrawer'
 import { HostTaskSummary } from './HostTaskSummary'
 import { SshCredentialsModal } from './SshCredentialsModal'
 import { startHostAction, type OpenedHostTasks } from './host-actions'
-import { EMPTY, isHostTaskActive } from './host-labels'
+import { EMPTY, certExpiryText, isHostTaskActive } from './host-labels'
 import { formatHostEndpoint } from './host-list'
 
 const loadHosts = (signal: AbortSignal) => api.GET('/api/admin/server-hosts', { signal })
@@ -31,6 +32,19 @@ function formatPlatform(host: ServerHost): string {
     return EMPTY
   }
   return `${host.osId || EMPTY} / ${host.arch || EMPTY}`
+}
+
+/** 域名与证书：没配 DNS 账号的主机显示占位符；配了的显示域名，以及证书到期日或“还没申请到”。 */
+function HostDomainCell({ host }: { host: ServerHost }) {
+  if (host.domain === '') {
+    return <>{EMPTY}</>
+  }
+  return (
+    <Space orientation="vertical" size={0}>
+      <span className="mono">{host.domain}</span>
+      <Typography.Text type="secondary">{certExpiryText(host.certNotAfter)}</Typography.Text>
+    </Space>
+  )
 }
 
 interface HostRowActionsProps {
@@ -99,6 +113,7 @@ export function HostsPage() {
   const hosts = useRemote<ServerHost[]>(loadHosts)
   const [isCreating, setIsCreating] = useState(false)
   const [isCredentialsOpen, setIsCredentialsOpen] = useState(false)
+  const [isDnsAccountsOpen, setIsDnsAccountsOpen] = useState(false)
   const [editing, setEditing] = useState<ServerHost | null>(null)
   const [opened, setOpened] = useState<OpenedHostTasks | null>(null)
   const act = useRowAction(hosts.reload)
@@ -126,6 +141,7 @@ export function HostsPage() {
     { title: '地址', key: 'address', render: (_: unknown, h: ServerHost) => <span className="mono">{formatHostEndpoint(h.address, h.sshPort)}</span> },
     { title: '凭据', dataIndex: 'credentialName' },
     { title: '系统 / 架构', key: 'platform', render: (_: unknown, h: ServerHost) => formatPlatform(h) },
+    { title: '域名 / 证书', key: 'domain', render: (_: unknown, h: ServerHost) => <HostDomainCell host={h} /> },
     {
       title: '关联服务器',
       key: 'server',
@@ -161,6 +177,7 @@ export function HostsPage() {
         action={
           <Space>
             <Button onClick={() => setIsCredentialsOpen(true)}>SSH 凭据</Button>
+            <Button onClick={() => setIsDnsAccountsOpen(true)}>DNS 账号</Button>
             {canWrite && (
               <Button type="primary" icon={<PlusOutlined />} onClick={() => setIsCreating(true)}>
                 新建主机
@@ -196,6 +213,7 @@ export function HostsPage() {
         }}
       />
       <SshCredentialsModal isOpen={isCredentialsOpen} canWrite={canWrite} onClose={() => setIsCredentialsOpen(false)} onChanged={hosts.reload} />
+      <DnsAccountsModal isOpen={isDnsAccountsOpen} canWrite={canWrite} onClose={() => setIsDnsAccountsOpen(false)} onChanged={hosts.reload} />
       <HostTaskDrawer
         host={opened?.host ?? null}
         initialTaskId={opened?.taskId}
