@@ -23,3 +23,30 @@ export function usePolling(callback: () => void, isActive: boolean, intervalMs: 
     return () => clearInterval(timer)
   }, [isActive, intervalMs])
 }
+
+/** 能被定时刷新的远端数据；useRemote 的结果就是这个形状。 */
+export interface Pollable {
+  isLoading: boolean
+  reload: () => void
+}
+
+/**
+ * 条件为真时定时刷新若干份远端数据。某一份上一次的请求还没回来就跳过它这一轮：
+ * reload 会取消旧请求，网络慢于轮询间隔时不跳过就会一直拿不到结果。
+ * @param remotes 要刷新的数据（useRemote 的结果）
+ * @param isActive 为 true 时才轮询
+ * @param intervalMs 间隔毫秒，默认 HOST_TASK_POLL_INTERVAL_MS
+ */
+export function usePollRemote(remotes: readonly Pollable[], isActive: boolean, intervalMs: number = HOST_TASK_POLL_INTERVAL_MS): void {
+  usePolling(
+    () => {
+      for (const remote of remotes) {
+        if (!remote.isLoading) {
+          remote.reload()
+        }
+      }
+    },
+    isActive,
+    intervalMs,
+  )
+}

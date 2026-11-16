@@ -7,13 +7,12 @@ import { FormModal } from '../../components/FormModal'
 import { useRemote } from '../../hooks/use-remote'
 import { useRowAction } from '../../hooks/use-submit'
 import { TABLE_SCROLL } from '../system/format'
-import { SSH_AUTH_TYPE_LABELS } from './host-labels'
+import { loadSshCredentials } from './host-actions'
+import { EMPTY, SSH_AUTH_TYPE_LABELS } from './host-labels'
 import { SshCredentialForm } from './SshCredentialForm'
 
 const MODAL_WIDTH = 880
-const EMPTY = '—'
 
-const loadCredentials = (signal: AbortSignal) => api.GET('/api/admin/ssh-credentials', { signal })
 
 interface SshCredentialsModalProps {
   isOpen: boolean
@@ -37,7 +36,7 @@ export function SshCredentialsModal({ isOpen, canWrite, onClose, onChanged }: Ss
 }
 
 function CredentialList({ canWrite, onChanged }: Pick<SshCredentialsModalProps, 'canWrite' | 'onChanged'>) {
-  const credentials = useRemote<SshCredential[]>(loadCredentials)
+  const credentials = useRemote<SshCredential[]>(loadSshCredentials)
   const [editing, setEditing] = useState<SshCredential | null>(null)
   const [isCreating, setIsCreating] = useState(false)
   const refresh = () => {

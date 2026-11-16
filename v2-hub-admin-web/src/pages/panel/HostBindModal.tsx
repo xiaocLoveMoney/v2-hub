@@ -3,8 +3,8 @@ import { useState } from 'react'
 import { api, csrfHeader, toApiError, type ApiError, type Server, type ServerHost } from '../../api/client'
 import { ErrorAlert } from '../../components/ErrorAlert'
 import { FormModal } from '../../components/FormModal'
-import { MAX_PORT } from '../form-limits'
-import { DEFAULT_SSH_PORT, MAX_HOST_ADDRESS_LEN, MIN_PORT, hostnameOfUrl, validateHostAddressField } from './host-list'
+import { MAX_PORT, MIN_PORT } from '../form-limits'
+import { DEFAULT_SSH_PORT, MAX_HOST_ADDRESS_LEN, hostnameOfUrl, validateHostAddressField } from './host-list'
 import { SshCredentialSelect } from './SshCredentialSelect'
 
 interface HostBindForm {

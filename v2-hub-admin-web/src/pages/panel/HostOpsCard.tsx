@@ -4,7 +4,7 @@ import { api, type HostTask, type Server, type ServerHost } from '../../api/clie
 import { useSession } from '../../auth/session-context'
 import { ErrorAlert } from '../../components/ErrorAlert'
 import { PageHeader } from '../../components/PageHeader'
-import { usePolling } from '../../hooks/use-polling'
+import { usePollRemote } from '../../hooks/use-polling'
 import { useRemote } from '../../hooks/use-remote'
 import { PERMISSIONS } from '../../menu'
 import { HostBindModal } from './HostBindModal'
@@ -47,11 +47,7 @@ export function HostOpsCard({ server, onChanged }: HostOpsCardProps) {
 
   // 任务没结束时每 2 秒刷新主机，结束即停
   const isTaskActive = isHostTaskActive(lastTask)
-  usePolling(() => {
-    if (!host.isLoading) {
-      host.reload()
-    }
-  }, isTaskActive)
+  usePollRemote([host], isTaskActive)
 
   // 盯着一条任务（刚发起的，或看到它还没结束的）：等它结束时通知详情页刷新一次，服务器的地址、状态可能跟着变了。
   // 按任务 ID 记而不是按“是否进行中”的变化记：任务很快结束、这里没来得及看到它进行中时也不会漏掉。

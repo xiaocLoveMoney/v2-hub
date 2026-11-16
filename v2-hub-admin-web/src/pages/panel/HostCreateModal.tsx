@@ -4,9 +4,9 @@ import { api, csrfHeader, toApiError, type ApiError, type HostDetection, type Se
 import { ErrorAlert } from '../../components/ErrorAlert'
 import { FormModal } from '../../components/FormModal'
 import { mutate } from '../../hooks/use-remote'
-import { MAX_PORT } from '../form-limits'
+import { MAX_PORT, MIN_PORT } from '../form-limits'
 import { HostDetectionResult } from './HostDetectionResult'
-import { DEFAULT_SSH_PORT, MAX_HOST_BATCH, MIN_PORT, formatHostListErrors, parseHostList } from './host-list'
+import { DEFAULT_SSH_PORT, MAX_HOST_BATCH, formatHostListErrors, parseHostList } from './host-list'
 import { DEFAULT_PROVIDER, PROVIDER_OPTIONS } from './providers'
 import { SshCredentialSelect } from './SshCredentialSelect'
 

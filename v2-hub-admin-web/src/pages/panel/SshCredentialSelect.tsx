@@ -1,10 +1,9 @@
 import { Alert, Select } from 'antd'
-import { api, type SshCredential } from '../../api/client'
+import type { SshCredential } from '../../api/client'
 import { ErrorAlert } from '../../components/ErrorAlert'
 import { useRemote } from '../../hooks/use-remote'
+import { loadSshCredentials } from './host-actions'
 import { SSH_AUTH_TYPE_LABELS } from './host-labels'
-
-const loadCredentials = (signal: AbortSignal) => api.GET('/api/admin/ssh-credentials', { signal })
 
 interface SshCredentialSelectProps {
   /** 由 Form.Item 注入，用来把标签关联到下拉框。 */
@@ -18,7 +17,7 @@ interface SshCredentialSelectProps {
  * 一份凭据都没有时提示先去新建（docs/03 §5.22 SSH 凭据）。
  */
 export function SshCredentialSelect({ id, value, onChange }: SshCredentialSelectProps) {
-  const credentials = useRemote<SshCredential[]>(loadCredentials)
+  const credentials = useRemote<SshCredential[]>(loadSshCredentials)
   const options = (credentials.data ?? []).map((c) => ({ value: c.id, label: `${c.name}（${c.username}，${SSH_AUTH_TYPE_LABELS[c.authType]}）` }))
   const isEmpty = credentials.data !== null && credentials.data.length === 0
   return (

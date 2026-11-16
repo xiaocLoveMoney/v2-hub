@@ -1,8 +1,7 @@
 import { Descriptions, Tag } from 'antd'
 import type { HostDetection } from '../../api/client'
-import { DEPLOY_PLAN_LABELS, PANEL_STATE_LABELS, hostErrorText } from './host-labels'
+import { DEPLOY_PLAN_LABELS, EMPTY, PANEL_STATE_LABELS, hostErrorText } from './host-labels'
 
-const EMPTY = '—'
 
 interface HostDetectionResultProps {
   /** 被测的地址（清单第一行）。 */

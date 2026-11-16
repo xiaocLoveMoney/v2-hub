@@ -6,8 +6,6 @@ export const MAX_HOST_BATCH = 50
 export const MAX_HOST_ADDRESS_LEN = 255
 /** SSH 端口的默认值。 */
 export const DEFAULT_SSH_PORT = 22
-/** 端口号的下限。 */
-export const MIN_PORT = 1
 
 /** 清单里解析出的一台主机；line 是它在文本里的行号（从 1 起）。 */
 export interface HostListEntry {
