@@ -1,6 +1,7 @@
-import { useState } from 'react'
+import { useCallback, useState } from 'react'
 import { Link } from 'react-router'
 import { api, type Shop, type ShopPlan, type ShopTrafficPack } from '../../api/client'
+import { useSession } from '../../auth/session-context'
 import { Alert, Badge, Button, Card, Empty, Loading, PageHeader } from '../../components/ui'
 import { formatBytes } from '../../format'
 import { useRemote } from '../../hooks/use-remote'
@@ -51,8 +52,15 @@ export function ShopPage() {
   const { t, tag } = useI18n()
   const currency = useCurrency()
   const shop = useRemote<Shop>(loadShop)
+  const { refresh } = useSession()
   const [item, setItem] = useState<CheckoutItem | null>(null)
   const data = shop.data
+  const reloadShop = shop.reload
+  // 买了或换了套餐，功能开关可能跟着变：除了本页数据，会话也重取，菜单才会更新（docs/06 §3 第 6 条）
+  const handlePaid = useCallback(() => {
+    reloadShop()
+    void refresh()
+  }, [reloadShop, refresh])
 
   if (shop.error !== null) {
     return (
@@ -121,7 +129,7 @@ export function ShopPage() {
           </div>
         </>
       )}
-      <CheckoutModal item={item} onClose={() => setItem(null)} onPaid={shop.reload} />
+      <CheckoutModal item={item} onClose={() => setItem(null)} onPaid={handlePaid} />
     </>
   )
 }
