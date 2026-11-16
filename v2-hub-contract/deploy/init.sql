@@ -854,9 +854,32 @@ CREATE TABLE ssh_credential (
     CONSTRAINT ck_ssh_credential_auth CHECK (auth_type IN ('key', 'password'))
 );
 
+-- DNS 账号（docs/03 §5.22，Ruling-72）：DNS 服务商的 API 令牌，一份对应一个根域名；给主机建解析与做证书的 DNS 验证。
+-- token_enc 用 AES-256-GCM 加密，关联数据 dns_account:<id>:token；只在 hub-server 上使用，不下发到主机。被主机引用时不能删。
+CREATE TABLE dns_account (
+    id            BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    name          VARCHAR(64)  NOT NULL,
+    provider_type VARCHAR(16)  NOT NULL,                   -- 服务商：cloudflare
+    zone          VARCHAR(255) NOT NULL,                   -- 根域名，小写，如 example.com
+    token_enc     BYTEA        NOT NULL,
+    remark        VARCHAR(255) NOT NULL DEFAULT '',
+    created_at    TIMESTAMPTZ  NOT NULL DEFAULT now(),
+    updated_at    TIMESTAMPTZ  NOT NULL DEFAULT now(),
+    CONSTRAINT uk_dns_account_name UNIQUE (name)
+);
+
+-- ACME 账号（docs/03 §5.22，Ruling-73）：每个签发方目录地址一把账号密钥，首次申请证书时生成。
+-- key_enc 是 PKCS#8 的 ECDSA P-256 私钥，AES-256-GCM 加密，关联数据 acme_account:<directory_url>:key。
+CREATE TABLE acme_account (
+    directory_url VARCHAR(255) PRIMARY KEY,
+    key_enc       BYTEA        NOT NULL,
+    created_at    TIMESTAMPTZ  NOT NULL DEFAULT now()
+);
+
 -- 托管主机（docs/03 §5.22）：一台能 SSH 登录的机器；装好面板并接入后 server_id 指向对应的服务器。
 -- host_key_sha256 是首次连接时记录并固定的主机公钥指纹，空串 = 还没记录；os_id、arch 取自最近一次检测。
 -- 删服务器时主机保留、解除关联；删主机时任务历史一并删除。
+-- dns_account_id 与 domain 同有同无：有则面板证书由平台申请（Ruling-73），cert_not_after 是这张证书的到期时间，空 = 还没申请到。
 CREATE TABLE server_host (
     id              BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     name            VARCHAR(64)  NOT NULL,                 -- 接入时用作服务器名
@@ -870,6 +893,9 @@ CREATE TABLE server_host (
     os_id           VARCHAR(32)  NOT NULL DEFAULT '',
     arch            VARCHAR(16)  NOT NULL DEFAULT '',
     server_id       BIGINT       REFERENCES server (id) ON DELETE SET NULL,
+    dns_account_id  BIGINT       REFERENCES dns_account (id) ON DELETE RESTRICT,
+    domain          VARCHAR(255) NOT NULL DEFAULT '',      -- 面板用的域名，小写；空串 = 不申请公开证书
+    cert_not_after  TIMESTAMPTZ,
     created_at      TIMESTAMPTZ  NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ  NOT NULL DEFAULT now(),
     CONSTRAINT uk_server_host_name UNIQUE (name),
@@ -877,9 +903,12 @@ CREATE TABLE server_host (
     CONSTRAINT uk_server_host_server UNIQUE (server_id),
     CONSTRAINT ck_server_host_region CHECK (region ~ '^([A-Z]{2})?$'),
     CONSTRAINT ck_server_host_ssh_port CHECK (ssh_port BETWEEN 1 AND 65535),
-    CONSTRAINT ck_server_host_panel_port CHECK (panel_port IS NULL OR panel_port BETWEEN 1 AND 65535)
+    CONSTRAINT ck_server_host_panel_port CHECK (panel_port IS NULL OR panel_port BETWEEN 1 AND 65535),
+    CONSTRAINT ck_server_host_domain CHECK ((dns_account_id IS NULL) = (domain = ''))
 );
 CREATE INDEX idx_server_host_credential ON server_host (credential_id);
+CREATE INDEX idx_server_host_dns_account ON server_host (dns_account_id);
+CREATE UNIQUE INDEX uk_server_host_domain ON server_host (domain) WHERE domain <> '';
 
 -- 主机任务（docs/03 §5.22，Ruling-71）：经 SSH 做的每件事一行。一台主机同时只有一条未结束的任务（部分唯一索引）。
 -- log 是脱敏后的步骤日志，上限 64 KB；error_code 是失败原因大类，last_error 是脱敏后的摘要。
