@@ -23,6 +23,8 @@ type Fake struct {
 
 	mu    sync.Mutex
 	calls []string
+	// installedCert 是最近一次 InstallCert 收到的证书链。
+	installedCert []byte
 }
 
 var _ deploy.Deployer = (*Fake)(nil)
@@ -39,6 +41,13 @@ func (f *Fake) Calls() []string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return append([]string(nil), f.calls...)
+}
+
+// InstalledCert 返回最近一次 InstallCert 收到的证书链；没装过为 nil。
+func (f *Fake) InstalledCert() []byte {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.installedCert
 }
 
 // Detect 见 deploy.Deployer。
@@ -63,6 +72,17 @@ func (f *Fake) IssueToken(context.Context, remote.Runner) (string, error) {
 		return "", err
 	}
 	return f.Token, nil
+}
+
+// InstallCert 见 deploy.Deployer；记下收到的证书。
+func (f *Fake) InstallCert(_ context.Context, _ remote.Runner, certPEM, _ []byte) error {
+	if err := f.enter("InstallCert"); err != nil {
+		return err
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.installedCert = certPEM
+	return nil
 }
 
 // EnableTLS 见 deploy.Deployer。

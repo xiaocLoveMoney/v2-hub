@@ -83,6 +83,14 @@ const (
 	defaultDeployActionLimit    = 60
 	defaultDeployActionWindow   = 10 * time.Minute
 	defaultDeployMaxBatch       = 50
+	// 公开证书（docs/03 §5.22，Ruling-73）：整条任务 10 分钟，等 TXT 生效最多 3 分钟，离到期 30 天开始续，每 12 小时检查一次。
+	defaultACMEDirectoryURL        = "https://acme-v02.api.letsencrypt.org/directory"
+	defaultACMETimeout             = 10 * time.Minute
+	defaultACMEPropagationTimeout  = 3 * time.Minute
+	defaultACMEPropagationInterval = 5 * time.Second
+	defaultACMERenewBefore         = 30 * 24 * time.Hour
+	defaultACMERenewInterval       = 12 * time.Hour
+	defaultCloudflareAPIURL        = "https://api.cloudflare.com/client/v4"
 )
 
 // ErrInvalidConfig 表示配置内容不合法。
@@ -144,6 +152,7 @@ type ReachConfig struct {
 // ConnectTimeout 是 SSH 连接加握手的时限，CommandTimeout 是普通动作的总时限，InstallTimeout 是安装与升级的总时限；
 // TestLimit / TestWindow 是每个管理员做连接测试的频率，ActionLimit / ActionWindow 是每个管理员发起动作的频率；
 // MaxBatch 是一次批量新建的主机数上限；AllowLoopback 允许连回环地址，只给联调用，生产必须为 false。
+// CloudflareAPIURL 是 Cloudflare 接口的根地址（只在测试里改）；ACME 是公开证书的签发参数。
 type DeployConfig struct {
 	Concurrency    int           `yaml:"concurrency"`
 	PollInterval   time.Duration `yaml:"pollInterval"`
@@ -156,6 +165,23 @@ type DeployConfig struct {
 	ActionWindow   time.Duration `yaml:"actionWindow"`
 	MaxBatch       int           `yaml:"maxBatch"`
 	AllowLoopback  bool          `yaml:"allowLoopback"`
+
+	CloudflareAPIURL string     `yaml:"cloudflareApiUrl"`
+	ACME             ACMEConfig `yaml:"acme"`
+}
+
+// ACMEConfig 是面板公开证书的签发参数（docs/03 §5.22，Ruling-73）：DirectoryURL 是签发方的目录地址；
+// Timeout 是一条“配置证书”任务的总时限；PropagationTimeout / PropagationInterval 是等验证记录生效的时限与查询间隔；
+// Resolvers 非空时向这些 host:port 查验证记录而不是域名的权威服务器，只给测试环境用；
+// RenewBefore 是证书离到期多久开始自动续期，RenewInterval 是检查间隔。
+type ACMEConfig struct {
+	DirectoryURL        string        `yaml:"directoryUrl"`
+	Timeout             time.Duration `yaml:"timeout"`
+	PropagationTimeout  time.Duration `yaml:"propagationTimeout"`
+	PropagationInterval time.Duration `yaml:"propagationInterval"`
+	Resolvers           []string      `yaml:"resolvers"`
+	RenewBefore         time.Duration `yaml:"renewBefore"`
+	RenewInterval       time.Duration `yaml:"renewInterval"`
 }
 
 // SubscriptionConfig 是订阅的系统级设置。
@@ -316,6 +342,13 @@ func defaults() Config {
 		ActionLimit:    defaultDeployActionLimit,
 		ActionWindow:   defaultDeployActionWindow,
 		MaxBatch:       defaultDeployMaxBatch,
+
+		CloudflareAPIURL: defaultCloudflareAPIURL,
+		ACME: ACMEConfig{
+			DirectoryURL: defaultACMEDirectoryURL, Timeout: defaultACMETimeout,
+			PropagationTimeout: defaultACMEPropagationTimeout, PropagationInterval: defaultACMEPropagationInterval,
+			RenewBefore: defaultACMERenewBefore, RenewInterval: defaultACMERenewInterval,
+		},
 	}, Subscription: SubscriptionConfig{
 		Title:               defaultSubscriptionTitle,
 		UpdateIntervalHours: defaultSubscriptionIntervalHours,
@@ -376,6 +409,13 @@ func (c Config) validate() error {
 	}
 	if dc.TestLimit <= 0 || dc.TestWindow <= 0 || dc.ActionLimit <= 0 || dc.ActionWindow <= 0 || dc.MaxBatch <= 0 {
 		return fmt.Errorf("%w: deploy limits and windows must be positive", ErrInvalidConfig)
+	}
+	ac := dc.ACME
+	if dc.CloudflareAPIURL == "" || ac.DirectoryURL == "" || ac.Timeout <= 0 || ac.PropagationTimeout <= 0 || ac.PropagationInterval <= 0 {
+		return fmt.Errorf("%w: deploy.cloudflareApiUrl, deploy.acme.directoryUrl and acme timeouts must be set", ErrInvalidConfig)
+	}
+	if ac.RenewBefore <= 0 || ac.RenewInterval <= 0 {
+		return fmt.Errorf("%w: deploy.acme.renewBefore and renewInterval must be positive", ErrInvalidConfig)
 	}
 	po := c.Portal
 	if po.SessionIdleTimeout <= a.SessionTouchInterval || po.SessionMaxAge < po.SessionIdleTimeout || po.LoginLogRetention <= 0 {

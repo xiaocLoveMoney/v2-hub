@@ -95,6 +95,49 @@ func (q *Queries) CountServersByName(ctx context.Context, name string) (int64, e
 	return count, err
 }
 
+const createACMEAccount = `-- name: CreateACMEAccount :exec
+INSERT INTO acme_account (directory_url, key_enc)
+VALUES ($1, $2)
+ON CONFLICT (directory_url) DO NOTHING
+`
+
+type CreateACMEAccountParams struct {
+	DirectoryUrl string
+	KeyEnc       []byte
+}
+
+// 两个任务同时首次申请时只留先写入的那把密钥，后到的丢弃自己生成的、回读先到的
+func (q *Queries) CreateACMEAccount(ctx context.Context, arg CreateACMEAccountParams) error {
+	_, err := q.db.Exec(ctx, createACMEAccount, arg.DirectoryUrl, arg.KeyEnc)
+	return err
+}
+
+const createDNSAccount = `-- name: CreateDNSAccount :one
+INSERT INTO dns_account (name, provider_type, zone, token_enc, remark)
+VALUES ($1, $2, $3, '\x00', $4)
+RETURNING id
+`
+
+type CreateDNSAccountParams struct {
+	Name         string
+	ProviderType string
+	Zone         string
+	Remark       string
+}
+
+// 密文依赖 id 作关联数据，先写占位，同一事务内再 SetDNSAccountToken
+func (q *Queries) CreateDNSAccount(ctx context.Context, arg CreateDNSAccountParams) (int64, error) {
+	row := q.db.QueryRow(ctx, createDNSAccount,
+		arg.Name,
+		arg.ProviderType,
+		arg.Zone,
+		arg.Remark,
+	)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}
+
 const createHostTask = `-- name: CreateHostTask :one
 INSERT INTO host_task (host_id, kind, created_by)
 VALUES ($1, $2, $3)
@@ -141,8 +184,8 @@ func (q *Queries) CreateSSHCredential(ctx context.Context, arg CreateSSHCredenti
 }
 
 const createServerHost = `-- name: CreateServerHost :one
-INSERT INTO server_host (name, address, ssh_port, credential_id, provider_type, region, panel_port, server_id)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+INSERT INTO server_host (name, address, ssh_port, credential_id, provider_type, region, panel_port, server_id, dns_account_id, domain)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 RETURNING id
 `
 
@@ -155,6 +198,8 @@ type CreateServerHostParams struct {
 	Region       string
 	PanelPort    pgtype.Int4
 	ServerID     pgtype.Int8
+	DnsAccountID pgtype.Int8
+	Domain       string
 }
 
 func (q *Queries) CreateServerHost(ctx context.Context, arg CreateServerHostParams) (int64, error) {
@@ -167,10 +212,24 @@ func (q *Queries) CreateServerHost(ctx context.Context, arg CreateServerHostPara
 		arg.Region,
 		arg.PanelPort,
 		arg.ServerID,
+		arg.DnsAccountID,
+		arg.Domain,
 	)
 	var id int64
 	err := row.Scan(&id)
 	return id, err
+}
+
+const deleteDNSAccount = `-- name: DeleteDNSAccount :execrows
+DELETE FROM dns_account WHERE id = $1
+`
+
+func (q *Queries) DeleteDNSAccount(ctx context.Context, id int64) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteDNSAccount, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const deleteSSHCredential = `-- name: DeleteSSHCredential :execrows
@@ -241,6 +300,76 @@ func (q *Queries) FinishHostTask(ctx context.Context, arg FinishHostTaskParams) 
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const getACMEAccountKey = `-- name: GetACMEAccountKey :one
+SELECT key_enc FROM acme_account WHERE directory_url = $1
+`
+
+func (q *Queries) GetACMEAccountKey(ctx context.Context, directoryUrl string) ([]byte, error) {
+	row := q.db.QueryRow(ctx, getACMEAccountKey, directoryUrl)
+	var key_enc []byte
+	err := row.Scan(&key_enc)
+	return key_enc, err
+}
+
+const getDNSAccount = `-- name: GetDNSAccount :one
+SELECT a.id, a.name, a.provider_type, a.zone, a.remark, a.created_at, a.updated_at,
+       (SELECT COUNT(*) FROM server_host h WHERE h.dns_account_id = a.id)::int AS host_count
+FROM dns_account a
+WHERE a.id = $1
+`
+
+type GetDNSAccountRow struct {
+	ID           int64
+	Name         string
+	ProviderType string
+	Zone         string
+	Remark       string
+	CreatedAt    pgtype.Timestamptz
+	UpdatedAt    pgtype.Timestamptz
+	HostCount    int32
+}
+
+func (q *Queries) GetDNSAccount(ctx context.Context, id int64) (GetDNSAccountRow, error) {
+	row := q.db.QueryRow(ctx, getDNSAccount, id)
+	var i GetDNSAccountRow
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.ProviderType,
+		&i.Zone,
+		&i.Remark,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.HostCount,
+	)
+	return i, err
+}
+
+const getDNSAccountSecret = `-- name: GetDNSAccountSecret :one
+SELECT id, provider_type, zone, token_enc
+FROM dns_account
+WHERE id = $1
+`
+
+type GetDNSAccountSecretRow struct {
+	ID           int64
+	ProviderType string
+	Zone         string
+	TokenEnc     []byte
+}
+
+func (q *Queries) GetDNSAccountSecret(ctx context.Context, id int64) (GetDNSAccountSecretRow, error) {
+	row := q.db.QueryRow(ctx, getDNSAccountSecret, id)
+	var i GetDNSAccountSecretRow
+	err := row.Scan(
+		&i.ID,
+		&i.ProviderType,
+		&i.Zone,
+		&i.TokenEnc,
+	)
+	return i, err
 }
 
 const getHostTask = `-- name: GetHostTask :one
@@ -364,10 +493,12 @@ func (q *Queries) GetSSHCredentialSecret(ctx context.Context, id int64) (GetSSHC
 const getServerHost = `-- name: GetServerHost :one
 SELECT h.id, h.name, h.address, h.ssh_port, h.credential_id, h.provider_type, h.region, h.panel_port,
        h.host_key_sha256, h.os_id, h.arch, h.server_id, h.created_at,
-       c.name AS credential_name, coalesce(s.name, '')::varchar AS server_name
+       c.name AS credential_name, coalesce(s.name, '')::varchar AS server_name,
+       h.dns_account_id, h.domain, h.cert_not_after, coalesce(d.name, '')::varchar AS dns_account_name
 FROM server_host h
 JOIN ssh_credential c ON c.id = h.credential_id
 LEFT JOIN server s ON s.id = h.server_id
+LEFT JOIN dns_account d ON d.id = h.dns_account_id
 WHERE h.id = $1
 `
 
@@ -387,6 +518,10 @@ type GetServerHostRow struct {
 	CreatedAt      pgtype.Timestamptz
 	CredentialName string
 	ServerName     string
+	DnsAccountID   pgtype.Int8
+	Domain         string
+	CertNotAfter   pgtype.Timestamptz
+	DnsAccountName string
 }
 
 func (q *Queries) GetServerHost(ctx context.Context, id int64) (GetServerHostRow, error) {
@@ -408,8 +543,61 @@ func (q *Queries) GetServerHost(ctx context.Context, id int64) (GetServerHostRow
 		&i.CreatedAt,
 		&i.CredentialName,
 		&i.ServerName,
+		&i.DnsAccountID,
+		&i.Domain,
+		&i.CertNotAfter,
+		&i.DnsAccountName,
 	)
 	return i, err
+}
+
+const listDNSAccounts = `-- name: ListDNSAccounts :many
+
+SELECT a.id, a.name, a.provider_type, a.zone, a.remark, a.created_at, a.updated_at,
+       (SELECT COUNT(*) FROM server_host h WHERE h.dns_account_id = a.id)::int AS host_count
+FROM dns_account a
+ORDER BY a.id
+`
+
+type ListDNSAccountsRow struct {
+	ID           int64
+	Name         string
+	ProviderType string
+	Zone         string
+	Remark       string
+	CreatedAt    pgtype.Timestamptz
+	UpdatedAt    pgtype.Timestamptz
+	HostCount    int32
+}
+
+// DNS 账号与 ACME 账号（docs/03 §5.22，Ruling-72、Ruling-73）-----------------------
+func (q *Queries) ListDNSAccounts(ctx context.Context) ([]ListDNSAccountsRow, error) {
+	rows, err := q.db.Query(ctx, listDNSAccounts)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListDNSAccountsRow{}
+	for rows.Next() {
+		var i ListDNSAccountsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.ProviderType,
+			&i.Zone,
+			&i.Remark,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.HostCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listHostTasks = `-- name: ListHostTasks :many
@@ -469,6 +657,41 @@ func (q *Queries) ListHostTasks(ctx context.Context, arg ListHostTasksParams) ([
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listHostsDueForCertRenewal = `-- name: ListHostsDueForCertRenewal :many
+SELECT h.id
+FROM server_host h
+WHERE h.dns_account_id IS NOT NULL AND h.server_id IS NOT NULL AND h.cert_not_after < $1
+  AND NOT EXISTS (SELECT 1 FROM host_task t WHERE t.host_id = h.id AND t.status IN ('queued', 'running'))
+ORDER BY h.cert_not_after
+LIMIT $2
+`
+
+type ListHostsDueForCertRenewalParams struct {
+	CertNotAfter pgtype.Timestamptz
+	Limit        int32
+}
+
+// 平台申请的证书快到期、已接入且没有未结束任务的主机；到期早的在前
+func (q *Queries) ListHostsDueForCertRenewal(ctx context.Context, arg ListHostsDueForCertRenewalParams) ([]int64, error) {
+	rows, err := q.db.Query(ctx, listHostsDueForCertRenewal, arg.CertNotAfter, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []int64{}
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -587,10 +810,12 @@ func (q *Queries) ListSSHCredentials(ctx context.Context) ([]ListSSHCredentialsR
 const listServerHosts = `-- name: ListServerHosts :many
 SELECT h.id, h.name, h.address, h.ssh_port, h.credential_id, h.provider_type, h.region, h.panel_port,
        h.host_key_sha256, h.os_id, h.arch, h.server_id, h.created_at,
-       c.name AS credential_name, coalesce(s.name, '')::varchar AS server_name
+       c.name AS credential_name, coalesce(s.name, '')::varchar AS server_name,
+       h.dns_account_id, h.domain, h.cert_not_after, coalesce(d.name, '')::varchar AS dns_account_name
 FROM server_host h
 JOIN ssh_credential c ON c.id = h.credential_id
 LEFT JOIN server s ON s.id = h.server_id
+LEFT JOIN dns_account d ON d.id = h.dns_account_id
 ORDER BY h.id
 `
 
@@ -610,6 +835,10 @@ type ListServerHostsRow struct {
 	CreatedAt      pgtype.Timestamptz
 	CredentialName string
 	ServerName     string
+	DnsAccountID   pgtype.Int8
+	Domain         string
+	CertNotAfter   pgtype.Timestamptz
+	DnsAccountName string
 }
 
 func (q *Queries) ListServerHosts(ctx context.Context) ([]ListServerHostsRow, error) {
@@ -637,6 +866,10 @@ func (q *Queries) ListServerHosts(ctx context.Context) ([]ListServerHostsRow, er
 			&i.CreatedAt,
 			&i.CredentialName,
 			&i.ServerName,
+			&i.DnsAccountID,
+			&i.Domain,
+			&i.CertNotAfter,
+			&i.DnsAccountName,
 		); err != nil {
 			return nil, err
 		}
@@ -678,6 +911,20 @@ func (q *Queries) ListServersByPanelGUID(ctx context.Context, panelGuid string) 
 	return items, nil
 }
 
+const setDNSAccountToken = `-- name: SetDNSAccountToken :exec
+UPDATE dns_account SET token_enc = $2, updated_at = now() WHERE id = $1
+`
+
+type SetDNSAccountTokenParams struct {
+	ID       int64
+	TokenEnc []byte
+}
+
+func (q *Queries) SetDNSAccountToken(ctx context.Context, arg SetDNSAccountTokenParams) error {
+	_, err := q.db.Exec(ctx, setDNSAccountToken, arg.ID, arg.TokenEnc)
+	return err
+}
+
 const setHostTaskStep = `-- name: SetHostTaskStep :exec
 UPDATE host_task SET step = $2 WHERE id = $1
 `
@@ -712,6 +959,20 @@ func (q *Queries) SetSSHCredentialSecret(ctx context.Context, arg SetSSHCredenti
 		arg.PassphraseEnc,
 		arg.KeyFingerprint,
 	)
+	return err
+}
+
+const setServerHostCert = `-- name: SetServerHostCert :exec
+UPDATE server_host SET cert_not_after = $2, updated_at = now() WHERE id = $1
+`
+
+type SetServerHostCertParams struct {
+	ID           int64
+	CertNotAfter pgtype.Timestamptz
+}
+
+func (q *Queries) SetServerHostCert(ctx context.Context, arg SetServerHostCertParams) error {
+	_, err := q.db.Exec(ctx, setServerHostCert, arg.ID, arg.CertNotAfter)
 	return err
 }
 
@@ -756,6 +1017,34 @@ type SetServerHostServerParams struct {
 func (q *Queries) SetServerHostServer(ctx context.Context, arg SetServerHostServerParams) error {
 	_, err := q.db.Exec(ctx, setServerHostServer, arg.ID, arg.ServerID)
 	return err
+}
+
+const updateDNSAccount = `-- name: UpdateDNSAccount :execrows
+UPDATE dns_account
+SET name = $2, provider_type = $3, zone = $4, remark = $5, updated_at = now()
+WHERE id = $1
+`
+
+type UpdateDNSAccountParams struct {
+	ID           int64
+	Name         string
+	ProviderType string
+	Zone         string
+	Remark       string
+}
+
+func (q *Queries) UpdateDNSAccount(ctx context.Context, arg UpdateDNSAccountParams) (int64, error) {
+	result, err := q.db.Exec(ctx, updateDNSAccount,
+		arg.ID,
+		arg.Name,
+		arg.ProviderType,
+		arg.Zone,
+		arg.Remark,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const updateSSHCredential = `-- name: UpdateSSHCredential :execrows
@@ -816,9 +1105,11 @@ func (q *Queries) UpdateServerConn(ctx context.Context, arg UpdateServerConnPara
 const updateServerHost = `-- name: UpdateServerHost :execrows
 UPDATE server_host
 SET name = $1, credential_id = $2, region = $3, panel_port = $4,
-    host_key_sha256 = CASE WHEN address = $5 AND ssh_port = $6 THEN host_key_sha256 ELSE '' END,
-    address = $5, ssh_port = $6, updated_at = now()
-WHERE id = $7
+    cert_not_after = CASE WHEN domain = $5 AND dns_account_id IS NOT DISTINCT FROM $6 THEN cert_not_after END,
+    dns_account_id = $6, domain = $5,
+    host_key_sha256 = CASE WHEN address = $7 AND ssh_port = $8 THEN host_key_sha256 ELSE '' END,
+    address = $7, ssh_port = $8, updated_at = now()
+WHERE id = $9
 `
 
 type UpdateServerHostParams struct {
@@ -826,18 +1117,23 @@ type UpdateServerHostParams struct {
 	CredentialID int64
 	Region       string
 	PanelPort    pgtype.Int4
+	Domain       string
+	DnsAccountID pgtype.Int8
 	Address      string
 	SshPort      int32
 	ID           int64
 }
 
-// 改了地址或端口就清空已固定的主机密钥，下次连接重新记录
+// 改了地址或端口就清空已固定的主机密钥，下次连接重新记录；改了域名或 DNS 账号就清空证书到期时间，不再自动续期，
+// 直到再做一次“配置证书”
 func (q *Queries) UpdateServerHost(ctx context.Context, arg UpdateServerHostParams) (int64, error) {
 	result, err := q.db.Exec(ctx, updateServerHost,
 		arg.Name,
 		arg.CredentialID,
 		arg.Region,
 		arg.PanelPort,
+		arg.Domain,
+		arg.DnsAccountID,
 		arg.Address,
 		arg.SshPort,
 		arg.ID,

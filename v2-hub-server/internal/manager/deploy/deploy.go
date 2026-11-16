@@ -29,6 +29,8 @@ const (
 	ReasonUnreachable      Reason = "unreachable"
 	ReasonHostKeyChanged   Reason = "host_key_changed"
 	ReasonNameTaken        Reason = "name_taken"
+	ReasonDNSFailed        Reason = "dns_failed"
+	ReasonCertFailed       Reason = "cert_failed"
 	ReasonInterrupted      Reason = "interrupted"
 	ReasonCommandFailed    Reason = "command_failed"
 )
@@ -116,6 +118,9 @@ type Deployer interface {
 	IssueToken(ctx context.Context, r remote.Runner) (string, error)
 	// EnableTLS 生成自签证书设给面板并重启；address 写进证书的主体，返回证书的 SHA-256（Base64）。
 	EnableTLS(ctx context.Context, r remote.Runner, address string) (string, error)
+	// InstallCert 把一份证书链与私钥（PEM）装到面板上并重启；用于平台申请到的公开证书（Ruling-73）。
+	// 私钥只经 SSH 的标准输入传过去，不进命令行与日志。
+	InstallCert(ctx context.Context, r remote.Runner, certPEM, keyPEM []byte) error
 	// RestartPanel 重启面板（连带内核）并确认服务在运行。
 	RestartPanel(ctx context.Context, r remote.Runner) error
 	// RestartCore 只让面板重载内核。

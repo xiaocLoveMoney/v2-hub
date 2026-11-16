@@ -16,6 +16,8 @@ import (
 	"v2-hub-server/internal/dao/sqlcgen"
 	"v2-hub-server/internal/manager/deploy"
 	"v2-hub-server/internal/manager/deploy/deploytest"
+	"v2-hub-server/internal/manager/dns"
+	"v2-hub-server/internal/manager/dns/dnstest"
 	"v2-hub-server/internal/manager/panel"
 	"v2-hub-server/internal/manager/remote"
 	"v2-hub-server/internal/manager/remote/remotetest"
@@ -41,6 +43,8 @@ type hostFixture struct {
 	dialer   *remotetest.Dialer
 	runner   *remotetest.Runner
 	deployer *deploytest.Fake
+	dnsFake  *dnstest.Fake
+	issuer   *fakeIssuer
 	credID   int64
 }
 
@@ -69,11 +73,17 @@ func newHostFixture(t *testing.T) *hostFixture {
 		Token:       issuedToken, CertPin: testCertPin, Errors: map[string]error{},
 		Login: deploy.PanelLogin{Username: "newuser", Password: "newpassword1234567890"},
 	}
-	hosts := NewHostService(pf.pool, testSealer(t), dialer, deploy.NewRegistry(map[string]deploy.Deployer{fakeType: deployer}), pf.panels, HostConfig{
-		CommandTimeout: time.Minute, InstallTimeout: time.Minute, TestLimit: hostTestLimit, TestWindow: time.Minute,
+	dnsFake := dnstest.New()
+	issuer := &fakeIssuer{notAfter: pf.clock.now().Add(testCertLifetime)}
+	hosts := NewHostService(pf.pool, testSealer(t), HostDeps{
+		Dialer: dialer, Deployers: deploy.NewRegistry(map[string]deploy.Deployer{fakeType: deployer}),
+		DNS: dns.NewRegistry(map[string]dns.Factory{fakeDNSType: dnsFake.Factory()}), Issuer: issuer, Panels: pf.panels,
+	}, HostConfig{
+		CommandTimeout: time.Minute, InstallTimeout: time.Minute, CertTimeout: time.Minute, RenewBefore: testRenewBefore,
+		TestLimit: hostTestLimit, TestWindow: time.Minute,
 		ActionLimit: hostActionsMax, ActionWindow: time.Minute, MaxBatch: 3, PanelWaitAttempts: 2, PanelWaitInterval: time.Millisecond, Now: pf.clock.now,
 	})
-	f := &hostFixture{panelFixture: pf, hosts: hosts, dialer: dialer, runner: runner, deployer: deployer}
+	f := &hostFixture{panelFixture: pf, hosts: hosts, dialer: dialer, runner: runner, deployer: deployer, dnsFake: dnsFake, issuer: issuer}
 	cred, err := hosts.CreateCredential(context.Background(), pf.actor, SSHCredentialInput{Name: "root-key", Username: "root", AuthType: SSHAuthKey, Secret: testPrivateKey(t)}, nil)
 	if err != nil {
 		t.Fatalf("CreateCredential: %v", err)

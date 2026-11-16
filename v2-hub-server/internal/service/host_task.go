@@ -150,9 +150,20 @@ func (s *HostService) GetTask(ctx context.Context, id int64) (*HostTaskDetail, e
 	return &HostTaskDetail{HostTask: *t, Log: log}, nil
 }
 
+// taskOrigin 说明一条任务是谁排的：管理员发起的带 adminID 与来源 IP，系统排的（证书自动续期）两者都空。
+type taskOrigin struct {
+	actorType string
+	adminID   int64
+	ip        *netip.Addr
+}
+
+func adminOrigin(actor *AdminPrincipal, ip *netip.Addr) taskOrigin {
+	return taskOrigin{actorType: ActorAdmin, adminID: actor.AdminID, ip: ip}
+}
+
 // insertTask 在事务里排一条任务并写审计；该主机已有未结束的任务时返回 409（由部分唯一索引保证）。
-func (s *HostService) insertTask(ctx context.Context, q *sqlcgen.Queries, actor *AdminPrincipal, ip *netip.Addr, hostID int64, kind string) (int64, error) {
-	id, err := q.CreateHostTask(ctx, sqlcgen.CreateHostTaskParams{HostID: hostID, Kind: kind, CreatedBy: pgtype.Int8{Int64: actor.AdminID, Valid: actor.AdminID != 0}})
+func (s *HostService) insertTask(ctx context.Context, q *sqlcgen.Queries, by taskOrigin, hostID int64, kind string) (int64, error) {
+	id, err := q.CreateHostTask(ctx, sqlcgen.CreateHostTaskParams{HostID: hostID, Kind: kind, CreatedBy: pgtype.Int8{Int64: by.adminID, Valid: by.adminID != 0}})
 	if isUniqueViolation(err) {
 		return 0, newError(CodeConflict, msgHostBusy)
 	}
@@ -160,7 +171,7 @@ func (s *HostService) insertTask(ctx context.Context, q *sqlcgen.Queries, actor 
 		return 0, fmt.Errorf("create host task: %w", err)
 	}
 	return id, writeAudit(ctx, q, AuditEntry{
-		ActorType: ActorAdmin, ActorID: actor.AdminID, Action: ActionHostTaskCreate, TargetType: targetHostTask, TargetID: fmt.Sprint(id), ClientIP: ip,
+		ActorType: by.actorType, ActorID: by.adminID, Action: ActionHostTaskCreate, TargetType: targetHostTask, TargetID: fmt.Sprint(id), ClientIP: by.ip,
 		Detail: map[string]any{"hostId": hostID, "kind": kind},
 	})
 }
@@ -187,7 +198,7 @@ func (s *HostService) CreateAction(ctx context.Context, actor *AdminPrincipal, h
 	var id int64
 	err = s.inTx(ctx, func(q *sqlcgen.Queries) error {
 		var err error
-		id, err = s.insertTask(ctx, q, actor, ip, hostID, kind)
+		id, err = s.insertTask(ctx, q, adminOrigin(actor, ip), hostID, kind)
 		return err
 	})
 	if err != nil {
@@ -304,11 +315,16 @@ func taskFailure(err error) (deploy.Reason, string) {
 	return deploy.ReasonCommandFailed, msgTaskInternal
 }
 
-func (s *HostService) taskTimeout(kind string) time.Duration {
-	if kind == HostTaskProvision || kind == HostTaskUpgrade {
+// taskTimeout 是一条任务的总时限：部署与升级要下载程序包；申请公开证书要等解析生效与签发方验证。
+func (s *HostService) taskTimeout(kind string, hasDNS bool) time.Duration {
+	switch {
+	case kind == HostTaskProvision || kind == HostTaskUpgrade:
 		return s.cfg.InstallTimeout
+	case kind == HostTaskEnableTLS && hasDNS:
+		return max(s.cfg.CertTimeout, s.cfg.CommandTimeout)
+	default:
+		return s.cfg.CommandTimeout
 	}
-	return s.cfg.CommandTimeout
 }
 
 func (s *HostService) runTask(ctx context.Context, taskID int64) error {
@@ -320,9 +336,9 @@ func (s *HostService) runTask(ctx context.Context, taskID int64) error {
 	if err != nil {
 		return err
 	}
-	ctx, cancel := context.WithTimeout(ctx, s.taskTimeout(task.Kind))
-	defer cancel()
 	t := &taskRun{svc: s, id: taskID, kind: task.Kind, adminID: task.CreatedBy.Int64, host: host}
+	ctx, cancel := context.WithTimeout(ctx, s.taskTimeout(task.Kind, t.hasDNS()))
+	defer cancel()
 	deployer, ok := s.deployers.Get(host.ProviderType)
 	if !ok {
 		return deploy.NewError(deploy.ReasonCommandFailed, msgNoDeployer)
@@ -423,10 +439,19 @@ func (t *taskRun) provision(ctx context.Context, d deploy.Deployer, r remote.Run
 	if err != nil {
 		return fmt.Errorf("link host %d to server %d: %w", t.host.ID, serverID, err)
 	}
+	t.logf("已接入，服务器 id %d", serverID)
+	// 新装的面板此时用的是自签证书，接管来的可能没有证书：主机带 DNS 账号就接着换成公开证书（“何时申请证书”）；
+	// 接管时面板自己已有证书的不动
+	if t.hasDNS() && (done.IsFresh || !done.Access.HasTLS) {
+		if err := t.certify(ctx, d, r, serverID); err != nil {
+			t.logf("%s", msgCertAfterAttach)
+			return err
+		}
+		return nil
+	}
 	if !done.Access.HasTLS {
 		t.logf("注意：面板是明文 HTTP，令牌以明文传输；可在服务器详情页的 SSH 运维里“配置证书”")
 	}
-	t.logf("已接入，服务器 id %d", serverID)
 	return nil
 }
 
@@ -440,7 +465,8 @@ func buildBaseURL(isTLS bool, address string, port int, basePath string) string 
 }
 
 // chooseConn 决定用什么方式接入面板并等它可达，返回连接信息与这次探测到的面板信息（Ruling-70）：没有证书走 http；
-// 新装的面板是平台刚配的自签证书，直接 pin；接管的面板先按 verify 试一次，不通过再 pin。
+// 新装的面板是平台刚配的自签证书，直接 pin；接管的面板先按 verify 试一次（主机有域名就先试域名——面板上可能是
+// 平台早先申请的那张公开证书），不通过再 pin。
 func (t *taskRun) chooseConn(ctx context.Context, done deploy.Provisioned) (ServerConnInput, *panel.PanelInfo, error) {
 	access := done.Access
 	conn := ServerConnInput{
@@ -448,6 +474,13 @@ func (t *taskRun) chooseConn(ctx context.Context, done deploy.Provisioned) (Serv
 		BaseURL: buildBaseURL(access.HasTLS, t.host.Address, access.Port, access.BasePath),
 	}
 	if access.HasTLS && !done.IsFresh {
+		if t.hasDNS() {
+			byDomain := conn
+			byDomain.BaseURL = buildBaseURL(true, t.host.Domain, access.Port, access.BasePath)
+			if info, err := t.svc.panels.probeConn(ctx, byDomain); err == nil {
+				return byDomain, info, nil
+			}
+		}
 		if info, err := t.svc.panels.probeConn(ctx, conn); err == nil {
 			return conn, info, nil
 		}
@@ -534,6 +567,10 @@ func (t *taskRun) operate(ctx context.Context, d deploy.Deployer, r remote.Runne
 	case HostTaskReissueToken:
 		return withServerLock(serverID, func() error { return t.reissueToken(ctx, d, r, serverID) })
 	case HostTaskEnableTLS:
+		if t.hasDNS() {
+			// 改解析与等签发可能要几分钟，不占对账锁；certify 只在装证书的那一段占
+			return t.certify(ctx, d, r, serverID)
+		}
 		return withServerLock(serverID, func() error { return t.enableTLS(ctx, d, r, serverID) })
 	default:
 		return deploy.NewError(deploy.ReasonCommandFailed, msgBadAction)

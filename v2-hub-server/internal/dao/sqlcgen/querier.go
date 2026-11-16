@@ -134,11 +134,15 @@ type Querier interface {
 	CountUsersCreatedBetween(ctx context.Context, arg CountUsersCreatedBetweenParams) (int32, error)
 	CouponCoversPlan(ctx context.Context, arg CouponCoversPlanParams) (bool, error)
 	CouponExists(ctx context.Context, id int64) (bool, error)
+	// 两个任务同时首次申请时只留先写入的那把密钥，后到的丢弃自己生成的、回读先到的
+	CreateACMEAccount(ctx context.Context, arg CreateACMEAccountParams) error
 	CreateAdmin(ctx context.Context, arg CreateAdminParams) (CreateAdminRow, error)
 	CreateAdminInviteCode(ctx context.Context, arg CreateAdminInviteCodeParams) (int64, error)
 	CreateAdminSession(ctx context.Context, arg CreateAdminSessionParams) error
 	CreateAnnouncement(ctx context.Context, arg CreateAnnouncementParams) (int64, error)
 	CreateCoupon(ctx context.Context, arg CreateCouponParams) (int64, error)
+	// 密文依赖 id 作关联数据，先写占位，同一事务内再 SetDNSAccountToken
+	CreateDNSAccount(ctx context.Context, arg CreateDNSAccountParams) (int64, error)
 	CreateHostTask(ctx context.Context, arg CreateHostTaskParams) (int64, error)
 	CreateNodeGroup(ctx context.Context, arg CreateNodeGroupParams) (int64, error)
 	CreatePlan(ctx context.Context, arg CreatePlanParams) (int64, error)
@@ -172,6 +176,7 @@ type Querier interface {
 	DeleteChainExitsByUser(ctx context.Context, userID int64) error
 	DeleteChainRoute(ctx context.Context, arg DeleteChainRouteParams) (string, error)
 	DeleteChainRoutesByUser(ctx context.Context, userID int64) error
+	DeleteDNSAccount(ctx context.Context, id int64) (int64, error)
 	DeleteEndpoint(ctx context.Context, id int64) error
 	DeleteExitNodeGroups(ctx context.Context, exitID int64) error
 	DeleteExitUsers(ctx context.Context, exitID int64) error
@@ -221,6 +226,7 @@ type Querier interface {
 	// 扫描结果只填进仍为空的位置，不覆盖管理员这期间的选择（Ruling-65）
 	FillServerRegion(ctx context.Context, arg FillServerRegionParams) (int64, error)
 	FinishHostTask(ctx context.Context, arg FinishHostTaskParams) (int64, error)
+	GetACMEAccountKey(ctx context.Context, directoryUrl string) ([]byte, error)
 	GetActiveEmailCodeForUpdate(ctx context.Context, arg GetActiveEmailCodeForUpdateParams) (GetActiveEmailCodeForUpdateRow, error)
 	GetAdminByID(ctx context.Context, id int64) (GetAdminByIDRow, error)
 	GetAdminByUsername(ctx context.Context, username string) (GetAdminByUsernameRow, error)
@@ -235,6 +241,8 @@ type Querier interface {
 	GetCouponByCodeForUpdate(ctx context.Context, code string) (GetCouponByCodeForUpdateRow, error)
 	// 数据库的当前时间：下发记录的 applied_at 用它，才能与规则的 updated_at 直接比较
 	GetDBNow(ctx context.Context) (pgtype.Timestamptz, error)
+	GetDNSAccount(ctx context.Context, id int64) (GetDNSAccountRow, error)
+	GetDNSAccountSecret(ctx context.Context, id int64) (GetDNSAccountSecretRow, error)
 	GetEndUserEmail(ctx context.Context, id int64) (pgtype.Text, error)
 	// 客户后台：终端用户会话、两步验证、登录记录（docs/03 §5.3）。
 	// 待删除的用户不可登录；停用的用户可以登录（docs/03 §5.3）。
@@ -374,6 +382,8 @@ type Querier interface {
 	ListChainRoutes(ctx context.Context, userIds []int64) ([]ListChainRoutesRow, error)
 	ListCheckins(ctx context.Context, arg ListCheckinsParams) ([]ListCheckinsRow, error)
 	ListCoupons(ctx context.Context, arg ListCouponsParams) ([]ListCouponsRow, error)
+	// DNS 账号与 ACME 账号（docs/03 §5.22，Ruling-72、Ruling-73）-----------------------
+	ListDNSAccounts(ctx context.Context) ([]ListDNSAccountsRow, error)
 	// 期望状态：每个（用户, 服务器）上应挂的入站。来源 = 套餐节点组里启用的节点，入站未缺失、服务器未停用（docs/03 §5.2 授权）
 	ListDesiredClients(ctx context.Context, serverID int64) ([]ListDesiredClientsRow, error)
 	ListEnabledServerIDs(ctx context.Context) ([]int64, error)
@@ -385,6 +395,8 @@ type Querier interface {
 	ListExpiringUsers(ctx context.Context, arg ListExpiringUsersParams) ([]ListExpiringUsersRow, error)
 	// 不带日志；新的在前
 	ListHostTasks(ctx context.Context, arg ListHostTasksParams) ([]ListHostTasksRow, error)
+	// 平台申请的证书快到期、已接入且没有未结束任务的主机；到期早的在前
+	ListHostsDueForCertRenewal(ctx context.Context, arg ListHostsDueForCertRenewalParams) ([]int64, error)
 	ListInboundsByIDs(ctx context.Context, ids []int64) ([]ListInboundsByIDsRow, error)
 	// 入站与对外地址缓存（docs/03 §5.1）------------------------------------------
 	ListInboundsByServer(ctx context.Context, serverID int64) ([]ListInboundsByServerRow, error)
@@ -547,6 +559,7 @@ type Querier interface {
 	SetChainRoutePosition(ctx context.Context, arg SetChainRoutePositionParams) (int64, error)
 	// 失败隔离（docs/03 §5.19）：记下当时的内容指纹；内容变化后指纹对不上即视为解除
 	SetChainRouteQuarantine(ctx context.Context, arg SetChainRouteQuarantineParams) error
+	SetDNSAccountToken(ctx context.Context, arg SetDNSAccountTokenParams) error
 	SetExpireNotified(ctx context.Context, arg SetExpireNotifiedParams) error
 	SetHostTaskStep(ctx context.Context, arg SetHostTaskStepParams) error
 	SetInviteCodeDisabled(ctx context.Context, arg SetInviteCodeDisabledParams) error
@@ -554,6 +567,7 @@ type Querier interface {
 	SetProvisionCounters(ctx context.Context, arg SetProvisionCountersParams) error
 	SetProvisionLinks(ctx context.Context, arg SetProvisionLinksParams) error
 	SetSSHCredentialSecret(ctx context.Context, arg SetSSHCredentialSecretParams) error
+	SetServerHostCert(ctx context.Context, arg SetServerHostCertParams) error
 	SetServerHostDetection(ctx context.Context, arg SetServerHostDetectionParams) error
 	SetServerHostKey(ctx context.Context, arg SetServerHostKeyParams) error
 	SetServerHostServer(ctx context.Context, arg SetServerHostServerParams) error
@@ -597,6 +611,7 @@ type Querier interface {
 	UpdateAnnouncement(ctx context.Context, arg UpdateAnnouncementParams) error
 	UpdateChainRoute(ctx context.Context, arg UpdateChainRouteParams) (int64, error)
 	UpdateCoupon(ctx context.Context, arg UpdateCouponParams) (int64, error)
+	UpdateDNSAccount(ctx context.Context, arg UpdateDNSAccountParams) (int64, error)
 	// 同步时以面板为准刷新缓存；drift_detected_at 由调用方按漂移规则给出（保留已有标记）。缺失是终态，不刷新
 	UpdateInboundFromSync(ctx context.Context, arg UpdateInboundFromSyncParams) error
 	UpdateNode(ctx context.Context, arg UpdateNodeParams) (int64, error)
@@ -608,7 +623,8 @@ type Querier interface {
 	UpdateServer(ctx context.Context, arg UpdateServerParams) (int64, error)
 	// 部署与运维任务改写服务器的接入信息（重签令牌、配置证书、接管已知面板）；令牌另由 SetServerToken 写
 	UpdateServerConn(ctx context.Context, arg UpdateServerConnParams) (int64, error)
-	// 改了地址或端口就清空已固定的主机密钥，下次连接重新记录
+	// 改了地址或端口就清空已固定的主机密钥，下次连接重新记录；改了域名或 DNS 账号就清空证书到期时间，不再自动续期，
+	// 直到再做一次“配置证书”
 	UpdateServerHost(ctx context.Context, arg UpdateServerHostParams) (int64, error)
 	UpdateSharedAccount(ctx context.Context, arg UpdateSharedAccountParams) (int64, error)
 	UpdateTrafficPack(ctx context.Context, arg UpdateTrafficPackParams) (int64, error)

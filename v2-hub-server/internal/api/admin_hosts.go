@@ -16,6 +16,10 @@ type HostManager interface {
 	CreateCredential(ctx context.Context, actor *service.AdminPrincipal, in service.SSHCredentialInput, ip *netip.Addr) (*service.SSHCredential, error)
 	UpdateCredential(ctx context.Context, actor *service.AdminPrincipal, id int64, in service.SSHCredentialInput, ip *netip.Addr) (*service.SSHCredential, error)
 	DeleteCredential(ctx context.Context, actor *service.AdminPrincipal, id int64, ip *netip.Addr) error
+	ListDNSAccounts(ctx context.Context) ([]service.DNSAccount, error)
+	CreateDNSAccount(ctx context.Context, actor *service.AdminPrincipal, in service.DNSAccountInput, ip *netip.Addr) (*service.DNSAccount, error)
+	UpdateDNSAccount(ctx context.Context, actor *service.AdminPrincipal, id int64, in service.DNSAccountInput, ip *netip.Addr) (*service.DNSAccount, error)
+	DeleteDNSAccount(ctx context.Context, actor *service.AdminPrincipal, id int64, ip *netip.Addr) error
 	ListHosts(ctx context.Context) ([]service.ServerHost, error)
 	GetHost(ctx context.Context, id int64) (*service.ServerHost, error)
 	CreateHosts(ctx context.Context, actor *service.AdminPrincipal, in service.HostBatchInput, ip *netip.Addr) ([]service.ServerHost, error)
@@ -64,6 +68,37 @@ func (r sshCredentialRequest) toInput() service.SSHCredentialInput {
 	return service.SSHCredentialInput{Name: r.Name, Username: r.Username, AuthType: r.AuthType, Secret: r.Secret, Passphrase: r.Passphrase, Remark: r.Remark}
 }
 
+type dnsAccountVO struct {
+	ID           int64     `json:"id"`
+	Name         string    `json:"name"`
+	ProviderType string    `json:"providerType"`
+	Zone         string    `json:"zone"`
+	Remark       string    `json:"remark"`
+	HostCount    int       `json:"hostCount"`
+	CreatedAt    time.Time `json:"createdAt"`
+	UpdatedAt    time.Time `json:"updatedAt"`
+}
+
+func toDNSAccountVO(a service.DNSAccount) dnsAccountVO {
+	return dnsAccountVO{
+		ID: a.ID, Name: a.Name, ProviderType: a.ProviderType, Zone: a.Zone, Remark: a.Remark,
+		HostCount: a.HostCount, CreatedAt: a.CreatedAt, UpdatedAt: a.UpdatedAt,
+	}
+}
+
+// dnsAccountRequest 的 token 只写：响应里没有对应字段。
+type dnsAccountRequest struct {
+	Name         string `json:"name"`
+	ProviderType string `json:"providerType"`
+	Zone         string `json:"zone"`
+	Token        string `json:"token"`
+	Remark       string `json:"remark"`
+}
+
+func (r dnsAccountRequest) toInput() service.DNSAccountInput {
+	return service.DNSAccountInput{Name: r.Name, ProviderType: r.ProviderType, Zone: r.Zone, Token: r.Token, Remark: r.Remark}
+}
+
 type hostTaskVO struct {
 	ID            int64      `json:"id"`
 	HostID        int64      `json:"hostId"`
@@ -105,6 +140,10 @@ type serverHostVO struct {
 	Arch           string      `json:"arch"`
 	ServerID       *int64      `json:"serverId"`
 	ServerName     string      `json:"serverName"`
+	DNSAccountID   *int64      `json:"dnsAccountId"`
+	DNSAccountName string      `json:"dnsAccountName"`
+	Domain         string      `json:"domain"`
+	CertNotAfter   *time.Time  `json:"certNotAfter"`
 	LastTask       *hostTaskVO `json:"lastTask"`
 	CreatedAt      time.Time   `json:"createdAt"`
 }
@@ -114,6 +153,7 @@ func toServerHostVO(h service.ServerHost) serverHostVO {
 		ID: h.ID, Name: h.Name, Address: h.Address, SSHPort: h.SSHPort, CredentialID: h.CredentialID, CredentialName: h.CredentialName,
 		ProviderType: h.ProviderType, Region: h.Region, PanelPort: h.PanelPort, HostKeySHA256: h.HostKeySHA256, OSID: h.OSID, Arch: h.Arch,
 		ServerID: h.ServerID, ServerName: h.ServerName, CreatedAt: h.CreatedAt,
+		DNSAccountID: h.DNSAccountID, DNSAccountName: h.DNSAccountName, Domain: h.Domain, CertNotAfter: h.CertNotAfter,
 	}
 	if h.LastTask != nil {
 		task := toHostTaskVO(*h.LastTask)
@@ -129,12 +169,15 @@ type serverHostRequest struct {
 	CredentialID int64  `json:"credentialId"`
 	Region       string `json:"region"`
 	PanelPort    *int   `json:"panelPort"`
+	DNSAccountID *int64 `json:"dnsAccountId"`
+	Domain       string `json:"domain"`
 }
 
 type serverHostBatchItem struct {
 	Address string `json:"address"`
 	Name    string `json:"name"`
 	Region  string `json:"region"`
+	Domain  string `json:"domain"`
 }
 
 type serverHostBatchRequest struct {
@@ -142,14 +185,15 @@ type serverHostBatchRequest struct {
 	SSHPort      int                   `json:"sshPort"`
 	ProviderType string                `json:"providerType"`
 	PanelPort    *int                  `json:"panelPort"`
+	DNSAccountID *int64                `json:"dnsAccountId"`
 	Hosts        []serverHostBatchItem `json:"hosts"`
 }
 
 func (r serverHostBatchRequest) toInput() service.HostBatchInput {
 	return service.HostBatchInput{
-		CredentialID: r.CredentialID, SSHPort: r.SSHPort, ProviderType: r.ProviderType, PanelPort: r.PanelPort,
+		CredentialID: r.CredentialID, SSHPort: r.SSHPort, ProviderType: r.ProviderType, PanelPort: r.PanelPort, DNSAccountID: r.DNSAccountID,
 		Hosts: mapSlice(r.Hosts, func(i serverHostBatchItem) service.HostBatchItem {
-			return service.HostBatchItem{Address: i.Address, Name: i.Name, Region: i.Region}
+			return service.HostBatchItem{Address: i.Address, Name: i.Name, Region: i.Region, Domain: i.Domain}
 		}),
 	}
 }
@@ -239,6 +283,57 @@ func (h *handlers) deleteSSHCredential(w http.ResponseWriter, r *http.Request, p
 	writeOK(w, nil)
 }
 
+func (h *handlers) listDNSAccounts(w http.ResponseWriter, r *http.Request, _ *service.AdminPrincipal) {
+	list, err := h.hosts.ListDNSAccounts(r.Context())
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeOK(w, mapSlice(list, toDNSAccountVO))
+}
+
+func (h *handlers) createDNSAccount(w http.ResponseWriter, r *http.Request, p *service.AdminPrincipal) {
+	var req dnsAccountRequest
+	if err := decodeJSON(w, r, &req); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	a, err := h.hosts.CreateDNSAccount(r.Context(), p, req.toInput(), clientIP(r, h.trustedProxies))
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeOK(w, toDNSAccountVO(*a))
+}
+
+func (h *handlers) updateDNSAccount(w http.ResponseWriter, r *http.Request, p *service.AdminPrincipal) {
+	var req dnsAccountRequest
+	id, err := decodeWithID(w, r, &req)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	a, err := h.hosts.UpdateDNSAccount(r.Context(), p, id, req.toInput(), clientIP(r, h.trustedProxies))
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeOK(w, toDNSAccountVO(*a))
+}
+
+func (h *handlers) deleteDNSAccount(w http.ResponseWriter, r *http.Request, p *service.AdminPrincipal) {
+	id, err := pathID(r)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	if err := h.hosts.DeleteDNSAccount(r.Context(), p, id, clientIP(r, h.trustedProxies)); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeOK(w, nil)
+}
+
 func (h *handlers) listServerHosts(w http.ResponseWriter, r *http.Request, _ *service.AdminPrincipal) {
 	list, err := h.hosts.ListHosts(r.Context())
 	if err != nil {
@@ -318,6 +413,7 @@ func (h *handlers) updateServerHost(w http.ResponseWriter, r *http.Request, p *s
 	}
 	host, err := h.hosts.UpdateHost(r.Context(), p, id, service.ServerHostInput{
 		Name: req.Name, Address: req.Address, SSHPort: req.SSHPort, CredentialID: req.CredentialID, Region: req.Region, PanelPort: req.PanelPort,
+		DNSAccountID: req.DNSAccountID, Domain: req.Domain,
 	}, clientIP(r, h.trustedProxies))
 	writeHost(w, r, host, err)
 }
