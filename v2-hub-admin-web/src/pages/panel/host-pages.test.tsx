@@ -5,7 +5,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { Pollable } from '../../hooks/use-polling'
 import { PERMISSIONS } from '../../menu'
 import { TEST_CSRF, mockServer, ok, renderWith } from '../../test/harness'
-import { CREDENTIAL, CREDENTIAL_OPTION, QUIET_MS, hostOf, sleep, taskOf } from '../../test/host-fixtures'
+import { CREDENTIAL, CREDENTIAL_OPTION, DNS_ACCOUNT, DNS_ACCOUNT_OPTION, QUIET_MS, hostOf, sleep, taskOf } from '../../test/host-fixtures'
+import { DnsAccountsModal } from './DnsAccountsModal'
 import { HostDetectionResult } from './HostDetectionResult'
 import { HostTaskDrawer } from './HostTaskDrawer'
 import { HostsPage } from './HostsPage'
@@ -24,6 +25,7 @@ const READ_WRITE = [PERMISSIONS.HOST_READ, PERMISSIONS.HOST_WRITE, PERMISSIONS.N
 const CONFIRM = /^(OK|确\s*定)$/
 const HOSTS_PATH = '/api/admin/server-hosts'
 const CREDENTIALS_PATH = '/api/admin/ssh-credentials'
+const DNS_ACCOUNTS_PATH = '/api/admin/dns-accounts'
 const conflict = (message: string) => Response.json({ code: 'conflict', message }, { status: 409 })
 const noop = () => undefined
 
@@ -181,11 +183,64 @@ describe('HostsPage', () => {
       sshPort: 22,
       providerType: 'xui',
       panelPort: null,
+      dnsAccountId: null,
       hosts: [
         { address: '203.0.113.20', name: 'sg-01' },
         { address: 'sg2.example.com', name: 'sg2.example.com' },
       ],
     })
+  })
+
+  it('新建主机时选了 DNS 账号：整批带上它，域名交给平台生成', async () => {
+    const calls = mockServer({
+      [`GET ${HOSTS_PATH}`]: () => ok([]),
+      [`GET ${CREDENTIALS_PATH}`]: () => ok([CREDENTIAL]),
+      [`GET ${DNS_ACCOUNTS_PATH}`]: () => ok([DNS_ACCOUNT]),
+      [`POST ${HOSTS_PATH}`]: () => ok([]),
+    })
+    renderPage(READ_WRITE, <HostsPage />)
+    fireEvent.click(await screen.findByRole('button', { name: /新建主机/ }))
+    const dialog = await screen.findByRole('dialog')
+    fireEvent.mouseDown(within(dialog).getByLabelText('SSH 凭据'))
+    fireEvent.click(await screen.findByTitle(CREDENTIAL_OPTION))
+    fireEvent.mouseDown(within(dialog).getByLabelText('DNS 账号'))
+    fireEvent.click(await screen.findByTitle(DNS_ACCOUNT_OPTION))
+    fireEvent.change(within(dialog).getByLabelText('主机清单'), { target: { value: '203.0.113.20 sg-01' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: '新建并部署' }))
+    await waitFor(() => expect(calls.some((c) => c.method === 'POST' && c.path === HOSTS_PATH)).toBe(true))
+    expect(calls.find((c) => c.method === 'POST' && c.path === HOSTS_PATH)?.body).toMatchObject({
+      dnsAccountId: 7,
+      hosts: [{ address: '203.0.113.20', name: 'sg-01' }],
+    })
+  })
+
+  it('列表显示域名与证书到期日；没申请到证书的写明，没配 DNS 账号的留空', async () => {
+    const issued = hostOf({ dnsAccountId: 7, dnsAccountName: 'cf-main', domain: 'hk-01.example.com', certNotAfter: '2027-02-14T08:00:00Z' })
+    const pending = hostOf({ id: 8, name: 'us-01', address: '203.0.113.30', dnsAccountId: 7, dnsAccountName: 'cf-main', domain: 'us-01.example.com' })
+    mockServer({ [`GET ${HOSTS_PATH}`]: () => ok([issued, pending, freshHost]) })
+    renderPage(READ_ONLY, <HostsPage />)
+    expect(within(await screen.findByText('hk-01.example.com').then(() => rowOf('hk-01.example.com'))).getByText('证书到期 2027-02-14')).toBeDefined()
+    expect(within(rowOf('us-01.example.com')).getByText('还没申请到证书')).toBeDefined()
+    expect(within(rowOf('jp-01')).queryByText(/证书/)).toBeNull()
+  })
+
+  it('编辑主机：选了 DNS 账号才出现域名；清掉账号时域名一并清空提交', async () => {
+    const withDomain = hostOf({ dnsAccountId: 7, dnsAccountName: 'cf-main', domain: 'hk-01.example.com', lastTask: null })
+    const calls = mockServer({
+      [`GET ${HOSTS_PATH}`]: () => ok([withDomain]),
+      [`GET ${CREDENTIALS_PATH}`]: () => ok([CREDENTIAL]),
+      [`GET ${DNS_ACCOUNTS_PATH}`]: () => ok([DNS_ACCOUNT]),
+      [`PUT ${HOSTS_PATH}/5`]: () => ok(withDomain),
+    })
+    renderPage(READ_WRITE, <HostsPage />)
+    fireEvent.click(await screen.findByRole('button', { name: /编\s*辑/ }))
+    const dialog = await screen.findByRole('dialog')
+    const domain = (await within(dialog).findByLabelText('域名')) as HTMLInputElement
+    expect(domain.value).toBe('hk-01.example.com')
+    fireEvent.change(domain, { target: { value: ' HK1.example.com ' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: /保\s*存/ }))
+    await waitFor(() => expect(calls.filter((c) => c.method === 'PUT')).toHaveLength(1))
+    expect(calls.find((c) => c.method === 'PUT')?.body).toMatchObject({ dnsAccountId: 7, domain: 'HK1.example.com' })
   })
 
   it('没有凭据时新建主机的弹窗提示先去新建', async () => {
@@ -300,6 +355,68 @@ describe('SshCredentialsModal', () => {
     renderPage(READ_ONLY, <SshCredentialsModal isOpen canWrite={false} onClose={noop} onChanged={noop} />)
     expect(await screen.findByText('root-key')).toBeDefined()
     for (const name of [/新建凭据/, /编\s*辑/, /删\s*除/]) {
+      expect(screen.queryByRole('button', { name })).toBeNull()
+    }
+  })
+})
+
+describe('DnsAccountsModal', () => {
+  const TOKEN = 'example-token-text'
+
+  it('列出账号；编辑时不回显令牌，留空提交的请求体不带 token，被引用时根域名不能改', async () => {
+    const calls = mockServer({
+      [`GET ${DNS_ACCOUNTS_PATH}`]: () => ok([DNS_ACCOUNT]),
+      [`PUT ${DNS_ACCOUNTS_PATH}/7`]: () => ok(DNS_ACCOUNT),
+    })
+    const onChanged = vi.fn()
+    renderPage(READ_WRITE, <DnsAccountsModal isOpen canWrite onClose={noop} onChanged={onChanged} />)
+    expect(await screen.findByText('example.com')).toBeDefined()
+    expect(screen.getByText('Cloudflare')).toBeDefined()
+    expect(screen.getByText('1 台')).toBeDefined()
+
+    fireEvent.click(screen.getByRole('button', { name: /编\s*辑/ }))
+    const form = await lastDialog()
+    const token = within(form).getByLabelText('API 令牌') as HTMLInputElement
+    expect(token.value).toBe('')
+    expect(token.placeholder).toContain('留空 = 沿用原值')
+    expect((within(form).getByLabelText('根域名') as HTMLInputElement).disabled).toBe(true)
+    fireEvent.change(within(form).getByLabelText('备注'), { target: { value: '主域名' } })
+    fireEvent.click(within(form).getByRole('button', { name: /保\s*存/ }))
+    await waitFor(() => expect(calls.filter((c) => c.method === 'PUT')).toHaveLength(1))
+    const put = calls.find((c) => c.method === 'PUT')
+    expect(put?.csrf).toBe(TEST_CSRF)
+    expect(put?.body).toEqual({ name: 'cf-main', providerType: 'cloudflare', zone: 'example.com', remark: '主域名' })
+    await waitFor(() => expect(onChanged).toHaveBeenCalled())
+  })
+
+  it('新建必须填令牌与合法的根域名；后端校验令牌失败时把原因显示出来', async () => {
+    const calls = mockServer({
+      [`GET ${DNS_ACCOUNTS_PATH}`]: () => ok([]),
+      [`POST ${DNS_ACCOUNTS_PATH}`]: () => Response.json({ code: 'upstream_unavailable', message: 'Cloudflare 拒绝了令牌' }, { status: 502 }),
+    })
+    renderPage(READ_WRITE, <DnsAccountsModal isOpen canWrite onClose={noop} onChanged={noop} />)
+    fireEvent.click(await screen.findByRole('button', { name: /新建 DNS 账号/ }))
+    const form = await lastDialog()
+    fireEvent.change(within(form).getByLabelText('名称'), { target: { value: 'cf' } })
+    fireEvent.change(within(form).getByLabelText('根域名'), { target: { value: 'not a zone' } })
+    fireEvent.click(within(form).getByRole('button', { name: /新\s*建/ }))
+    expect(await within(form).findByText('请输入 API 令牌')).toBeDefined()
+    expect(within(form).getByText('请输入根域名，如 example.com')).toBeDefined()
+    expect(calls.some((c) => c.method === 'POST')).toBe(false)
+
+    fireEvent.change(within(form).getByLabelText('根域名'), { target: { value: 'example.com' } })
+    fireEvent.change(within(form).getByLabelText('API 令牌'), { target: { value: TOKEN } })
+    fireEvent.click(within(form).getByRole('button', { name: /新\s*建/ }))
+    await waitFor(() => expect(calls.some((c) => c.method === 'POST')).toBe(true))
+    expect(calls.find((c) => c.method === 'POST')?.body).toEqual({ name: 'cf', providerType: 'cloudflare', zone: 'example.com', remark: '', token: TOKEN })
+    expect(await within(form).findByText('Cloudflare 拒绝了令牌')).toBeDefined()
+  })
+
+  it('没有 host:write 时只能看列表', async () => {
+    mockServer({ [`GET ${DNS_ACCOUNTS_PATH}`]: () => ok([DNS_ACCOUNT]) })
+    renderPage(READ_ONLY, <DnsAccountsModal isOpen canWrite={false} onClose={noop} onChanged={noop} />)
+    expect(await screen.findByText('cf-main')).toBeDefined()
+    for (const name of [/新建 DNS 账号/, /编\s*辑/, /删\s*除/]) {
       expect(screen.queryByRole('button', { name })).toBeNull()
     }
   })

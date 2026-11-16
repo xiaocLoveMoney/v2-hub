@@ -12,7 +12,7 @@ import { HostOpsActions } from './HostOpsActions'
 import { HostTaskDrawer } from './HostTaskDrawer'
 import { HostTaskSummary } from './HostTaskSummary'
 import type { OpenedHostTasks } from './host-actions'
-import { isHostTaskActive, isPlainHttpUrl } from './host-labels'
+import { certExpiryText, isHostTaskActive, isPlainHttpUrl } from './host-labels'
 import { formatHostEndpoint } from './host-list'
 
 const CARD_TITLE = 'SSH 运维'
@@ -108,6 +108,11 @@ export function HostOpsCard({ server, onChanged }: HostOpsCardProps) {
               <span className="mono">{formatHostEndpoint(current.address, current.sshPort)}</span>
             </Descriptions.Item>
             <Descriptions.Item label="凭据">{current.credentialName}</Descriptions.Item>
+            {current.domain !== '' && (
+              <Descriptions.Item label="域名">
+                <span className="mono">{current.domain}</span>（{certExpiryText(current.certNotAfter)}）
+              </Descriptions.Item>
+            )}
             <Descriptions.Item label="最近任务">
               <HostTaskSummary task={lastTask} onOpen={(task) => openTasks(current, task)} />
             </Descriptions.Item>
@@ -117,6 +122,8 @@ export function HostOpsCard({ server, onChanged }: HostOpsCardProps) {
           <HostOpsActions
             hostId={current.id}
             isPlainHttp={isPlainHttpUrl(server.baseUrl)}
+            hasDomain={current.domain !== ''}
+            hasCert={current.certNotAfter !== null}
             isBusy={isTaskActive}
             onStarted={(task) => {
               watchTask(current, task)

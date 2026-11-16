@@ -1,4 +1,4 @@
-import type { HostTask, Server, ServerHost, SshCredential } from '../api/client'
+import type { DnsAccount, HostTask, Server, ServerHost, SshCredential } from '../api/client'
 
 // SSH 托管各测试文件共用的样例数据；地址用文档保留网段，指纹是示例值
 
@@ -39,6 +39,10 @@ export function hostOf(over: Partial<ServerHost> = {}): ServerHost {
     arch: 'amd64',
     serverId: 1,
     serverName: 'hk-01',
+    dnsAccountId: null,
+    dnsAccountName: '',
+    domain: '',
+    certNotAfter: null,
     lastTask: taskOf(),
     createdAt: NOW,
     ...over,
@@ -57,6 +61,21 @@ export const CREDENTIAL: SshCredential = {
   createdAt: NOW,
   updatedAt: NOW,
 }
+
+/** 一个 Cloudflare 的 DNS 账号。 */
+export const DNS_ACCOUNT: DnsAccount = {
+  id: 7,
+  name: 'cf-main',
+  providerType: 'cloudflare',
+  zone: 'example.com',
+  remark: '',
+  hostCount: 1,
+  createdAt: NOW,
+  updatedAt: NOW,
+}
+
+/** DNS 账号下拉框里这个账号的选项文字。 */
+export const DNS_ACCOUNT_OPTION = 'cf-main（Cloudflare，example.com）'
 
 /** 凭据下拉框里这份凭据的选项文字。 */
 export const CREDENTIAL_OPTION = 'root-key（root，私钥）'
