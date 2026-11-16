@@ -35,7 +35,7 @@ cd v2-hub-contract/deploy/it && bash run_all.sh
 - 生产自动部署：`main` 检查全绿后由生产机上的自托管 Runner 执行 `deploy_prod.sh`（Ruling-62，docs/02 §6）。
 
 契约（全部在 v2-hub-contract/）：`hub-api.yaml`（server → 前端）、`deploy/init.sql`（server 的表结构）、
-`upstream/3x-ui/openapi-v3.11.0.json`（3x-ui → server 的上游基准）。契约版本用 git tag `vX.Y`，当前 `v0.20`。
+`upstream/3x-ui/openapi-v3.11.0.json`（3x-ui → server 的上游基准）。契约版本用 git tag `vX.Y`，当前 `v0.21`。
 
 ## 跨目录纪律
 
@@ -90,6 +90,10 @@ GitHub 仓库设置见 `docs/github-仓库设置清单.md`。
   配置自签证书（`https` + `pin`）、查看状态与日志、重置面板登录口令。只有固定动作，没有任意命令；主机密钥首次连接后固定；权限码 `host:read` / `host:write`。
   部署抽象 `manager/deploy` 按面板类型注册，目前只有 3x-ui；SSH 执行器在 `manager/remote`。IT-14 通过（带 sshd 的 3x-ui 容器走接管全链路）。
   全新安装与升级（真实 systemd、从 GitHub 下载）、管理端 M11 页面登录后的浏览器实测未自动化，待人工验证。
+  补充（tag `v0.21`，Ruling-72、Ruling-73）：面板的公开证书——管理端配一个 DNS 账号（目前只有 Cloudflare，令牌加密、只写不读、只在平台上使用），
+  主机选了它并有域名时，平台建解析、经 ACME DNS-01 向 Let's Encrypt 申请证书、经 SSH 装到面板上，服务器改按 `https://域名` + `verify` 接入，
+  离到期不足 30 天自动续期；没选 DNS 账号的主机仍用自签证书 + `pin`。DNS 抽象在 `manager/dns`，签发在 `manager/acmecert`。
+  签发协议由进程内的假 ACME 服务端单测覆盖，真实 Cloudflare 域名上的首次申请与续期待人工验证。
 - 路线图 M3–M8、M9（链式改造）、M10（出口补全与入站预填）与 M11（SSH 托管与面板部署）已完成；后续工作待定。
 - 路线（2026-11-13，Ruling-17 – Ruling-22）：参考 SSPanel-Uim Malio 的功能与界面，自行实现；里程碑为
   M3 订阅与用户端基础 → M4 自助运营 → M5 商店与钱包 → M6 / M7 两种链式 → M8 运营，见 docs/07。
