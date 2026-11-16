@@ -14,6 +14,9 @@ v2-hub-server/
 │   ├── manager/
 │   │   ├── panel/               # Provider 接口、Capabilities、中立模型、注册表（M1）
 │   │   ├── panel/xui/           # 3x-ui 实现（M1）
+│   │   ├── remote/              # SSH 执行器：连接、主机密钥固定、sudo、输出限长（M11）
+│   │   ├── deploy/              # Deployer 接口、中立结果、注册表（M11）
+│   │   ├── deploy/xui/          # 3x-ui 的安装、接管与运维动作；内嵌上游脚本快照（M11）
 │   │   ├── render/              # 分享链接解析 → ProxyNode → 各订阅格式（M3）
 │   │   ├── chain/               # 服务端链式的面板配置变更（M7）；客户端链式的渲染在 render/（M6）；M9 起一条规则可带多个入站
 │   │   └── crypto/              # AES-GCM、argon2id、token 生成（M0）
@@ -58,11 +61,19 @@ type CoreConfigurator interface { GetCoreTemplate / SetCoreTemplate / RestartCor
 2. 面板 token、用户凭据入库前 AES-GCM 加密，密钥来自环境变量；日志不打印分享链接与 token。
 3. 批量禁用 / 删除 client 合并成一次调用：3x-ui 默认禁用 client 会重启 Xray。
 4. 所有写面板的操作写审计日志。
+5. 经 SSH 执行的命令只能来自 `manager/deploy` 里的固定模板，参数先过白名单再做 shell 转义；`service` 与 `api` 不拼命令行。SSH 凭据、令牌、面板口令不进日志与任务日志（Ruling-68）。
 
 M9 链式改造（docs/03 §5.18、§5.19、§5.21）在 `internal/service` 里的分工：`chain.go` 管规则与用户出口的增删改与调顺序，
 `chain_resolve.go` 是生效计算的纯函数（哪条规则在哪个起飞入站上生效），`chain_guard.go` 管用户出口用于服务端链式的防护
 （公网地址判定、域名解析与固定 IP、字段白名单、防环；DNS 解析走可注入的接口，单测不发真实查询），
 `chain_exit_admin.go` 是管理端的出口管理，`chain_apply.go` 的期望条目改由生效计算的结果生成并带失败隔离。
+
+M11 SSH 托管（docs/03 §5.22）的分工：`manager/remote` 只管“连上去、跑一段脚本、传一个文件”，不认识面板；
+`manager/deploy` 定义 `Deployer`（检测、安装、接管、重签令牌、重启、升级、配置证书、查看状态、重置登录口令）与中立结果，
+按 `provider_type` 注册（Ruling-69），3x-ui 实现在 `deploy/xui`，上游脚本快照由 `make gen-upstream` 从 `contract/upstream/3x-ui/` 拷入后内嵌；
+`service/ssh_credential.go` 管凭据，`service/host.go` 管主机与连接测试，`service/host_task.go` 是任务状态机与各种任务的步骤，
+部署成功后调 `PanelService` 现有的接入逻辑；后台任务 `job.RunHostTasks` 领取排队的任务并限并发。
+`service` 只依赖 `deploy.Deployer` 与 `remote.Dialer` 接口，单测用脚本化的假执行器，不发真实 SSH。
 
 ## 4. 与其它模块的握手
 
@@ -70,6 +81,7 @@ M9 链式改造（docs/03 §5.18、§5.19、§5.21）在 `internal/service` 里�
 |---|---|---|---|
 | admin-web / user-web | 被调 | HTTP 8080（生产经 Caddy） | `hub-api.yaml` |
 | 3x-ui 面板 | 主调 | HTTPS + Bearer | `upstream/3x-ui/openapi-v3.11.0.json` |
+| 托管主机 | 主调 | SSH（默认 22） | `upstream/3x-ui/install-v3.11.0.sh`、`update-v3.11.0.sh`（M11） |
 | PostgreSQL | 主调 | 5432 | `deploy/init.sql` |
 | MinIO | 主调 | S3 API 9000 | —（上传文件，M6） |
 
@@ -77,6 +89,7 @@ M9 链式改造（docs/03 §5.18、§5.19、§5.21）在 `internal/service` 里�
 
 - `etc/hub-server.yaml`：监听地址、超时（已有）；数据库、轮询间隔、并发上限随任务补。
 - 环境变量：`HUB_DATABASE_URL`；`HUB_INSECURE_DEV_COOKIE=1` 仅本机 HTTP 开发（`make run` 自动设置）；`HUB_ENCRYPTION_KEY`（Base64 的 32 字节，AES-256-GCM 主密钥，加密 TOTP 密钥，M1 起也加密面板 token；缺失则拒绝启动）。
+- M11 配置段 `deploy`：同时执行的任务数、SSH 连接与命令超时、安装超时、连接测试与动作的频控、批量上限、`allowLoopback`（只给联调用）。不新增环境变量。
 - 首个超管：`make admin-create USERNAME=<名称>`，密码终端无回显输入或经管道传入一行。
 - `make run / test / build / lint`。
 
