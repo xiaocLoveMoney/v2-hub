@@ -184,6 +184,27 @@ func tokenAAD(serverID int64) []byte {
 	return fmt.Appendf(nil, "server:%d:token", serverID)
 }
 
+// openToken 解密一台服务器的 API token。
+func (s *PanelService) openToken(serverID int64, sealed []byte) (string, error) {
+	token, err := s.sealer.Open(sealed, tokenAAD(serverID))
+	if err != nil {
+		return "", fmt.Errorf("open token of server %d: %w", serverID, err)
+	}
+	return string(token), nil
+}
+
+// saveToken 加密并保存一台服务器的 API token（在调用方的事务里）。
+func (s *PanelService) saveToken(ctx context.Context, q *sqlcgen.Queries, serverID int64, token string) error {
+	sealed, err := s.sealer.Seal([]byte(token), tokenAAD(serverID))
+	if err != nil {
+		return fmt.Errorf("seal server token: %w", err)
+	}
+	if err := q.SetServerToken(ctx, sqlcgen.SetServerTokenParams{ID: serverID, ApiTokenEnc: sealed}); err != nil {
+		return fmt.Errorf("save server token: %w", err)
+	}
+	return nil
+}
+
 // openProvider 解密 token 并按类型创建 Provider。
 func (s *PanelService) openProvider(ctx context.Context, serverID int64) (panel.Provider, sqlcgen.GetServerConnRow, error) {
 	row, err := s.q.GetServerConn(ctx, serverID)
@@ -193,12 +214,12 @@ func (s *PanelService) openProvider(ctx context.Context, serverID int64) (panel.
 	if err != nil {
 		return nil, row, fmt.Errorf("get server %d: %w", serverID, err)
 	}
-	token, err := s.sealer.Open(row.ApiTokenEnc, tokenAAD(serverID))
+	token, err := s.openToken(serverID, row.ApiTokenEnc)
 	if err != nil {
-		return nil, row, fmt.Errorf("open token of server %d: %w", serverID, err)
+		return nil, row, err
 	}
 	p, err := s.registry.Open(row.ProviderType, panel.ConnConfig{
-		BaseURL: row.BaseUrl, Token: string(token), TLSMode: row.TlsMode,
+		BaseURL: row.BaseUrl, Token: token, TLSMode: row.TlsMode,
 		CertPinSHA256: row.CertPinSha256.String, Timeout: s.cfg.RequestTimeout,
 	})
 	if err != nil {
@@ -336,12 +357,8 @@ func (s *PanelService) CreateServer(ctx context.Context, actor *AdminPrincipal, 
 		if err != nil {
 			return fmt.Errorf("create server: %w", err)
 		}
-		sealed, err := s.sealer.Seal([]byte(conn.APIToken), tokenAAD(id))
-		if err != nil {
-			return fmt.Errorf("seal server token: %w", err)
-		}
-		if err := q.SetServerToken(ctx, sqlcgen.SetServerTokenParams{ID: id, ApiTokenEnc: sealed}); err != nil {
-			return fmt.Errorf("save server token: %w", err)
+		if err := s.saveToken(ctx, q, id, conn.APIToken); err != nil {
+			return err
 		}
 		if err := q.SetServerProbeResult(ctx, probeParams(id, info, nil, s.now())); err != nil {
 			return fmt.Errorf("save probe result: %w", err)
@@ -421,11 +438,9 @@ func (s *PanelService) UpdateServer(ctx context.Context, actor *AdminPrincipal, 
 	}
 	tokenChanged := conn.APIToken != ""
 	if !tokenChanged {
-		token, err := s.sealer.Open(current.ApiTokenEnc, tokenAAD(id))
-		if err != nil {
-			return nil, fmt.Errorf("open token of server %d: %w", id, err)
+		if conn.APIToken, err = s.openToken(id, current.ApiTokenEnc); err != nil {
+			return nil, err
 		}
-		conn.APIToken = string(token)
 	}
 	connChanged := tokenChanged || conn.ProviderType != current.ProviderType || conn.BaseURL != current.BaseUrl ||
 		conn.TLSMode != current.TlsMode || conn.CertPinSHA256 != current.CertPinSha256.String
@@ -448,12 +463,8 @@ func (s *PanelService) UpdateServer(ctx context.Context, actor *AdminPrincipal, 
 			return fmt.Errorf("update server %d: %w", id, err)
 		}
 		if tokenChanged {
-			sealed, err := s.sealer.Seal([]byte(conn.APIToken), tokenAAD(id))
-			if err != nil {
-				return fmt.Errorf("seal server token: %w", err)
-			}
-			if err := q.SetServerToken(ctx, sqlcgen.SetServerTokenParams{ID: id, ApiTokenEnc: sealed}); err != nil {
-				return fmt.Errorf("save server token: %w", err)
+			if err := s.saveToken(ctx, q, id, conn.APIToken); err != nil {
+				return err
 			}
 		}
 		if info != nil {

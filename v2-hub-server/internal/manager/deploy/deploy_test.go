@@ -1,8 +1,12 @@
 package deploy
 
 import (
+	"errors"
+	"fmt"
 	"strings"
 	"testing"
+
+	"v2-hub-server/internal/manager/remote"
 )
 
 func TestRedact(t *testing.T) {
@@ -37,8 +41,31 @@ func TestRegistry(t *testing.T) {
 	if _, ok := reg.Get("sui"); ok {
 		t.Fatal("unregistered type must not be found")
 	}
-	if got := reg.Types(); len(got) != 2 || got[0] != "a" || got[1] != "b" {
-		t.Fatalf("types = %v", got)
+}
+
+func TestFailureOf(t *testing.T) {
+	tests := []struct {
+		name       string
+		err        error
+		wantReason Reason
+		wantOK     bool
+	}{
+		{"deploy error", NewError(ReasonListenLocal, "x"), ReasonListenLocal, true},
+		{"wrapped deploy error", fmt.Errorf("ctx: %w", NewError(ReasonDownloadFailed, "x")), ReasonDownloadFailed, true},
+		{"ssh unreachable", &remote.Error{Kind: remote.KindUnreachable, Message: "x"}, ReasonUnreachable, true},
+		{"ssh auth", &remote.Error{Kind: remote.KindAuth, Message: "x"}, ReasonAuthFailed, true},
+		{"ssh host key", &remote.Error{Kind: remote.KindHostKey, Message: "x"}, ReasonHostKeyChanged, true},
+		{"ssh command", &remote.Error{Kind: remote.KindCommand, Message: "x"}, ReasonCommandFailed, true},
+		{"unknown ssh kind falls back", &remote.Error{Kind: "new_kind", Message: "x"}, ReasonCommandFailed, true},
+		{"other error", errors.New("boom"), ReasonNone, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			reason, _, ok := FailureOf(tt.err)
+			if reason != tt.wantReason || ok != tt.wantOK {
+				t.Fatalf("FailureOf = %q, %v", reason, ok)
+			}
+		})
 	}
 }
 

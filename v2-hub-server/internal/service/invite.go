@@ -2,10 +2,8 @@ package service
 
 import (
 	"context"
-	"crypto/rand"
 	"errors"
 	"fmt"
-	"math/big"
 	"net/netip"
 	"regexp"
 	"strings"
@@ -15,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"v2-hub-server/internal/dao/sqlcgen"
+	"v2-hub-server/internal/manager/crypto"
 )
 
 // 邀请码（docs/03 §5.8）：每个用户一个个人码，管理员可另发带次数与到期时间的码。
@@ -65,20 +64,9 @@ func normalizeInviteCode(raw string) string {
 	return v
 }
 
-// randomString 用 crypto/rand 从 alphabet 里均匀地取 n 个字符拼成串（rand.Int 按字母表长度取值，无取模偏差）。
-// alphabet 须为非空的单字节字符集；返回的 error 来自 crypto/rand，由调用方加上下文。
+// randomString 见 crypto.RandomString；返回的 error 由调用方加上下文。
 func randomString(alphabet string, n int) (string, error) {
-	var sb strings.Builder
-	sb.Grow(n)
-	size := big.NewInt(int64(len(alphabet)))
-	for range n {
-		i, err := rand.Int(rand.Reader, size)
-		if err != nil {
-			return "", err
-		}
-		sb.WriteByte(alphabet[i.Int64()])
-	}
-	return sb.String(), nil
+	return crypto.RandomString(alphabet, n)
 }
 
 func randomInviteCode() (string, error) {

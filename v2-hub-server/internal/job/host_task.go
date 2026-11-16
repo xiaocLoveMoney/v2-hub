@@ -24,23 +24,26 @@ func RunHostTasks(ctx context.Context, r HostTaskRunner, interval time.Duration,
 		slog.Warn("host tasks: marked interrupted tasks as failed", "count", n)
 	}
 	slots := make(chan struct{}, concurrency)
+	// freed 在有任务结束、空出名额时发信号，排队的任务不必等到下一个 tick
+	freed := make(chan struct{}, 1)
 	var running sync.WaitGroup
 	defer running.Wait()
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {
-		claimHostTasks(ctx, r, slots, &running)
+		claimHostTasks(ctx, r, slots, freed, &running)
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
 		case <-r.Requests():
+		case <-freed:
 		}
 	}
 }
 
 // claimHostTasks 按空闲的名额领取任务，每条各起一个 goroutine；名额占满时这一轮什么都不领。
-func claimHostTasks(ctx context.Context, r HostTaskRunner, slots chan struct{}, running *sync.WaitGroup) {
+func claimHostTasks(ctx context.Context, r HostTaskRunner, slots, freed chan struct{}, running *sync.WaitGroup) {
 	free := cap(slots) - len(slots)
 	if free <= 0 || ctx.Err() != nil {
 		return
@@ -55,7 +58,13 @@ func claimHostTasks(ctx context.Context, r HostTaskRunner, slots chan struct{}, 
 		running.Add(1)
 		go func() {
 			defer running.Done()
-			defer func() { <-slots }()
+			defer func() {
+				<-slots
+				select {
+				case freed <- struct{}{}:
+				default:
+				}
+			}()
 			defer func() {
 				if p := recover(); p != nil {
 					slog.Error("host task panicked", "task_id", id, "panic", p)

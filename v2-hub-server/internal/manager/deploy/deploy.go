@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
-	"sort"
 	"strings"
 
 	"v2-hub-server/internal/manager/remote"
@@ -55,7 +54,7 @@ const (
 	PlanAdopt   Plan = "adopt"
 )
 
-// Detection 是对一台主机的检测结果。Reason 非空时不能部署，Plan 为空。
+// Detection 是对一台主机的检测结果。Reason 非空时不能部署，Plan 为空，Message 是给人看的说明。
 type Detection struct {
 	OSID         string
 	Arch         string
@@ -64,6 +63,8 @@ type Detection struct {
 	PanelVersion string
 	Plan         Plan
 	Reason       Reason
+	// Message 由实现填写：各面板的门槛（最低版本、支持的安装方式）不同，文案也不同。
+	Message string
 }
 
 // PanelAccess 是从主机上读出的面板接入信息（不含令牌）。
@@ -77,10 +78,21 @@ type PanelAccess struct {
 	CertSHA256 string
 }
 
-// InstallOptions 是安装面板的参数。
-type InstallOptions struct {
-	// PanelPort 是指定的面板端口；0 表示由安装脚本随机选。
+// ProvisionOptions 是部署面板的参数。
+type ProvisionOptions struct {
+	// Address 是平台连这台主机用的地址（IP 或域名）；新装面板时写进自签证书的主体。
+	Address string
+	// PanelPort 是新装面板时指定的端口；0 表示由实现自己选。接管已有面板时不用。
 	PanelPort int
+}
+
+// Provisioned 是部署的结果：面板已在运行，Token 可用来接入。
+type Provisioned struct {
+	Access PanelAccess
+	// Token 是平台专用的管理令牌明文；调用方加密保存，不进日志。
+	Token string
+	// IsFresh 表示面板是这次新装的（证书由平台生成，接入时直接固定指纹）；false 表示接管了已有面板。
+	IsFresh bool
 }
 
 // PanelLogin 是面板网页的登录信息；只在重置的那一次返回，不落库、不进日志。
@@ -96,16 +108,14 @@ type Logger func(line string)
 type Deployer interface {
 	// Detect 检测系统、权限与面板安装情况，并给出部署会走安装还是接管。
 	Detect(ctx context.Context, r remote.Runner) (Detection, error)
-	// Install 在没有面板的主机上安装平台基线版本；装完面板是明文 HTTP，由调用方接着 EnableTLS。
-	Install(ctx context.Context, r remote.Runner, opts InstallOptions, log Logger) error
-	// Access 读出面板的端口、路径与证书情况。面板只监听本机时返回 ReasonListenLocal。
-	Access(ctx context.Context, r remote.Runner) (PanelAccess, error)
+	// Provision 按 det.Plan 把面板弄到“在运行、平台拿得到令牌”的状态：没有面板就安装，有标准安装的面板就接管。
+	// 安装时要做哪些事、先后顺序如何（配证书、放行防火墙等）由各实现自己定；det.Plan 为空时不应调用。
+	// 面板只监听本机时返回 ReasonListenLocal。
+	Provision(ctx context.Context, r remote.Runner, det Detection, opts ProvisionOptions, log Logger) (Provisioned, error)
 	// IssueToken 签发（同名则轮换）平台专用的管理令牌，不动其它令牌与管理员口令。
 	IssueToken(ctx context.Context, r remote.Runner) (string, error)
 	// EnableTLS 生成自签证书设给面板并重启；address 写进证书的主体，返回证书的 SHA-256（Base64）。
 	EnableTLS(ctx context.Context, r remote.Runner, address string) (string, error)
-	// OpenFirewall 在主机自带防火墙开着时放行面板端口。
-	OpenFirewall(ctx context.Context, r remote.Runner, port int) error
 	// RestartPanel 重启面板（连带内核）并确认服务在运行。
 	RestartPanel(ctx context.Context, r remote.Runner) error
 	// RestartCore 只让面板重载内核。
@@ -160,14 +170,28 @@ func (r *Registry) Get(providerType string) (Deployer, bool) {
 	return d, ok
 }
 
-// Types 返回已注册的面板类型，按字典序。
-func (r *Registry) Types() []string {
-	types := make([]string, 0, len(r.deployers))
-	for k := range r.deployers {
-		types = append(types, k)
+// reasonByRemoteKind 把 SSH 层的失败大类对到任务的原因大类；两边的取值各自独立，只在这里对应。
+var reasonByRemoteKind = map[remote.ErrorKind]Reason{
+	remote.KindUnreachable: ReasonUnreachable,
+	remote.KindAuth:        ReasonAuthFailed,
+	remote.KindHostKey:     ReasonHostKeyChanged,
+	remote.KindCommand:     ReasonCommandFailed,
+}
+
+// FailureOf 从错误链里认出部署错误或 SSH 错误，给出原因大类与可展示的说明；都不是时 ok 为 false。
+func FailureOf(err error) (reason Reason, message string, ok bool) {
+	if de := AsError(err); de != nil {
+		return de.Reason, de.Message, true
 	}
-	sort.Strings(types)
-	return types
+	re := remote.AsError(err)
+	if re == nil {
+		return ReasonNone, "", false
+	}
+	reason, known := reasonByRemoteKind[re.Kind]
+	if !known {
+		reason = ReasonCommandFailed
+	}
+	return reason, re.Message, true
 }
 
 const redactedMark = "[已隐去]"

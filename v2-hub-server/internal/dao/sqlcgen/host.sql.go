@@ -244,7 +244,7 @@ func (q *Queries) FinishHostTask(ctx context.Context, arg FinishHostTaskParams) 
 }
 
 const getHostTask = `-- name: GetHostTask :one
-SELECT t.id, t.host_id, t.kind, t.status, t.step, t.error_code, t.last_error, t.log, t.created_by,
+SELECT t.id, t.host_id, t.kind, t.status, t.step, t.error_code, t.last_error, t.created_by,
        t.created_at, t.started_at, t.finished_at, coalesce(a.username, '')::varchar AS created_by_name
 FROM host_task t
 LEFT JOIN admin a ON a.id = t.created_by
@@ -259,7 +259,6 @@ type GetHostTaskRow struct {
 	Step          string
 	ErrorCode     string
 	LastError     string
-	Log           string
 	CreatedBy     pgtype.Int8
 	CreatedAt     pgtype.Timestamptz
 	StartedAt     pgtype.Timestamptz
@@ -267,6 +266,7 @@ type GetHostTaskRow struct {
 	CreatedByName string
 }
 
+// 不带日志（上限 64 KB），列与 ListHostTasks 相同；要日志另取 GetHostTaskLog
 func (q *Queries) GetHostTask(ctx context.Context, id int64) (GetHostTaskRow, error) {
 	row := q.db.QueryRow(ctx, getHostTask, id)
 	var i GetHostTaskRow
@@ -278,7 +278,6 @@ func (q *Queries) GetHostTask(ctx context.Context, id int64) (GetHostTaskRow, er
 		&i.Step,
 		&i.ErrorCode,
 		&i.LastError,
-		&i.Log,
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.StartedAt,
@@ -286,6 +285,17 @@ func (q *Queries) GetHostTask(ctx context.Context, id int64) (GetHostTaskRow, er
 		&i.CreatedByName,
 	)
 	return i, err
+}
+
+const getHostTaskLog = `-- name: GetHostTaskLog :one
+SELECT log FROM host_task WHERE id = $1
+`
+
+func (q *Queries) GetHostTaskLog(ctx context.Context, id int64) (string, error) {
+	row := q.db.QueryRow(ctx, getHostTaskLog, id)
+	var log string
+	err := row.Scan(&log)
+	return log, err
 }
 
 const getSSHCredential = `-- name: GetSSHCredential :one
