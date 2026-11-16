@@ -59,13 +59,13 @@ box_up || fail "sshbox 没起来"
 # 面板上先签一个别的令牌，再用它建一个入站：接管之后这两样都要原样还在
 SEED_TOKEN="$(box_exec "$XUI_BIN" setting -tokenName "$SEED_TOKEN_NAME" -tokenScope admin -getApiToken | sed -n 's/^apiToken: //p' | tr -d '\r')"
 [ -n "$SEED_TOKEN" ] || fail "面板签发初始令牌失败"
-# panel <method> <根地址> <路径> [json]：用初始令牌直接调面板
+# panel <method> <路径> [json]：用初始令牌直接调面板（都发生在配置证书之前，走明文 HTTP）
 panel() {
-  local args=(-sk -X "$1" -H "Authorization: Bearer $SEED_TOKEN" -H 'Content-Type: application/json')
-  [ -n "${4:-}" ] && args+=(--data "$4")
-  curl "${args[@]}" "$2/panel/api$3"
+  local args=(-s -X "$1" -H "Authorization: Bearer $SEED_TOKEN" -H 'Content-Type: application/json')
+  [ -n "${3:-}" ] && args+=(--data "$3")
+  curl "${args[@]}" "$PANEL_HTTP/panel/api$2"
 }
-panel POST "$PANEL_HTTP" /inbounds/add "$(jq -nc --argjson p "$INBOUND_PORT" --arg r "$INBOUND_REMARK" '{enable:true,remark:$r,listen:"",port:$p,protocol:"vmess",expiryTime:0,total:0,
+panel POST /inbounds/add "$(jq -nc --argjson p "$INBOUND_PORT" --arg r "$INBOUND_REMARK" '{enable:true,remark:$r,listen:"",port:$p,protocol:"vmess",expiryTime:0,total:0,
   settings:{clients:[]},streamSettings:{network:"ws",security:"none",wsSettings:{path:"/it14"}},sniffing:{enabled:false}}')" | jq -e .success >/dev/null || fail "面板上预建入站失败"
 
 # ---- 2. hub-server（允许回环地址、任务 1 秒领取一次）与超管 ----
@@ -153,8 +153,8 @@ hub GET "/api/admin/servers/$SERVER_ID" > "$WORK/server.json"
   || fail "接入后的服务器不对：$(jq -c .data "$WORK/server.json")"
 [ "$(hub GET "/api/admin/servers/$SERVER_ID/inbounds" | jq -r '.data[0].remark')" = "$INBOUND_REMARK" ] || fail "面板原有的入站应已同步：$(cat "$WORK/body")"
 # 面板侧：多了 v2-hub 令牌；原有令牌还在而且还能用（这次查询用的就是它）
-[ "$(panel GET "$PANEL_HTTP" /setting/apiTokens | jq -c '[.obj[].name] | sort')" = "[\"$SEED_TOKEN_NAME\",\"$PLATFORM_TOKEN_NAME\"]" ] \
-  || fail "面板上应只有原有令牌与 v2-hub 令牌：$(panel GET "$PANEL_HTTP" /setting/apiTokens | jq -c '[.obj[].name]')"
+[ "$(panel GET /setting/apiTokens | jq -c '[.obj[].name] | sort')" = "[\"$SEED_TOKEN_NAME\",\"$PLATFORM_TOKEN_NAME\"]" ] \
+  || fail "面板上应只有原有令牌与 v2-hub 令牌：$(panel GET /setting/apiTokens | jq -c '[.obj[].name]')"
 hub POST "/api/admin/server-hosts/$HOST_ID/actions" '{"action":"provision"}' >/dev/null; expect_error 409 conflict "已接入的主机再部署"
 hub POST "/api/admin/server-hosts/$HOST_ID/actions" '{"action":"shell"}' >/dev/null; expect_error 400 invalid_argument "不存在的动作"
 
@@ -169,7 +169,7 @@ hub DELETE "/api/admin/server-hosts/$HOST_ID" >/dev/null; expect_error 409 confl
 [ "$(server_field .data.status)" = "online" ] || fail "重启后服务器应在线"
 run_action restart_core succeeded
 run_action reissue_token succeeded
-[ "$(panel GET "$PANEL_HTTP" /setting/apiTokens | jq -c '[.obj[].name] | sort')" = "[\"$SEED_TOKEN_NAME\",\"$PLATFORM_TOKEN_NAME\"]" ] || fail "重签只轮换 v2-hub 令牌，不应多出别的"
+[ "$(panel GET /setting/apiTokens | jq -c '[.obj[].name] | sort')" = "[\"$SEED_TOKEN_NAME\",\"$PLATFORM_TOKEN_NAME\"]" ] || fail "重签只轮换 v2-hub 令牌，不应多出别的"
 hub POST "/api/admin/servers/$SERVER_ID/sync" >/dev/null; expect_code 200 "重签后用新令牌同步"
 [ "$(hub GET "/api/admin/server-hosts/$HOST_ID/tasks" | jq -c '[.data[].kind]')" = '["reissue_token","restart_core","restart_panel","diagnose","provision"]' ] \
   || fail "任务历史应新的在前：$(cat "$WORK/body")"
