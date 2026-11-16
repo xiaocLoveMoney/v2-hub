@@ -90,13 +90,13 @@ if pgrep -x x-ui >/dev/null 2>&1; then echo proc=1; else echo proc=0; fi
 `
 
 const accessScript = `x=/usr/local/x-ui/x-ui
-"$x" setting -show true 2>/dev/null | sed -n 's/^port: */port=/p; s/^webBasePath: */path=/p'
-"$x" setting -getCert true 2>/dev/null | sed -n 's/^cert: */cert=/p'
-"$x" setting -getListen true 2>/dev/null | sed -n 's/^listenIP: */listen=/p'
+"$x" setting -show 2>/dev/null | sed -n 's/^port: */port=/p; s/^webBasePath: */path=/p'
+"$x" setting -getCert 2>/dev/null | sed -n 's/^cert: */cert=/p'
+"$x" setting -getListen 2>/dev/null | sed -n 's/^listenIP: */listen=/p'
 `
 
-// -getApiToken 必须放最后：上游的参数解析遇到第一个位置参数就停。
-const tokenScript = `/usr/local/x-ui/x-ui setting -tokenName ` + tokenName + ` -tokenScope admin -getApiToken true 2>&1
+// 开关型参数不带值：上游的参数解析遇到第一个位置参数（如多写的 true）就停，后面的参数会被丢掉。
+const tokenScript = `/usr/local/x-ui/x-ui setting -tokenName ` + tokenName + ` -tokenScope admin -getApiToken 2>&1
 `
 
 // upstreamScript 执行一份已上传的上游脚本：%[1]s 环境变量，%[2]s 脚本路径（已转义），%[3]s 位置参数。

@@ -162,7 +162,7 @@ func TestIssueToken(t *testing.T) {
 		t.Fatalf("token = %q, err = %v", got, err)
 	}
 	script := r.Scripts()[0]
-	if !strings.Contains(script, "-tokenName v2-hub -tokenScope admin -getApiToken true") {
+	if !strings.Contains(script, "-tokenName v2-hub -tokenScope admin -getApiToken 2>&1") {
 		t.Fatalf("script = %q", script)
 	}
 
