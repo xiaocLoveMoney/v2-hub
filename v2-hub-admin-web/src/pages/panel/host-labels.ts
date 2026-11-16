@@ -1,6 +1,9 @@
 import type { HostDetection, HostErrorCode, HostTask, HostTaskKind, HostTaskStatus, SshAuthType } from '../../api/client'
 import type { TagMeta } from './chain-labels'
 
+/** 没有值时的占位。 */
+export const EMPTY = '—'
+
 /** 任务种类的显示名（docs/03 §5.22 任务）。 */
 export const HOST_TASK_KIND_LABELS: Record<HostTaskKind, string> = {
   provision: '部署',

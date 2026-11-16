@@ -1,6 +1,6 @@
 import { cleanup, renderHook } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { HOST_TASK_POLL_INTERVAL_MS, usePolling } from './use-polling'
+import { HOST_TASK_POLL_INTERVAL_MS, usePollRemote, usePolling } from './use-polling'
 
 const TICKS = 3
 
@@ -67,5 +67,23 @@ describe('usePolling', () => {
     vi.advanceTimersByTime(HOST_TASK_POLL_INTERVAL_MS / 2)
     expect(first).not.toHaveBeenCalled()
     expect(second).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('usePollRemote', () => {
+  it('每轮刷新各份数据，上一次还没回来的那份跳过', () => {
+    const idle = { isLoading: false, reload: vi.fn() }
+    const busy = { isLoading: true, reload: vi.fn() }
+    renderHook(() => usePollRemote([idle, busy], true))
+    vi.advanceTimersByTime(HOST_TASK_POLL_INTERVAL_MS * TICKS)
+    expect(idle.reload).toHaveBeenCalledTimes(TICKS)
+    expect(busy.reload).not.toHaveBeenCalled()
+  })
+
+  it('条件为假时不刷新', () => {
+    const remote = { isLoading: false, reload: vi.fn() }
+    renderHook(() => usePollRemote([remote], false))
+    vi.advanceTimersByTime(HOST_TASK_POLL_INTERVAL_MS * TICKS)
+    expect(remote.reload).not.toHaveBeenCalled()
   })
 })

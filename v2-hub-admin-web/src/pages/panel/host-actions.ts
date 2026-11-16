@@ -1,5 +1,8 @@
 import { api, csrfHeader, toApiError, type ApiError, type HostAction, type HostTask } from '../../api/client'
 
+/** 拉取全部 SSH 凭据（host:read）；给 useRemote 用。 */
+export const loadSshCredentials = (signal: AbortSignal) => api.GET('/api/admin/ssh-credentials', { signal })
+
 /** 发起动作的结果：成功时 task 是排队中的任务，失败时 error 非空。 */
 export interface HostActionResult {
   task: HostTask | null

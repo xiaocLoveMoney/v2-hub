@@ -1,8 +1,7 @@
 import { Button, Space, Tag, Typography } from 'antd'
 import type { HostTask } from '../../api/client'
-import { HOST_TASK_KIND_LABELS, HOST_TASK_STATUS_META, hostErrorText } from './host-labels'
+import { EMPTY, HOST_TASK_KIND_LABELS, HOST_TASK_STATUS_META, hostErrorText } from './host-labels'
 
-const EMPTY = '—'
 const STATUS_FAILED = 'failed'
 
 /** 任务状态标签。 */

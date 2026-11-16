@@ -4,14 +4,13 @@ import { api, csrfHeader, type HostTask, type HostTaskDetail, type HostTaskKind,
 import { useSession } from '../../auth/session-context'
 import { ErrorAlert } from '../../components/ErrorAlert'
 import { PageHeader } from '../../components/PageHeader'
-import { usePolling } from '../../hooks/use-polling'
+import { usePollRemote, type Pollable } from '../../hooks/use-polling'
 import { mutate, useRemote } from '../../hooks/use-remote'
 import { PERMISSIONS } from '../../menu'
 import { TABLE_SCROLL, formatTime } from '../system/format'
-import { HOST_TASK_KIND_LABELS, hostErrorText, hostStepLabel, isHostTaskActive } from './host-labels'
+import { EMPTY, HOST_TASK_KIND_LABELS, hostErrorText, hostStepLabel, isHostTaskActive } from './host-labels'
 import { HostTaskStatusTag } from './HostTaskSummary'
 
-const EMPTY = '—'
 const NO_LOG = '（暂无日志）'
 const STATUS_QUEUED = 'queued'
 const DETAIL_TITLE_LEVEL = 5
@@ -87,7 +86,7 @@ function HostTaskBody({ hostId, initialTaskId, onChanged }: HostTaskBodyProps) {
           key={currentId}
           taskId={currentId}
           canWrite={can(PERMISSIONS.HOST_WRITE)}
-          onTick={tasks.reload}
+          tasks={tasks}
           onChanged={() => {
             tasks.reload()
             onChanged()
@@ -101,14 +100,14 @@ function HostTaskBody({ hostId, initialTaskId, onChanged }: HostTaskBodyProps) {
 interface HostTaskPanelProps {
   taskId: number
   canWrite: boolean
-  /** 每次轮询时调用（顺带刷新任务列表）。 */
-  onTick: () => void
+  /** 任务列表：这条任务没结束时跟着详情一起定时刷新。 */
+  tasks: Pollable
   /** 任务从未结束变成结束（含被取消）时调用。 */
   onChanged: () => void
 }
 
 /** 一条任务的详情与日志。日志是后端脱敏后的纯文本，放在 pre 里原样显示。 */
-function HostTaskPanel({ taskId, canWrite, onTick, onChanged }: HostTaskPanelProps) {
+function HostTaskPanel({ taskId, canWrite, tasks, onChanged }: HostTaskPanelProps) {
   const { message } = App.useApp()
   const [isCanceling, setIsCanceling] = useState(false)
   const load = useCallback((signal: AbortSignal) => api.GET('/api/admin/host-tasks/{id}', { params: { path: { id: taskId } }, signal }), [taskId])
@@ -116,14 +115,7 @@ function HostTaskPanel({ taskId, canWrite, onTick, onChanged }: HostTaskPanelPro
   const task = detail.data
   const isActive = isHostTaskActive(task)
 
-  usePolling(() => {
-    // 上一次请求还没回来就不叠加新的：reload 会取消旧请求，慢网络下会一直拿不到结果
-    if (detail.isLoading) {
-      return
-    }
-    detail.reload()
-    onTick()
-  }, isActive)
+  usePollRemote([detail, tasks], isActive)
 
   const wasActive = useRef(false)
   useEffect(() => {

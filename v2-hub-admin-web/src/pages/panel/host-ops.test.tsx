@@ -2,6 +2,7 @@ import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/re
 import type { ReactNode } from 'react'
 import { MemoryRouter, Route, Routes } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import type { Pollable } from '../../hooks/use-polling'
 import { PERMISSIONS } from '../../menu'
 import { TEST_CSRF, mockServer, ok, renderWith } from '../../test/harness'
 import { CREDENTIAL, CREDENTIAL_OPTION, hostOf, serverOf, taskOf } from '../../test/host-fixtures'
@@ -13,7 +14,7 @@ import { ServersPage } from './ServersPage'
 const { POLL_MS } = vi.hoisted(() => ({ POLL_MS: 20 }))
 vi.mock('../../hooks/use-polling', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../hooks/use-polling')>()
-  return { ...actual, usePolling: (callback: () => void, isActive: boolean) => actual.usePolling(callback, isActive, POLL_MS) }
+  return { ...actual, usePollRemote: (remotes: readonly Pollable[], isActive: boolean) => actual.usePollRemote(remotes, isActive, POLL_MS) }
 })
 
 const READ_ONLY = [PERMISSIONS.HOST_READ]

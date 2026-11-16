@@ -3,9 +3,9 @@ import { api, csrfHeader, type ServerHost } from '../../api/client'
 import { ErrorAlert } from '../../components/ErrorAlert'
 import { FormModal } from '../../components/FormModal'
 import { useSubmit } from '../../hooks/use-submit'
-import { MAX_NAME_LEN, MAX_PORT } from '../form-limits'
+import { MAX_NAME_LEN, MAX_PORT, MIN_PORT } from '../form-limits'
 import { COUNTRY_OPTIONS } from './countries'
-import { MAX_HOST_ADDRESS_LEN, MIN_PORT, validateHostAddressField } from './host-list'
+import { MAX_HOST_ADDRESS_LEN, validateHostAddressField } from './host-list'
 import { SshCredentialSelect } from './SshCredentialSelect'
 
 interface HostEditForm {

@@ -18,5 +18,6 @@ export const MAX_KEYWORD_LEN = 64
 /** 同时在线 IP 数的上限。 */
 export const MAX_LIMIT_IP = 1000
 
-/** 端口号的上限。 */
+/** 端口号的下限与上限。 */
+export const MIN_PORT = 1
 export const MAX_PORT = 65535

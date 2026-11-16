@@ -6,7 +6,7 @@ import { api, csrfHeader, type HostAction, type HostTask, type ServerHost } from
 import { useSession } from '../../auth/session-context'
 import { ErrorAlert } from '../../components/ErrorAlert'
 import { PageHeader } from '../../components/PageHeader'
-import { usePolling } from '../../hooks/use-polling'
+import { usePollRemote } from '../../hooks/use-polling'
 import { useRemote } from '../../hooks/use-remote'
 import { useRowAction } from '../../hooks/use-submit'
 import { PERMISSIONS, ROUTES } from '../../menu'
@@ -17,11 +17,10 @@ import { HostTaskDrawer } from './HostTaskDrawer'
 import { HostTaskSummary } from './HostTaskSummary'
 import { SshCredentialsModal } from './SshCredentialsModal'
 import { startHostAction, type OpenedHostTasks } from './host-actions'
-import { isHostTaskActive } from './host-labels'
+import { EMPTY, isHostTaskActive } from './host-labels'
 import { formatHostEndpoint } from './host-list'
 
 const loadHosts = (signal: AbortSignal) => api.GET('/api/admin/server-hosts', { signal })
-const EMPTY = '—'
 const NOT_ONBOARDED = '未接入'
 /** 部署动作：只对还没关联服务器的主机可用（docs/03 §5.22 任务）。 */
 const ACTION_PROVISION: HostAction = 'provision'
@@ -106,12 +105,7 @@ export function HostsPage() {
 
   // 有主机的任务还没结束时每 2 秒刷新列表，全部结束即停
   const hasActiveTask = (hosts.data ?? []).some((h) => isHostTaskActive(h.lastTask))
-  usePolling(() => {
-    // 上一次请求还没回来就不叠加新的：reload 会取消旧请求，慢网络下会一直拿不到结果
-    if (!hosts.isLoading) {
-      hosts.reload()
-    }
-  }, hasActiveTask)
+  usePollRemote([hosts], hasActiveTask)
 
   const openTasks = (host: ServerHost, task: HostTask | null) => setOpened({ host: { id: host.id, name: host.name }, taskId: task?.id ?? null })
 
