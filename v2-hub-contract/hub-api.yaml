@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: v2-hub API
-  version: 0.11.0
+  version: 0.12.0
   description: |
     v2-hub 对外接口契约（hub-server 提供，v2-hub-admin-web / v2-hub-user-web 消费）。
     - 管理端接口前缀 /api/admin，客户端接口前缀 /api/user，订阅端点前缀 /sub。
@@ -27,6 +27,8 @@ info:
       用户自设连接密码（Ruling-58）——新增 PUT /api/user/subscription/password，订阅信息带 hasCustomPassword。
     0.11.0：总览分析（Ruling-66）——新增 /api/admin/analytics/{users,traffic,servers,finance,backlog}；
       大陆连通检测（Ruling-67）——节点带 reach、服务器带 reach 汇总，新增 /api/admin/nodes/{id}/reach 与 /reach/check，系统设置增加 reach 分组。
+    0.12.0：SSH 托管与面板部署（docs/03 §5.22，Ruling-68 – Ruling-71）——新增 SSH 凭据、托管主机、主机任务与动作接口（权限码 host:read / host:write），
+      给已接入的服务器绑定 SSH（PUT /api/admin/servers/{id}/host），服务器带 hostId。
 servers:
   - url: http://127.0.0.1:8080
     description: 本地开发
@@ -41,6 +43,8 @@ tags:
     description: 审计日志（需 audit:read）
   - name: admin-panel
     description: 服务器（server:*）、入站与节点（node:*），docs/03 §5.1
+  - name: admin-hosts
+    description: SSH 凭据、托管主机、部署与运维任务（host:*），docs/03 §5.22
   - name: admin-users
     description: 套餐（plan:*）与用户（user:*），docs/03 §5.2
   - name: admin-settings
@@ -1354,6 +1358,415 @@ paths:
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
         "502": { $ref: "#/components/responses/UpstreamUnavailable" }
+  /api/admin/ssh-credentials:
+    get:
+      tags: [admin-hosts]
+      operationId: listSshCredentials
+      summary: 全部 SSH 凭据（host:read；docs/03 §5.22，0.12.0）；不返回私钥、密码与口令
+      responses:
+        "200":
+          description: 凭据列表
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: "#/components/schemas/SshCredential" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+    post:
+      tags: [admin-hosts]
+      operationId: createSshCredential
+      summary: 新建 SSH 凭据（host:write）；私钥在保存时解析校验
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SshCredentialInput" }
+      responses:
+        "200":
+          description: 新建的凭据
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/SshCredential" }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /api/admin/ssh-credentials/{id}:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    put:
+      tags: [admin-hosts]
+      operationId: updateSshCredential
+      summary: 修改 SSH 凭据（host:write）；secret、passphrase 留空表示沿用原值，改认证方式时 secret 必填
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SshCredentialInput" }
+      responses:
+        "200":
+          description: 修改后的凭据
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/SshCredential" }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+    delete:
+      tags: [admin-hosts]
+      operationId: deleteSshCredential
+      summary: 删除 SSH 凭据（host:write）；仍被主机引用时返回 409
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      responses:
+        "200": { $ref: "#/components/responses/Ok" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /api/admin/server-hosts:
+    get:
+      tags: [admin-hosts]
+      operationId: listServerHosts
+      summary: 全部托管主机及各自最近一条任务（host:read）
+      responses:
+        "200":
+          description: 主机列表
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: "#/components/schemas/ServerHost" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+    post:
+      tags: [admin-hosts]
+      operationId: createServerHosts
+      summary: 批量新建托管主机并各排一条部署任务（host:write）
+      description: 一次最多 50 台，共用同一份凭据、端口与面板类型；整批校验，任一行不合法都不保存。名称或（地址，端口）已存在返回 409。
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ServerHostBatchInput" }
+      responses:
+        "200":
+          description: 新建的主机（已各有一条排队中的部署任务）
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: "#/components/schemas/ServerHost" }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /api/admin/server-hosts/test:
+    post:
+      tags: [admin-hosts]
+      operationId: testServerHost
+      summary: 用未保存的信息连一次主机并检测（host:write）；不落库，按管理员频控
+      description: SSH 连不上或认证失败返回 502，message 给出脱敏后的原因。
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ServerHostTestInput" }
+      responses:
+        "200":
+          description: 检测结果
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/HostDetection" }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "502": { $ref: "#/components/responses/UpstreamUnavailable" }
+  /api/admin/server-hosts/{id}:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    get:
+      tags: [admin-hosts]
+      operationId: getServerHost
+      summary: 主机详情（host:read）
+      responses:
+        "200":
+          description: 主机
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/ServerHost" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    put:
+      tags: [admin-hosts]
+      operationId: updateServerHost
+      summary: 修改主机（host:write）；改了地址或端口会清空已固定的主机密钥。有未结束的任务时返回 409
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ServerHostInput" }
+      responses:
+        "200":
+          description: 修改后的主机
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/ServerHost" }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+    delete:
+      tags: [admin-hosts]
+      operationId: deleteServerHost
+      summary: 删除主机（host:write）；只删平台记录与任务历史，不动目标机与关联的服务器。有未结束的任务时返回 409
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      responses:
+        "200": { $ref: "#/components/responses/Ok" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /api/admin/server-hosts/{id}/reset-host-key:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    post:
+      tags: [admin-hosts]
+      operationId: resetServerHostKey
+      summary: 清空已固定的主机密钥，下次连接时重新记录（host:write）
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      responses:
+        "200":
+          description: 修改后的主机
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/ServerHost" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/admin/server-hosts/{id}/tasks:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    get:
+      tags: [admin-hosts]
+      operationId: listServerHostTasks
+      summary: 该主机最近 20 条任务，新的在前（host:read）；不带日志
+      responses:
+        "200":
+          description: 任务列表
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: "#/components/schemas/HostTask" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/admin/server-hosts/{id}/actions:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    post:
+      tags: [admin-hosts]
+      operationId: createServerHostAction
+      summary: 对主机发起一个动作，排成一条任务（host:write）
+      description: >-
+        provision 只在主机还没关联服务器时可用，其余动作（diagnose 除外）只在已关联服务器时可用，否则 409；
+        该主机已有未结束的任务时 409。按管理员频控。写审计。
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/HostActionInput" }
+      responses:
+        "200":
+          description: 排队中的任务
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/HostTask" }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /api/admin/server-hosts/{id}/panel-login/reset:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    post:
+      tags: [admin-hosts]
+      operationId: resetServerHostPanelLogin
+      summary: 重置面板网页的登录用户名与口令（host:write）；结果只在本次响应里返回，不落库
+      description: 只对已关联服务器的主机可用；有未结束的任务时 409。SSH 或命令失败返回 502。写审计（不含口令）。
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      responses:
+        "200":
+          description: 新的面板登录信息
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/PanelLogin" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "502": { $ref: "#/components/responses/UpstreamUnavailable" }
+  /api/admin/host-tasks/{id}:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    get:
+      tags: [admin-hosts]
+      operationId: getHostTask
+      summary: 任务详情，带脱敏后的日志（host:read）
+      responses:
+        "200":
+          description: 任务
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/HostTaskDetail" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/admin/host-tasks/{id}/cancel:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    post:
+      tags: [admin-hosts]
+      operationId: cancelHostTask
+      summary: 取消一条还在排队的任务（host:write）；已开始或已结束的返回 409
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      responses:
+        "200":
+          description: 取消后的任务
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/HostTask" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /api/admin/servers/{id}/host:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    put:
+      tags: [admin-hosts]
+      operationId: bindServerHost
+      summary: 给已接入的服务器绑定 SSH（host:write），并排一条校验连接的任务
+      description: 主机名取服务器名，面板类型取服务器的类型。该服务器已关联主机时返回 409。
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ServerHostBindInput" }
+      responses:
+        "200":
+          description: 新建的主机（已有一条排队中的 verify 任务）
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/ServerHost" }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
   /api/admin/endpoints/{id}:
     parameters:
       - $ref: "#/components/parameters/IdPath"
@@ -4745,7 +5158,7 @@ components:
           description: 资源快照（cpu、mem、uptime、xray 运行状态等，原样透传，字段随面板而定）
     Server:
       type: object
-      required: [id, name, providerType, baseUrl, tlsMode, region, remark, isDisabled, status, lastError, panelVersion, inboundCount, createdAt, reach]
+      required: [id, name, providerType, baseUrl, tlsMode, region, remark, isDisabled, status, lastError, panelVersion, inboundCount, createdAt, reach, hostId]
       properties:
         id: { type: integer, format: int64 }
         name: { type: string }
@@ -4764,6 +5177,7 @@ components:
         statusSnapshot: { type: [object, "null"], additionalProperties: true }
         inboundCount: { type: integer }
         createdAt: { type: string, format: date-time }
+        hostId: { type: [integer, "null"], format: int64, description: 关联的托管主机（0.12.0，docs/03 §5.22）；没有为 null }
         reach:
           type: [object, "null"]
           description: 这台服务器上的大陆连通检测目标数（0.11.0，Ruling-67）；功能没开为 null
@@ -4779,6 +5193,165 @@ components:
         - type: object
           properties:
             data: { $ref: "#/components/schemas/Server" }
+    SshAuthType:
+      type: string
+      enum: [key, password]
+    SshCredential:
+      type: object
+      required: [id, name, username, authType, keyFingerprint, remark, hostCount, createdAt, updatedAt]
+      properties:
+        id: { type: integer, format: int64 }
+        name: { type: string }
+        username: { type: string }
+        authType: { $ref: "#/components/schemas/SshAuthType" }
+        keyFingerprint: { type: string, description: "公钥指纹（SHA256:…），只用于展示；密码认证为空串" }
+        remark: { type: string }
+        hostCount: { type: integer, description: 引用这份凭据的主机数 }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    SshCredentialInput:
+      type: object
+      required: [name, username, authType]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 64 }
+        username: { type: string, minLength: 1, maxLength: 64, pattern: "^[a-zA-Z_][a-zA-Z0-9_.-]*$" }
+        authType: { $ref: "#/components/schemas/SshAuthType" }
+        secret: { type: string, maxLength: 16384, description: 只写。私钥（OpenSSH / PEM）或密码；新建必填，更新时留空表示沿用原值 }
+        passphrase: { type: string, maxLength: 255, description: 只写。私钥口令；更新时留空表示沿用原值，随新私钥一起提交时以提交的为准 }
+        remark: { type: string, maxLength: 255 }
+    HostAddress:
+      type: string
+      minLength: 1
+      maxLength: 255
+      description: IP 或域名；不能是回环或未指定地址
+    HostTaskKind:
+      type: string
+      enum: [provision, verify, restart_panel, restart_core, upgrade, reissue_token, enable_tls, diagnose]
+      description: >-
+        provision 部署（安装或接管）、verify 校验连接、restart_panel 重启面板、restart_core 重启内核、
+        upgrade 升级或修复到平台基线版本、reissue_token 重签令牌、enable_tls 配置证书、diagnose 查看状态与最近日志
+    HostTaskStatus:
+      type: string
+      enum: [queued, running, succeeded, failed, canceled]
+    HostErrorCode:
+      type: string
+      enum: ["", unsupported_os, no_systemd, no_root, nonstandard_install, listen_local, version_too_old, download_failed,
+             panel_unreachable, auth_failed, unreachable, host_key_changed, name_taken, interrupted, command_failed]
+      description: 失败或不能部署的原因大类（docs/03 §5.22），空串为没有
+    HostTask:
+      type: object
+      required: [id, hostId, kind, status, step, errorCode, lastError, createdByName, createdAt, startedAt, finishedAt]
+      properties:
+        id: { type: integer, format: int64 }
+        hostId: { type: integer, format: int64 }
+        kind: { $ref: "#/components/schemas/HostTaskKind" }
+        status: { $ref: "#/components/schemas/HostTaskStatus" }
+        step: { type: string, description: "当前或最后所在的步骤：connect、detect、install、adopt、register、run，还没开始为空串" }
+        errorCode: { $ref: "#/components/schemas/HostErrorCode" }
+        lastError: { type: string, description: 脱敏后的失败摘要，没有为空串 }
+        createdByName: { type: string, description: 发起任务的管理员用户名；管理员已被删除为空串 }
+        createdAt: { type: string, format: date-time }
+        startedAt: { type: [string, "null"], format: date-time }
+        finishedAt: { type: [string, "null"], format: date-time }
+    HostTaskDetail:
+      allOf:
+        - $ref: "#/components/schemas/HostTask"
+        - type: object
+          required: [log]
+          properties:
+            log: { type: string, description: 脱敏后的步骤日志，最多 64 KB }
+    ServerHost:
+      type: object
+      required: [id, name, address, sshPort, credentialId, credentialName, providerType, region, panelPort, hostKeySha256, osId, arch, serverId, serverName, lastTask, createdAt]
+      properties:
+        id: { type: integer, format: int64 }
+        name: { type: string }
+        address: { type: string }
+        sshPort: { type: integer }
+        credentialId: { type: integer, format: int64 }
+        credentialName: { type: string }
+        providerType: { type: string }
+        region: { type: string }
+        panelPort: { type: [integer, "null"], description: 安装时指定的面板端口，null 为随机 }
+        hostKeySha256: { type: string, description: "已固定的主机公钥指纹（SHA256:…），空串为还没记录" }
+        osId: { type: string, description: 最近一次检测到的发行版标识，如 debian；未检测为空串 }
+        arch: { type: string }
+        serverId: { type: [integer, "null"], format: int64, description: 已关联的服务器 }
+        serverName: { type: string, description: 已关联服务器的名称，没有为空串 }
+        lastTask:
+          oneOf:
+            - $ref: "#/components/schemas/HostTask"
+            - type: "null"
+        createdAt: { type: string, format: date-time }
+    ServerHostInput:
+      type: object
+      required: [name, address, sshPort, credentialId]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 64 }
+        address: { $ref: "#/components/schemas/HostAddress" }
+        sshPort: { type: integer, minimum: 1, maximum: 65535 }
+        credentialId: { type: integer, format: int64, minimum: 1 }
+        region: { $ref: "#/components/schemas/CountryCode" }
+        panelPort: { type: [integer, "null"], minimum: 1, maximum: 65535 }
+    ServerHostBatchInput:
+      type: object
+      required: [credentialId, providerType, hosts]
+      properties:
+        credentialId: { type: integer, format: int64, minimum: 1 }
+        sshPort: { type: integer, minimum: 1, maximum: 65535, default: 22 }
+        providerType: { type: string, enum: [xui] }
+        panelPort: { type: [integer, "null"], minimum: 1, maximum: 65535, description: 安装时用的面板端口，整批相同；null 为各自随机 }
+        hosts:
+          type: array
+          minItems: 1
+          maxItems: 50
+          items:
+            type: object
+            required: [address, name]
+            properties:
+              address: { $ref: "#/components/schemas/HostAddress" }
+              name: { type: string, minLength: 1, maxLength: 64 }
+              region: { $ref: "#/components/schemas/CountryCode" }
+    ServerHostTestInput:
+      type: object
+      required: [address, credentialId, providerType]
+      properties:
+        address: { $ref: "#/components/schemas/HostAddress" }
+        sshPort: { type: integer, minimum: 1, maximum: 65535, default: 22 }
+        credentialId: { type: integer, format: int64, minimum: 1 }
+        providerType: { type: string, enum: [xui] }
+    ServerHostBindInput:
+      type: object
+      required: [address, credentialId]
+      properties:
+        address: { $ref: "#/components/schemas/HostAddress" }
+        sshPort: { type: integer, minimum: 1, maximum: 65535, default: 22 }
+        credentialId: { type: integer, format: int64, minimum: 1 }
+    HostDetection:
+      type: object
+      required: [hostKeySha256, osId, arch, isPrivileged, panelState, panelVersion, plan, reason]
+      properties:
+        hostKeySha256: { type: string, description: "本次连接看到的主机公钥指纹（SHA256:…）" }
+        osId: { type: string }
+        arch: { type: string }
+        isPrivileged: { type: boolean, description: 登录用户是 root 或能免密 sudo }
+        panelState: { type: string, enum: [none, standard, nonstandard], description: 没有面板 / 标准安装的面板 / 非标准安装（如 Docker） }
+        panelVersion: { type: string, description: 已有面板的版本，没有为空串 }
+        plan: { type: string, enum: ["", install, adopt], description: 部署时会走安装还是接管；不能部署为空串 }
+        reason: { $ref: "#/components/schemas/HostErrorCode" }
+    HostActionInput:
+      type: object
+      required: [action]
+      properties:
+        action:
+          type: string
+          enum: [provision, restart_panel, restart_core, upgrade, reissue_token, enable_tls, diagnose]
+    PanelLogin:
+      type: object
+      required: [username, password]
+      properties:
+        username: { type: string }
+        password: { type: string }
     SyncResult:
       type: object
       required: [inbounds, added, updated, missing, drifted]
