@@ -231,6 +231,21 @@ type Endpoint struct {
 	UpdatedAt      pgtype.Timestamptz
 }
 
+type HostTask struct {
+	ID         int64
+	HostID     int64
+	Kind       string
+	Status     string
+	Step       string
+	ErrorCode  string
+	LastError  string
+	Log        string
+	CreatedBy  pgtype.Int8
+	CreatedAt  pgtype.Timestamptz
+	StartedAt  pgtype.Timestamptz
+	FinishedAt pgtype.Timestamptz
+}
+
 type ImpersonateTicket struct {
 	ID         int64
 	TicketHash []byte
@@ -473,6 +488,23 @@ type Server struct {
 	UpdatedAt      pgtype.Timestamptz
 }
 
+type ServerHost struct {
+	ID            int64
+	Name          string
+	Address       string
+	SshPort       int32
+	CredentialID  int64
+	ProviderType  string
+	Region        string
+	PanelPort     pgtype.Int4
+	HostKeySha256 string
+	OsID          string
+	Arch          string
+	ServerID      pgtype.Int8
+	CreatedAt     pgtype.Timestamptz
+	UpdatedAt     pgtype.Timestamptz
+}
+
 type ServerMetric struct {
 	ServerID      int64
 	BucketAt      pgtype.Timestamptz
@@ -528,6 +560,19 @@ type ShopOrder struct {
 	CouponID       pgtype.Int8
 	CouponCode     string
 	CreatedAt      pgtype.Timestamptz
+}
+
+type SshCredential struct {
+	ID             int64
+	Name           string
+	Username       string
+	AuthType       string
+	SecretEnc      []byte
+	PassphraseEnc  []byte
+	KeyFingerprint string
+	Remark         string
+	CreatedAt      pgtype.Timestamptz
+	UpdatedAt      pgtype.Timestamptz
 }
 
 type SubscribeLog struct {

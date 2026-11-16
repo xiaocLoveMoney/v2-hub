@@ -14,14 +14,22 @@ import (
 
 	"v2-hub-server/internal/dao/daotest"
 	"v2-hub-server/internal/manager/crypto"
+	"v2-hub-server/internal/manager/deploy"
+	"v2-hub-server/internal/manager/deploy/deploytest"
 	"v2-hub-server/internal/manager/panel"
 	"v2-hub-server/internal/manager/pay"
 	"v2-hub-server/internal/manager/pay/paytest"
+	"v2-hub-server/internal/manager/remote/remotetest"
 	"v2-hub-server/internal/manager/totp"
 	"v2-hub-server/internal/service"
 )
 
-const cred = "correct-horse-battery"
+const (
+	cred = "correct-horse-battery"
+	// testDeployType 是接口用例里注册的假部署类型；面板注册表里没有它，所以建主机会被拒，连接测试可用。
+	testDeployType = "fake"
+	testHostKey    = "SHA256:apitesthostkeyapitesthostkeyapitesthostkey0"
+)
 
 type apiClient struct {
 	t    *testing.T
@@ -75,8 +83,16 @@ func newAPIServer(t *testing.T) (*httptest.Server, *service.RBACService) {
 	ops := service.NewOpsService(pool, settings, mails, telegramSvc, nil)
 	// 不接探测服务：大陆连通检测只能看结论，手动检测返回 upstream_unavailable
 	reachSvc := service.NewReachService(pool, settings, ops, nil, service.ReachOptions{})
+	// SSH 托管：假拨号器 + 假部署实现，接口用例不发真实 SSH（docs/03 §5.22）
+	hosts := service.NewHostService(pool, sealer, &remotetest.Dialer{Runner: &remotetest.Runner{Privileged: true, HostKey: testHostKey}},
+		deploy.NewRegistry(map[string]deploy.Deployer{testDeployType: &deploytest.Fake{
+			Detection: deploy.Detection{OSID: "debian", Arch: "x86_64", IsPrivileged: true, PanelState: deploy.PanelNone, Plan: deploy.PlanInstall},
+		}}), panels, service.HostConfig{
+			CommandTimeout: time.Second, InstallTimeout: time.Second, TestLimit: 10, TestWindow: time.Minute,
+			ActionLimit: 10, ActionWindow: time.Minute, MaxBatch: 5, PanelWaitAttempts: 1, PanelWaitInterval: time.Millisecond,
+		})
 	srv := httptest.NewServer(NewRouter(Deps{
-		Database: pool, PingTimeout: time.Second, Auth: auth, RBAC: rbac,
+		Database: pool, PingTimeout: time.Second, Auth: auth, RBAC: rbac, Hosts: hosts,
 		Settings: settings, Mail: mails, Account: account, Users: users, PortalAuth: portal, Portal: users,
 		Content: service.NewContentService(pool, sealer, settings, mails, nil), Tickets: service.NewTicketService(pool, settings, mails, nil, nil),
 		Wallet: service.NewWalletService(pool, sealer, settings, nil), Shop: shop, Finance: shop, Pay: service.NewPayService(pool, settings, testGateways(t), nil, nil),

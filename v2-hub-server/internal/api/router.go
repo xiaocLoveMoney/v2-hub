@@ -78,6 +78,8 @@ type Deps struct {
 	Analytics AnalyticsManager
 	// Reach 提供大陆连通检测的结论与手动检测（Ruling-67）；为 nil 时节点与服务器不带结论。
 	Reach ReachManager
+	// Hosts 提供 SSH 凭据、托管主机与主机任务（docs/03 §5.22）。
+	Hosts HostManager
 	// Cookie 是会话 Cookie 属性。
 	Cookie CookieConfig
 	// TrustedProxies 是可采信 X-Forwarded-For 的直连网段（如 Caddy 所在 docker 网络）。
@@ -107,6 +109,7 @@ type handlers struct {
 	ops            OpsManager
 	analytics      AnalyticsManager
 	reach          ReachManager
+	hosts          HostManager
 	cookie         CookieConfig
 	trustedProxies []netip.Prefix
 }
@@ -114,7 +117,7 @@ type handlers struct {
 // NewRouter 返回注册好全部路由的 http.Handler。路由与 hub-api.yaml 的 paths 逐条对应。
 func NewRouter(deps Deps) http.Handler {
 	h := &handlers{auth: deps.Auth, rbac: deps.RBAC, panels: deps.Panels, users: deps.Users, portalAuth: deps.PortalAuth, portal: deps.Portal,
-		settings: deps.Settings, mail: deps.Mail, account: deps.Account, content: deps.Content, tickets: deps.Tickets, wallet: deps.Wallet, shop: deps.Shop, finance: deps.Finance, pay: deps.Pay, chain: deps.Chain, chainApply: deps.ChainApply, chainAdmin: deps.ChainAdmin, telegram: deps.Telegram, ops: deps.Ops, analytics: deps.Analytics, reach: deps.Reach, cookie: deps.Cookie, trustedProxies: deps.TrustedProxies}
+		settings: deps.Settings, mail: deps.Mail, account: deps.Account, content: deps.Content, tickets: deps.Tickets, wallet: deps.Wallet, shop: deps.Shop, finance: deps.Finance, pay: deps.Pay, chain: deps.Chain, chainApply: deps.ChainApply, chainAdmin: deps.ChainAdmin, telegram: deps.Telegram, ops: deps.Ops, analytics: deps.Analytics, reach: deps.Reach, hosts: deps.Hosts, cookie: deps.Cookie, trustedProxies: deps.TrustedProxies}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", handleHealthz)
 	mux.HandleFunc("GET /readyz", newReadyzHandler(deps.Database, deps.PingTimeout))
@@ -148,6 +151,23 @@ func NewRouter(deps Deps) http.Handler {
 	mux.HandleFunc("POST /api/admin/servers/{id}/sync", h.requireAdmin(service.PermServerWrite, h.syncServer))
 	mux.HandleFunc("GET /api/admin/servers/{id}/chain-apply", h.requireAdmin(service.PermServerRead, h.getServerChainApply))
 	mux.HandleFunc("POST /api/admin/servers/{id}/chain-apply/retry", h.requireAdmin(service.PermServerWrite, h.retryServerChainApply))
+	mux.HandleFunc("GET /api/admin/ssh-credentials", h.requireAdmin(service.PermHostRead, h.listSSHCredentials))
+	mux.HandleFunc("POST /api/admin/ssh-credentials", h.requireAdmin(service.PermHostWrite, h.createSSHCredential))
+	mux.HandleFunc("PUT /api/admin/ssh-credentials/{id}", h.requireAdmin(service.PermHostWrite, h.updateSSHCredential))
+	mux.HandleFunc("DELETE /api/admin/ssh-credentials/{id}", h.requireAdmin(service.PermHostWrite, h.deleteSSHCredential))
+	mux.HandleFunc("GET /api/admin/server-hosts", h.requireAdmin(service.PermHostRead, h.listServerHosts))
+	mux.HandleFunc("POST /api/admin/server-hosts", h.requireAdmin(service.PermHostWrite, h.createServerHosts))
+	mux.HandleFunc("POST /api/admin/server-hosts/test", h.requireAdmin(service.PermHostWrite, h.testServerHost))
+	mux.HandleFunc("GET /api/admin/server-hosts/{id}", h.requireAdmin(service.PermHostRead, h.getServerHost))
+	mux.HandleFunc("PUT /api/admin/server-hosts/{id}", h.requireAdmin(service.PermHostWrite, h.updateServerHost))
+	mux.HandleFunc("DELETE /api/admin/server-hosts/{id}", h.requireAdmin(service.PermHostWrite, h.deleteServerHost))
+	mux.HandleFunc("POST /api/admin/server-hosts/{id}/reset-host-key", h.requireAdmin(service.PermHostWrite, h.resetServerHostKey))
+	mux.HandleFunc("GET /api/admin/server-hosts/{id}/tasks", h.requireAdmin(service.PermHostRead, h.listServerHostTasks))
+	mux.HandleFunc("POST /api/admin/server-hosts/{id}/actions", h.requireAdmin(service.PermHostWrite, h.createServerHostAction))
+	mux.HandleFunc("POST /api/admin/server-hosts/{id}/panel-login/reset", h.requireAdmin(service.PermHostWrite, h.resetServerHostPanelLogin))
+	mux.HandleFunc("GET /api/admin/host-tasks/{id}", h.requireAdmin(service.PermHostRead, h.getHostTask))
+	mux.HandleFunc("POST /api/admin/host-tasks/{id}/cancel", h.requireAdmin(service.PermHostWrite, h.cancelHostTask))
+	mux.HandleFunc("PUT /api/admin/servers/{id}/host", h.requireAdmin(service.PermHostWrite, h.bindServerHost))
 	mux.HandleFunc("GET /api/admin/chain-routes", h.requireAdmin(service.PermServerRead, h.listChainRoutes))
 	mux.HandleFunc("GET /api/admin/chain-exits", h.requireAdmin(service.PermNodeRead, h.listChainExits))
 	mux.HandleFunc("POST /api/admin/chain-exits", h.requireAdmin(service.PermNodeWrite, h.createPlatformChainExit))

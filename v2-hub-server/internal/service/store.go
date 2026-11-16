@@ -16,7 +16,10 @@ import (
 	"v2-hub-server/internal/dao/sqlcgen"
 )
 
-const pgUniqueViolation = "23505"
+const (
+	pgUniqueViolation     = "23505"
+	pgForeignKeyViolation = "23503"
+)
 
 // store 封装连接池与事务，供各 service 共用。
 type store struct {
@@ -52,6 +55,11 @@ func (s store) inTx(ctx context.Context, fn func(q *sqlcgen.Queries) error) erro
 func isUniqueViolation(err error) bool {
 	var pgErr *pgconn.PgError
 	return errors.As(err, &pgErr) && pgErr.Code == pgUniqueViolation
+}
+
+func isForeignKeyViolation(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == pgForeignKeyViolation
 }
 
 // 审计动作，取值稳定，前端与报表按此筛选。

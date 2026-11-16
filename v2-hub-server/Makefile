@@ -1,4 +1,4 @@
-.PHONY: run test build lint vuln sqlc admin-create
+.PHONY: run test build lint vuln sqlc gen-upstream admin-create
 
 REPO_ROOT := $(abspath ..)
 SQLC_IMAGE := sqlc/sqlc:1.31.1
@@ -34,6 +34,10 @@ build:
 # 挂载仓库根，让 contract 符号链接在容器内也能解析。
 sqlc:
 	docker run --rm -v $(REPO_ROOT):/src -w /src/v2-hub-server $(SQLC_IMAGE) generate
+
+# 把契约目录里的上游安装与升级脚本快照拷进 deploy/xui 供内嵌（生成物入库，Ruling-69）；升级基线版本时重跑并 review diff。
+gen-upstream:
+	cp contract/upstream/3x-ui/install-v*.sh contract/upstream/3x-ui/update-v*.sh internal/manager/deploy/xui/upstream/
 
 # 扫描代码实际调用到的已知漏洞（标准库与依赖）；有可达漏洞时退出码非 0，CI 据此失败。
 vuln:

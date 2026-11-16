@@ -31,6 +31,9 @@ const (
 	PermFinanceRead      = "finance:read"
 	PermFinanceWrite     = "finance:write"
 	PermImpersonateWrite = "impersonate:write"
+	// M11：SSH 托管（docs/03 §5.22）
+	PermHostRead  = "host:read"
+	PermHostWrite = "host:write"
 )
 
 // AllPermissions 是全部权限码，super_admin 隐式拥有（docs/03 §4）。
@@ -40,6 +43,7 @@ var AllPermissions = []string{
 	PermUserRead, PermUserWrite, PermPlanRead, PermPlanWrite,
 	PermSettingRead, PermSettingWrite, PermContentRead, PermContentWrite, PermTicketRead, PermTicketWrite,
 	PermShopRead, PermShopWrite, PermFinanceRead, PermFinanceWrite, PermImpersonateWrite,
+	PermHostRead, PermHostWrite,
 }
 
 // RoleSuperAdmin 是内置超级管理员角色 code。

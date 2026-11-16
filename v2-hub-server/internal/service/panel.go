@@ -119,6 +119,8 @@ type Server struct {
 	StatusSnapshot []byte
 	InboundCount   int
 	CreatedAt      time.Time
+	// HostID 是关联的托管主机（docs/03 §5.22）；nil 表示没有绑定 SSH。
+	HostID *int64
 }
 
 func (s *PanelService) validateConn(in ServerConnInput, requireToken bool) (ServerConnInput, error) {
@@ -211,13 +213,23 @@ func (s *PanelService) TestServer(ctx context.Context, in ServerConnInput) (*pan
 	if err != nil {
 		return nil, err
 	}
+	info, err := s.probeConn(ctx, conn)
+	if err != nil {
+		return nil, panelError(err)
+	}
+	return info, nil
+}
+
+// probeConn 用已校验的连接信息探测面板，返回 Provider 层的原始错误（带 ErrorKind），
+// 供要按“连不上 / 令牌被拒”分支的调用方使用；对外接口一律走 TestServer。
+func (s *PanelService) probeConn(ctx context.Context, conn ServerConnInput) (*panel.PanelInfo, error) {
 	p, err := s.registry.Open(conn.ProviderType, s.connConfig(conn))
 	if err != nil {
 		return nil, newError(CodeInvalidArgument, "连接信息不合法")
 	}
 	info, err := p.Probe(ctx)
 	if err != nil {
-		return nil, panelError(err)
+		return nil, err
 	}
 	return &info, nil
 }
@@ -270,6 +282,10 @@ func serverFromRow(r sqlcgen.GetServerRow) Server {
 	if r.CertPinSha256.Valid {
 		v := r.CertPinSha256.String
 		srv.CertPinSHA256 = &v
+	}
+	if r.HostID != 0 {
+		hostID := r.HostID
+		srv.HostID = &hostID
 	}
 	return srv
 }

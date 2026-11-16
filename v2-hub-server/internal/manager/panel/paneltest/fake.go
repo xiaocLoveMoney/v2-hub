@@ -53,6 +53,13 @@ func New() *Fake {
 	}
 }
 
+// SetGUID 改面板标识；默认每台假面板的标识相同，要模拟不同机器时各设一个。
+func (f *Fake) SetGUID(guid string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.info.GUID = guid
+}
+
 // FailWith 让之后的所有调用返回 err；传 nil 恢复正常。
 func (f *Fake) FailWith(err error) {
 	f.mu.Lock()
