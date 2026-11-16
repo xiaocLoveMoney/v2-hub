@@ -34,6 +34,7 @@ run_case IT-10 it10_ops.sh
 run_case IT-11 it11_chain_routes.sh
 run_case IT-12 it12_exit_extras.sh
 run_case IT-13 it13_analytics_reach.sh
+run_case IT-14 it14_host_deploy.sh
 # 新用例登记在这里，并在 docs/08-联调与测试方案.md 用例库加一行
 
 echo

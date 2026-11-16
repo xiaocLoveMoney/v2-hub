@@ -45,6 +45,20 @@ services:
     profiles: ["xui"]
     ports: ["127.0.0.1:${XUI_B_PORT:-12054}:2053"]
 
+  # IT-14 用的“托管主机”：Debian + sshd + 按官方目录布局放好的 3x-ui（docs/08）；默认不起，由 it14_host_deploy.sh 起停。
+  # AUTHORIZED_KEY 是联调脚本每次生成的公钥；面板端口在容器内外一致，平台按“主机地址 + 面板自报的端口”去连。
+  # 不挂数据卷：重建容器 = 全新面板 + 新的 SSH 主机密钥。
+  sshbox:
+    build: ./it/sshbox
+    image: v2-hub-it-sshbox:v3.11.0
+    profiles: ["sshbox"]
+    environment:
+      AUTHORIZED_KEY: ${IT_SSHBOX_PUBKEY:-}
+      PANEL_PORT: ${SSHBOX_PANEL_PORT:-12056}
+    ports:
+      - "127.0.0.1:${SSHBOX_SSH_PORT:-12222}:22"
+      - "127.0.0.1:${SSHBOX_PANEL_PORT:-12056}:${SSHBOX_PANEL_PORT:-12056}"
+
 volumes:
   pg-data:
   minio-data:
