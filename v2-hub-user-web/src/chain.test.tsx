@@ -298,6 +298,51 @@ describe('链式代理页：客户端链式与我的出口', () => {
     await waitFor(() => expect(calls.some((c) => c.method === 'DELETE' && c.path === '/api/user/chain/exits/9')).toBe(true))
   })
 
+  it('我的出口卡里也列本人可用的平台出口：置灰只读、不显示地址、不占名额，引用数按规则数出', async () => {
+    mockServer(signedIn(overview))
+    renderApp('/chain')
+    const card = (await screen.findByText(/我的出口（1 \/ 10）/)).closest('section') as HTMLElement
+    const platform = within(card).getByRole('region', { name: '平台提供（2）' })
+    expect(within(platform).getByText(/由管理员添加并分配给你/)).toBeDefined()
+
+    const tokyo = within(platform).getByText('东京出口').closest('.hub-chain-exit-readonly') as HTMLElement
+    expect(within(tokyo).getByText('vless')).toBeDefined()
+    expect(within(tokyo).getByText('平台提供')).toBeDefined()
+    expect(within(tokyo).getByText('可用于服务端')).toBeDefined()
+    expect(within(tokyo).queryByText('可用于客户端')).toBeNull()
+    expect(within(tokyo).getByText('地址不公开 · 被 1 条规则引用')).toBeDefined()
+    const shared = within(platform).getByText('公共出口').closest('.hub-chain-exit-readonly') as HTMLElement
+    expect(within(shared).getByText('可用于客户端')).toBeDefined()
+    expect(within(shared).getByText('地址不公开 · 被 0 条规则引用')).toBeDefined()
+
+    // 查看链接、测试、编辑、删除只对自己的出口有
+    expect(within(platform).queryByRole('button')).toBeNull()
+    expect(within(card).getAllByRole('button', { name: '删除' })).toHaveLength(1)
+  })
+
+  it('没有自己的出口、套餐也不允许添加时：平台出口照常列出，标题名额仍是 0，不显示空状态', async () => {
+    mockServer(signedIn({ ...overview, exitAllowed: false, exits: [], serverRoutes: [serverTop], clientRoutes: [] }))
+    renderApp('/chain')
+    const card = (await screen.findByText(/我的出口（0 \/ 10）/)).closest('section') as HTMLElement
+    expect(within(card).getByRole('region', { name: '平台提供（2）' })).toBeDefined()
+    expect(within(card).queryByText(/还没有自己的出口/)).toBeNull()
+    expect(within(card).getByRole('button', { name: '添加' })).toHaveProperty('disabled', true)
+  })
+
+  it('没有平台出口时不出现“平台提供”一段；英文界面有对应文案', async () => {
+    mockServer(signedIn({ ...overview, platformExits: [], serverRoutes: [serverWide] }))
+    const view = renderApp('/chain')
+    const card = (await screen.findByText(/我的出口（1 \/ 10）/)).closest('section') as HTMLElement
+    expect(within(card).queryByText(/平台提供/)).toBeNull()
+    view.unmount()
+
+    mockServer(signedIn(overview))
+    renderApp('/chain', 'en')
+    const platform = await screen.findByRole('region', { name: 'Provided by the platform (2)' })
+    expect(within(platform).getByText('Address not shown · used by 1 rule(s)')).toBeDefined()
+    expect(within(platform).getAllByText('Platform')).toHaveLength(2)
+  })
+
   it('套餐都不允许时给横幅，禁用添加、调顺序与编辑，删除仍可用；菜单不显示', async () => {
     const off = { ...overview, allowed: false, exitAllowed: false, serverAllowed: false }
     mockServer(signedIn(off, { ...session, features: { clientChain: false, customNode: false, serverChain: false } }))

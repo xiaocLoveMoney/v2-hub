@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { api, setCsrfToken, toApiError, type ApiError, type UserSession } from '../api/client'
+import { usePageReturn } from '../hooks/use-page-return'
 import { SessionContext, type SessionContextValue, type SessionStatus } from './session-context'
+
+const HTTP_UNAUTHORIZED = 401
+const STATUS_AUTHENTICATED: SessionStatus = 'authenticated'
 
 interface SessionProviderProps {
   children: ReactNode
@@ -69,12 +73,23 @@ export function SessionProvider({ children }: SessionProviderProps) {
 
   const refresh = useCallback(async () => {
     try {
-      const { data } = await api.GET('/api/user/auth/me')
-      apply(data?.data ?? null)
+      const { data, response } = await api.GET('/api/user/auth/me')
+      if (data?.data !== undefined) {
+        apply(data.data)
+        return
+      }
+      // 只有后端明确说会话没了才回到未登录；其余失败（网络抖动、5xx）保持现状，不把人踢回登录页
+      if (response.status === HTTP_UNAUTHORIZED) {
+        apply(null)
+      }
     } catch (err) {
       reportError(err)
     }
   }, [apply])
+
+  // 套餐可能在别处变（管理员改、自动续费、到期）：回到页面时重取会话，菜单随 features 更新（docs/06 §3 第 6 条）
+  const handlePageReturn = useCallback(() => void refresh(), [refresh])
+  usePageReturn(handlePageReturn, status === STATUS_AUTHENTICATED)
 
   const adopt = useCallback((next: UserSession) => apply(next), [apply])
   const clear = useCallback(() => apply(null), [apply])

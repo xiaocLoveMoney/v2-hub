@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { toApiError, type ApiError, type PageData } from '../api/client'
+import { usePageReturn } from './use-page-return'
 
 /** openapi-fetch 调用结果的最小形状。 */
 interface FetchResult<T> {
@@ -17,6 +18,7 @@ interface RemoteState<T> {
 
 /**
  * 拉取一份远端数据：load 变化或调用 reload 时重新请求，卸载 / 重新请求时取消旧请求，避免过期响应覆盖新数据。
+ * 用户回到页面时在后台再取一次（docs/06 §3 第 6 条）：不亮加载态，失败时保留已有数据；上一次失败的则照常重试。
  * @param load 发起请求的函数，调用方用 useCallback 固定并列出依赖；必须把 signal 传给 openapi-fetch
  */
 export function useRemote<T>(load: (signal: AbortSignal) => Promise<FetchResult<T>>): RemoteState<T> {
@@ -24,18 +26,26 @@ export function useRemote<T>(load: (signal: AbortSignal) => Promise<FetchResult<
   const [error, setError] = useState<ApiError | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [version, setVersion] = useState(0)
+  // 下一次请求是否为回到页面触发的后台重取；只由 revalidate 置真，请求开始时读走
+  const isBackgroundNext = useRef(false)
 
   useEffect(() => {
     const controller = new AbortController()
+    const isBackground = isBackgroundNext.current
+    isBackgroundNext.current = false
     const run = async () => {
-      setIsLoading(true)
+      if (!isBackground) {
+        setIsLoading(true)
+      }
       try {
         const res = await load(controller.signal)
         if (controller.signal.aborted) {
           return
         }
         if (res.error !== undefined || res.data?.data === undefined) {
-          setError(toApiError(res.error))
+          if (!isBackground) {
+            setError(toApiError(res.error))
+          }
           return
         }
         setError(null)
@@ -45,7 +55,9 @@ export function useRemote<T>(load: (signal: AbortSignal) => Promise<FetchResult<
           return
         }
         reportError(err)
-        setError(toApiError(err))
+        if (!isBackground) {
+          setError(toApiError(err))
+        }
       } finally {
         if (!controller.signal.aborted) {
           setIsLoading(false)
@@ -57,6 +69,13 @@ export function useRemote<T>(load: (signal: AbortSignal) => Promise<FetchResult<
   }, [load, version])
 
   const reload = useCallback(() => setVersion((v) => v + 1), [])
+  const revalidate = useCallback(() => {
+    isBackgroundNext.current = true
+    setVersion((v) => v + 1)
+  }, [])
+  // 已有数据才走后台重取，否则页面会停在没有数据也没有错误的状态；请求进行中不打断
+  const hasFreshData = data !== null && error === null
+  usePageReturn(hasFreshData ? revalidate : reload, !isLoading)
   return { data, error, isLoading, reload }
 }
 

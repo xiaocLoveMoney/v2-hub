@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { api, csrfHeader, type ChainExit, type ChainNodeOption, type ChainOverview } from '../../api/client'
+import { api, csrfHeader, type ChainExit, type ChainExitKind, type ChainNodeOption, type ChainOverview, type ChainPlatformExit } from '../../api/client'
 import { useToast } from '../../components/toast-context'
 import { Alert, Badge, Button, Card, Confirm, Empty } from '../../components/ui'
 import { useCopy } from '../../hooks/use-copy'
@@ -10,6 +10,7 @@ import { ExitTestPanel } from './ExitTestPanel'
 
 const NEW_EXIT_KEY = 'new'
 const NO_ROUTES = 0
+const EXIT_KIND_PLATFORM: ChainExitKind = 'platform'
 
 interface ExitItemProps {
   exit: ChainExit
@@ -91,7 +92,60 @@ function ExitItem({ exit, testNodes, isWritable, onEdit, onDelete }: ExitItemPro
   )
 }
 
-/** “我的出口”卡（docs/03 §5.21）：只能作落地；套餐不允许时只读，但仍可删除。 */
+/** 每个平台出口被本人几条规则引用：总览里的平台出口不带引用数，按两类规则数出来。 */
+function countPlatformRefs(overview: ChainOverview): Map<number, number> {
+  const counts = new Map<number, number>()
+  for (const route of [...overview.serverRoutes, ...overview.clientRoutes]) {
+    if (route.exit.kind === EXIT_KIND_PLATFORM) {
+      counts.set(route.exit.id, (counts.get(route.exit.id) ?? NO_ROUTES) + 1)
+    }
+  }
+  return counts
+}
+
+/**
+ * 一个平台出口（管理员添加并分配给本人，docs/03 §5.21）：只读、整行置灰。
+ * 地址与链接后端不返回，所以没有查看链接、测试、编辑、删除，地址处显示占位。
+ */
+function PlatformExitItem({ exit, routeCount }: { exit: ChainPlatformExit; routeCount: number }) {
+  const { t } = useI18n()
+  return (
+    <div className="hub-shared-item hub-chain-exit-readonly">
+      <div className="hub-chain-node-head">
+        <span className="hub-shared-name">{exit.name}</span>
+        <Badge tone="light">{exit.protocol}</Badge>
+        <Badge tone="light">{t('chain.platformProvided')}</Badge>
+        {exit.allowServer && <Badge tone="light">{t('chain.platformForServer')}</Badge>}
+        {exit.allowClient && <Badge tone="light">{t('chain.platformForClient')}</Badge>}
+      </div>
+      <p className="hub-field-hint">
+        {t('chain.platformAddressHidden')}
+        {t('chain.refCount', { n: routeCount })}
+      </p>
+    </div>
+  )
+}
+
+/** “平台提供”一段：本人可用的平台出口，让人看得到管理员已经分配了哪些；没有时整段不显示。 */
+function PlatformExits({ overview }: { overview: ChainOverview }) {
+  const { t } = useI18n()
+  const exits = overview.platformExits
+  if (exits.length === 0) {
+    return null
+  }
+  const refs = countPlatformRefs(overview)
+  return (
+    <section className="hub-chain-platform-exits" aria-label={t('chain.platformExitsTitle', { count: exits.length })}>
+      <h5 className="hub-chain-subtitle">{t('chain.platformExitsTitle', { count: exits.length })}</h5>
+      <p className="hub-field-hint">{t('chain.platformExitsHint')}</p>
+      {exits.map((x) => (
+        <PlatformExitItem key={x.id} exit={x} routeCount={refs.get(x.id) ?? NO_ROUTES} />
+      ))}
+    </section>
+  )
+}
+
+/** “我的出口”卡（docs/03 §5.21）：只能作落地；套餐不允许时只读，但仍可删除。后面附本人可用的平台出口（只读）。 */
 export function ExitsCard({ overview, onChanged }: { overview: ChainOverview; onChanged: () => void }) {
   const { t } = useI18n()
   const toast = useToast()
@@ -140,10 +194,11 @@ export function ExitsCard({ overview, onChanged }: { overview: ChainOverview; on
     <Card title={t('chain.exitsTitle', { count: exits.length, max: overview.maxExits })} extra={addButton}>
       {!overview.exitAllowed && <Alert tone="info">{t('chain.exitsNotAllowed')}</Alert>}
       {overview.exitAllowed && isFull && <Alert tone="info">{t('chain.exitsFull', { max: overview.maxExits })}</Alert>}
-      {exits.length === 0 && <Empty>{t('chain.exitsEmpty')}</Empty>}
+      {exits.length === 0 && overview.platformExits.length === 0 && <Empty>{t('chain.exitsEmpty')}</Empty>}
       {exits.map((x) => (
         <ExitItem key={x.id} exit={x} testNodes={testNodes} isWritable={overview.exitAllowed} onEdit={() => setEditing(x)} onDelete={() => setDeleting(x)} />
       ))}
+      <PlatformExits overview={overview} />
       {/* 每次打开都重新挂载，表单状态不残留上一次的输入 */}
       {(isAdding || editing !== null) && <ExitModal key={editing?.id ?? NEW_EXIT_KEY} exit={editing} isOpen onClose={closeForm} onSaved={handleSaved} />}
       <Confirm title={t('chain.deleteExit')} isOpen={deleting !== null} isBusy={isDeleting} confirmText={t('common.delete')} onConfirm={() => void handleDelete()} onClose={() => setDeleting(null)}>
