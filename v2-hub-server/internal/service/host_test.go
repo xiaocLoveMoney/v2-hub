@@ -64,9 +64,9 @@ func newHostFixture(t *testing.T) *hostFixture {
 	runner := &remotetest.Runner{Privileged: true, HostKey: hostKeyFP}
 	dialer := &remotetest.Dialer{Runner: runner}
 	deployer := &deploytest.Fake{
-		Detection: deploy.Detection{OSID: "debian", Arch: "x86_64", IsPrivileged: true, PanelState: deploy.PanelStandard, PanelVersion: "3.11.0", Plan: deploy.PlanAdopt},
-		Panel:     deploy.PanelAccess{Port: testPanelPort, BasePath: testBasePath},
-		Token:     issuedToken, CertPin: testCertPin, Errors: map[string]error{},
+		Detection:   deploy.Detection{OSID: "debian", Arch: "x86_64", IsPrivileged: true, PanelState: deploy.PanelStandard, PanelVersion: "3.11.0", Plan: deploy.PlanAdopt},
+		Provisioned: deploy.Provisioned{Access: deploy.PanelAccess{Port: testPanelPort, BasePath: testBasePath}, Token: issuedToken},
+		Token:       issuedToken, CertPin: testCertPin, Errors: map[string]error{},
 		Login: deploy.PanelLogin{Username: "newuser", Password: "newpassword1234567890"},
 	}
 	hosts := NewHostService(pf.pool, testSealer(t), dialer, deploy.NewRegistry(map[string]deploy.Deployer{fakeType: deployer}), pf.panels, HostConfig{
@@ -319,8 +319,8 @@ func TestProvisionAdoptsExistingPanel(t *testing.T) {
 		t.Fatalf("an http panel should be flagged in the log:\n%s", task.Log)
 	}
 	calls := strings.Join(f.deployer.Calls(), ",")
-	if calls != "Detect,Access,IssueToken" {
-		t.Fatalf("adopt must not install or touch TLS / firewall, calls = %s", calls)
+	if calls != "Detect,Provision" {
+		t.Fatalf("the remote steps belong to the deployer, calls = %s", calls)
 	}
 
 	got, err := f.hosts.GetHost(ctx, host.ID)
@@ -349,12 +349,14 @@ func TestProvisionInstallsOnCleanHost(t *testing.T) {
 	f := newHostFixture(t)
 	ctx := context.Background()
 	f.deployer.Detection.PanelState, f.deployer.Detection.PanelVersion, f.deployer.Detection.Plan = deploy.PanelNone, "", deploy.PlanInstall
+	f.deployer.Provisioned.IsFresh = true
+	f.deployer.Provisioned.Access.HasTLS, f.deployer.Provisioned.Access.CertSHA256 = true, testCertPin
 	host := f.createHost(t, hostAddrA, "node-a")
 
 	task := f.runNext(t)
 	wantTask(t, task, HostTaskSucceeded, deploy.ReasonNone)
-	if calls := strings.Join(f.deployer.Calls(), ","); calls != "Detect,Install,EnableTLS,Access,OpenFirewall,IssueToken" {
-		t.Fatalf("calls = %s", calls)
+	if task.Step != hostStepRegister || !strings.Contains(task.Log, "开始安装") {
+		t.Fatalf("step = %s, log:\n%s", task.Step, task.Log)
 	}
 	got, err := f.hosts.GetHost(ctx, host.ID)
 	if err != nil || got.ServerID == nil {
@@ -377,7 +379,7 @@ func TestProvisionFailures(t *testing.T) {
 		reason deploy.Reason
 	}{
 		{"unsupported host", func(f *hostFixture) {
-			f.deployer.Detection.Plan, f.deployer.Detection.Reason = deploy.PlanNone, deploy.ReasonNonstandard
+			f.deployer.Detection.Plan, f.deployer.Detection.Reason, f.deployer.Detection.Message = deploy.PlanNone, deploy.ReasonNonstandard, "不是标准安装"
 		}, deploy.ReasonNonstandard},
 		{"ssh auth", func(f *hostFixture) {
 			f.dialer.Err = &remote.Error{Kind: remote.KindAuth, Message: "SSH 登录被拒"}
@@ -386,7 +388,7 @@ func TestProvisionFailures(t *testing.T) {
 			f.dialer.Err = &remote.Error{Kind: remote.KindUnreachable, Message: "连不上"}
 		}, deploy.ReasonUnreachable},
 		{"listen local", func(f *hostFixture) {
-			f.deployer.Errors["Access"] = deploy.NewError(deploy.ReasonListenLocal, "面板只监听本机")
+			f.deployer.Errors["Provision"] = deploy.NewError(deploy.ReasonListenLocal, "面板只监听本机")
 		}, deploy.ReasonListenLocal},
 		{"panel unreachable from hub", func(f *hostFixture) {
 			f.fleet.get(urlHTTPHostA).FailWith(&panel.Error{Kind: panel.KindUnreachable, Message: "连接超时"})
@@ -512,7 +514,10 @@ func TestOperateActions(t *testing.T) {
 
 	wantTask(t, f.action(t, host.ID, HostTaskRestartPanel), HostTaskSucceeded, deploy.ReasonNone)
 	wantTask(t, f.action(t, host.ID, HostTaskRestartCore), HostTaskSucceeded, deploy.ReasonNone)
+	// 升级要下载程序包、耗时不定，不占对账锁：锁被对账占着时照样能跑完
+	unlock := lockServer(serverID)
 	wantTask(t, f.action(t, host.ID, HostTaskUpgrade), HostTaskSucceeded, deploy.ReasonNone)
+	unlock()
 
 	f.deployer.Diagnosis = "服务状态: active\nxray started"
 	diag := f.action(t, host.ID, HostTaskDiagnose)

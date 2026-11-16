@@ -33,10 +33,7 @@ const (
 	maxSSHKeyBytes      = 16 << 10
 	maxSSHPasswordLen   = 255
 	maxSSHPassphraseLen = 255
-	maxHostAddressLen   = 255
 	defaultSSHPort      = 22
-	minTCPPort          = 1
-	maxTCPPort          = 65535
 	hostGuardMaxKeys    = 1024
 	localhostName       = "localhost"
 
@@ -70,10 +67,7 @@ const (
 	msgBadProviderType     = "不支持的面板类型："
 )
 
-var (
-	sshUsernamePattern = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_.-]*$`)
-	hostDomainPattern  = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*$`)
-)
+var sshUsernamePattern = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_.-]*$`)
 
 // HostConfig 是 SSH 托管业务的参数（docs/03 §5.22）。
 type HostConfig struct {
@@ -175,11 +169,25 @@ type SSHCredentialInput struct {
 func secretAAD(id int64) []byte     { return fmt.Appendf(nil, "ssh_credential:%d:secret", id) }
 func passphraseAAD(id int64) []byte { return fmt.Appendf(nil, "ssh_credential:%d:passphrase", id) }
 
+// validateName 去掉首尾空白并校验凭据 / 主机的名称长度。
+func validateName(name string) (string, error) {
+	name = strings.TrimSpace(name)
+	if n := utf8.RuneCountInString(name); n < 1 || n > maxServerNameLen {
+		return "", newError(CodeInvalidArgument, fmt.Sprintf("名称长度须为 1–%d", maxServerNameLen))
+	}
+	return name, nil
+}
+
+// validateCredentialFields 校验并规范化凭据的非密文字段；密码认证没有私钥口令，一并清掉。
 func validateCredentialFields(in SSHCredentialInput) (SSHCredentialInput, error) {
-	in.Name = strings.TrimSpace(in.Name)
+	name, err := validateName(in.Name)
+	if err != nil {
+		return in, err
+	}
+	in.Name = name
 	in.Username = strings.TrimSpace(in.Username)
-	if n := utf8.RuneCountInString(in.Name); n < 1 || n > maxServerNameLen {
-		return in, newError(CodeInvalidArgument, fmt.Sprintf("名称长度须为 1–%d", maxServerNameLen))
+	if in.AuthType == SSHAuthPassword {
+		in.Passphrase = ""
 	}
 	if len(in.Username) > maxSSHUsernameLen || !sshUsernamePattern.MatchString(in.Username) {
 		return in, newError(CodeInvalidArgument, "登录用户名不合法")
@@ -271,9 +279,6 @@ func (s *HostService) CreateCredential(ctx context.Context, actor *AdminPrincipa
 	if err != nil {
 		return nil, err
 	}
-	if in.AuthType == SSHAuthPassword {
-		in.Passphrase = ""
-	}
 	fingerprint, err := checkSecret(in.AuthType, in.Secret, in.Passphrase)
 	if err != nil {
 		return nil, err
@@ -358,9 +363,6 @@ func (s *HostService) UpdateCredential(ctx context.Context, actor *AdminPrincipa
 	if err != nil {
 		return nil, err
 	}
-	if in.AuthType == SSHAuthPassword {
-		in.Passphrase = ""
-	}
 	secret, passphrase, fingerprint, isSecretChanged, err := s.resolveSecret(ctx, id, in)
 	if err != nil {
 		return nil, err
@@ -394,12 +396,10 @@ func (s *HostService) UpdateCredential(ctx context.Context, actor *AdminPrincipa
 
 // DeleteCredential 删除 SSH 凭据；仍被主机引用时返回 409。
 func (s *HostService) DeleteCredential(ctx context.Context, actor *AdminPrincipal, id int64, ip *netip.Addr) error {
+	// 先取名称给审计用；“仍被引用”由外键拦（ON DELETE RESTRICT）
 	cred, err := s.getCredential(ctx, id)
 	if err != nil {
 		return err
-	}
-	if cred.HostCount > 0 {
-		return newError(CodeConflict, msgCredentialInUse)
 	}
 	return s.inTx(ctx, func(q *sqlcgen.Queries) error {
 		n, err := q.DeleteSSHCredential(ctx, id)
@@ -422,7 +422,7 @@ func (s *HostService) DeleteCredential(ctx context.Context, actor *AdminPrincipa
 // normalizeHostAddress 校验并规范化主机地址：IP 取规范写法，域名转小写。
 func normalizeHostAddress(address string, allowLoopback bool) (string, error) {
 	address = strings.ToLower(strings.TrimSpace(address))
-	if address == "" || len(address) > maxHostAddressLen {
+	if address == "" || len(address) > maxAddressLen {
 		return "", newError(CodeInvalidArgument, msgBadHostAddress)
 	}
 	if ip, err := netip.ParseAddr(address); err == nil {
@@ -432,7 +432,7 @@ func normalizeHostAddress(address string, allowLoopback bool) (string, error) {
 		}
 		return ip.String(), nil
 	}
-	if !hostDomainPattern.MatchString(address) {
+	if !hostnamePattern.MatchString(address) {
 		return "", newError(CodeInvalidArgument, msgBadHostAddress)
 	}
 	if address == localhostName && !allowLoopback {
@@ -442,7 +442,7 @@ func normalizeHostAddress(address string, allowLoopback bool) (string, error) {
 }
 
 func validatePort(port int) error {
-	if port < minTCPPort || port > maxTCPPort {
+	if port < minPort || port > maxPort {
 		return newError(CodeInvalidArgument, msgBadSSHPort)
 	}
 	return nil

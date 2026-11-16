@@ -5,10 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/netip"
-	"net/url"
-	"strings"
 	"time"
-	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -123,7 +120,7 @@ func (s *HostService) GetHost(ctx context.Context, id int64) (*ServerHost, error
 		return nil, err
 	}
 	host := hostFromRow(row)
-	tasks, err := s.ListTasks(ctx, id, 1)
+	tasks, err := s.listTasks(ctx, id, 1)
 	if err != nil {
 		return nil, err
 	}
@@ -166,19 +163,23 @@ func (s *HostService) checkProviderType(providerType string) error {
 	return nil
 }
 
-func validateHostName(name string) (string, error) {
-	name = strings.TrimSpace(name)
-	if n := utf8.RuneCountInString(name); n < 1 || n > maxServerNameLen {
-		return "", newError(CodeInvalidArgument, fmt.Sprintf("名称长度须为 1–%d", maxServerNameLen))
-	}
-	return name, nil
-}
-
 func validatePanelPort(port *int) error {
 	if port == nil {
 		return nil
 	}
 	return validatePort(*port)
+}
+
+// normalizeEndpoint 给 SSH 端口补默认值并校验，再规范化主机地址。
+func (s *HostService) normalizeEndpoint(address string, port int) (string, int, error) {
+	if port == 0 {
+		port = defaultSSHPort
+	}
+	if err := validatePort(port); err != nil {
+		return "", 0, err
+	}
+	address, err := normalizeHostAddress(address, s.cfg.AllowLoopback)
+	return address, port, err
 }
 
 // normalizeBatch 校验整批输入并规范化每一行；任一行不合法即整批拒绝，错误里指出是第几行。
@@ -207,7 +208,7 @@ func (s *HostService) normalizeBatch(in HostBatchInput) (HostBatchInput, error) 
 		if err != nil {
 			return in, rowError(row, err)
 		}
-		name, err := validateHostName(item.Name)
+		name, err := validateName(item.Name)
 		if err != nil {
 			return in, rowError(row, err)
 		}
@@ -238,9 +239,6 @@ func rowError(row int, err error) error {
 func (s *HostService) CreateHosts(ctx context.Context, actor *AdminPrincipal, in HostBatchInput, ip *netip.Addr) ([]ServerHost, error) {
 	in, err := s.normalizeBatch(in)
 	if err != nil {
-		return nil, err
-	}
-	if _, err := s.getCredential(ctx, in.CredentialID); err != nil {
 		return nil, err
 	}
 	ids := make([]int64, 0, len(in.Hosts))
@@ -335,7 +333,7 @@ func (s *HostService) ensureIdle(ctx context.Context, q *sqlcgen.Queries, hostID
 
 // UpdateHost 修改主机；改了地址或端口会清空已固定的主机密钥。有未结束的任务时返回 409。
 func (s *HostService) UpdateHost(ctx context.Context, actor *AdminPrincipal, id int64, in ServerHostInput, ip *netip.Addr) (*ServerHost, error) {
-	name, err := validateHostName(in.Name)
+	name, err := validateName(in.Name)
 	if err != nil {
 		return nil, err
 	}
@@ -423,13 +421,7 @@ func (s *HostService) ResetHostKey(ctx context.Context, actor *AdminPrincipal, i
 
 // BindServer 给已接入的服务器绑定 SSH，并排一条校验连接的任务；主机名取服务器名。
 func (s *HostService) BindServer(ctx context.Context, actor *AdminPrincipal, serverID int64, in HostBindInput, ip *netip.Addr) (*ServerHost, error) {
-	if in.SSHPort == 0 {
-		in.SSHPort = defaultSSHPort
-	}
-	if err := validatePort(in.SSHPort); err != nil {
-		return nil, err
-	}
-	address, err := normalizeHostAddress(in.Address, s.cfg.AllowLoopback)
+	address, sshPort, err := s.normalizeEndpoint(in.Address, in.SSHPort)
 	if err != nil {
 		return nil, err
 	}
@@ -444,7 +436,7 @@ func (s *HostService) BindServer(ctx context.Context, actor *AdminPrincipal, ser
 	err = s.inTx(ctx, func(q *sqlcgen.Queries) error {
 		var err error
 		id, err = s.createHost(ctx, q, actor, ip, createHostParams{
-			item: HostBatchItem{Address: address, Name: srv.Name, Region: srv.Region}, credentialID: in.CredentialID, sshPort: in.SSHPort,
+			item: HostBatchItem{Address: address, Name: srv.Name, Region: srv.Region}, credentialID: in.CredentialID, sshPort: sshPort,
 			providerType: srv.ProviderType, serverID: serverID, kind: HostTaskVerify, action: ActionHostBind,
 		})
 		return err
@@ -456,30 +448,45 @@ func (s *HostService) BindServer(ctx context.Context, actor *AdminPrincipal, ser
 	return s.GetHost(ctx, id)
 }
 
-// dialTarget 组出连接主机用的全部信息；pinnedKey 为空表示首次连接。
-func (s *HostService) dialTarget(ctx context.Context, address string, port int, credentialID int64, pinnedKey string) (remote.Target, error) {
+// dial 解密凭据并连上主机；pinnedKey 为空表示首次连接。调用方用完须关闭。
+func (s *HostService) dial(ctx context.Context, address string, port int, credentialID int64, pinnedKey string) (remote.Runner, error) {
 	cred, err := s.openCredential(ctx, credentialID)
 	if err != nil {
-		return remote.Target{}, err
+		return nil, err
 	}
 	target := remote.Target{Address: address, Port: port, Username: cred.username, HostKeySHA256: pinnedKey}
 	if cred.authType == SSHAuthPassword {
 		target.Password = string(cred.secret)
-		return target, nil
+	} else {
+		target.PrivateKey, target.Passphrase = cred.secret, cred.passphrase
 	}
-	target.PrivateKey, target.Passphrase = cred.secret, cred.passphrase
-	return target, nil
+	return s.dialer.Dial(ctx, target)
+}
+
+// endpoint 是一次连接的去处。
+type endpoint struct {
+	address      string
+	port         int
+	credentialID int64
+	pinnedKey    string
+}
+
+// withRunner 给“请求里同步做一件事”的接口用：在普通动作的时限内连上主机、执行 fn、关闭连接，
+// SSH 与部署层的错误统一转成对外的 502。
+func (s *HostService) withRunner(ctx context.Context, e endpoint, fn func(ctx context.Context, r remote.Runner) error) error {
+	ctx, cancel := context.WithTimeout(ctx, s.cfg.CommandTimeout)
+	defer cancel()
+	runner, err := s.dial(ctx, e.address, e.port, e.credentialID, e.pinnedKey)
+	if err != nil {
+		return upstreamError(err)
+	}
+	defer closeRunner(runner)
+	return upstreamError(fn(ctx, runner))
 }
 
 // TestHost 用未保存的信息连一次主机并检测；不落库，按管理员频控。SSH 失败返回 502。
 func (s *HostService) TestHost(ctx context.Context, actor *AdminPrincipal, in HostTestInput) (*HostDetection, error) {
-	if in.SSHPort == 0 {
-		in.SSHPort = defaultSSHPort
-	}
-	if err := validatePort(in.SSHPort); err != nil {
-		return nil, err
-	}
-	address, err := normalizeHostAddress(in.Address, s.cfg.AllowLoopback)
+	address, sshPort, err := s.normalizeEndpoint(in.Address, in.SSHPort)
 	if err != nil {
 		return nil, err
 	}
@@ -490,40 +497,22 @@ func (s *HostService) TestHost(ctx context.Context, actor *AdminPrincipal, in Ho
 	if err := allow(s.tests, actor.AdminID); err != nil {
 		return nil, err
 	}
-	target, err := s.dialTarget(ctx, address, in.SSHPort, in.CredentialID, "")
+	var out HostDetection
+	err = s.withRunner(ctx, endpoint{address: address, port: sshPort, credentialID: in.CredentialID}, func(ctx context.Context, r remote.Runner) error {
+		det, err := deployer.Detect(ctx, r)
+		out = HostDetection{HostKeySHA256: r.HostKeySHA256(), Detection: det}
+		return err
+	})
 	if err != nil {
 		return nil, err
 	}
-	ctx, cancel := context.WithTimeout(ctx, s.cfg.CommandTimeout)
-	defer cancel()
-	runner, err := s.dialer.Dial(ctx, target)
-	if err != nil {
-		return nil, upstreamError(err)
-	}
-	defer closeRunner(runner)
-	det, err := deployer.Detect(ctx, runner)
-	if err != nil {
-		return nil, upstreamError(err)
-	}
-	return &HostDetection{HostKeySHA256: runner.HostKeySHA256(), Detection: det}, nil
+	return &out, nil
 }
 
-// upstreamError 把 SSH 与部署层的错误转成对外的 502，message 取脱敏后的原因。
+// upstreamError 把 SSH 与部署层的错误转成对外的 502，message 取脱敏后的原因；其它错误（含 nil）原样返回。
 func upstreamError(err error) error {
-	if re := remote.AsError(err); re != nil {
-		return newError(CodeUpstream, re.Message)
-	}
-	if de := deploy.AsError(err); de != nil {
-		return newError(CodeUpstream, de.Message)
+	if _, message, ok := deploy.FailureOf(err); ok {
+		return newError(CodeUpstream, message)
 	}
 	return err
-}
-
-// panelHost 取服务器面板地址里的主机名，给证书主体用。
-func panelHost(baseURL string) (*url.URL, error) {
-	u, err := url.Parse(baseURL)
-	if err != nil || u.Hostname() == "" {
-		return nil, fmt.Errorf("parse panel base url")
-	}
-	return u, nil
 }

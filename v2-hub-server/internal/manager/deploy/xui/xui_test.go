@@ -89,6 +89,10 @@ func TestClassify(t *testing.T) {
 			if got.PanelState != tt.wantState || got.Plan != tt.wantPlan || got.Reason != tt.wantReason {
 				t.Fatalf("got state=%q plan=%q reason=%q", got.PanelState, got.Plan, got.Reason)
 			}
+			// 不能部署时必须带说明，能部署时不带
+			if (got.Reason != deploy.ReasonNone) != (got.Message != "") {
+				t.Fatalf("reason %q with message %q", got.Reason, got.Message)
+			}
 		})
 	}
 }
@@ -184,7 +188,7 @@ func TestInstall(t *testing.T) {
 		r := &remotetest.Runner{Handle: func(string) (remote.Result, error) {
 			return out("Username: abc\nPassword: def\nAPI Token: " + fakeToken + "\n")
 		}}
-		if err := New().Install(ctx, r, deploy.InstallOptions{PanelPort: 34567}, log); err != nil {
+		if err := New().Install(ctx, r, 34567, log); err != nil {
 			t.Fatalf("install: %v", err)
 		}
 		if ups := r.Uploads(); len(ups) != 1 || !bytes.Equal(ups[0], installScript) {
@@ -209,7 +213,7 @@ func TestInstall(t *testing.T) {
 		r := &remotetest.Runner{Handle: func(string) (remote.Result, error) {
 			return exit(1, "step one\nPassword: hunter2\nAPI Token: "+fakeToken+"\nboom\n")
 		}}
-		err := New().Install(ctx, r, deploy.InstallOptions{}, log)
+		err := New().Install(ctx, r, 0, log)
 		if de := deploy.AsError(err); de == nil || de.Reason != deploy.ReasonCommandFailed {
 			t.Fatalf("err = %v", err)
 		}
@@ -226,7 +230,7 @@ func TestInstall(t *testing.T) {
 		r := &remotetest.Runner{Handle: func(string) (remote.Result, error) {
 			return exit(1, "ERROR: Failed to download x-ui, please be sure that your server can access GitHub\n")
 		}}
-		err := New().Install(ctx, r, deploy.InstallOptions{}, log)
+		err := New().Install(ctx, r, 0, log)
 		if de := deploy.AsError(err); de == nil || de.Reason != deploy.ReasonDownloadFailed {
 			t.Fatalf("err = %v", err)
 		}
@@ -234,11 +238,87 @@ func TestInstall(t *testing.T) {
 
 	t.Run("bad port never reaches the host", func(t *testing.T) {
 		r := &remotetest.Runner{}
-		if err := New().Install(ctx, r, deploy.InstallOptions{PanelPort: 70000}, log); err == nil {
+		if err := New().Install(ctx, r, 70000, log); err == nil {
 			t.Fatal("want error")
 		}
 		if len(r.Scripts()) != 0 || len(r.Uploads()) != 0 {
 			t.Fatal("nothing should be sent")
+		}
+	})
+}
+
+// provisionRunner 模拟一台主机：按脚本的特征给出各步的输出，并记下跑过哪些步骤。
+func provisionRunner(certPEM, settings string) (*remotetest.Runner, *[]string) {
+	steps := []string{}
+	r := &remotetest.Runner{Privileged: true}
+	r.Handle = func(script string) (remote.Result, error) {
+		switch {
+		case strings.Contains(script, "XUI_NONINTERACTIVE"):
+			steps = append(steps, "install")
+		case strings.Contains(script, "openssl req"):
+			steps = append(steps, "tls")
+			settings += "cert=/etc/x-ui/hub-tls/panel.crt\n"
+			return out(certPEM)
+		case strings.HasPrefix(script, "cat "):
+			return out(certPEM)
+		case strings.Contains(script, "-getListen"):
+			steps = append(steps, "access")
+			return out(settings)
+		case strings.Contains(script, "ufw"):
+			steps = append(steps, "firewall")
+		case strings.Contains(script, "-getApiToken"):
+			steps = append(steps, "token")
+			return out("apiToken: " + fakeToken + "\n")
+		}
+		return out("")
+	}
+	return r, &steps
+}
+
+func TestProvision(t *testing.T) {
+	certPEM, pin := selfSignedPEM(t)
+	const settings = "port=2053\npath=/abc/\n"
+	log := func(string) {}
+	opts := deploy.ProvisionOptions{Address: "203.0.113.7", PanelPort: 2053}
+
+	t.Run("install configures TLS before reading access, then opens the firewall", func(t *testing.T) {
+		r, steps := provisionRunner(certPEM, settings)
+		got, err := New().Provision(ctx, r, deploy.Detection{Plan: deploy.PlanInstall}, opts, log)
+		if err != nil {
+			t.Fatalf("provision: %v", err)
+		}
+		if strings.Join(*steps, ",") != "install,tls,access,firewall,token" {
+			t.Fatalf("steps = %v", *steps)
+		}
+		want := deploy.Provisioned{Access: deploy.PanelAccess{HasTLS: true, Port: 2053, BasePath: "/abc/", CertSHA256: pin}, Token: fakeToken, IsFresh: true}
+		if got != want {
+			t.Fatalf("provisioned = %+v", got)
+		}
+	})
+
+	t.Run("adopt only reads access and issues a token", func(t *testing.T) {
+		r, steps := provisionRunner(certPEM, settings)
+		got, err := New().Provision(ctx, r, deploy.Detection{Plan: deploy.PlanAdopt}, opts, log)
+		if err != nil {
+			t.Fatalf("provision: %v", err)
+		}
+		if strings.Join(*steps, ",") != "access,token" || len(r.Uploads()) != 0 {
+			t.Fatalf("adopt must not install, touch TLS or the firewall; steps = %v", *steps)
+		}
+		want := deploy.Provisioned{Access: deploy.PanelAccess{Port: 2053, BasePath: "/abc/"}, Token: fakeToken}
+		if got != want {
+			t.Fatalf("provisioned = %+v", got)
+		}
+	})
+
+	t.Run("a panel listening on loopback is not adopted", func(t *testing.T) {
+		r, steps := provisionRunner(certPEM, settings+"listen=127.0.0.1\n")
+		_, err := New().Provision(ctx, r, deploy.Detection{Plan: deploy.PlanAdopt}, opts, log)
+		if de := deploy.AsError(err); de == nil || de.Reason != deploy.ReasonListenLocal {
+			t.Fatalf("err = %v", err)
+		}
+		if strings.Join(*steps, ",") != "access" {
+			t.Fatalf("no token should be issued for an unreachable panel; steps = %v", *steps)
 		}
 	})
 }

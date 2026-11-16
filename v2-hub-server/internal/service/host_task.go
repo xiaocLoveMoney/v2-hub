@@ -47,11 +47,9 @@ const (
 
 const (
 	maxHostTaskErrorLen = 500
-	hostTaskListLimit   = 20
+	hostTaskListLimit   = int32(20)
 	// taskWriteTimeout 是任务收尾时写库的时限；此时任务自己的 ctx 可能已超时，所以另起一个。
 	taskWriteTimeout = 10 * time.Second
-	schemeHTTP       = "http"
-	schemeHTTPS      = "https"
 	logTimeLayout    = "15:04:05"
 
 	msgTaskNotFound      = "任务不存在"
@@ -64,6 +62,7 @@ const (
 	msgTaskInternal      = "内部错误"
 	msgNoDeployer        = "这类面板不支持经 SSH 部署"
 	msgNoStandardPanel   = "主机上没有标准安装的面板"
+	msgNoPrivilege       = "登录用户不是 root，也不能免密 sudo"
 	msgPanelUnreachable  = "面板端口从平台连不上，请检查防火墙或云厂商安全组后重做"
 	msgPanelRejectsToken = "面板拒绝了新签发的令牌"
 	msgAlreadyHTTPS      = "面板已经是 HTTPS"
@@ -74,15 +73,6 @@ const (
 var actionKinds = map[string]struct{}{
 	HostTaskProvision: {}, HostTaskRestartPanel: {}, HostTaskRestartCore: {}, HostTaskUpgrade: {},
 	HostTaskReissueToken: {}, HostTaskEnableTLS: {}, HostTaskDiagnose: {},
-}
-
-// reasonMessages 是检测阶段各原因的说明（docs/03 §5.22 “不能部署的原因”）。
-var reasonMessages = map[deploy.Reason]string{
-	deploy.ReasonUnsupportedOS: "不是受支持的发行版",
-	deploy.ReasonNoSystemd:     "主机没有 systemd",
-	deploy.ReasonNoRoot:        "登录用户不是 root，也不能免密 sudo",
-	deploy.ReasonNonstandard:   "主机上的面板不是标准安装（如 Docker），请改用手动接入",
-	deploy.ReasonVersionTooOld: "已有面板的版本过低，请先升级到 v3.0 以上",
 }
 
 // HostTask 是一条主机任务（不含日志）。
@@ -113,12 +103,9 @@ func taskFromListRow(r sqlcgen.ListHostTasksRow) HostTask {
 	}
 }
 
-// ListTasks 返回一台主机最近的任务，新的在前；limit ≤ 0 时取默认条数。
-func (s *HostService) ListTasks(ctx context.Context, hostID int64, limit int) ([]HostTask, error) {
-	if limit <= 0 {
-		limit = hostTaskListLimit
-	}
-	rows, err := s.q.ListHostTasks(ctx, sqlcgen.ListHostTasksParams{HostID: hostID, Limit: int32(limit)}) //nolint:gosec // limit 是包内常量级的小数
+// listTasks 返回一台主机最近的 limit 条任务，新的在前。
+func (s *HostService) listTasks(ctx context.Context, hostID int64, limit int32) ([]HostTask, error) {
+	rows, err := s.q.ListHostTasks(ctx, sqlcgen.ListHostTasksParams{HostID: hostID, Limit: limit})
 	if err != nil {
 		return nil, fmt.Errorf("list tasks of host %d: %w", hostID, err)
 	}
@@ -134,11 +121,11 @@ func (s *HostService) ListHostTasks(ctx context.Context, hostID int64) ([]HostTa
 	if _, err := s.hostRow(ctx, hostID); err != nil {
 		return nil, err
 	}
-	return s.ListTasks(ctx, hostID, hostTaskListLimit)
+	return s.listTasks(ctx, hostID, hostTaskListLimit)
 }
 
-// GetTask 返回一条任务及其日志。
-func (s *HostService) GetTask(ctx context.Context, id int64) (*HostTaskDetail, error) {
+// task 返回一条任务（不带日志）；不存在返回 404。
+func (s *HostService) task(ctx context.Context, id int64) (*HostTask, error) {
 	r, err := s.q.GetHostTask(ctx, id)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, newError(CodeNotFound, msgTaskNotFound)
@@ -146,10 +133,21 @@ func (s *HostService) GetTask(ctx context.Context, id int64) (*HostTaskDetail, e
 	if err != nil {
 		return nil, fmt.Errorf("get host task %d: %w", id, err)
 	}
-	return &HostTaskDetail{Log: r.Log, HostTask: HostTask{
-		ID: r.ID, HostID: r.HostID, Kind: r.Kind, Status: r.Status, Step: r.Step, ErrorCode: r.ErrorCode, LastError: r.LastError,
-		CreatedByName: r.CreatedByName, CreatedAt: r.CreatedAt.Time, StartedAt: timePtr(r.StartedAt), FinishedAt: timePtr(r.FinishedAt),
-	}}, nil
+	t := taskFromListRow(sqlcgen.ListHostTasksRow(r))
+	return &t, nil
+}
+
+// GetTask 返回一条任务及其日志。
+func (s *HostService) GetTask(ctx context.Context, id int64) (*HostTaskDetail, error) {
+	t, err := s.task(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	log, err := s.q.GetHostTaskLog(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("get log of host task %d: %w", id, err)
+	}
+	return &HostTaskDetail{HostTask: *t, Log: log}, nil
 }
 
 // insertTask 在事务里排一条任务并写审计；该主机已有未结束的任务时返回 409（由部分唯一索引保证）。
@@ -196,16 +194,12 @@ func (s *HostService) CreateAction(ctx context.Context, actor *AdminPrincipal, h
 		return nil, err
 	}
 	s.kickRunner()
-	task, err := s.GetTask(ctx, id)
-	if err != nil {
-		return nil, err
-	}
-	return &task.HostTask, nil
+	return s.task(ctx, id)
 }
 
 // CancelTask 取消一条还在排队的任务；已开始或已结束的返回 409。
 func (s *HostService) CancelTask(ctx context.Context, actor *AdminPrincipal, id int64, ip *netip.Addr) (*HostTask, error) {
-	if _, err := s.GetTask(ctx, id); err != nil {
+	if _, err := s.task(ctx, id); err != nil {
 		return nil, err
 	}
 	err := s.inTx(ctx, func(q *sqlcgen.Queries) error {
@@ -223,11 +217,7 @@ func (s *HostService) CancelTask(ctx context.Context, actor *AdminPrincipal, id 
 	if err != nil {
 		return nil, err
 	}
-	task, err := s.GetTask(ctx, id)
-	if err != nil {
-		return nil, err
-	}
-	return &task.HostTask, nil
+	return s.task(ctx, id)
 }
 
 // ClaimTasks 领取至多 limit 条排队的任务并置为进行中，返回它们的 id。
@@ -301,24 +291,17 @@ func (s *HostService) RunTask(ctx context.Context, taskID int64) {
 
 // taskFailure 把执行中的错误归到 docs/03 §5.22 的原因大类，并给出可展示的摘要。
 func taskFailure(err error) (deploy.Reason, string) {
-	var se *Error
-	switch {
-	case deploy.AsError(err) != nil:
-		de := deploy.AsError(err)
-		return de.Reason, de.Message
-	case remote.AsError(err) != nil:
-		re := remote.AsError(err)
-		if errors.Is(re.Err, context.DeadlineExceeded) {
-			return deploy.ReasonCommandFailed, msgTaskTimeout
-		}
-		return deploy.Reason(re.Kind), re.Message
-	case errors.Is(err, context.DeadlineExceeded):
+	if errors.Is(err, context.DeadlineExceeded) {
 		return deploy.ReasonCommandFailed, msgTaskTimeout
-	case errors.As(err, &se):
-		return deploy.ReasonCommandFailed, se.Message
-	default:
-		return deploy.ReasonCommandFailed, msgTaskInternal
 	}
+	if reason, message, ok := deploy.FailureOf(err); ok {
+		return reason, message
+	}
+	var se *Error
+	if errors.As(err, &se) {
+		return deploy.ReasonCommandFailed, se.Message
+	}
+	return deploy.ReasonCommandFailed, msgTaskInternal
 }
 
 func (s *HostService) taskTimeout(kind string) time.Duration {
@@ -346,11 +329,7 @@ func (s *HostService) runTask(ctx context.Context, taskID int64) error {
 	}
 
 	t.step(ctx, hostStepConnect, fmt.Sprintf("连接 %s", net.JoinHostPort(host.Address, strconv.Itoa(int(host.SshPort)))))
-	target, err := s.dialTarget(ctx, host.Address, int(host.SshPort), host.CredentialID, host.HostKeySha256)
-	if err != nil {
-		return err
-	}
-	runner, err := s.dialer.Dial(ctx, target)
+	runner, err := s.dial(ctx, host.Address, int(host.SshPort), host.CredentialID, host.HostKeySha256)
 	if err != nil {
 		return err
 	}
@@ -386,7 +365,7 @@ func (s *HostService) runTask(ctx context.Context, taskID int64) error {
 // requireStandardPanel 要求主机可提权且有标准安装的面板；运维动作与校验连接都以此为前提。
 func requireStandardPanel(det deploy.Detection) error {
 	if !det.IsPrivileged {
-		return deploy.NewError(deploy.ReasonNoRoot, reasonMessages[deploy.ReasonNoRoot])
+		return deploy.NewError(deploy.ReasonNoRoot, msgNoPrivilege)
 	}
 	if det.PanelState != deploy.PanelStandard {
 		return deploy.NewError(deploy.ReasonNonstandard, msgNoStandardPanel)
@@ -404,49 +383,33 @@ func (t *taskRun) diagnose(ctx context.Context, d deploy.Deployer, r remote.Runn
 	return nil
 }
 
-// provision 是部署流程 ②–④（docs/03 §5.22）：没有面板就安装并配证书，有标准安装的面板就接管，然后接入平台。
+// provision 是部署流程 ②–④（docs/03 §5.22）：远端该做什么由 Deployer 自己排（没有面板就安装，有标准安装的面板就接管），
+// 这里只管与面板类型无关的部分：选接入方式、接入平台、把主机关联到服务器。
 func (t *taskRun) provision(ctx context.Context, d deploy.Deployer, r remote.Runner, det deploy.Detection) error {
 	if det.Reason != deploy.ReasonNone {
-		return deploy.NewError(det.Reason, reasonMessages[det.Reason])
+		return deploy.NewError(det.Reason, det.Message)
 	}
-	isFresh := det.Plan == deploy.PlanInstall
-	if isFresh {
+	if det.Plan == deploy.PlanInstall {
 		t.step(ctx, hostStepInstall, "主机上没有面板，开始安装（平台基线版本）")
-		opts := deploy.InstallOptions{}
-		if t.host.PanelPort.Valid {
-			opts.PanelPort = int(t.host.PanelPort.Int32)
-		}
-		if err := d.Install(ctx, r, opts, func(line string) { t.logf("%s", line) }); err != nil {
-			return err
-		}
-		t.logf("安装完成，生成自签证书并改为 HTTPS")
-		if _, err := d.EnableTLS(ctx, r, t.host.Address); err != nil {
-			return err
-		}
 	} else {
 		t.step(ctx, hostStepAdopt, "主机上已有面板，读取现有配置并签发令牌")
 	}
-	access, err := d.Access(ctx, r)
+	opts := deploy.ProvisionOptions{Address: t.host.Address}
+	if t.host.PanelPort.Valid {
+		opts.PanelPort = int(t.host.PanelPort.Int32)
+	}
+	done, err := d.Provision(ctx, r, det, opts, func(line string) { t.logf("%s", line) })
 	if err != nil {
 		return err
 	}
-	if isFresh {
-		if err := d.OpenFirewall(ctx, r, access.Port); err != nil {
-			return err
-		}
-	}
-	token, err := d.IssueToken(ctx, r)
-	if err != nil {
-		return err
-	}
-	t.secrets = append(t.secrets, token)
+	t.secrets = append(t.secrets, done.Token)
 
-	t.step(ctx, hostStepRegister, fmt.Sprintf("面板端口 %d，接入平台", access.Port))
-	conn, err := t.chooseConn(ctx, access, token, isFresh)
+	t.step(ctx, hostStepRegister, fmt.Sprintf("面板端口 %d，接入平台", done.Access.Port))
+	conn, info, err := t.chooseConn(ctx, done)
 	if err != nil {
 		return err
 	}
-	serverID, err := t.svc.panels.AttachPanel(ctx, t.adminID, ServerInput{ServerConnInput: conn, Name: t.host.Name, Region: t.host.Region})
+	serverID, err := t.svc.panels.AttachPanel(ctx, t.adminID, ServerInput{ServerConnInput: conn, Name: t.host.Name, Region: t.host.Region}, info)
 	if err != nil {
 		if errors.Is(err, ErrConflict) {
 			return deploy.NewError(deploy.ReasonNameTaken, "服务器名称已被占用，请改主机名称后重做")
@@ -460,7 +423,7 @@ func (t *taskRun) provision(ctx context.Context, d deploy.Deployer, r remote.Run
 	if err != nil {
 		return fmt.Errorf("link host %d to server %d: %w", t.host.ID, serverID, err)
 	}
-	if conn.TLSMode == panel.TLSVerify && !access.HasTLS {
+	if !done.Access.HasTLS {
 		t.logf("注意：面板是明文 HTTP，令牌以明文传输；可在服务器详情页的 SSH 运维里“配置证书”")
 	}
 	t.logf("已接入，服务器 id %d", serverID)
@@ -469,37 +432,40 @@ func (t *taskRun) provision(ctx context.Context, d deploy.Deployer, r remote.Run
 
 // buildBaseURL 用主机地址与读出的端口、路径拼面板根地址；根路径不带结尾的斜杠。
 func buildBaseURL(isTLS bool, address string, port int, basePath string) string {
-	scheme := schemeHTTP
+	scheme := httpScheme
 	if isTLS {
-		scheme = schemeHTTPS
+		scheme = httpsScheme
 	}
 	return scheme + "://" + net.JoinHostPort(address, strconv.Itoa(port)) + strings.TrimRight(basePath, "/")
 }
 
-// chooseConn 决定用什么方式接入面板并等它可达（Ruling-70）：没有证书走 http；
+// chooseConn 决定用什么方式接入面板并等它可达，返回连接信息与这次探测到的面板信息（Ruling-70）：没有证书走 http；
 // 新装的面板是平台刚配的自签证书，直接 pin；接管的面板先按 verify 试一次，不通过再 pin。
-func (t *taskRun) chooseConn(ctx context.Context, access deploy.PanelAccess, token string, isFresh bool) (ServerConnInput, error) {
+func (t *taskRun) chooseConn(ctx context.Context, done deploy.Provisioned) (ServerConnInput, *panel.PanelInfo, error) {
+	access := done.Access
 	conn := ServerConnInput{
-		ProviderType: t.host.ProviderType, APIToken: token, TLSMode: panel.TLSVerify,
+		ProviderType: t.host.ProviderType, APIToken: done.Token, TLSMode: panel.TLSVerify,
 		BaseURL: buildBaseURL(access.HasTLS, t.host.Address, access.Port, access.BasePath),
 	}
-	if access.HasTLS && !isFresh {
-		if _, err := t.svc.panels.probeConn(ctx, conn); err == nil {
-			return conn, nil
+	if access.HasTLS && !done.IsFresh {
+		if info, err := t.svc.panels.probeConn(ctx, conn); err == nil {
+			return conn, info, nil
 		}
 		t.logf("证书未通过系统 CA 校验，改为固定证书指纹")
 	}
 	if access.HasTLS {
 		conn.TLSMode, conn.CertPinSHA256 = panel.TLSPin, access.CertSHA256
 	}
+	var info *panel.PanelInfo
 	err := t.svc.waitFor(ctx, func() error {
-		_, err := t.svc.panels.probeConn(ctx, conn)
+		var err error
+		info, err = t.svc.panels.probeConn(ctx, conn)
 		return err
 	})
 	if err != nil {
-		return conn, attachError(err)
+		return conn, nil, attachError(err)
 	}
-	return conn, nil
+	return conn, info, nil
 }
 
 // attachError 把接入阶段的面板错误归类：连不上多半是防火墙，令牌被拒是面板侧的问题。
@@ -521,12 +487,8 @@ func (s *HostService) waitFor(ctx context.Context, probe func() error) error {
 	var err error
 	for attempt := range s.cfg.PanelWaitAttempts {
 		if attempt > 0 {
-			timer := time.NewTimer(s.cfg.PanelWaitInterval)
-			select {
-			case <-ctx.Done():
-				timer.Stop()
-				return ctx.Err()
-			case <-timer.C:
+			if serr := sleepCtx(ctx, s.cfg.PanelWaitInterval); serr != nil {
+				return serr
 			}
 		}
 		if err = probe(); err == nil {
@@ -536,7 +498,15 @@ func (s *HostService) waitFor(ctx context.Context, probe func() error) error {
 	return err
 }
 
-// operate 执行对已接入主机的运维动作与校验连接；期间占用该服务器的对账锁（docs/03 §5.22）。
+// withServerLock 在占用该服务器对账锁的情况下执行 fn（docs/03 §5.22）：避免面板重启时对账正好在写 client。
+// 只包住会重启或改写面板的那几秒，不包下载与等待——对账与用量采集的每一轮都要等齐所有服务器，锁占久了会拖停全站。
+func withServerLock(serverID int64, fn func() error) error {
+	unlock := lockServer(serverID)
+	defer unlock()
+	return fn()
+}
+
+// operate 执行对已接入主机的运维动作与校验连接。
 func (t *taskRun) operate(ctx context.Context, d deploy.Deployer, r remote.Runner, det deploy.Detection) error {
 	if err := requireStandardPanel(det); err != nil {
 		return err
@@ -549,30 +519,27 @@ func (t *taskRun) operate(ctx context.Context, d deploy.Deployer, r remote.Runne
 		return deploy.NewError(deploy.ReasonCommandFailed, msgNeedsServer)
 	}
 	serverID := t.host.ServerID.Int64
-	unlock := lockServer(serverID)
-	defer unlock()
+	var err error
 	switch t.kind {
 	case HostTaskRestartPanel:
 		t.step(ctx, hostStepRun, "重启面板")
-		if err := d.RestartPanel(ctx, r); err != nil {
-			return err
-		}
+		err = withServerLock(serverID, func() error { return d.RestartPanel(ctx, r) })
 	case HostTaskRestartCore:
 		t.step(ctx, hostStepRun, "让面板重载内核")
-		if err := d.RestartCore(ctx, r); err != nil {
-			return err
-		}
+		err = withServerLock(serverID, func() error { return d.RestartCore(ctx, r) })
 	case HostTaskUpgrade:
+		// 升级要先下载程序包，耗时不定，不占对账锁；面板重启的那一下若撞上对账，由对账器下一轮重试
 		t.step(ctx, hostStepRun, "升级 / 修复到平台基线版本")
-		if err := d.Upgrade(ctx, r, func(line string) { t.logf("%s", line) }); err != nil {
-			return err
-		}
+		err = d.Upgrade(ctx, r, func(line string) { t.logf("%s", line) })
 	case HostTaskReissueToken:
-		return t.reissueToken(ctx, d, r, serverID)
+		return withServerLock(serverID, func() error { return t.reissueToken(ctx, d, r, serverID) })
 	case HostTaskEnableTLS:
-		return t.enableTLS(ctx, d, r, serverID)
+		return withServerLock(serverID, func() error { return t.enableTLS(ctx, d, r, serverID) })
 	default:
 		return deploy.NewError(deploy.ReasonCommandFailed, msgBadAction)
+	}
+	if err != nil {
+		return err
 	}
 	return t.confirmOnline(ctx, serverID)
 }
@@ -593,14 +560,12 @@ func (t *taskRun) reissueToken(ctx context.Context, d deploy.Deployer, r remote.
 		return err
 	}
 	t.secrets = append(t.secrets, token)
-	current, err := t.svc.q.GetServerConn(ctx, serverID)
+	srv, err := t.svc.panels.GetServer(ctx, serverID)
 	if err != nil {
-		return fmt.Errorf("get server %d: %w", serverID, err)
+		return err
 	}
-	conn := ServerConnInput{
-		ProviderType: current.ProviderType, BaseURL: current.BaseUrl, APIToken: token,
-		TLSMode: current.TlsMode, CertPinSHA256: current.CertPinSha256.String,
-	}
+	conn := serverConn(srv)
+	conn.APIToken = token
 	if err := t.svc.panels.ReplaceServerConn(ctx, t.adminID, serverID, conn); err != nil {
 		return attachError(err)
 	}
@@ -608,16 +573,25 @@ func (t *taskRun) reissueToken(ctx context.Context, d deploy.Deployer, r remote.
 	return nil
 }
 
-func (t *taskRun) enableTLS(ctx context.Context, d deploy.Deployer, r remote.Runner, serverID int64) error {
-	current, err := t.svc.q.GetServerConn(ctx, serverID)
-	if err != nil {
-		return fmt.Errorf("get server %d: %w", serverID, err)
+// serverConn 取一台服务器现有的接入信息（不含令牌：留空表示沿用）。
+func serverConn(srv *Server) ServerConnInput {
+	conn := ServerConnInput{ProviderType: srv.ProviderType, BaseURL: srv.BaseURL, TLSMode: srv.TLSMode}
+	if srv.CertPinSHA256 != nil {
+		conn.CertPinSHA256 = *srv.CertPinSHA256
 	}
-	u, err := panelHost(current.BaseUrl)
+	return conn
+}
+
+func (t *taskRun) enableTLS(ctx context.Context, d deploy.Deployer, r remote.Runner, serverID int64) error {
+	srv, err := t.svc.panels.GetServer(ctx, serverID)
 	if err != nil {
 		return err
 	}
-	if u.Scheme != schemeHTTP {
+	u, err := panel.ParseBaseURL(srv.BaseURL)
+	if err != nil {
+		return fmt.Errorf("parse base url of server %d: %w", serverID, err)
+	}
+	if u.Scheme != httpScheme {
 		return deploy.NewError(deploy.ReasonCommandFailed, msgAlreadyHTTPS)
 	}
 	t.step(ctx, hostStepRun, "生成自签证书并设给面板")
@@ -625,8 +599,9 @@ func (t *taskRun) enableTLS(ctx context.Context, d deploy.Deployer, r remote.Run
 	if err != nil {
 		return err
 	}
-	u.Scheme = schemeHTTPS
-	conn := ServerConnInput{ProviderType: current.ProviderType, BaseURL: u.String(), TLSMode: panel.TLSPin, CertPinSHA256: pin}
+	u.Scheme = httpsScheme
+	conn := ServerConnInput{ProviderType: srv.ProviderType, BaseURL: u.String(), TLSMode: panel.TLSPin, CertPinSHA256: pin}
+	// 面板刚重启，要几秒才回来；ReplaceServerConn 探测通过才保存，没通过不留痕，可以重试
 	err = t.svc.waitFor(ctx, func() error { return t.svc.panels.ReplaceServerConn(ctx, t.adminID, serverID, conn) })
 	if err != nil {
 		return attachError(err)
@@ -659,20 +634,15 @@ func (s *HostService) ResetPanelLogin(ctx context.Context, actor *AdminPrincipal
 		return nil, newError(CodeConflict, msgLoginBusy)
 	}
 	defer s.logins.unlock(hostID)
-	target, err := s.dialTarget(ctx, host.Address, int(host.SshPort), host.CredentialID, host.HostKeySha256)
+	var login deploy.PanelLogin
+	target := endpoint{address: host.Address, port: int(host.SshPort), credentialID: host.CredentialID, pinnedKey: host.HostKeySha256}
+	err = s.withRunner(ctx, target, func(ctx context.Context, r remote.Runner) error {
+		var err error
+		login, err = deployer.ResetPanelLogin(ctx, r)
+		return err
+	})
 	if err != nil {
 		return nil, err
-	}
-	ctx, cancel := context.WithTimeout(ctx, s.cfg.CommandTimeout)
-	defer cancel()
-	runner, err := s.dialer.Dial(ctx, target)
-	if err != nil {
-		return nil, upstreamError(err)
-	}
-	defer closeRunner(runner)
-	login, err := deployer.ResetPanelLogin(ctx, runner)
-	if err != nil {
-		return nil, upstreamError(err)
 	}
 	err = s.inTx(ctx, func(q *sqlcgen.Queries) error {
 		return writeAudit(ctx, q, AuditEntry{

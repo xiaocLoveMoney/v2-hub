@@ -4,19 +4,18 @@ package xui
 
 import (
 	"context"
-	"crypto/rand"
 	"crypto/sha256"
 	"crypto/x509"
 	_ "embed" // 内嵌上游安装与升级脚本的快照
 	"encoding/base64"
 	"encoding/pem"
 	"fmt"
-	"math/big"
 	"net/netip"
 	"regexp"
 	"strconv"
 	"strings"
 
+	"v2-hub-server/internal/manager/crypto"
 	"v2-hub-server/internal/manager/deploy"
 	"v2-hub-server/internal/manager/remote"
 )
@@ -63,6 +62,15 @@ const (
 	msgLoginFailed    = "面板登录口令重置失败"
 	msgFirewallFailed = "防火墙放行端口失败"
 )
+
+// detectMessages 是各原因的说明（docs/03 §5.22 “不能部署的原因”）；版本门槛等只有这种面板才有的细节写在这里。
+var detectMessages = map[deploy.Reason]string{
+	deploy.ReasonUnsupportedOS: "不是受支持的发行版",
+	deploy.ReasonNoSystemd:     "主机没有 systemd",
+	deploy.ReasonNoRoot:        "登录用户不是 root，也不能免密 sudo",
+	deploy.ReasonNonstandard:   "主机上的面板不是标准安装（如 Docker），请改用手动接入",
+	deploy.ReasonVersionTooOld: "已有面板的版本过低，请先升级到 v3.0 以上",
+}
 
 // supportedOS 与上游 install.sh 认识的发行版一致，去掉没有 systemd 的 alpine。
 var supportedOS = map[string]struct{}{
@@ -203,6 +211,7 @@ func classify(kv map[string]string, privileged bool) deploy.Detection {
 	default:
 		det.Plan = deploy.PlanInstall
 	}
+	det.Message = detectMessages[det.Reason]
 	return det
 }
 
@@ -250,14 +259,46 @@ func runUpstream(ctx context.Context, r remote.Runner, script []byte, env, args,
 	return commandError(fmt.Sprintf("%s脚本以状态 %d 退出", what, res.ExitCode))
 }
 
-// Install 见 deploy.Deployer。
-func (d *Deployer) Install(ctx context.Context, r remote.Runner, opts deploy.InstallOptions, log deploy.Logger) error {
+// Provision 见 deploy.Deployer。3x-ui 的安装顺序（Ruling-70）：跑上游安装脚本（装完是明文 HTTP）→ 生成自签证书并改成 HTTPS
+// → 读出端口与路径 → 放行防火墙 → 签发令牌；接管只做“读出接入信息、签发令牌”两步，不改面板的其它配置。
+func (d *Deployer) Provision(ctx context.Context, r remote.Runner, det deploy.Detection, opts deploy.ProvisionOptions, log deploy.Logger) (deploy.Provisioned, error) {
+	isFresh := det.Plan == deploy.PlanInstall
+	if isFresh {
+		log("安装 3x-ui " + BaselineTag)
+		if err := d.Install(ctx, r, opts.PanelPort, log); err != nil {
+			return deploy.Provisioned{}, err
+		}
+		log("安装完成，生成自签证书并改为 HTTPS")
+		if _, err := d.EnableTLS(ctx, r, opts.Address); err != nil {
+			return deploy.Provisioned{}, err
+		}
+	}
+	access, err := d.Access(ctx, r)
+	if err != nil {
+		return deploy.Provisioned{}, err
+	}
+	if isFresh {
+		if err := d.OpenFirewall(ctx, r, access.Port); err != nil {
+			return deploy.Provisioned{}, err
+		}
+	}
+	token, err := d.IssueToken(ctx, r)
+	if err != nil {
+		return deploy.Provisioned{}, err
+	}
+	return deploy.Provisioned{Access: access, Token: token, IsFresh: isFresh}, nil
+}
+
+func isValidPort(port int) bool { return port >= minPort && port <= maxPort }
+
+// Install 在没有面板的主机上安装基线版本；panelPort 为 0 表示由安装脚本随机选端口。装完面板是明文 HTTP。
+func (d *Deployer) Install(ctx context.Context, r remote.Runner, panelPort int, log deploy.Logger) error {
 	env := "XUI_NONINTERACTIVE=1 XUI_SSL_MODE=none XUI_DB_TYPE=sqlite"
-	if opts.PanelPort != 0 {
-		if opts.PanelPort < minPort || opts.PanelPort > maxPort {
+	if panelPort != 0 {
+		if !isValidPort(panelPort) {
 			return commandError("面板端口不合法")
 		}
-		env += " XUI_PANEL_PORT=" + strconv.Itoa(opts.PanelPort)
+		env += " XUI_PANEL_PORT=" + strconv.Itoa(panelPort)
 	}
 	return runUpstream(ctx, r, installScript, env, BaselineTag, "安装", log)
 }
@@ -282,7 +323,7 @@ func expectOK(ctx context.Context, r remote.Runner, script, message string) erro
 	return nil
 }
 
-// Access 见 deploy.Deployer。
+// Access 读出面板的端口、路径与证书情况。面板只监听本机时返回 ReasonListenLocal。
 func (d *Deployer) Access(ctx context.Context, r remote.Runner) (deploy.PanelAccess, error) {
 	res, err := r.Run(ctx, accessScript)
 	if err != nil {
@@ -290,7 +331,7 @@ func (d *Deployer) Access(ctx context.Context, r remote.Runner) (deploy.PanelAcc
 	}
 	kv := parseKV(res.Output)
 	port, err := strconv.Atoi(kv["port"])
-	if err != nil || port < minPort || port > maxPort {
+	if err != nil || !isValidPort(port) {
 		return deploy.PanelAccess{}, commandError(msgBadAccess)
 	}
 	if isLocalListen(kv["listen"]) {
@@ -387,9 +428,9 @@ func subjectAltName(address string) (string, error) {
 	return "DNS:" + address, nil
 }
 
-// OpenFirewall 见 deploy.Deployer。
+// OpenFirewall 在主机自带防火墙开着时放行面板端口。
 func (d *Deployer) OpenFirewall(ctx context.Context, r remote.Runner, port int) error {
-	if port < minPort || port > maxPort {
+	if !isValidPort(port) {
 		return commandError(msgFirewallFailed)
 	}
 	return expectOK(ctx, r, fmt.Sprintf(firewallScript, port), msgFirewallFailed)
@@ -416,17 +457,17 @@ func (d *Deployer) Diagnose(ctx context.Context, r remote.Runner) (string, error
 
 // ResetPanelLogin 见 deploy.Deployer。
 func (d *Deployer) ResetPanelLogin(ctx context.Context, r remote.Runner) (deploy.PanelLogin, error) {
-	first, err := randomString(loginLetters, 1)
+	first, err := crypto.RandomString(loginLetters, 1)
 	if err != nil {
-		return deploy.PanelLogin{}, err
+		return deploy.PanelLogin{}, fmt.Errorf("generate panel username: %w", err)
 	}
-	rest, err := randomString(loginAlphabet, loginUsernameLen-1)
+	rest, err := crypto.RandomString(loginAlphabet, loginUsernameLen-1)
 	if err != nil {
-		return deploy.PanelLogin{}, err
+		return deploy.PanelLogin{}, fmt.Errorf("generate panel username: %w", err)
 	}
-	password, err := randomString(loginAlphabet, loginPasswordLen)
+	password, err := crypto.RandomString(loginAlphabet, loginPasswordLen)
 	if err != nil {
-		return deploy.PanelLogin{}, err
+		return deploy.PanelLogin{}, fmt.Errorf("generate panel password: %w", err)
 	}
 	login := deploy.PanelLogin{Username: first + rest, Password: password}
 	script := fmt.Sprintf(loginScript, remote.Quote(login.Username), remote.Quote(login.Password))
@@ -434,19 +475,4 @@ func (d *Deployer) ResetPanelLogin(ctx context.Context, r remote.Runner) (deploy
 		return deploy.PanelLogin{}, err
 	}
 	return login, nil
-}
-
-// randomString 用系统安全随机数从 alphabet 里取 n 个字符。
-func randomString(alphabet string, n int) (string, error) {
-	limit := big.NewInt(int64(len(alphabet)))
-	var b strings.Builder
-	b.Grow(n)
-	for range n {
-		idx, err := rand.Int(rand.Reader, limit)
-		if err != nil {
-			return "", fmt.Errorf("read random: %w", err)
-		}
-		b.WriteByte(alphabet[idx.Int64()])
-	}
-	return b.String(), nil
 }

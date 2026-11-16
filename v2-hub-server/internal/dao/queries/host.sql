@@ -95,11 +95,15 @@ VALUES ($1, $2, $3)
 RETURNING id;
 
 -- name: GetHostTask :one
-SELECT t.id, t.host_id, t.kind, t.status, t.step, t.error_code, t.last_error, t.log, t.created_by,
+-- 不带日志（上限 64 KB），列与 ListHostTasks 相同；要日志另取 GetHostTaskLog
+SELECT t.id, t.host_id, t.kind, t.status, t.step, t.error_code, t.last_error, t.created_by,
        t.created_at, t.started_at, t.finished_at, coalesce(a.username, '')::varchar AS created_by_name
 FROM host_task t
 LEFT JOIN admin a ON a.id = t.created_by
 WHERE t.id = $1;
+
+-- name: GetHostTaskLog :one
+SELECT log FROM host_task WHERE id = $1;
 
 -- name: ListHostTasks :many
 -- 不带日志；新的在前

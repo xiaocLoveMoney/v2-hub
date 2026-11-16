@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"v2-hub-server/internal/dao/sqlcgen"
+	"v2-hub-server/internal/manager/panel"
 )
 
 // auditSourceHostTask 标在审计详情里，说明这次改动来自 SSH 部署或运维任务（docs/03 §5.22）。
@@ -18,12 +19,9 @@ const auditSourceHostTask = "host_task"
 // AttachPanel 把经 SSH 得到的面板接入信息落成一台服务器（docs/03 §5.22 部署流程 ④），返回服务器 id。
 // 平台里已有一台面板标识相同、且面板地址的主机名也相同的服务器时，只更新那台的接入信息与令牌，不重复新建；
 // 否则按 §5.1 新建并首次同步。只认标识不认地址会把“从同一份镜像克隆出来的两台机器”错连成一台。
+// info 是调用方刚用这份接入信息探测到的面板信息，这里不再重复探测。
 // adminID 是发起任务的管理员，记在审计里；管理员已被删除时为 0。
-func (s *PanelService) AttachPanel(ctx context.Context, adminID int64, in ServerInput) (int64, error) {
-	info, err := s.TestServer(ctx, in.ServerConnInput)
-	if err != nil {
-		return 0, err
-	}
+func (s *PanelService) AttachPanel(ctx context.Context, adminID int64, in ServerInput, info *panel.PanelInfo) (int64, error) {
 	existing, err := s.findSamePanel(ctx, info.GUID, in.BaseURL)
 	if err != nil {
 		return 0, err
@@ -78,11 +76,9 @@ func (s *PanelService) ReplaceServerConn(ctx context.Context, adminID, serverID 
 		if err != nil {
 			return fmt.Errorf("get server %d: %w", serverID, err)
 		}
-		token, err := s.sealer.Open(current.ApiTokenEnc, tokenAAD(serverID))
-		if err != nil {
-			return fmt.Errorf("open token of server %d: %w", serverID, err)
+		if conn.APIToken, err = s.openToken(serverID, current.ApiTokenEnc); err != nil {
+			return err
 		}
-		conn.APIToken = string(token)
 	}
 	info, err := s.TestServer(ctx, conn)
 	if err != nil {
@@ -99,12 +95,8 @@ func (s *PanelService) ReplaceServerConn(ctx context.Context, adminID, serverID 
 			return newError(CodeNotFound, msgServerNotFound)
 		}
 		if tokenChanged {
-			sealed, err := s.sealer.Seal([]byte(conn.APIToken), tokenAAD(serverID))
-			if err != nil {
-				return fmt.Errorf("seal server token: %w", err)
-			}
-			if err := q.SetServerToken(ctx, sqlcgen.SetServerTokenParams{ID: serverID, ApiTokenEnc: sealed}); err != nil {
-				return fmt.Errorf("save server token: %w", err)
+			if err := s.saveToken(ctx, q, serverID, conn.APIToken); err != nil {
+				return err
 			}
 		}
 		if err := q.SetServerProbeResult(ctx, probeParams(serverID, info, nil, s.now())); err != nil {

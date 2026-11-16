@@ -244,7 +244,9 @@ type Querier interface {
 	GetEndUserIDByEmail(ctx context.Context, email string) (int64, error)
 	GetEndUserLoginSecretHash(ctx context.Context, id int64) (string, error)
 	GetEndpoint(ctx context.Context, id int64) (GetEndpointRow, error)
+	// 不带日志（上限 64 KB），列与 ListHostTasks 相同；要日志另取 GetHostTaskLog
 	GetHostTask(ctx context.Context, id int64) (GetHostTaskRow, error)
+	GetHostTaskLog(ctx context.Context, id int64) (string, error)
 	// 兑换时锁住票据行，一张票只能换一次会话
 	GetImpersonateTicketForUpdate(ctx context.Context, ticketHash []byte) (GetImpersonateTicketForUpdateRow, error)
 	GetInbound(ctx context.Context, id int64) (GetInboundRow, error)
