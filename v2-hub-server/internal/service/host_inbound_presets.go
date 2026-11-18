@@ -63,10 +63,13 @@ type InboundPresetItem struct {
 	Port int    `json:"port"`
 }
 
-// InboundPresetDeployInput 是一键部署的参数，原样存进任务的 payload。
+// InboundPresetDeployInput 是一键部署的参数，整理后存进任务的 payload。
+// NamePrefix / NameSuffix 是新入站直连节点显示名的前缀与后缀（Ruling-80），空串为不加。
 type InboundPresetDeployInput struct {
 	Items        []InboundPresetItem `json:"items"`
 	NodeGroupIDs []int64             `json:"nodeGroupIds"`
+	NamePrefix   string              `json:"namePrefix"`
+	NameSuffix   string              `json:"nameSuffix"`
 }
 
 // InboundPresetOption 是预览里的一项。
@@ -205,6 +208,7 @@ func pickPresetPort(used portSet, taken map[int]bool) (int, error) {
 }
 
 // validatePresetInput 校验预设、端口与节点组；不可用的预设（主机没有 DNS 账号时的 TLS 预设）返回 400。
+// 显示名的前后缀由调用方先整理（normalizeNodeAffix）。
 func (s *HostService) validatePresetInput(ctx context.Context, host sqlcgen.GetServerHostRow, in InboundPresetDeployInput) error {
 	if len(in.Items) == 0 || len(in.Items) > len(inboundtpl.Presets) {
 		return newError(CodeInvalidArgument, msgPresetNoItems)
@@ -254,6 +258,10 @@ func (s *HostService) DeployInboundPresets(ctx context.Context, actor *AdminPrin
 		return nil, err
 	}
 	in.NodeGroupIDs = slices.Compact(slices.Sorted(slices.Values(in.NodeGroupIDs)))
+	in.NamePrefix, in.NameSuffix, err = normalizeNodeAffix(in.NamePrefix, in.NameSuffix)
+	if err != nil {
+		return nil, err
+	}
 	if err := s.validatePresetInput(ctx, host, in); err != nil {
 		return nil, err
 	}
@@ -298,7 +306,7 @@ type presetEnv struct {
 }
 
 // deployInbounds 执行一键部署（docs/03 §5.1）：查端口 → 需要时配证书 → 准备 REALITY 目标与 VLESS Encryption 参数
-// → 逐个建入站 → 放行防火墙 → 确认 Xray 在跑 → 打开 VLESS 流控、加进节点组、触发下发对账。
+// → 逐个建入站 → 给新节点的显示名加前后缀（Ruling-80）→ 放行防火墙 → 确认 Xray 在跑 → 打开 VLESS 流控、加进节点组、触发下发对账。
 // 主机有标准安装的面板、已接入为服务器由调用方（operate）保证。
 func (t *taskRun) deployInbounds(ctx context.Context, d deploy.Deployer, r remote.Runner, serverID int64) error {
 	in, err := t.svc.presetPayload(ctx, t.id)
@@ -330,7 +338,12 @@ func (t *taskRun) deployInbounds(ctx context.Context, d deploy.Deployer, r remot
 	}
 	var finishErr error
 	if len(created) > 0 {
+		// 改名失败不拦收尾：防火墙与 Xray 检查关系到入站能不能用
+		affixErr := t.affixPresetNodes(ctx, in, created)
 		finishErr = t.finishPresets(ctx, d, r, serverID, in.NodeGroupIDs, created)
+		if finishErr == nil {
+			finishErr = affixErr
+		}
 	}
 	t.logPresetSummary(results)
 	if finishErr != nil {
@@ -500,6 +513,23 @@ func (t *taskRun) createPresetInbound(ctx context.Context, serverID int64, it In
 		return 0, err
 	}
 	return created.ID, nil
+}
+
+// affixPresetNodes 给新入站的直连节点显示名加前缀 / 后缀（Ruling-80）；都没填时什么也不做。
+// 预设备注加端口再加两头各 32 个字符也到不了显示名上限。
+func (t *taskRun) affixPresetNodes(ctx context.Context, in InboundPresetDeployInput, created []presetResult) error {
+	if in.NamePrefix == "" && in.NameSuffix == "" {
+		return nil
+	}
+	ids := make([]int64, 0, len(created))
+	for _, res := range created {
+		ids = append(ids, res.nodeID)
+	}
+	if _, err := t.svc.panels.AffixNodeNames(ctx, t.actor(), NodeAffixInput{NodeIDs: ids, Prefix: in.NamePrefix, Suffix: in.NameSuffix}, nil); err != nil {
+		return err
+	}
+	t.logf("新节点的显示名已加上前缀「%s」、后缀「%s」", in.NamePrefix, in.NameSuffix)
+	return nil
 }
 
 // finishPresets 收尾：放行防火墙、确认 Xray 在跑、打开 VLESS 流控、加进节点组并触发下发对账。

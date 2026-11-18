@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: v2-hub API
-  version: 0.14.0
+  version: 0.14.1
   description: |
     v2-hub 对外接口契约（hub-server 提供，v2-hub-admin-web / v2-hub-user-web 消费）。
     - 管理端接口前缀 /api/admin，客户端接口前缀 /api/user，订阅端点前缀 /sub。
@@ -29,6 +29,7 @@ info:
       大陆连通检测（Ruling-67）——节点带 reach、服务器带 reach 汇总，新增 /api/admin/nodes/{id}/reach 与 /reach/check，系统设置增加 reach 分组。
     0.12.0：SSH 托管与面板部署（docs/03 §5.22，Ruling-68 – Ruling-71）——新增 SSH 凭据、托管主机、主机任务与动作接口（权限码 host:read / host:write），
       给已接入的服务器绑定 SSH（PUT /api/admin/servers/{id}/host），服务器带 hostId。
+    0.14.1：节点显示名的前缀 / 后缀（Ruling-80）——一键部署参数加 namePrefix / nameSuffix，新增 POST /api/admin/nodes/affix。
 servers:
   - url: http://127.0.0.1:8080
     description: 本地开发
@@ -1425,6 +1426,7 @@ paths:
       description: >-
         端口须在 1–65535 且互不相同，不能选当前不可用的预设（如主机没有 DNS 账号时的 TLS 预设，400）；
         服务器没绑 SSH、主机有未结束的任务时返回 409。端口是否被占在任务执行时再查一次。
+        namePrefix / nameSuffix（0.14.1，Ruling-80）填了的话，新入站的直连节点显示名取“前缀 + 默认名 + 后缀”。
       parameters:
         - $ref: "#/components/parameters/CsrfHeader"
       requestBody:
@@ -1991,6 +1993,39 @@ paths:
                             type: array
                             items: { $ref: "#/components/schemas/Node" }
                           total: { type: integer, format: int64 }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+  /api/admin/nodes/affix:
+    post:
+      tags: [admin-panel]
+      operationId: affixNodeNames
+      summary: 给一批节点的显示名加前缀 / 后缀（node:write；docs/03 §5.1，Ruling-80，0.14.1）
+      description: >-
+        选中节点的显示名变成“前缀 + 现有显示名 + 后缀”，只影响平台，不写回面板。前缀、后缀至少填一个；
+        包含不存在的节点、或有节点加上后超过 128 个字符时返回 400，一个都不改。
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/NodeAffixInput" }
+      responses:
+        "200":
+          description: 改了几个节点
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        required: [updated]
+                        properties:
+                          updated: { type: integer, format: int64 }
         "400": { $ref: "#/components/responses/InvalidArgument" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "403": { $ref: "#/components/responses/PermissionDenied" }
@@ -5490,6 +5525,8 @@ components:
           maxItems: 50
           items: { type: integer, format: int64 }
           description: 新入站的直连节点要加进的节点组，可为空
+        namePrefix: { $ref: "#/components/schemas/NodeNameAffix" }
+        nameSuffix: { $ref: "#/components/schemas/NodeNameAffix" }
     HostTaskStatus:
       type: string
       enum: [queued, running, succeeded, failed, canceled]
@@ -5765,6 +5802,23 @@ components:
           items: { type: string, maxLength: 32 }
         sortOrder: { type: integer, minimum: -100000, maximum: 100000 }
         isEnabled: { type: boolean }
+    NodeNameAffix:
+      type: string
+      maxLength: 32
+      default: ""
+      description: >-
+        节点显示名的前缀或后缀（0.14.1，Ruling-80）：不含控制字符；前缀开头、后缀结尾的空白会被去掉，中间的空格保留；空串为不加
+    NodeAffixInput:
+      type: object
+      required: [nodeIds, prefix, suffix]
+      properties:
+        nodeIds:
+          type: array
+          minItems: 1
+          maxItems: 500
+          items: { type: integer, format: int64 }
+        prefix: { $ref: "#/components/schemas/NodeNameAffix" }
+        suffix: { $ref: "#/components/schemas/NodeNameAffix" }
     NodeGroup:
       type: object
       required: [id, name, remark, nodeIds]

@@ -48,14 +48,25 @@ describe('InboundPresetsModal', () => {
     fireEvent.change(screen.getByLabelText('Trojan + TCP + TLS 端口'), { target: { value: '8443' } })
     fireEvent.mouseDown(screen.getByRole('combobox'))
     fireEvent.click(await screen.findByText('basic'))
+    // 前缀开头、后缀结尾的空白不提交，中间的分隔空格保留（Ruling-80）
+    fireEvent.change(screen.getByLabelText('显示名前缀'), { target: { value: ' 香港 ' } })
+    fireEvent.change(screen.getByLabelText('显示名后缀'), { target: { value: '-01 ' } })
+    expect(screen.getByText(/形如「香港 VLESS-REALITY-01」/)).toBeDefined()
     fireEvent.click(screen.getByRole('button', { name: /部署 6 个入站/ }))
 
     await waitFor(() => expect(onStarted).toHaveBeenCalled())
-    const body = calls.find((c) => c.method === 'POST' && c.path === DEPLOY_PATH)?.body as { items: { key: string; port: number }[]; nodeGroupIds: number[] }
+    const body = calls.find((c) => c.method === 'POST' && c.path === DEPLOY_PATH)?.body as {
+      items: { key: string; port: number }[]
+      nodeGroupIds: number[]
+      namePrefix: string
+      nameSuffix: string
+    }
     expect(body.items.map((i) => i.key)).not.toContain('vless_reality_mlkem')
     expect(body.items.find((i) => i.key === 'trojan_tls')?.port).toBe(8443)
     expect(body.items.find((i) => i.key === 'shadowsocks_2022')?.port).toBe(41006)
     expect(body.nodeGroupIds).toEqual([9])
+    expect(body.namePrefix).toBe('香港 ')
+    expect(body.nameSuffix).toBe('-01')
     expect(onStarted.mock.calls[0][0]).toMatchObject({ id: 30, kind: 'deploy_inbounds' })
   })
 

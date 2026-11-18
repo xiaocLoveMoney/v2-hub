@@ -47,6 +47,21 @@ LIMIT sqlc.arg(row_limit) OFFSET sqlc.arg(row_offset);
 UPDATE node SET display_name = $2, tags = $3, sort_order = $4, is_enabled = $5, updated_at = now()
 WHERE id = $1;
 
+-- name: LockNodeNameLengths :many
+-- 批量加前后缀前锁住这些节点、取现有显示名的字符数（Ruling-80）；按 id 排序加锁，避免两批互相等锁
+SELECT id, char_length(display_name)::int AS name_length
+FROM node
+WHERE id = ANY(sqlc.arg(ids)::bigint[])
+ORDER BY id
+FOR UPDATE;
+
+-- name: AffixNodeDisplayNames :execrows
+-- 显示名两头加前缀 / 后缀（Ruling-80）；长度由调用方先查过
+UPDATE node
+SET display_name = sqlc.arg(prefix)::text || display_name || sqlc.arg(suffix)::text,
+    updated_at   = now()
+WHERE id = ANY(sqlc.arg(ids)::bigint[]);
+
 -- name: CountNodesByIDs :one
 SELECT COUNT(*) FROM node WHERE id = ANY(sqlc.arg(ids)::bigint[]);
 

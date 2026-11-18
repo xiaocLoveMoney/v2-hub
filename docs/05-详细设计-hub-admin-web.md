@@ -87,6 +87,9 @@ M11 补充（Ruling-72 – Ruling-74）：`DnsAccountsModal`（DNS 账号管理�
 M11 补充（Ruling-76、Ruling-77）：服务器详情页入站区多一个“一键部署入站”（`InboundPresetsModal`，要 `node:write` 且 `host:write`，没绑 SSH 时置灰）：
 打开即调预览接口列出 7 个预设（不可用的置灰并写原因）与建议端口，默认全选，端口可改，可选节点组；提交后用 `HostTaskDrawer` 看任务进度，任务结束刷新入站列表。
 详情页信息区有“VLESS 流控”开关（`server:write`）。入站表单的 Hysteria2 混淆改为传输 FinalMask 里的 Salamander（开关 + 随机密码）。
+M11 补充（Ruling-80）：一键部署弹窗多“显示名前缀 / 后缀”两个输入框（`NodeAffixInputs`，可不填）；服务器详情页入站区多一个“批量改节点名”（`ServerNodeAffixModal`，要 `node:write`）：
+分页拉全本服务器的节点（上限 500），默认全选，填前缀 / 后缀后表格里实时预览新显示名，超过 128 个字符的行标红并禁止提交；节点目录的表格加勾选列（跨页保留），勾选后“批量改节点名”打开 `NodeAffixModal`，改完清空勾选并刷新；
+两个弹窗共用同一个表单，前后缀的整理与拼接在 `node-affix.ts`。
 
 ## 3. 关键不变式
 

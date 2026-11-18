@@ -41,6 +41,7 @@ type PanelManager interface {
 
 	ListNodes(ctx context.Context, f service.NodeFilter, pq service.PageQuery) (*service.Page[service.Node], error)
 	UpdateNode(ctx context.Context, actor *service.AdminPrincipal, id int64, in service.NodeInput, ip *netip.Addr) error
+	AffixNodeNames(ctx context.Context, actor *service.AdminPrincipal, in service.NodeAffixInput, ip *netip.Addr) (int64, error)
 	ListNodeGroups(ctx context.Context) ([]service.NodeGroup, error)
 	CreateNodeGroup(ctx context.Context, actor *service.AdminPrincipal, in service.NodeGroupInput, ip *netip.Addr) (*service.NodeGroup, error)
 	UpdateNodeGroup(ctx context.Context, actor *service.AdminPrincipal, id int64, in service.NodeGroupInput, ip *netip.Addr) error
@@ -247,6 +248,16 @@ type nodeRequest struct {
 	Tags        []string `json:"tags"`
 	SortOrder   int      `json:"sortOrder"`
 	IsEnabled   bool     `json:"isEnabled"`
+}
+
+type nodeAffixRequest struct {
+	NodeIDs []int64 `json:"nodeIds"`
+	Prefix  string  `json:"prefix"`
+	Suffix  string  `json:"suffix"`
+}
+
+type nodeAffixVO struct {
+	Updated int64 `json:"updated"`
 }
 
 type nodeGroupRequest struct {
@@ -736,6 +747,21 @@ func (h *handlers) updateNode(w http.ResponseWriter, r *http.Request, p *service
 		return
 	}
 	writeOK(w, nil)
+}
+
+// affixNodeNames 给一批节点的显示名加前缀 / 后缀（docs/03 §5.1，Ruling-80）。
+func (h *handlers) affixNodeNames(w http.ResponseWriter, r *http.Request, p *service.AdminPrincipal) {
+	var req nodeAffixRequest
+	if err := decodeJSON(w, r, &req); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	updated, err := h.panels.AffixNodeNames(r.Context(), p, service.NodeAffixInput{NodeIDs: req.NodeIDs, Prefix: req.Prefix, Suffix: req.Suffix}, clientIP(r, h.trustedProxies))
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeOK(w, nodeAffixVO{Updated: updated})
 }
 
 func toNodeGroupVO(g service.NodeGroup) nodeGroupVO {

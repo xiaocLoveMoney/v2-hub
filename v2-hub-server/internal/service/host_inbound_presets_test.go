@@ -144,6 +144,8 @@ func TestDeployInboundPresetsValidation(t *testing.T) {
 		{Items: []InboundPresetItem{{Key: inboundtpl.PresetTrojanTLS, Port: presetPortBase}, {Key: inboundtpl.PresetVMessWSTLS, Port: presetPortBase}}},
 		{Items: []InboundPresetItem{{Key: inboundtpl.PresetTrojanTLS, Port: presetPortBase}, {Key: inboundtpl.PresetTrojanTLS, Port: presetPortBase + 1}}},
 		{Items: []InboundPresetItem{{Key: inboundtpl.PresetTrojanTLS, Port: presetPortBase}}, NodeGroupIDs: []int64{999999}},
+		{Items: []InboundPresetItem{{Key: inboundtpl.PresetTrojanTLS, Port: presetPortBase}}, NamePrefix: strings.Repeat("x", maxNodeAffixLen+1)},
+		{Items: []InboundPresetItem{{Key: inboundtpl.PresetTrojanTLS, Port: presetPortBase}}, NameSuffix: "a\tb"},
 	}
 	for i, in := range bad {
 		_, err := f.hosts.DeployInboundPresets(ctx, f.actor, f.serverID, in, nil)
@@ -250,6 +252,40 @@ func TestDeployAllInboundPresets(t *testing.T) {
 	wantTask(t, again, HostTaskFailed, deploy.ReasonPortInUse)
 	if len(f.inboundsByPort(t)) != len(after) {
 		t.Fatal("nothing may be created when a port is busy")
+	}
+}
+
+// TestDeployInboundPresetsAffixesNodeNames：填了前后缀时新入站的直连节点显示名带上它们，入站备注与原有节点不变（Ruling-80）。
+func TestDeployInboundPresetsAffixesNodeNames(t *testing.T) {
+	f := newPresetFixture(t, true)
+	ctx := context.Background()
+	seedInbound(f.fake, "900", 2096, "existing")
+	if _, err := f.panels.SyncServer(ctx, f.actor, f.serverID, nil); err != nil {
+		t.Fatalf("SyncServer: %v", err)
+	}
+	items := allPresetItems()[:2]
+	task := f.deploy(t, InboundPresetDeployInput{Items: items, NamePrefix: " 香港 ", NameSuffix: " | 01 "})
+	wantTask(t, task, HostTaskSucceeded, deploy.ReasonNone)
+	if !strings.Contains(task.Log, "前缀「香港 」、后缀「 | 01」") {
+		t.Fatalf("log must mention the affix:\n%s", task.Log)
+	}
+	inbounds := f.inboundsByPort(t)
+	nodes, err := f.panels.ListNodes(ctx, NodeFilter{ServerID: f.serverID}, PageQuery{PageSize: maxPageSize})
+	if err != nil {
+		t.Fatalf("ListNodes: %v", err)
+	}
+	names := make(map[int64]string, len(nodes.Items))
+	for _, n := range nodes.Items {
+		names[n.InboundID] = n.DisplayName
+	}
+	for _, it := range items {
+		in := inbounds[it.Port]
+		if remark := presetOf(it).Remark; in.Remark != remark || names[in.ID] != "香港 "+remark+" | 01" {
+			t.Fatalf("%s: remark %q, node name %q", it.Key, in.Remark, names[in.ID])
+		}
+	}
+	if got := names[inbounds[2096].ID]; got != "existing" {
+		t.Fatalf("existing node renamed to %q", got)
 	}
 }
 
