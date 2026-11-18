@@ -134,8 +134,6 @@ type Querier interface {
 	CountUsersCreatedBetween(ctx context.Context, arg CountUsersCreatedBetweenParams) (int32, error)
 	CouponCoversPlan(ctx context.Context, arg CouponCoversPlanParams) (bool, error)
 	CouponExists(ctx context.Context, id int64) (bool, error)
-	// 两个任务同时首次申请时只留先写入的那把密钥，后到的丢弃自己生成的、回读先到的
-	CreateACMEAccount(ctx context.Context, arg CreateACMEAccountParams) error
 	CreateAdmin(ctx context.Context, arg CreateAdminParams) (CreateAdminRow, error)
 	CreateAdminInviteCode(ctx context.Context, arg CreateAdminInviteCodeParams) (int64, error)
 	CreateAdminSession(ctx context.Context, arg CreateAdminSessionParams) error
@@ -226,7 +224,6 @@ type Querier interface {
 	// 扫描结果只填进仍为空的位置，不覆盖管理员这期间的选择（Ruling-65）
 	FillServerRegion(ctx context.Context, arg FillServerRegionParams) (int64, error)
 	FinishHostTask(ctx context.Context, arg FinishHostTaskParams) (int64, error)
-	GetACMEAccountKey(ctx context.Context, directoryUrl string) ([]byte, error)
 	GetActiveEmailCodeForUpdate(ctx context.Context, arg GetActiveEmailCodeForUpdateParams) (GetActiveEmailCodeForUpdateRow, error)
 	GetAdminByID(ctx context.Context, id int64) (GetAdminByIDRow, error)
 	GetAdminByUsername(ctx context.Context, username string) (GetAdminByUsernameRow, error)
@@ -395,7 +392,7 @@ type Querier interface {
 	ListExpiringUsers(ctx context.Context, arg ListExpiringUsersParams) ([]ListExpiringUsersRow, error)
 	// 不带日志；新的在前
 	ListHostTasks(ctx context.Context, arg ListHostTasksParams) ([]ListHostTasksRow, error)
-	// 平台申请的证书快到期、已接入且没有未结束任务的主机；到期早的在前
+	// 已到续期时间、已接入且没有未结束任务的带 DNS 账号的主机；早的在前。续期时间为空（接管来的、面板自带证书）的不动
 	ListHostsDueForCertRenewal(ctx context.Context, arg ListHostsDueForCertRenewalParams) ([]int64, error)
 	ListInboundsByIDs(ctx context.Context, ids []int64) ([]ListInboundsByIDsRow, error)
 	// 入站与对外地址缓存（docs/03 §5.1）------------------------------------------
@@ -515,6 +512,8 @@ type Querier interface {
 	MarkPaymentPaid(ctx context.Context, arg MarkPaymentPaidParams) error
 	MarkReachAlerted(ctx context.Context, arg MarkReachAlertedParams) error
 	MarkServerAlerted(ctx context.Context, arg MarkServerAlertedParams) error
+	// 申请或装证书没成功：续期时间提前到 $2（不晚于原值），下一轮检查重试
+	MarkServerHostCertRetry(ctx context.Context, arg MarkServerHostCertRetryParams) error
 	MarkTelegramFailed(ctx context.Context, arg MarkTelegramFailedParams) error
 	MarkTelegramSent(ctx context.Context, arg MarkTelegramSentParams) error
 	MarkTopupCodeUsed(ctx context.Context, arg MarkTopupCodeUsedParams) error
@@ -567,6 +566,7 @@ type Querier interface {
 	SetProvisionCounters(ctx context.Context, arg SetProvisionCountersParams) error
 	SetProvisionLinks(ctx context.Context, arg SetProvisionLinksParams) error
 	SetSSHCredentialSecret(ctx context.Context, arg SetSSHCredentialSecretParams) error
+	// 证书装好且平台按域名接入后记下到期时间与 acme.sh 给出的下次续期时间（Ruling-74）
 	SetServerHostCert(ctx context.Context, arg SetServerHostCertParams) error
 	SetServerHostDetection(ctx context.Context, arg SetServerHostDetectionParams) error
 	SetServerHostKey(ctx context.Context, arg SetServerHostKeyParams) error
@@ -623,8 +623,8 @@ type Querier interface {
 	UpdateServer(ctx context.Context, arg UpdateServerParams) (int64, error)
 	// 部署与运维任务改写服务器的接入信息（重签令牌、配置证书、接管已知面板）；令牌另由 SetServerToken 写
 	UpdateServerConn(ctx context.Context, arg UpdateServerConnParams) (int64, error)
-	// 改了地址或端口就清空已固定的主机密钥，下次连接重新记录；改了域名或 DNS 账号就清空证书到期时间，不再自动续期，
-	// 直到再做一次“配置证书”
+	// 改了地址或端口就清空已固定的主机密钥，下次连接重新记录；改了域名或 DNS 账号就清空证书到期时间，
+	// 续期时间记为 now（还带 DNS 账号时，下一轮按新域名申请）或清空（去掉了 DNS 账号）（docs/03 §5.22 “证书自动续期”）
 	UpdateServerHost(ctx context.Context, arg UpdateServerHostParams) (int64, error)
 	UpdateSharedAccount(ctx context.Context, arg UpdateSharedAccountParams) (int64, error)
 	UpdateTrafficPack(ctx context.Context, arg UpdateTrafficPackParams) (int64, error)

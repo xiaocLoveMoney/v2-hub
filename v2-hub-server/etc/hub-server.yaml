@@ -70,14 +70,12 @@ deploy:
   actionWindow: 10m
   maxBatch: 50
   allowLoopback: false
-  # 面板的公开证书（docs/03 §5.22，Ruling-72、Ruling-73）：DNS 令牌与 ACME 账号密钥都加密存库，这里只有非敏感参数
+  # 面板的公开证书（docs/03 §5.22，Ruling-72 – Ruling-74）：DNS 令牌加密存库，这里只有非敏感参数；
+  # 证书由主机上的 acme.sh 向 directoryUrl 申请（测试环境可填 https://acme-staging-v02.api.letsencrypt.org/directory）
   cloudflareApiUrl: https://api.cloudflare.com/client/v4
   acme:
     directoryUrl: https://acme-v02.api.letsencrypt.org/directory
     timeout: 10m
-    propagationTimeout: 3m
-    propagationInterval: 5s
-    renewBefore: 720h
     renewInterval: 12h
 # 终端用户会话，语义见 docs/03 §5.3；登录频控与 Cookie 的 Secure 沿用 auth 段
 portal:

@@ -10,12 +10,6 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-type AcmeAccount struct {
-	DirectoryUrl string
-	KeyEnc       []byte
-	CreatedAt    pgtype.Timestamptz
-}
-
 type Admin struct {
 	ID             int64
 	Username       string
@@ -521,6 +515,7 @@ type ServerHost struct {
 	DnsAccountID  pgtype.Int8
 	Domain        string
 	CertNotAfter  pgtype.Timestamptz
+	CertRenewAt   pgtype.Timestamptz
 	CreatedAt     pgtype.Timestamptz
 	UpdatedAt     pgtype.Timestamptz
 }

@@ -26,10 +26,11 @@ const (
 
 	defaultTimeout   = 20 * time.Second
 	maxResponseBytes = 1 << 20
-	// txtTTL 是验证用 TXT 记录的 TTL（秒），Cloudflare 允许的最小值。
-	txtTTL = 60
 	// autoTTL 让 Cloudflare 自己定 TTL。
 	autoTTL = 1
+	// acmeHookName / acmeTokenEnv 是 acme.sh 的 Cloudflare 钩子与它读令牌的环境变量（Ruling-74）。
+	acmeHookName = "dns_cf"
+	acmeTokenEnv = "CF_Token"
 	// recordComment 标在平台建的记录上，方便在 Cloudflare 后台认出来。
 	recordComment = "v2-hub"
 	// listPageSize 是列记录时的每页条数；同一个名字下的记录远小于它。
@@ -38,7 +39,6 @@ const (
 	typeA     = "A"
 	typeAAAA  = "AAAA"
 	typeCNAME = "CNAME"
-	typeTXT   = "TXT"
 
 	headerAuthorization = "Authorization"
 	headerContentType   = "Content-Type"
@@ -278,11 +278,7 @@ func (c *client) PointTo(ctx context.Context, name, target string) error {
 	return err
 }
 
-// SetTXT 见 dns.Provider。内容按 Cloudflare 的要求加上双引号（value 是 Base64URL，不含需要转义的字符）。
-func (c *client) SetTXT(ctx context.Context, name, value string) (func(context.Context) error, error) {
-	id, err := c.createRecord(ctx, record{Type: typeTXT, Name: name, Content: `"` + value + `"`, TTL: txtTTL, Comment: recordComment})
-	if err != nil {
-		return nil, err
-	}
-	return func(ctx context.Context) error { return c.deleteRecord(ctx, id) }, nil
+// ACMEHook 见 dns.Provider：acme.sh 的 dns_cf 钩子用 API 令牌（CF_Token），根域名由它自己按令牌查。
+func (c *client) ACMEHook() dns.ACMEHook {
+	return dns.ACMEHook{Name: acmeHookName, Env: map[string]string{acmeTokenEnv: c.token}}
 }

@@ -433,36 +433,3 @@ func TestEmbeddedScriptsMatchContract(t *testing.T) {
 		}
 	}
 }
-
-func TestInstallCert(t *testing.T) {
-	certPEM, keyPEM := []byte("CERT-CHAIN"), []byte("KEY-MATERIAL")
-	r := &remotetest.Runner{}
-	if err := New().InstallCert(ctx, r, certPEM, keyPEM); err != nil {
-		t.Fatalf("InstallCert: %v", err)
-	}
-	uploads := r.Uploads()
-	if len(uploads) != 2 || !bytes.Equal(uploads[0], certPEM) || !bytes.Equal(uploads[1], keyPEM) {
-		t.Fatalf("want the certificate then the key uploaded, got %d uploads", len(uploads))
-	}
-	scripts := r.Scripts()
-	if len(scripts) != 1 {
-		t.Fatalf("want one script, got %d", len(scripts))
-	}
-	script := scripts[0]
-	for _, want := range []string{
-		"trap 'rm -f '" + remotetest.UploadPath, `-webCert "$d/panel.crt" -webCertKey "$d/panel.key"`, "systemctl restart x-ui", `install -m 600`,
-	} {
-		if !strings.Contains(script, want) {
-			t.Fatalf("script misses %q:\n%s", want, script)
-		}
-	}
-	if strings.Contains(script, string(keyPEM)) || strings.Contains(script, string(certPEM)) {
-		t.Fatal("certificate material must travel over stdin, not the command line")
-	}
-
-	failing := &remotetest.Runner{Handle: func(string) (remote.Result, error) { return exit(1, "") }}
-	err := New().InstallCert(ctx, failing, certPEM, keyPEM)
-	if de := deploy.AsError(err); de == nil || de.Reason != deploy.ReasonCommandFailed {
-		t.Fatalf("want command_failed, got %v", err)
-	}
-}

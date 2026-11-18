@@ -64,11 +64,15 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 RETURNING id;
 
 -- name: UpdateServerHost :execrows
--- 改了地址或端口就清空已固定的主机密钥，下次连接重新记录；改了域名或 DNS 账号就清空证书到期时间，不再自动续期，
--- 直到再做一次“配置证书”
+-- 改了地址或端口就清空已固定的主机密钥，下次连接重新记录；改了域名或 DNS 账号就清空证书到期时间，
+-- 续期时间记为 now（还带 DNS 账号时，下一轮按新域名申请）或清空（去掉了 DNS 账号）（docs/03 §5.22 “证书自动续期”）
 UPDATE server_host
 SET name = sqlc.arg(name), credential_id = sqlc.arg(credential_id), region = sqlc.arg(region), panel_port = sqlc.narg(panel_port),
     cert_not_after = CASE WHEN domain = sqlc.arg(domain) AND dns_account_id IS NOT DISTINCT FROM sqlc.narg(dns_account_id) THEN cert_not_after END,
+    cert_renew_at = CASE
+        WHEN domain = sqlc.arg(domain) AND dns_account_id IS NOT DISTINCT FROM sqlc.narg(dns_account_id) THEN cert_renew_at
+        WHEN sqlc.narg(dns_account_id)::bigint IS NOT NULL THEN sqlc.arg(now)::timestamptz
+    END,
     dns_account_id = sqlc.narg(dns_account_id), domain = sqlc.arg(domain),
     host_key_sha256 = CASE WHEN address = sqlc.arg(address) AND ssh_port = sqlc.arg(ssh_port) THEN host_key_sha256 ELSE '' END,
     address = sqlc.arg(address), ssh_port = sqlc.arg(ssh_port), updated_at = now()
@@ -172,15 +176,20 @@ WHERE status = 'running';
 SELECT COUNT(*) FROM server WHERE name = $1;
 
 -- name: SetServerHostCert :exec
-UPDATE server_host SET cert_not_after = $2, updated_at = now() WHERE id = $1;
+-- 证书装好且平台按域名接入后记下到期时间与 acme.sh 给出的下次续期时间（Ruling-74）
+UPDATE server_host SET cert_not_after = $2, cert_renew_at = $3, updated_at = now() WHERE id = $1;
+
+-- name: MarkServerHostCertRetry :exec
+-- 申请或装证书没成功：续期时间提前到 $2（不晚于原值），下一轮检查重试
+UPDATE server_host SET cert_renew_at = LEAST(coalesce(cert_renew_at, $2), $2), updated_at = now() WHERE id = $1;
 
 -- name: ListHostsDueForCertRenewal :many
--- 平台申请的证书快到期、已接入且没有未结束任务的主机；到期早的在前
+-- 已到续期时间、已接入且没有未结束任务的带 DNS 账号的主机；早的在前。续期时间为空（接管来的、面板自带证书）的不动
 SELECT h.id
 FROM server_host h
-WHERE h.dns_account_id IS NOT NULL AND h.server_id IS NOT NULL AND h.cert_not_after < $1
+WHERE h.dns_account_id IS NOT NULL AND h.server_id IS NOT NULL AND h.cert_renew_at <= $1
   AND NOT EXISTS (SELECT 1 FROM host_task t WHERE t.host_id = h.id AND t.status IN ('queued', 'running'))
-ORDER BY h.cert_not_after
+ORDER BY h.cert_renew_at, h.id
 LIMIT $2;
 
 -- DNS 账号与 ACME 账号（docs/03 §5.22，Ruling-72、Ruling-73）-----------------------
@@ -218,12 +227,3 @@ WHERE id = $1;
 
 -- name: DeleteDNSAccount :execrows
 DELETE FROM dns_account WHERE id = $1;
-
--- name: GetACMEAccountKey :one
-SELECT key_enc FROM acme_account WHERE directory_url = $1;
-
--- name: CreateACMEAccount :exec
--- 两个任务同时首次申请时只留先写入的那把密钥，后到的丢弃自己生成的、回读先到的
-INSERT INTO acme_account (directory_url, key_enc)
-VALUES ($1, $2)
-ON CONFLICT (directory_url) DO NOTHING;

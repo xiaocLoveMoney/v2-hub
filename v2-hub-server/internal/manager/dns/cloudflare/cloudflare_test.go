@@ -24,6 +24,8 @@ type fakeAPI struct {
 	records map[string]record
 	nextID  int
 	calls   []string
+	// createErr 非 nil 时新建记录一律被拒并返回它。
+	createErr *apiError
 }
 
 func newFakeAPI() *fakeAPI { return &fakeAPI{records: map[string]record{}} }
@@ -65,8 +67,8 @@ func (f *fakeAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			f.write(w, http.StatusBadRequest, nil, apiError{Code: 1, Message: "bad json"})
 			return
 		}
-		if rec.Type == "TXT" && !strings.HasPrefix(rec.Content, `"`) {
-			f.write(w, http.StatusBadRequest, nil, apiError{Code: 9000, Message: "TXT content must be quoted"})
+		if f.createErr != nil {
+			f.write(w, http.StatusBadRequest, nil, *f.createErr)
 			return
 		}
 		f.nextID++
@@ -215,39 +217,23 @@ func TestPointToReplacesProxiedRecord(t *testing.T) {
 	}
 }
 
-func TestSetTXTAndRemove(t *testing.T) {
+func TestACMEHookCarriesTokenWithoutCallingAPI(t *testing.T) {
 	api := newFakeAPI()
-	const name = "_acme-challenge.node.example.com"
-	p := open(t, api, testZone, testSecret)
-	remove, err := p.SetTXT(context.Background(), name, "abc-DEF_123")
-	if err != nil {
-		t.Fatalf("SetTXT: %v", err)
+	hook := open(t, api, testZone, testSecret).ACMEHook()
+	if hook.Name != "dns_cf" || len(hook.Env) != 1 || hook.Env["CF_Token"] != testSecret {
+		t.Fatalf("hook: name %q, %d env vars", hook.Name, len(hook.Env))
 	}
-	got := api.named(name)
-	if len(got) != 1 || got[0].Type != "TXT" || got[0].Content != `"abc-DEF_123"` || got[0].TTL != txtTTL {
-		t.Fatalf("txt record: %+v", got)
-	}
-	if err := remove(context.Background()); err != nil {
-		t.Fatalf("remove: %v", err)
-	}
-	if got := api.named(name); len(got) != 0 {
-		t.Fatalf("txt record not removed: %+v", got)
+	if len(api.calls) != 0 {
+		t.Fatalf("ACMEHook must not call the API, got %v", api.calls)
 	}
 }
 
 func TestRejectedCarriesProviderMessage(t *testing.T) {
 	api := newFakeAPI()
-	p := open(t, api, testZone, testSecret)
-	remove, err := p.SetTXT(context.Background(), "_acme-challenge.x.example.com", "v")
-	if err != nil {
-		t.Fatalf("SetTXT: %v", err)
-	}
-	if err := remove(context.Background()); err != nil {
-		t.Fatalf("first remove: %v", err)
-	}
-	err = remove(context.Background())
+	api.createErr = &apiError{Code: 81057, Message: "Record already exists."}
+	err := open(t, api, testZone, testSecret).PointTo(context.Background(), "node.example.com", "203.0.113.7")
 	de := dns.AsError(err)
-	if de == nil || de.Kind != dns.KindRejected || !strings.Contains(de.Message, "Record does not exist") {
+	if de == nil || de.Kind != dns.KindRejected || !strings.Contains(de.Message, "Record already exists") {
 		t.Fatalf("want KindRejected with provider message, got %v", err)
 	}
 }

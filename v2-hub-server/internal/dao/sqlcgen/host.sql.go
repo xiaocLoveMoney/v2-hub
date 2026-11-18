@@ -95,23 +95,6 @@ func (q *Queries) CountServersByName(ctx context.Context, name string) (int64, e
 	return count, err
 }
 
-const createACMEAccount = `-- name: CreateACMEAccount :exec
-INSERT INTO acme_account (directory_url, key_enc)
-VALUES ($1, $2)
-ON CONFLICT (directory_url) DO NOTHING
-`
-
-type CreateACMEAccountParams struct {
-	DirectoryUrl string
-	KeyEnc       []byte
-}
-
-// 两个任务同时首次申请时只留先写入的那把密钥，后到的丢弃自己生成的、回读先到的
-func (q *Queries) CreateACMEAccount(ctx context.Context, arg CreateACMEAccountParams) error {
-	_, err := q.db.Exec(ctx, createACMEAccount, arg.DirectoryUrl, arg.KeyEnc)
-	return err
-}
-
 const createDNSAccount = `-- name: CreateDNSAccount :one
 INSERT INTO dns_account (name, provider_type, zone, token_enc, remark)
 VALUES ($1, $2, $3, '\x00', $4)
@@ -300,17 +283,6 @@ func (q *Queries) FinishHostTask(ctx context.Context, arg FinishHostTaskParams) 
 		return 0, err
 	}
 	return result.RowsAffected(), nil
-}
-
-const getACMEAccountKey = `-- name: GetACMEAccountKey :one
-SELECT key_enc FROM acme_account WHERE directory_url = $1
-`
-
-func (q *Queries) GetACMEAccountKey(ctx context.Context, directoryUrl string) ([]byte, error) {
-	row := q.db.QueryRow(ctx, getACMEAccountKey, directoryUrl)
-	var key_enc []byte
-	err := row.Scan(&key_enc)
-	return key_enc, err
 }
 
 const getDNSAccount = `-- name: GetDNSAccount :one
@@ -667,20 +639,20 @@ func (q *Queries) ListHostTasks(ctx context.Context, arg ListHostTasksParams) ([
 const listHostsDueForCertRenewal = `-- name: ListHostsDueForCertRenewal :many
 SELECT h.id
 FROM server_host h
-WHERE h.dns_account_id IS NOT NULL AND h.server_id IS NOT NULL AND h.cert_not_after < $1
+WHERE h.dns_account_id IS NOT NULL AND h.server_id IS NOT NULL AND h.cert_renew_at <= $1
   AND NOT EXISTS (SELECT 1 FROM host_task t WHERE t.host_id = h.id AND t.status IN ('queued', 'running'))
-ORDER BY h.cert_not_after
+ORDER BY h.cert_renew_at, h.id
 LIMIT $2
 `
 
 type ListHostsDueForCertRenewalParams struct {
-	CertNotAfter pgtype.Timestamptz
-	Limit        int32
+	CertRenewAt pgtype.Timestamptz
+	Limit       int32
 }
 
-// 平台申请的证书快到期、已接入且没有未结束任务的主机；到期早的在前
+// 已到续期时间、已接入且没有未结束任务的带 DNS 账号的主机；早的在前。续期时间为空（接管来的、面板自带证书）的不动
 func (q *Queries) ListHostsDueForCertRenewal(ctx context.Context, arg ListHostsDueForCertRenewalParams) ([]int64, error) {
-	rows, err := q.db.Query(ctx, listHostsDueForCertRenewal, arg.CertNotAfter, arg.Limit)
+	rows, err := q.db.Query(ctx, listHostsDueForCertRenewal, arg.CertRenewAt, arg.Limit)
 	if err != nil {
 		return nil, err
 	}
@@ -911,6 +883,21 @@ func (q *Queries) ListServersByPanelGUID(ctx context.Context, panelGuid string) 
 	return items, nil
 }
 
+const markServerHostCertRetry = `-- name: MarkServerHostCertRetry :exec
+UPDATE server_host SET cert_renew_at = LEAST(coalesce(cert_renew_at, $2), $2), updated_at = now() WHERE id = $1
+`
+
+type MarkServerHostCertRetryParams struct {
+	ID          int64
+	CertRenewAt pgtype.Timestamptz
+}
+
+// 申请或装证书没成功：续期时间提前到 $2（不晚于原值），下一轮检查重试
+func (q *Queries) MarkServerHostCertRetry(ctx context.Context, arg MarkServerHostCertRetryParams) error {
+	_, err := q.db.Exec(ctx, markServerHostCertRetry, arg.ID, arg.CertRenewAt)
+	return err
+}
+
 const setDNSAccountToken = `-- name: SetDNSAccountToken :exec
 UPDATE dns_account SET token_enc = $2, updated_at = now() WHERE id = $1
 `
@@ -963,16 +950,18 @@ func (q *Queries) SetSSHCredentialSecret(ctx context.Context, arg SetSSHCredenti
 }
 
 const setServerHostCert = `-- name: SetServerHostCert :exec
-UPDATE server_host SET cert_not_after = $2, updated_at = now() WHERE id = $1
+UPDATE server_host SET cert_not_after = $2, cert_renew_at = $3, updated_at = now() WHERE id = $1
 `
 
 type SetServerHostCertParams struct {
 	ID           int64
 	CertNotAfter pgtype.Timestamptz
+	CertRenewAt  pgtype.Timestamptz
 }
 
+// 证书装好且平台按域名接入后记下到期时间与 acme.sh 给出的下次续期时间（Ruling-74）
 func (q *Queries) SetServerHostCert(ctx context.Context, arg SetServerHostCertParams) error {
-	_, err := q.db.Exec(ctx, setServerHostCert, arg.ID, arg.CertNotAfter)
+	_, err := q.db.Exec(ctx, setServerHostCert, arg.ID, arg.CertNotAfter, arg.CertRenewAt)
 	return err
 }
 
@@ -1106,10 +1095,14 @@ const updateServerHost = `-- name: UpdateServerHost :execrows
 UPDATE server_host
 SET name = $1, credential_id = $2, region = $3, panel_port = $4,
     cert_not_after = CASE WHEN domain = $5 AND dns_account_id IS NOT DISTINCT FROM $6 THEN cert_not_after END,
+    cert_renew_at = CASE
+        WHEN domain = $5 AND dns_account_id IS NOT DISTINCT FROM $6 THEN cert_renew_at
+        WHEN $6::bigint IS NOT NULL THEN $7::timestamptz
+    END,
     dns_account_id = $6, domain = $5,
-    host_key_sha256 = CASE WHEN address = $7 AND ssh_port = $8 THEN host_key_sha256 ELSE '' END,
-    address = $7, ssh_port = $8, updated_at = now()
-WHERE id = $9
+    host_key_sha256 = CASE WHEN address = $8 AND ssh_port = $9 THEN host_key_sha256 ELSE '' END,
+    address = $8, ssh_port = $9, updated_at = now()
+WHERE id = $10
 `
 
 type UpdateServerHostParams struct {
@@ -1119,13 +1112,14 @@ type UpdateServerHostParams struct {
 	PanelPort    pgtype.Int4
 	Domain       string
 	DnsAccountID pgtype.Int8
+	Now          pgtype.Timestamptz
 	Address      string
 	SshPort      int32
 	ID           int64
 }
 
-// 改了地址或端口就清空已固定的主机密钥，下次连接重新记录；改了域名或 DNS 账号就清空证书到期时间，不再自动续期，
-// 直到再做一次“配置证书”
+// 改了地址或端口就清空已固定的主机密钥，下次连接重新记录；改了域名或 DNS 账号就清空证书到期时间，
+// 续期时间记为 now（还带 DNS 账号时，下一轮按新域名申请）或清空（去掉了 DNS 账号）（docs/03 §5.22 “证书自动续期”）
 func (q *Queries) UpdateServerHost(ctx context.Context, arg UpdateServerHostParams) (int64, error) {
 	result, err := q.db.Exec(ctx, updateServerHost,
 		arg.Name,
@@ -1134,6 +1128,7 @@ func (q *Queries) UpdateServerHost(ctx context.Context, arg UpdateServerHostPara
 		arg.PanelPort,
 		arg.Domain,
 		arg.DnsAccountID,
+		arg.Now,
 		arg.Address,
 		arg.SshPort,
 		arg.ID,

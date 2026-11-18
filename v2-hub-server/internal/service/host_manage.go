@@ -384,7 +384,7 @@ func (s *HostService) UpdateHost(ctx context.Context, actor *AdminPrincipal, id 
 		n, err := q.UpdateServerHost(ctx, sqlcgen.UpdateServerHostParams{
 			ID: id, Name: name, Address: address, SshPort: int32(in.SSHPort), //nolint:gosec // 端口已校验在 1–65535
 			CredentialID: in.CredentialID, Region: in.Region, PanelPort: int4OrNull(in.PanelPort),
-			DnsAccountID: dnsAccountID, Domain: domain,
+			DnsAccountID: dnsAccountID, Domain: domain, Now: pgtype.Timestamptz{Time: s.now(), Valid: true},
 		})
 		if isUniqueViolation(err) {
 			return newError(CodeConflict, msgHostTaken)
