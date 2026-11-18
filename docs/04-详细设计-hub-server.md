@@ -16,9 +16,8 @@ v2-hub-server/
 │   │   ├── panel/xui/           # 3x-ui 实现（M1）
 │   │   ├── remote/              # SSH 执行器：连接、主机密钥固定、sudo、输出限长（M11）
 │   │   ├── deploy/              # Deployer 接口、中立结果、注册表（M11）
-│   │   ├── deploy/xui/          # 3x-ui 的安装、接管与运维动作；内嵌上游脚本快照（M11）
+│   │   ├── deploy/xui/          # 3x-ui 的安装、接管、运维动作与主机上的证书签发；内嵌上游脚本与 acme.sh 快照（M11）
 │   │   ├── dns/                 # DNS 服务商接口与注册表；dns/cloudflare 是 Cloudflare 实现（M11 补充）
-│   │   ├── acmecert/            # ACME 签发（DNS-01）：下单、等解析生效、取证书（M11 补充）
 │   │   ├── render/              # 分享链接解析 → ProxyNode → 各订阅格式（M3）
 │   │   ├── chain/               # 服务端链式的面板配置变更（M7）；客户端链式的渲染在 render/（M6）；M9 起一条规则可带多个入站
 │   │   └── crypto/              # AES-GCM、argon2id、token 生成（M0）
@@ -77,10 +76,11 @@ M11 SSH 托管（docs/03 §5.22）的分工：`manager/remote` 只管“连上�
 部署成功后调 `PanelService` 现有的接入逻辑；后台任务 `job.RunHostTasks` 领取排队的任务并限并发。
 `service` 只依赖 `deploy.Deployer` 与 `remote.Dialer` 接口，单测用脚本化的假执行器，不发真实 SSH。
 
-公开证书（Ruling-72、Ruling-73）的分工：`manager/dns` 定义“校验域名、把域名解析到一个地址、写 / 删 TXT”三件事并按服务商类型注册，
-`manager/acmecert` 只管 ACME 协议（用 `golang.org/x/crypto/acme`）与“等 TXT 在权威服务器上生效”，不认识任何 DNS 服务商——写记录的事经 `Solver` 接口交给调用方；
-`Deployer.InstallCert` 把一份证书与私钥装到面板上；`service/host_dns.go` 管 DNS 账号，`service/host_cert.go` 把这几件事串成“配置证书”的步骤并管 ACME 账号密钥，
-`job.RunCertRenewal` 定时给快到期的证书排续期任务。单测里 DNS 服务商与签发方都是假的，`acmecert` 另有一个进程内的假 ACME 服务端测协议流程。
+公开证书（Ruling-72 – Ruling-74）的分工：`manager/dns` 定义“校验域名、把域名解析到一个地址”两件事并按服务商类型注册；
+签发在主机上：`Deployer.IssueCert` 把内嵌的 acme.sh 与 DNS 钩子传到主机、经临时文件传入令牌并执行 DNS-01 申请（已有没到期的证书就复用），
+`Deployer.InstallCert` 把 acme.sh 里的证书装到面板上、返回证书链与 acme.sh 给出的下次续期时间；
+服务商类型到 acme.sh 钩子名与环境变量的对应在 `service/host_cert.go`。`service/host_dns.go` 管 DNS 账号，`service/host_cert.go` 把这几件事串成“配置证书”的步骤，
+`job.RunCertRenewal` 定时给没记下证书或已到续期时间的主机排任务。单测里 DNS 服务商与部署器都是假的；`deploy/xui` 另有一个默认跳过的真实主机测试（环境变量开启）。
 
 ## 4. 与其它模块的握手
 
@@ -88,9 +88,8 @@ M11 SSH 托管（docs/03 §5.22）的分工：`manager/remote` 只管“连上�
 |---|---|---|---|
 | admin-web / user-web | 被调 | HTTP 8080（生产经 Caddy） | `hub-api.yaml` |
 | 3x-ui 面板 | 主调 | HTTPS + Bearer | `upstream/3x-ui/openapi-v3.11.0.json` |
-| 托管主机 | 主调 | SSH（默认 22） | `upstream/3x-ui/install-v3.11.0.sh`、`update-v3.11.0.sh`（M11） |
+| 托管主机 | 主调 | SSH（默认 22） | `upstream/3x-ui/install-v3.11.0.sh`、`update-v3.11.0.sh`（M11）；`upstream/acme.sh/`（证书签发） |
 | Cloudflare API | 主调 | HTTPS | —（DNS 记录接口，M11 补充） |
-| ACME 签发方 | 主调 | HTTPS（RFC 8555） | —（默认 Let's Encrypt，M11 补充） |
 | PostgreSQL | 主调 | 5432 | `deploy/init.sql` |
 | MinIO | 主调 | S3 API 9000 | —（上传文件，M6） |
 
@@ -99,7 +98,7 @@ M11 SSH 托管（docs/03 §5.22）的分工：`manager/remote` 只管“连上�
 - `etc/hub-server.yaml`：监听地址、超时（已有）；数据库、轮询间隔、并发上限随任务补。
 - 环境变量：`HUB_DATABASE_URL`；`HUB_INSECURE_DEV_COOKIE=1` 仅本机 HTTP 开发（`make run` 自动设置）；`HUB_ENCRYPTION_KEY`（Base64 的 32 字节，AES-256-GCM 主密钥，加密 TOTP 密钥，M1 起也加密面板 token；缺失则拒绝启动）。
 - M11 配置段 `deploy`：同时执行的任务数、SSH 连接与命令超时、安装超时、连接测试与动作的频控、批量上限、`allowLoopback`（只给联调用）。不新增环境变量。
-- `deploy.acme`：签发方目录地址、整条证书任务的时限、等解析生效的时限与间隔、续期提前量与检查间隔；`deploy.cloudflareApiUrl` 是 Cloudflare API 的根地址（只在测试里改）。DNS 令牌与 ACME 账号密钥都加密存库，不走环境变量。
+- `deploy.acme`：签发方目录地址（传给主机上的 acme.sh）、整条证书任务的时限、续期检查间隔；`deploy.cloudflareApiUrl` 是 Cloudflare API 的根地址（只在测试里改）。DNS 令牌加密存库，不走环境变量；ACME 账号由主机上的 acme.sh 保存。
 - 首个超管：`make admin-create USERNAME=<名称>`，密码终端无回显输入或经管道传入一行。
 - `make run / test / build / lint`。
 
