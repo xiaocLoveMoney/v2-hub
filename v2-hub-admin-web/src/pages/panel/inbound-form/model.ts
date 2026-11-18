@@ -135,7 +135,13 @@ export function canReality(protocol: string, network: string): boolean {
 }
 
 export function hasFallbacks(d: InboundDraft): boolean {
-  return FALLBACK_PROTOCOLS.includes(d.protocol) && networkOf(d) === 'tcp' && securityOf(d) !== SECURITY_NONE
+  return FALLBACK_PROTOCOLS.includes(d.protocol) && networkOf(d) === 'tcp' && securityOf(d) !== SECURITY_NONE && !hasVlessEncryption(d)
+}
+
+/** VLESS 开了 Encryption（decryption 不是 none）：Xray 不接受它与回落同在，整个内核会起不来。 */
+function hasVlessEncryption(d: InboundDraft): boolean {
+  const decryption = d.settings.decryption
+  return d.protocol === 'vless' && typeof decryption === 'string' && decryption !== '' && decryption !== 'none'
 }
 
 export function isSS2022(method: unknown): boolean {
@@ -442,7 +448,17 @@ export interface InboundConfigPayload extends JsonObject {
 
 /** 草稿转成提交给 hub-server 的 config。 */
 export function toConfig(d: InboundDraft): InboundConfigPayload {
-  return { settings: d.settings, streamSettings: hasStream(d.protocol) ? mapCerts(d.streamSettings, certForWire) : {}, sniffing: d.sniffing }
+  return { settings: settingsForWire(d), streamSettings: hasStream(d.protocol) ? mapCerts(d.streamSettings, certForWire) : {}, sniffing: d.sniffing }
+}
+
+/** 提交前的 settings：VLESS 开了 Encryption 时去掉 fallbacks（哪怕是空数组，Xray 也会拒绝）。 */
+function settingsForWire(d: InboundDraft): JsonObject {
+  if (!hasVlessEncryption(d) || !('fallbacks' in d.settings)) {
+    return d.settings
+  }
+  const rest = { ...d.settings }
+  delete rest.fallbacks
+  return rest
 }
 
 export interface PanelConfig {

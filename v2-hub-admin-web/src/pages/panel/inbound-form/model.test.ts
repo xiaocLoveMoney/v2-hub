@@ -9,6 +9,7 @@ import {
   canTls,
   fromPanelConfig,
   getAt,
+  hasFallbacks,
   newDraft,
   parseRealityTargets,
   prefillNetwork,
@@ -193,5 +194,17 @@ describe('REALITY 目标扫描的结果处理（Ruling-54）', () => {
   it('候选目标按行、逗号或空格拆开，去掉空项与重复', () => {
     expect(parseRealityTargets(' www.a.com:443\n\nwww.b.com, 203.0.114.9:8443  www.a.com:443 ')).toEqual(['www.a.com:443', 'www.b.com', '203.0.114.9:8443'])
     expect(parseRealityTargets('  \n ')).toEqual([])
+  })
+})
+
+describe('VLESS Encryption 与回落', () => {
+  it('开了 Encryption 时不显示回落、提交不带 fallbacks；没开时照常', () => {
+    const plain = { ...withSecurity(newDraft('vless'), 'reality') }
+    expect(hasFallbacks(plain)).toBe(true)
+    expect(toConfig(plain).settings).toHaveProperty('fallbacks')
+    const enc = { ...plain, settings: { ...plain.settings, decryption: 'mlkem768x25519plus.native.600s.x', encryption: 'mlkem768x25519plus.native.0rtt.y' } }
+    expect(hasFallbacks(enc)).toBe(false)
+    expect(toConfig(enc).settings).not.toHaveProperty('fallbacks')
+    expect(toConfig(enc).settings.decryption).toBe('mlkem768x25519plus.native.600s.x')
   })
 })
