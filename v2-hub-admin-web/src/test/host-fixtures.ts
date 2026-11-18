@@ -102,6 +102,7 @@ export function serverOf(over: Partial<Server> = {}): Server {
     createdAt: NOW,
     reach: null,
     hostId: null,
+    clientFlow: '',
     ...over,
   }
 }

@@ -2,13 +2,16 @@ import { PlusOutlined } from '@ant-design/icons'
 import { Alert, App, Button, Descriptions, Popconfirm, Space, Switch, Table, Tag, Tooltip, Typography, type TableProps } from 'antd'
 import { useCallback, useState } from 'react'
 import { Link, useParams } from 'react-router'
-import { api, csrfHeader, type Endpoint, type Inbound, type Server } from '../../api/client'
+import { api, csrfHeader, type Endpoint, type HostTask, type Inbound, type Server } from '../../api/client'
 import { useSession } from '../../auth/session-context'
 import { mutate, useRemote } from '../../hooks/use-remote'
 import { PERMISSIONS, ROUTES } from '../../menu'
 import { TABLE_SCROLL, formatTime } from '../system/format'
 import { ChainApplyCard } from './ChainApplyCard'
 import { HostOpsCard } from './HostOpsCard'
+import { HostTaskDrawer } from './HostTaskDrawer'
+import { InboundPresetsModal } from './InboundPresetsModal'
+import type { OpenedHostTasks } from './host-actions'
 import { PLAIN_HTTP_TAG, PLAIN_HTTP_WARNING, isPlainHttpUrl } from './host-labels'
 import { EndpointModal } from './InboundModals'
 import { InboundFormModal } from './inbound-form/InboundFormModal'
@@ -17,6 +20,9 @@ import { ServerStatusTag } from './status'
 import { formatCountry } from './countries'
 import { ErrorAlert } from '../../components/ErrorAlert'
 import { PageHeader } from '../../components/PageHeader'
+
+/** VLESS Vision 流控（Ruling-77）。 */
+const VISION_FLOW = 'xtls-rprx-vision'
 
 interface EndpointTagProps {
   endpoint: Endpoint
@@ -67,6 +73,11 @@ export function ServerDetailPage() {
   const [isAddingEndpoint, setIsAddingEndpoint] = useState(false)
   const [editing, setEditing] = useState<Inbound | null>(null)
   const [busyId, setBusyId] = useState<number | null>(null)
+  const [isDeployingPresets, setIsDeployingPresets] = useState(false)
+  const [presetTask, setPresetTask] = useState<OpenedHostTasks | null>(null)
+  const [isFlowBusy, setIsFlowBusy] = useState(false)
+  // 一键部署要同时能改入站与操作主机（Ruling-76）
+  const canDeployPresets = canWrite && can(PERMISSIONS.HOST_WRITE)
 
   const loadServer = useCallback((signal: AbortSignal) => api.GET('/api/admin/servers/{id}', { params: { path: { id: serverId } }, signal }), [serverId])
   const loadInbounds = useCallback(
@@ -91,6 +102,26 @@ export function ServerDetailPage() {
     }
     void message.success(okText)
     reloadAll()
+  }
+
+  /** 开关服务器的 VLESS 流控（Ruling-77）：由下发对账写到面板上的 client。 */
+  const setClientFlow = async (isOn: boolean) => {
+    setIsFlowBusy(true)
+    const err = await mutate(() =>
+      api.PUT('/api/admin/servers/{id}/client-flow', { params: { ...csrfHeader(), path: { id: serverId } }, body: { clientFlow: isOn ? VISION_FLOW : '' } }),
+    )
+    setIsFlowBusy(false)
+    if (err !== null) {
+      void message.error(err.message)
+      return
+    }
+    void message.success(isOn ? '已打开 VLESS 流控，用户更新订阅后生效' : '已关闭 VLESS 流控，用户更新订阅后生效')
+    server.reload()
+  }
+
+  const handlePresetsStarted = (task: HostTask, hostId: number) => {
+    setIsDeployingPresets(false)
+    setPresetTask({ host: { id: hostId, name: server.data?.name ?? '' }, taskId: task.id })
   }
 
   const columns: TableProps<Inbound>['columns'] = [
@@ -192,6 +223,18 @@ export function ServerDetailPage() {
           <Descriptions.Item label="地址">{srv.baseUrl}</Descriptions.Item>
           <Descriptions.Item label="最近同步">{formatTime(srv.lastSyncedAt)}</Descriptions.Item>
           <Descriptions.Item label="备注">{srv.remark || '—'}</Descriptions.Item>
+          <Descriptions.Item label="VLESS 流控">
+            <Tooltip title="打开后平台下发的用户带 xtls-rprx-vision，只在 TCP + REALITY / TLS 的 VLESS 入站上生效">
+              <Switch
+                size="small"
+                aria-label="VLESS 流控"
+                checked={srv.clientFlow === VISION_FLOW}
+                loading={isFlowBusy}
+                disabled={!can(PERMISSIONS.SERVER_WRITE)}
+                onChange={(isOn) => void setClientFlow(isOn)}
+              />
+            </Tooltip>
+          </Descriptions.Item>
         </Descriptions>
       )}
       {srv !== null && isPlainHttpUrl(srv.baseUrl) && <Alert type="warning" showIcon className="page-alert" title={`${PLAIN_HTTP_TAG}：${PLAIN_HTTP_WARNING}`} />}
@@ -205,6 +248,13 @@ export function ServerDetailPage() {
             <Button onClick={() => setIsAddingEndpoint(true)} disabled={(inbounds.data ?? []).length === 0}>
               添加对外地址
             </Button>
+            {canDeployPresets && (
+              <Tooltip title={srv?.hostId === null ? '先在下方 SSH 运维里绑定 SSH' : undefined}>
+                <Button onClick={() => setIsDeployingPresets(true)} disabled={(srv?.isDisabled ?? true) || srv?.hostId === null}>
+                  一键部署入站
+                </Button>
+              </Tooltip>
+            )}
             <Button type="primary" icon={<PlusOutlined />} onClick={() => setIsCreating(true)} disabled={srv?.isDisabled ?? true}>
               新建入站
             </Button>
@@ -228,6 +278,16 @@ export function ServerDetailPage() {
           setEditing(null)
           reloadAll()
         }}
+      />
+      <InboundPresetsModal serverId={serverId} isOpen={isDeployingPresets} onClose={() => setIsDeployingPresets(false)} onStarted={handlePresetsStarted} />
+      <HostTaskDrawer
+        host={presetTask?.host ?? null}
+        initialTaskId={presetTask?.taskId}
+        onClose={() => {
+          setPresetTask(null)
+          reloadAll()
+        }}
+        onChanged={reloadAll}
       />
       <EndpointModal
         serverId={serverId}
