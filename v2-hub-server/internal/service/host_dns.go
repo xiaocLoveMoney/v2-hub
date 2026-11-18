@@ -38,6 +38,7 @@ const (
 	msgDomainNeedsAccount  = "没选 DNS 账号时域名必须留空"
 	msgBadDomain           = "域名不合法"
 	msgDomainOutOfZone     = "域名须是所选 DNS 账号的根域名或它的子域名："
+	msgDomainNeedsPublicIP = "选了 DNS 账号时主机地址要填公网 IP 或域名：域名会解析到这个地址，内网地址客户端连不上"
 )
 
 // nonLabelChars 匹配域名前缀里不能出现的字符。
@@ -339,6 +340,10 @@ func hostDomain(ctx context.Context, q *sqlcgen.Queries, dnsAccountID *int64, do
 		}
 		return pgtype.Int8{}, "", nil
 	}
+	// 域名要解析到主机地址（Ruling-75）：内网、回环等地址解析出去客户端连不上；与平台同机时的 Docker 网关地址也在此列
+	if addr, err := netip.ParseAddr(address); err == nil && isLANAddr(addr) {
+		return pgtype.Int8{}, "", newError(CodeInvalidArgument, msgDomainNeedsPublicIP)
+	}
 	account, err := q.GetDNSAccountSecret(ctx, *dnsAccountID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return pgtype.Int8{}, "", newError(CodeNotFound, msgDNSAccountNotFound)
@@ -357,4 +362,11 @@ func hostDomain(ctx context.Context, q *sqlcgen.Queries, dnsAccountID *int64, do
 		return pgtype.Int8{}, "", newError(CodeInvalidArgument, msgDomainOutOfZone+account.Zone)
 	}
 	return pgtype.Int8{Int64: *dnsAccountID, Valid: true}, normalized, nil
+}
+
+// isLANAddr 报告地址是不是本机或局域网里的地址（内网、回环、链路本地、未指定、组播），解析到它客户端连不上。
+// 比 isPublicAddr 宽：文档、基准测试等保留网段不在这里拦，管理员不会把它们当成主机地址填进来。
+func isLANAddr(addr netip.Addr) bool {
+	addr = addr.Unmap()
+	return !addr.IsGlobalUnicast() || addr.IsPrivate()
 }

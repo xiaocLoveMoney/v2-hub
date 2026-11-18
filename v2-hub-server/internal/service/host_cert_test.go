@@ -187,6 +187,11 @@ func TestHostDomainRules(t *testing.T) {
 	wantCode(t, err, CodeInvalidArgument)
 	_, err = batch(HostBatchItem{Address: hostAddrA, Name: "node-a", Domain: "bad_name.example.com"}, &account.ID)
 	wantCode(t, err, CodeInvalidArgument)
+	// 选了 DNS 账号：地址不能是内网、回环等（与平台同机时的 Docker 网关也不行），域名会解析过去
+	for _, lan := range []string{"172.17.0.1", "192.168.1.10", "10.0.0.5", "fd00::1", "169.254.1.1"} {
+		_, err = batch(HostBatchItem{Address: lan, Name: "lan"}, &account.ID)
+		wantCode(t, err, CodeInvalidArgument)
+	}
 	missing := int64(999999)
 	_, err = batch(HostBatchItem{Address: hostAddrA, Name: "node-a"}, &missing)
 	wantCode(t, err, CodeNotFound)
