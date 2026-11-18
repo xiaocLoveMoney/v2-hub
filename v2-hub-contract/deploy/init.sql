@@ -855,7 +855,7 @@ CREATE TABLE ssh_credential (
 );
 
 -- DNS 账号（docs/03 §5.22，Ruling-72）：DNS 服务商的 API 令牌，一份对应一个根域名；给主机建解析与做证书的 DNS 验证。
--- token_enc 用 AES-256-GCM 加密，关联数据 dns_account:<id>:token；只在 hub-server 上使用，不下发到主机。被主机引用时不能删。
+-- token_enc 用 AES-256-GCM 加密，关联数据 dns_account:<id>:token；签发证书时经 SSH 临时传给主机、不在主机上落盘（Ruling-74）。被主机引用时不能删。
 CREATE TABLE dns_account (
     id            BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     name          VARCHAR(64)  NOT NULL,
@@ -868,18 +868,11 @@ CREATE TABLE dns_account (
     CONSTRAINT uk_dns_account_name UNIQUE (name)
 );
 
--- ACME 账号（docs/03 §5.22，Ruling-73）：每个签发方目录地址一把账号密钥，首次申请证书时生成。
--- key_enc 是 PKCS#8 的 ECDSA P-256 私钥，AES-256-GCM 加密，关联数据 acme_account:<directory_url>:key。
-CREATE TABLE acme_account (
-    directory_url VARCHAR(255) PRIMARY KEY,
-    key_enc       BYTEA        NOT NULL,
-    created_at    TIMESTAMPTZ  NOT NULL DEFAULT now()
-);
-
 -- 托管主机（docs/03 §5.22）：一台能 SSH 登录的机器；装好面板并接入后 server_id 指向对应的服务器。
 -- host_key_sha256 是首次连接时记录并固定的主机公钥指纹，空串 = 还没记录；os_id、arch 取自最近一次检测。
 -- 删服务器时主机保留、解除关联；删主机时任务历史一并删除。
--- dns_account_id 与 domain 同有同无：有则面板证书由平台申请（Ruling-73），cert_not_after 是这张证书的到期时间，空 = 还没申请到。
+-- dns_account_id 与 domain 同有同无：有则面板证书由主机上的 acme.sh 申请（Ruling-74），cert_not_after 是这张证书的到期时间，空 = 还没申请到；
+-- cert_renew_at 是 acme.sh 给出的下次续期时间，空 = 还没记下，下一轮检查就排“配置证书”。
 CREATE TABLE server_host (
     id              BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     name            VARCHAR(64)  NOT NULL,                 -- 接入时用作服务器名
@@ -896,6 +889,7 @@ CREATE TABLE server_host (
     dns_account_id  BIGINT       REFERENCES dns_account (id) ON DELETE RESTRICT,
     domain          VARCHAR(255) NOT NULL DEFAULT '',      -- 面板用的域名，小写；空串 = 不申请公开证书
     cert_not_after  TIMESTAMPTZ,
+    cert_renew_at   TIMESTAMPTZ,
     created_at      TIMESTAMPTZ  NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ  NOT NULL DEFAULT now(),
     CONSTRAINT uk_server_host_name UNIQUE (name),
