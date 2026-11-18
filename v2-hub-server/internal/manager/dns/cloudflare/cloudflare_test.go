@@ -155,11 +155,11 @@ func TestPointToCreatesByTargetKind(t *testing.T) {
 	}
 }
 
-func TestPointToReplacesOtherAddressRecords(t *testing.T) {
+func TestPointToReplacesOwnAddressRecords(t *testing.T) {
 	api := newFakeAPI()
 	const name = "node.example.com"
-	api.seed(record{ID: "old1", Type: "A", Name: name, Content: "198.51.100.1"})
-	api.seed(record{ID: "old2", Type: "CNAME", Name: name, Content: "elsewhere.example.net"})
+	api.seed(record{ID: "old1", Type: "A", Name: name, Content: "198.51.100.1", Comment: recordComment})
+	api.seed(record{ID: "old2", Type: "CNAME", Name: name, Content: "elsewhere.example.net", Comment: recordComment})
 	api.seed(record{ID: "keep", Type: "TXT", Name: name, Content: `"note"`})
 	p := open(t, api, testZone, testSecret)
 	if err := p.PointTo(context.Background(), name, "203.0.113.7"); err != nil {
@@ -207,13 +207,58 @@ func TestPointToIsIdempotent(t *testing.T) {
 func TestPointToReplacesProxiedRecord(t *testing.T) {
 	api := newFakeAPI()
 	const name = "node.example.com"
-	api.seed(record{ID: "prox", Type: "A", Name: name, Content: "203.0.113.7", Proxied: true})
+	api.seed(record{ID: "prox", Type: "A", Name: name, Content: "203.0.113.7", Proxied: true, Comment: recordComment})
 	p := open(t, api, testZone, testSecret)
 	if err := p.PointTo(context.Background(), name, "203.0.113.7"); err != nil {
 		t.Fatalf("PointTo: %v", err)
 	}
 	if got := api.named(name); len(got) != 1 || got[0].Proxied {
 		t.Fatalf("proxied record should be replaced by a dns-only one, got %+v", got)
+	}
+}
+
+// 别处建的记录（不带 v2-hub 注释）不删不改：冲突就拒绝，且一条都不动（Ruling-75）。
+func TestPointToRefusesConflictingForeignRecords(t *testing.T) {
+	const name = "www.example.com"
+	cases := map[string]record{
+		"other address": {ID: "site", Type: "A", Name: name, Content: "198.51.100.9"},
+		"proxied same":  {ID: "site", Type: "A", Name: name, Content: "203.0.113.7", Proxied: true},
+		"cname":         {ID: "site", Type: "CNAME", Name: name, Content: "pages.example.net"},
+	}
+	for label, foreign := range cases {
+		api := newFakeAPI()
+		api.seed(foreign)
+		api.seed(record{ID: "mine", Type: "A", Name: name, Content: "198.51.100.1", Comment: recordComment})
+		err := open(t, api, testZone, testSecret).PointTo(context.Background(), name, "203.0.113.7")
+		de := dns.AsError(err)
+		if de == nil || de.Kind != dns.KindConflict || !strings.Contains(de.Message, foreign.Content) {
+			t.Fatalf("%s: want KindConflict naming the record, got %v", label, err)
+		}
+		if got := api.named(name); len(got) != 2 {
+			t.Fatalf("%s: nothing may change on conflict, got %+v", label, got)
+		}
+	}
+}
+
+func TestPointToKeepsCompatibleForeignRecords(t *testing.T) {
+	const name = "node.example.com"
+	// 别处建的、已经指向这台主机的 A：照用，不新建
+	api := newFakeAPI()
+	api.seed(record{ID: "manual", Type: "A", Name: name, Content: "203.0.113.7"})
+	if err := open(t, api, testZone, testSecret).PointTo(context.Background(), name, "203.0.113.7"); err != nil {
+		t.Fatalf("PointTo: %v", err)
+	}
+	if got := api.named(name); len(got) != 1 || got[0].ID != "manual" {
+		t.Fatalf("a matching foreign record should be used as is, got %+v", got)
+	}
+	// 别处建的 AAAA 与要建的 A 可以共存：保留它，另建 A
+	api = newFakeAPI()
+	api.seed(record{ID: "v6", Type: "AAAA", Name: name, Content: "2001:db8::7"})
+	if err := open(t, api, testZone, testSecret).PointTo(context.Background(), name, "203.0.113.7"); err != nil {
+		t.Fatalf("PointTo: %v", err)
+	}
+	if got := api.named(name); len(got) != 2 {
+		t.Fatalf("want the foreign AAAA kept next to the new A, got %+v", got)
 	}
 }
 

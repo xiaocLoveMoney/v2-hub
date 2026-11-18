@@ -31,7 +31,10 @@ const (
 	// acmeHookName / acmeTokenEnv 是 acme.sh 的 Cloudflare 钩子与它读令牌的环境变量（Ruling-74）。
 	acmeHookName = "dns_cf"
 	acmeTokenEnv = "CF_Token"
-	// recordComment 标在平台建的记录上，方便在 Cloudflare 后台认出来。
+	// msgForeignRecord 是域名上有别处建的冲突记录时的说明：%[1]s 域名，%[2]s 类型，%[3]s 内容，%[4]s 代理说明。
+	msgForeignRecord = "域名 %[1]s 上已有不是平台建的解析记录（%[2]s %[3]s%[4]s），平台不覆盖；请换一个域名，或确认无用后在 Cloudflare 里删掉再重试"
+	msgProxiedSuffix = "，已开代理"
+	// recordComment 标在平台建的记录上；只有带它的记录平台才会删改（Ruling-75），方便在 Cloudflare 后台认出来。
 	recordComment = "v2-hub"
 	// listPageSize 是列记录时的每页条数；同一个名字下的记录远小于它。
 	listPageSize = "100"
@@ -250,7 +253,7 @@ func isAddressType(recordType string) bool {
 	return recordType == typeA || recordType == typeAAAA || recordType == typeCNAME
 }
 
-// PointTo 见 dns.Provider。
+// PointTo 见 dns.Provider。先检查完再动手：有冲突时一条记录都不改。
 func (c *client) PointTo(ctx context.Context, name, target string) error {
 	want := addressRecord(name, target)
 	existing, err := c.listRecords(ctx, name)
@@ -258,6 +261,7 @@ func (c *client) PointTo(ctx context.Context, name, target string) error {
 		return err
 	}
 	found := false
+	stale := make([]record, 0, len(existing))
 	for _, rec := range existing {
 		if !isAddressType(rec.Type) {
 			continue
@@ -267,6 +271,15 @@ func (c *client) PointTo(ctx context.Context, name, target string) error {
 			found = true
 			continue
 		}
+		if rec.Comment == recordComment {
+			stale = append(stale, rec)
+			continue
+		}
+		if conflicts(rec, want) {
+			return foreignRecordError(rec)
+		}
+	}
+	for _, rec := range stale {
 		if err := c.deleteRecord(ctx, rec.ID); err != nil {
 			return err
 		}
@@ -276,6 +289,20 @@ func (c *client) PointTo(ctx context.Context, name, target string) error {
 	}
 	_, err = c.createRecord(ctx, want)
 	return err
+}
+
+// conflicts 报告别处建的 rec 与要建的 want 能否共存：同类型（内容不同）、任一方是 CNAME、开了代理都不能。
+// 类型不同的 A 与 AAAA 可以共存（比如双栈主机由管理员自己加的另一族地址）。
+func conflicts(rec, want record) bool {
+	return rec.Proxied || rec.Type == want.Type || rec.Type == typeCNAME || want.Type == typeCNAME
+}
+
+func foreignRecordError(rec record) error {
+	proxied := ""
+	if rec.Proxied {
+		proxied = msgProxiedSuffix
+	}
+	return &dns.Error{Kind: dns.KindConflict, Message: fmt.Sprintf(msgForeignRecord, rec.Name, rec.Type, rec.Content, proxied)}
 }
 
 // ACMEHook 见 dns.Provider：acme.sh 的 dns_cf 钩子用 API 令牌（CF_Token），根域名由它自己按令牌查。
