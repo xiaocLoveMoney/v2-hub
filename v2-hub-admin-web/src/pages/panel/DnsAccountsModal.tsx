@@ -82,8 +82,8 @@ function AccountList({ canWrite, onChanged }: Pick<DnsAccountsModalProps, 'canWr
   return (
     <>
       <Typography.Paragraph type="secondary">
-        给主机配上 DNS 账号后，平台会把主机的域名解析过去，并向 Let’s Encrypt 申请公开可信的证书装到面板上，到期前自动续期；使用即表示同意
-        Let’s Encrypt 的订阅者协议。令牌能修改这个域名的全部解析记录，加密存储、只写不读，只在平台上使用。
+        给主机配上 DNS 账号后，平台会把主机的域名解析过去，并在主机上用 acme.sh 向 Let’s Encrypt 申请公开可信的证书装到面板上，到期前自动续期；
+        使用即表示同意 Let’s Encrypt 的订阅者协议。令牌能修改这个域名的全部解析记录，加密存储、只写不读，只在申请证书时临时传给对应主机、用完即删。
       </Typography.Paragraph>
       {canWrite && (
         <Button type="primary" icon={<PlusOutlined />} className="page-alert" onClick={() => setIsCreating(true)}>
