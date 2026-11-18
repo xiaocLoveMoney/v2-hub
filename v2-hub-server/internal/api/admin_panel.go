@@ -75,6 +75,8 @@ type serverVO struct {
 	CreatedAt      time.Time       `json:"createdAt"`
 	// HostID 是关联的托管主机（docs/03 §5.22）；没有为 null。
 	HostID *int64 `json:"hostId"`
+	// ClientFlow 是服务器的 VLESS 流控（Ruling-77），空串为不带。
+	ClientFlow string `json:"clientFlow"`
 	// Reach 是这台服务器上大陆连通检测的目标数（Ruling-67）；功能没开为 null。
 	Reach *serverReachVO `json:"reach"`
 }
@@ -86,6 +88,7 @@ func toServerVO(s service.Server, reach map[int64]service.ReachCount) serverVO {
 		CertPinSHA256: s.CertPinSHA256, Region: s.Region, Remark: s.Remark, IsDisabled: s.IsDisabled,
 		Status: s.Status, LastError: s.LastError, LastSeenAt: s.LastSeenAt, LastSyncedAt: s.LastSyncedAt,
 		PanelVersion: s.PanelVersion, InboundCount: s.InboundCount, CreatedAt: s.CreatedAt, HostID: s.HostID,
+		ClientFlow: s.ClientFlow,
 	}
 	if len(s.StatusSnapshot) > 0 {
 		vo.StatusSnapshot = s.StatusSnapshot
@@ -342,6 +345,26 @@ func (h *handlers) updateServer(w http.ResponseWriter, r *http.Request, p *servi
 		return
 	}
 	srv, err := h.panels.UpdateServer(r.Context(), p, id, req.toInput(), clientIP(r, h.trustedProxies))
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	h.writeServer(w, r, srv)
+}
+
+type clientFlowRequest struct {
+	ClientFlow string `json:"clientFlow"`
+}
+
+// setServerClientFlow 开关服务器的 VLESS 流控（Ruling-77）。
+func (h *handlers) setServerClientFlow(w http.ResponseWriter, r *http.Request, p *service.AdminPrincipal) {
+	var req clientFlowRequest
+	id, err := decodeWithID(w, r, &req)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	srv, err := h.users.SetServerClientFlow(r.Context(), p, id, req.ClientFlow, clientIP(r, h.trustedProxies))
 	if err != nil {
 		writeError(w, r, err)
 		return

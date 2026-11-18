@@ -84,7 +84,7 @@ func (f *fakePanel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		f.reply(w, true, "Inbound client(s) have been added.", nil)
 	case strings.HasPrefix(path, "/clients/update/"):
 		cl := f.clients[strings.TrimPrefix(path, "/clients/update/")]
-		cl["limitIp"], cl["enable"] = body["limitIp"], body["enable"]
+		cl["limitIp"], cl["enable"], cl["flow"] = body["limitIp"], body["enable"], body["flow"]
 		if id, ok := body["id"]; ok {
 			cl["id"], cl["password"] = id, body["password"]
 		}
@@ -495,12 +495,13 @@ func TestClientOps(t *testing.T) {
 	fp := newFakePanel()
 	c, _ := newTestClient(t, fp, testToken)
 	ctx := context.Background()
-	spec := panel.ClientSpec{Email: "u1-abc123", UUID: "uuid-1", Auth: "sec-1", LimitIP: 2, Enabled: true, InboundRefs: []string{"1", "2"}}
+	spec := panel.ClientSpec{Email: "u1-abc123", UUID: "uuid-1", Auth: "sec-1", LimitIP: 2, Enabled: true, InboundRefs: []string{"1", "2"}, Flow: "xtls-rprx-vision"}
 	if err := c.AddClient(ctx, spec); err != nil {
 		t.Fatalf("AddClient: %v", err)
 	}
 	sent := fp.lastBody["client"].(map[string]any)
-	if sent["totalGB"] != float64(0) || sent["expiryTime"] != float64(0) || sent["id"] != "uuid-1" || sent["password"] != "sec-1" || sent["auth"] != "sec-1" {
+	if sent["totalGB"] != float64(0) || sent["expiryTime"] != float64(0) || sent["id"] != "uuid-1" || sent["password"] != "sec-1" || sent["auth"] != "sec-1" ||
+		sent["flow"] != "xtls-rprx-vision" {
 		t.Fatalf("add body = %v", sent)
 	}
 	if err := c.AttachClient(ctx, spec.Email, []string{"3"}); err != nil {
@@ -514,6 +515,7 @@ func TestClientOps(t *testing.T) {
 	}
 	spec.LimitIP = 5
 	spec.Enabled = false
+	spec.Flow = "" // 去掉流控：flow 总是随更新给出
 	if err := c.UpdateClient(ctx, spec); err != nil {
 		t.Fatalf("UpdateClient: %v", err)
 	}
@@ -525,7 +527,7 @@ func TestClientOps(t *testing.T) {
 		t.Fatalf("ListClients = %+v, %v", list, err)
 	}
 	got := list[0]
-	if got.Enabled || got.LimitIP != 5 || got.Up != 100 || got.Down != 250 || strings.Join(got.InboundRefs, ",") != "2,3" {
+	if got.Enabled || got.LimitIP != 5 || got.Flow != "" || got.Up != 100 || got.Down != 250 || strings.Join(got.InboundRefs, ",") != "2,3" {
 		t.Fatalf("client = %+v", got)
 	}
 	spec.UUID = "22222222-2222-4222-8222-222222222222"

@@ -14,6 +14,7 @@ const (
 	keyTotalGB = "totalGB"
 	keyLimitIP = "limitIp"
 	keyEmail   = "email"
+	keyFlow    = "flow"
 )
 
 // clientRow 是 /clients/list 返回的一行 client（平台用到的字段）；traffic 是面板累计的流量计数。
@@ -21,6 +22,7 @@ type clientRow struct {
 	Email      string  `json:"email"`
 	Enable     bool    `json:"enable"`
 	LimitIP    int     `json:"limitIp"`
+	Flow       string  `json:"flow"`
 	InboundIDs []int64 `json:"inboundIds"`
 	Traffic    *struct {
 		Up   int64 `json:"up"`
@@ -52,7 +54,7 @@ func (c *Client) ListClients(ctx context.Context) ([]panel.Client, error) {
 		for _, id := range r.InboundIDs {
 			refs = append(refs, strconv.FormatInt(id, 10))
 		}
-		cl := panel.Client{Email: r.Email, Enabled: r.Enable, LimitIP: r.LimitIP, InboundRefs: refs}
+		cl := panel.Client{Email: r.Email, Enabled: r.Enable, LimitIP: r.LimitIP, Flow: r.Flow, InboundRefs: refs}
 		if r.Traffic != nil {
 			cl.Up, cl.Down = r.Traffic.Up, r.Traffic.Down
 		}
@@ -69,7 +71,7 @@ func (c *Client) AddClient(ctx context.Context, spec panel.ClientSpec) error {
 	}
 	body := map[string]any{
 		"client": map[string]any{
-			keyEmail: spec.Email, "id": spec.UUID, "password": spec.PasswordOrAuth(), "auth": spec.Auth,
+			keyEmail: spec.Email, "id": spec.UUID, "password": spec.PasswordOrAuth(), "auth": spec.Auth, keyFlow: spec.Flow,
 			keyTotalGB: 0, keyExpiryTime: 0, keyLimitIP: spec.LimitIP, keyEnable: spec.Enabled,
 		},
 		"inboundIds": ids,
@@ -77,9 +79,9 @@ func (c *Client) AddClient(ctx context.Context, spec panel.ClientSpec) error {
 	return c.call(ctx, http.MethodPost, "/clients/add", body, nil)
 }
 
-// UpdateClient 实现 panel.Provider：面板按字段合并，未给出的凭据与挂载保持不变。
+// UpdateClient 实现 panel.Provider：面板按字段合并，未给出的凭据与挂载保持不变；flow 总是给出（空串即去掉）。
 func (c *Client) UpdateClient(ctx context.Context, spec panel.ClientSpec) error {
-	body := map[string]any{keyEmail: spec.Email, keyLimitIP: spec.LimitIP, keyEnable: spec.Enabled}
+	body := map[string]any{keyEmail: spec.Email, keyLimitIP: spec.LimitIP, keyEnable: spec.Enabled, keyFlow: spec.Flow}
 	return c.call(ctx, http.MethodPost, "/clients/update/"+url.PathEscape(spec.Email), body, nil)
 }
 
@@ -122,7 +124,7 @@ func (c *Client) DeleteClient(ctx context.Context, email string) error {
 func (c *Client) SetClientCredential(ctx context.Context, spec panel.ClientSpec) error {
 	body := map[string]any{
 		keyEmail: spec.Email, "id": spec.UUID, "password": spec.PasswordOrAuth(), "auth": spec.Auth,
-		keyLimitIP: spec.LimitIP, keyEnable: spec.Enabled,
+		keyLimitIP: spec.LimitIP, keyEnable: spec.Enabled, keyFlow: spec.Flow,
 	}
 	return c.call(ctx, http.MethodPost, "/clients/update/"+url.PathEscape(spec.Email), body, nil)
 }

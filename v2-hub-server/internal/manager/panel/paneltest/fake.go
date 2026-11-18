@@ -448,7 +448,7 @@ func (f *Fake) AddClient(_ context.Context, spec panel.ClientSpec) error {
 	if err := f.checkRefs(spec.InboundRefs); err != nil {
 		return err
 	}
-	f.clients[spec.Email] = &panel.Client{Email: spec.Email, Enabled: spec.Enabled, LimitIP: spec.LimitIP, InboundRefs: append([]string(nil), spec.InboundRefs...)}
+	f.clients[spec.Email] = &panel.Client{Email: spec.Email, Enabled: spec.Enabled, LimitIP: spec.LimitIP, Flow: spec.Flow, InboundRefs: append([]string(nil), spec.InboundRefs...)}
 	f.creds[spec.Email] = [2]string{spec.UUID, spec.PasswordOrAuth()}
 	return nil
 }
@@ -472,7 +472,7 @@ func (f *Fake) UpdateClient(_ context.Context, spec panel.ClientSpec) error {
 	if err != nil {
 		return err
 	}
-	c.Enabled, c.LimitIP = spec.Enabled, spec.LimitIP
+	c.Enabled, c.LimitIP, c.Flow = spec.Enabled, spec.LimitIP, spec.Flow
 	return nil
 }
 
@@ -562,7 +562,7 @@ func (f *Fake) SetClientCredential(_ context.Context, spec panel.ClientSpec) err
 	if err != nil {
 		return err
 	}
-	c.Enabled, c.LimitIP = spec.Enabled, spec.LimitIP
+	c.Enabled, c.LimitIP, c.Flow = spec.Enabled, spec.LimitIP, spec.Flow
 	f.creds[spec.Email] = [2]string{spec.UUID, spec.PasswordOrAuth()}
 	return nil
 }

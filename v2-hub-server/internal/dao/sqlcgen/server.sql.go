@@ -78,7 +78,7 @@ func (q *Queries) FillServerRegion(ctx context.Context, arg FillServerRegionPara
 const getServer = `-- name: GetServer :one
 SELECT s.id, s.name, s.provider_type, s.base_url, s.tls_mode, s.cert_pin_sha256, s.region, s.remark,
        s.is_disabled, s.status, s.last_error, s.last_seen_at, s.panel_version, s.status_snapshot,
-       s.last_synced_at, s.created_at,
+       s.last_synced_at, s.created_at, s.client_flow,
        (SELECT COUNT(*) FROM inbound i WHERE i.server_id = s.id AND NOT i.is_missing)::int AS inbound_count,
        coalesce((SELECT h.id FROM server_host h WHERE h.server_id = s.id), 0)::bigint AS host_id
 FROM server s
@@ -102,6 +102,7 @@ type GetServerRow struct {
 	StatusSnapshot []byte
 	LastSyncedAt   pgtype.Timestamptz
 	CreatedAt      pgtype.Timestamptz
+	ClientFlow     string
 	InboundCount   int32
 	HostID         int64
 }
@@ -126,6 +127,7 @@ func (q *Queries) GetServer(ctx context.Context, id int64) (GetServerRow, error)
 		&i.StatusSnapshot,
 		&i.LastSyncedAt,
 		&i.CreatedAt,
+		&i.ClientFlow,
 		&i.InboundCount,
 		&i.HostID,
 	)
@@ -133,7 +135,7 @@ func (q *Queries) GetServer(ctx context.Context, id int64) (GetServerRow, error)
 }
 
 const getServerConn = `-- name: GetServerConn :one
-SELECT id, name, provider_type, base_url, api_token_enc, tls_mode, cert_pin_sha256, is_disabled
+SELECT id, name, provider_type, base_url, api_token_enc, tls_mode, cert_pin_sha256, is_disabled, client_flow
 FROM server
 WHERE id = $1
 `
@@ -147,6 +149,7 @@ type GetServerConnRow struct {
 	TlsMode       string
 	CertPinSha256 pgtype.Text
 	IsDisabled    bool
+	ClientFlow    string
 }
 
 func (q *Queries) GetServerConn(ctx context.Context, id int64) (GetServerConnRow, error) {
@@ -161,6 +164,7 @@ func (q *Queries) GetServerConn(ctx context.Context, id int64) (GetServerConnRow
 		&i.TlsMode,
 		&i.CertPinSha256,
 		&i.IsDisabled,
+		&i.ClientFlow,
 	)
 	return i, err
 }
@@ -277,7 +281,7 @@ const listServers = `-- name: ListServers :many
 
 SELECT s.id, s.name, s.provider_type, s.base_url, s.tls_mode, s.cert_pin_sha256, s.region, s.remark,
        s.is_disabled, s.status, s.last_error, s.last_seen_at, s.panel_version, s.status_snapshot,
-       s.last_synced_at, s.created_at,
+       s.last_synced_at, s.created_at, s.client_flow,
        (SELECT COUNT(*) FROM inbound i WHERE i.server_id = s.id AND NOT i.is_missing)::int AS inbound_count,
        coalesce((SELECT h.id FROM server_host h WHERE h.server_id = s.id), 0)::bigint AS host_id
 FROM server s
@@ -301,6 +305,7 @@ type ListServersRow struct {
 	StatusSnapshot []byte
 	LastSyncedAt   pgtype.Timestamptz
 	CreatedAt      pgtype.Timestamptz
+	ClientFlow     string
 	InboundCount   int32
 	HostID         int64
 }
@@ -332,6 +337,7 @@ func (q *Queries) ListServers(ctx context.Context) ([]ListServersRow, error) {
 			&i.StatusSnapshot,
 			&i.LastSyncedAt,
 			&i.CreatedAt,
+			&i.ClientFlow,
 			&i.InboundCount,
 			&i.HostID,
 		); err != nil {
@@ -400,6 +406,24 @@ type RecordServerMetricParams struct {
 func (q *Queries) RecordServerMetric(ctx context.Context, arg RecordServerMetricParams) error {
 	_, err := q.db.Exec(ctx, recordServerMetric, arg.SampledAt, arg.Cpu, arg.ServerID)
 	return err
+}
+
+const setServerClientFlow = `-- name: SetServerClientFlow :execrows
+UPDATE server SET client_flow = $2, updated_at = now() WHERE id = $1
+`
+
+type SetServerClientFlowParams struct {
+	ID         int64
+	ClientFlow string
+}
+
+// 服务器的 VLESS 流控（Ruling-77）：下发对账据此给 client 带上或去掉 flow
+func (q *Queries) SetServerClientFlow(ctx context.Context, arg SetServerClientFlowParams) (int64, error) {
+	result, err := q.db.Exec(ctx, setServerClientFlow, arg.ID, arg.ClientFlow)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const setServerProbeResult = `-- name: SetServerProbeResult :exec

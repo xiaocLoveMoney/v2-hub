@@ -3,7 +3,7 @@
 -- name: ListServers :many
 SELECT s.id, s.name, s.provider_type, s.base_url, s.tls_mode, s.cert_pin_sha256, s.region, s.remark,
        s.is_disabled, s.status, s.last_error, s.last_seen_at, s.panel_version, s.status_snapshot,
-       s.last_synced_at, s.created_at,
+       s.last_synced_at, s.created_at, s.client_flow,
        (SELECT COUNT(*) FROM inbound i WHERE i.server_id = s.id AND NOT i.is_missing)::int AS inbound_count,
        coalesce((SELECT h.id FROM server_host h WHERE h.server_id = s.id), 0)::bigint AS host_id
 FROM server s
@@ -12,16 +12,20 @@ ORDER BY s.id;
 -- name: GetServer :one
 SELECT s.id, s.name, s.provider_type, s.base_url, s.tls_mode, s.cert_pin_sha256, s.region, s.remark,
        s.is_disabled, s.status, s.last_error, s.last_seen_at, s.panel_version, s.status_snapshot,
-       s.last_synced_at, s.created_at,
+       s.last_synced_at, s.created_at, s.client_flow,
        (SELECT COUNT(*) FROM inbound i WHERE i.server_id = s.id AND NOT i.is_missing)::int AS inbound_count,
        coalesce((SELECT h.id FROM server_host h WHERE h.server_id = s.id), 0)::bigint AS host_id
 FROM server s
 WHERE s.id = $1;
 
 -- name: GetServerConn :one
-SELECT id, name, provider_type, base_url, api_token_enc, tls_mode, cert_pin_sha256, is_disabled
+SELECT id, name, provider_type, base_url, api_token_enc, tls_mode, cert_pin_sha256, is_disabled, client_flow
 FROM server
 WHERE id = $1;
+
+-- name: SetServerClientFlow :execrows
+-- 服务器的 VLESS 流控（Ruling-77）：下发对账据此给 client 带上或去掉 flow
+UPDATE server SET client_flow = $2, updated_at = now() WHERE id = $1;
 
 -- name: ListEnabledServerIDs :many
 SELECT id FROM server WHERE NOT is_disabled ORDER BY id;

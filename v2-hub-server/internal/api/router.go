@@ -148,6 +148,7 @@ func NewRouter(deps Deps) http.Handler {
 	mux.HandleFunc("GET /api/admin/servers/{id}", h.requireAdmin(service.PermServerRead, h.getServer))
 	mux.HandleFunc("PUT /api/admin/servers/{id}", h.requireAdmin(service.PermServerWrite, h.updateServer))
 	mux.HandleFunc("DELETE /api/admin/servers/{id}", h.requireAdmin(service.PermServerWrite, h.deleteServer))
+	mux.HandleFunc("PUT /api/admin/servers/{id}/client-flow", h.requireAdmin(service.PermServerWrite, h.setServerClientFlow))
 	mux.HandleFunc("POST /api/admin/servers/{id}/sync", h.requireAdmin(service.PermServerWrite, h.syncServer))
 	mux.HandleFunc("GET /api/admin/servers/{id}/chain-apply", h.requireAdmin(service.PermServerRead, h.getServerChainApply))
 	mux.HandleFunc("POST /api/admin/servers/{id}/chain-apply/retry", h.requireAdmin(service.PermServerWrite, h.retryServerChainApply))

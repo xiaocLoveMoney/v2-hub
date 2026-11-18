@@ -19,6 +19,7 @@ const (
 
 // UserManager 是套餐与用户接口需要的业务能力（由 service.UserService 实现，docs/03 §5.2）。
 type UserManager interface {
+	SetServerClientFlow(ctx context.Context, actor *service.AdminPrincipal, serverID int64, flow string, ip *netip.Addr) (*service.Server, error)
 	ListPlans(ctx context.Context) ([]service.Plan, error)
 	CreatePlan(ctx context.Context, actor *service.AdminPrincipal, in service.PlanInput, ip *netip.Addr) (*service.Plan, error)
 	UpdatePlan(ctx context.Context, actor *service.AdminPrincipal, id int64, in service.PlanInput, ip *netip.Addr) (*service.Plan, error)

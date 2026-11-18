@@ -566,6 +566,8 @@ type Querier interface {
 	SetProvisionCounters(ctx context.Context, arg SetProvisionCountersParams) error
 	SetProvisionLinks(ctx context.Context, arg SetProvisionLinksParams) error
 	SetSSHCredentialSecret(ctx context.Context, arg SetSSHCredentialSecretParams) error
+	// 服务器的 VLESS 流控（Ruling-77）：下发对账据此给 client 带上或去掉 flow
+	SetServerClientFlow(ctx context.Context, arg SetServerClientFlowParams) (int64, error)
 	// 证书装好且平台按域名接入后记下到期时间与 acme.sh 给出的下次续期时间（Ruling-74）
 	SetServerHostCert(ctx context.Context, arg SetServerHostCertParams) error
 	SetServerHostDetection(ctx context.Context, arg SetServerHostDetectionParams) error

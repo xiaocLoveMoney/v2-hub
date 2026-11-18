@@ -144,7 +144,9 @@ type ClientSpec struct {
 	UUID  string
 	Auth  string
 	// Password 是用户自设的连接密码（Ruling-58）；空 = 沿用 Auth。用 PasswordOrAuth 取实际值。
-	Password    string
+	Password string
+	// Flow 是 VLESS 流控，由服务器的开关决定（Ruling-77）；空串为不带。
+	Flow        string
 	LimitIP     int
 	Enabled     bool
 	InboundRefs []string
@@ -160,9 +162,11 @@ func (c ClientSpec) PasswordOrAuth() string {
 
 // Client 是面板上一个 client 的现状；Up / Down 是面板累计的流量计数（字节）。
 type Client struct {
-	Email       string
-	Enabled     bool
-	LimitIP     int
+	Email   string
+	Enabled bool
+	LimitIP int
+	// Flow 是 client 的 VLESS 流控（如 xtls-rprx-vision），空为不带；面板只在支持它的入站上生效（Ruling-77）。
+	Flow        string
 	InboundRefs []string
 	Up          int64
 	Down        int64
