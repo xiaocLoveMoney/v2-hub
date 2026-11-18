@@ -150,7 +150,7 @@ function HostCreateBody({ onSaved }: { onSaved: () => void }) {
         <Form.Item
           name="dnsAccountId"
           label="DNS 账号"
-          extra="选了就给每台主机申请公开可信的证书（Let’s Encrypt）：域名自动取“名称.根域名”，名称转不成域名时取地址，之后可在编辑主机时改。不选则面板用自签证书"
+          extra="选了就给每台主机申请公开可信的证书（Let’s Encrypt）：地址本身是根域名下的域名就直接用它，否则域名自动取“名称.根域名”（名称转不成域名时取地址），之后可在编辑主机时改。不选则面板用自签证书"
         >
           <DnsAccountSelect />
         </Form.Item>

@@ -45,7 +45,7 @@ type ServerHost struct {
 }
 
 // ServerHostInput 是修改一台主机的输入。DNSAccountID 为 nil 表示不用 DNS 账号，此时 Domain 必须为空；
-// 选了 DNS 账号而 Domain 为空时由平台按名称生成。
+// 选了 DNS 账号而 Domain 为空时由平台生成（地址是根域名之下的域名就用地址，否则按名称，Ruling-79）。
 type ServerHostInput struct {
 	Name         string
 	Address      string

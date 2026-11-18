@@ -319,8 +319,12 @@ func domainLabel(text string) string {
 	return label
 }
 
-// defaultDomain 给没填域名的主机生成一个（docs/03 §5.22 “域名”）：前缀取主机名称，转不出来就取地址。
+// defaultDomain 给没填域名的主机生成一个（docs/03 §5.22 “域名”）：地址本身就是根域名之下的域名时直接用它（Ruling-79）；
+// 否则取“前缀.根域名”，前缀取主机名称，转不出来就取地址。
 func defaultDomain(name, address, zone string) string {
+	if domain := normalizeDomainName(address); domain != "" && dns.InZone(domain, zone) {
+		return domain
+	}
 	label := domainLabel(name)
 	if label == "" {
 		label = domainLabel(address)
