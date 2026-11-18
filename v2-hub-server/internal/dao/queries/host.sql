@@ -101,9 +101,17 @@ SET base_url = $2, tls_mode = $3, cert_pin_sha256 = $4, updated_at = now()
 WHERE id = $1;
 
 -- name: CreateHostTask :one
-INSERT INTO host_task (host_id, kind, created_by)
-VALUES ($1, $2, $3)
+-- payload 是任务参数（deploy_inbounds 的预设、端口与节点组，Ruling-76），其它任务为空对象
+INSERT INTO host_task (host_id, kind, created_by, payload)
+VALUES ($1, $2, $3, $4)
 RETURNING id;
+
+-- name: GetHostTaskPayload :one
+SELECT payload FROM host_task WHERE id = $1;
+
+-- name: GetServerHostIDByServer :one
+-- 服务器关联的托管主机（docs/03 §5.22：一台服务器最多一台主机）
+SELECT id FROM server_host WHERE server_id = $1;
 
 -- name: GetHostTask :one
 -- 不带日志（上限 64 KB），列与 ListHostTasks 相同；要日志另取 GetHostTaskLog

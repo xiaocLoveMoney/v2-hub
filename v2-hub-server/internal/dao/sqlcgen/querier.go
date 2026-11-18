@@ -141,6 +141,7 @@ type Querier interface {
 	CreateCoupon(ctx context.Context, arg CreateCouponParams) (int64, error)
 	// 密文依赖 id 作关联数据，先写占位，同一事务内再 SetDNSAccountToken
 	CreateDNSAccount(ctx context.Context, arg CreateDNSAccountParams) (int64, error)
+	// payload 是任务参数（deploy_inbounds 的预设、端口与节点组，Ruling-76），其它任务为空对象
 	CreateHostTask(ctx context.Context, arg CreateHostTaskParams) (int64, error)
 	CreateNodeGroup(ctx context.Context, arg CreateNodeGroupParams) (int64, error)
 	CreatePlan(ctx context.Context, arg CreatePlanParams) (int64, error)
@@ -240,6 +241,8 @@ type Querier interface {
 	GetDBNow(ctx context.Context) (pgtype.Timestamptz, error)
 	GetDNSAccount(ctx context.Context, id int64) (GetDNSAccountRow, error)
 	GetDNSAccountSecret(ctx context.Context, id int64) (GetDNSAccountSecretRow, error)
+	// 入站的直连节点（一键部署把它加进节点组，Ruling-76）
+	GetDirectNodeID(ctx context.Context, inboundID int64) (int64, error)
 	GetEndUserEmail(ctx context.Context, id int64) (pgtype.Text, error)
 	// 客户后台：终端用户会话、两步验证、登录记录（docs/03 §5.3）。
 	// 待删除的用户不可登录；停用的用户可以登录（docs/03 §5.3）。
@@ -252,6 +255,7 @@ type Querier interface {
 	// 不带日志（上限 64 KB），列与 ListHostTasks 相同；要日志另取 GetHostTaskLog
 	GetHostTask(ctx context.Context, id int64) (GetHostTaskRow, error)
 	GetHostTaskLog(ctx context.Context, id int64) (string, error)
+	GetHostTaskPayload(ctx context.Context, id int64) ([]byte, error)
 	// 兑换时锁住票据行，一张票只能换一次会话
 	GetImpersonateTicketForUpdate(ctx context.Context, ticketHash []byte) (GetImpersonateTicketForUpdateRow, error)
 	GetInbound(ctx context.Context, id int64) (GetInboundRow, error)
@@ -275,6 +279,8 @@ type Querier interface {
 	GetServer(ctx context.Context, id int64) (GetServerRow, error)
 	GetServerConn(ctx context.Context, id int64) (GetServerConnRow, error)
 	GetServerHost(ctx context.Context, id int64) (GetServerHostRow, error)
+	// 服务器关联的托管主机（docs/03 §5.22：一台服务器最多一台主机）
+	GetServerHostIDByServer(ctx context.Context, serverID pgtype.Int8) (int64, error)
 	// 影响分享链接的入站与对外地址摘要；变了就要重新向面板取全部链接（docs/03 §5.4 节点来源）
 	GetServerLinkFingerprint(ctx context.Context, serverID int64) (string, error)
 	GetSharedAccountCredential(ctx context.Context, id int64) ([]byte, error)

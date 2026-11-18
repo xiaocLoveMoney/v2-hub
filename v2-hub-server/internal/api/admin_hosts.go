@@ -33,6 +33,8 @@ type HostManager interface {
 	CreateAction(ctx context.Context, actor *service.AdminPrincipal, hostID int64, kind string, ip *netip.Addr) (*service.HostTask, error)
 	CancelTask(ctx context.Context, actor *service.AdminPrincipal, id int64, ip *netip.Addr) (*service.HostTask, error)
 	ResetPanelLogin(ctx context.Context, actor *service.AdminPrincipal, hostID int64, ip *netip.Addr) (*deploy.PanelLogin, error)
+	PreviewInboundPresets(ctx context.Context, actor *service.AdminPrincipal, serverID int64) (*service.InboundPresetPreview, error)
+	DeployInboundPresets(ctx context.Context, actor *service.AdminPrincipal, serverID int64, in service.InboundPresetDeployInput, ip *netip.Addr) (*service.HostTask, error)
 }
 
 type sshCredentialVO struct {
@@ -478,6 +480,70 @@ func (h *handlers) resetServerHostPanelLogin(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	writeOK(w, panelLoginVO{Username: login.Username, Password: login.Password})
+}
+
+type inboundPresetOptionVO struct {
+	Key       string `json:"key"`
+	Available bool   `json:"available"`
+	Reason    string `json:"reason"`
+	Port      int    `json:"port"`
+	NeedsCert bool   `json:"needsCert"`
+}
+
+type inboundPresetPreviewVO struct {
+	HostID    int64                   `json:"hostId"`
+	Domain    string                  `json:"domain"`
+	CertReady bool                    `json:"certReady"`
+	Items     []inboundPresetOptionVO `json:"items"`
+}
+
+// requireHostWrite 是一键部署在 node:write（路由已查）之外要求的 host:write（Ruling-76）。
+func requireHostWrite(w http.ResponseWriter, r *http.Request, p *service.AdminPrincipal) bool {
+	if p.Can(service.PermHostWrite) {
+		return true
+	}
+	writeError(w, r, service.ErrPermissionDenied)
+	return false
+}
+
+// previewInboundPresets 一键部署入站的预览（docs/03 §5.1，Ruling-76）。
+func (h *handlers) previewInboundPresets(w http.ResponseWriter, r *http.Request, p *service.AdminPrincipal) {
+	if !requireHostWrite(w, r, p) {
+		return
+	}
+	id, err := pathID(r)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	preview, err := h.hosts.PreviewInboundPresets(r.Context(), p, id)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	items := make([]inboundPresetOptionVO, 0, len(preview.Items))
+	for _, it := range preview.Items {
+		items = append(items, inboundPresetOptionVO{Key: it.Key, Available: it.Available, Reason: it.Reason, Port: it.Port, NeedsCert: it.NeedsCert})
+	}
+	writeOK(w, inboundPresetPreviewVO{HostID: preview.HostID, Domain: preview.Domain, CertReady: preview.CertReady, Items: items})
+}
+
+// deployInboundPresets 一键部署入站，排一条 deploy_inbounds 主机任务（Ruling-76）。
+func (h *handlers) deployInboundPresets(w http.ResponseWriter, r *http.Request, p *service.AdminPrincipal) {
+	if !requireHostWrite(w, r, p) {
+		return
+	}
+	var req service.InboundPresetDeployInput
+	id, err := decodeWithID(w, r, &req)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	if req.NodeGroupIDs == nil {
+		req.NodeGroupIDs = []int64{}
+	}
+	task, err := h.hosts.DeployInboundPresets(r.Context(), p, id, req, clientIP(r, h.trustedProxies))
+	writeTask(w, r, task, err)
 }
 
 func (h *handlers) getHostTask(w http.ResponseWriter, r *http.Request, _ *service.AdminPrincipal) {

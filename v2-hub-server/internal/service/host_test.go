@@ -8,6 +8,7 @@ import (
 	"encoding/pem"
 	"errors"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -44,7 +45,9 @@ type hostFixture struct {
 	runner   *remotetest.Runner
 	deployer *deploytest.Fake
 	dnsFake  *dnstest.Fake
-	credID   int64
+	// reconciles 记下主机服务请求对账的次数
+	reconciles *countingReconciler
+	credID     int64
 }
 
 func testPrivateKey(t *testing.T) string {
@@ -60,6 +63,11 @@ func testPrivateKey(t *testing.T) string {
 	return string(pem.EncodeToMemory(block))
 }
 
+// countingReconciler 是假的对账触发器，只计数。
+type countingReconciler struct{ n atomic.Int32 }
+
+func (c *countingReconciler) TriggerReconcile() { c.n.Add(1) }
+
 // newHostFixture 搭好假拨号器、假部署实现与一份私钥凭据；默认主机上已有标准安装的明文 HTTP 面板。
 func newHostFixture(t *testing.T) *hostFixture {
 	t.Helper()
@@ -73,17 +81,18 @@ func newHostFixture(t *testing.T) *hostFixture {
 		Login: deploy.PanelLogin{Username: "newuser", Password: "newpassword1234567890"},
 	}
 	deployer.Installed = testInstalledCert(pf.clock.now())
+	reconciles := &countingReconciler{}
 	dnsFake := dnstest.New()
 	dnsFake.Hook = dns.ACMEHook{Name: testDNSHook, Env: map[string]string{testDNSEnv: testDNSValue}}
 	hosts := NewHostService(pf.pool, testSealer(t), HostDeps{
 		Dialer: dialer, Deployers: deploy.NewRegistry(map[string]deploy.Deployer{fakeType: deployer}),
-		DNS: dns.NewRegistry(map[string]dns.Factory{fakeDNSType: dnsFake.Factory()}), Panels: pf.panels,
+		DNS: dns.NewRegistry(map[string]dns.Factory{fakeDNSType: dnsFake.Factory()}), Panels: pf.panels, Reconciler: reconciles,
 	}, HostConfig{
 		CommandTimeout: time.Minute, InstallTimeout: time.Minute, CertTimeout: time.Minute, ACMEDirectoryURL: fakeACMEURL,
 		TestLimit: hostTestLimit, TestWindow: time.Minute,
 		ActionLimit: hostActionsMax, ActionWindow: time.Minute, MaxBatch: 3, PanelWaitAttempts: 2, PanelWaitInterval: time.Millisecond, Now: pf.clock.now,
 	})
-	f := &hostFixture{panelFixture: pf, hosts: hosts, dialer: dialer, runner: runner, deployer: deployer, dnsFake: dnsFake}
+	f := &hostFixture{panelFixture: pf, hosts: hosts, dialer: dialer, runner: runner, deployer: deployer, dnsFake: dnsFake, reconciles: reconciles}
 	cred, err := hosts.CreateCredential(context.Background(), pf.actor, SSHCredentialInput{Name: "root-key", Username: "root", AuthType: SSHAuthKey, Secret: testPrivateKey(t)}, nil)
 	if err != nil {
 		t.Fatalf("CreateCredential: %v", err)
@@ -723,5 +732,5 @@ func TestTestHost(t *testing.T) {
 
 // createVerifyTask 直接排一条校验任务（正常只由绑定服务器产生），用来重跑校验。
 func createVerifyTask(hostID int64) sqlcgen.CreateHostTaskParams {
-	return sqlcgen.CreateHostTaskParams{HostID: hostID, Kind: HostTaskVerify}
+	return sqlcgen.CreateHostTaskParams{HostID: hostID, Kind: HostTaskVerify, Payload: emptyTaskPayload}
 }

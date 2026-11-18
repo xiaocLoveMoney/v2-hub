@@ -163,7 +163,17 @@ func adminOrigin(actor *AdminPrincipal, ip *netip.Addr) taskOrigin {
 
 // insertTask 在事务里排一条任务并写审计；该主机已有未结束的任务时返回 409（由部分唯一索引保证）。
 func (s *HostService) insertTask(ctx context.Context, q *sqlcgen.Queries, by taskOrigin, hostID int64, kind string) (int64, error) {
-	id, err := q.CreateHostTask(ctx, sqlcgen.CreateHostTaskParams{HostID: hostID, Kind: kind, CreatedBy: pgtype.Int8{Int64: by.adminID, Valid: by.adminID != 0}})
+	return s.insertTaskWithPayload(ctx, q, by, hostID, kind, emptyTaskPayload)
+}
+
+// emptyTaskPayload 是不带参数的任务的 payload。
+var emptyTaskPayload = []byte("{}")
+
+// insertTaskWithPayload 排一条任务并记审计；payload 是任务参数（JSON 对象）。
+func (s *HostService) insertTaskWithPayload(ctx context.Context, q *sqlcgen.Queries, by taskOrigin, hostID int64, kind string, payload []byte) (int64, error) {
+	id, err := q.CreateHostTask(ctx, sqlcgen.CreateHostTaskParams{
+		HostID: hostID, Kind: kind, CreatedBy: pgtype.Int8{Int64: by.adminID, Valid: by.adminID != 0}, Payload: payload,
+	})
 	if isUniqueViolation(err) {
 		return 0, newError(CodeConflict, msgHostBusy)
 	}
@@ -320,7 +330,8 @@ func (s *HostService) taskTimeout(kind string, hasDNS bool) time.Duration {
 	switch {
 	case kind == HostTaskProvision || kind == HostTaskUpgrade:
 		return s.cfg.InstallTimeout
-	case kind == HostTaskEnableTLS && hasDNS:
+	case kind == HostTaskEnableTLS && hasDNS, kind == HostTaskDeployInbounds:
+		// 一键部署可能先配置证书，再逐个建入站
 		return max(s.cfg.CertTimeout, s.cfg.CommandTimeout)
 	default:
 		return s.cfg.CommandTimeout
@@ -373,6 +384,8 @@ func (s *HostService) runTask(ctx context.Context, taskID int64) error {
 		return t.provision(ctx, deployer, runner, det)
 	case HostTaskDiagnose:
 		return t.diagnose(ctx, deployer, runner)
+	case HostTaskDeployInbounds:
+		return t.deployInbounds(ctx, deployer, runner, det)
 	default:
 		return t.operate(ctx, deployer, runner, det)
 	}

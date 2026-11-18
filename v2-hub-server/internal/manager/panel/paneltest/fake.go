@@ -107,6 +107,11 @@ func (f *Fake) Capabilities() panel.Capabilities {
 	return panel.Capabilities{OnlineClients: true, CoreType: panel.CoreXray, Endpoints: true, CoreConfig: true}
 }
 
+// FakeVLESSEnc 是假面板生成的 VLESS Encryption 参数（形状同 3x-ui 的 getNewVlessEnc：一组 X25519、一组 ML-KEM-768）。
+const FakeVLESSEnc = `{"auths":[` +
+	`{"id":"x25519","label":"X25519, not Post-Quantum","decryption":"mlkem768x25519plus.native.600s.fake-x","encryption":"mlkem768x25519plus.native.0rtt.fake-x"},` +
+	`{"id":"mlkem768","label":"ML-KEM-768, Post-Quantum","decryption":"mlkem768x25519plus.native.600s.fake-pq","encryption":"mlkem768x25519plus.native.0rtt.fake-pq"}]}`
+
 // FakePublicIP 是假面板默认自报的公网 IP（文档地址段之外的公网地址，位置扫描测试用）。
 const FakePublicIP = "8.8.8.8"
 
@@ -267,15 +272,19 @@ func (f *Fake) GetInboundConfig(_ context.Context, ref string) (panel.InboundCon
 // FakeX25519 是内存面板生成的固定 x25519 密钥对，便于断言。
 const FakeX25519 = `{"privateKey":"fake-private","publicKey":"fake-public"}`
 
-// GenerateKeys 实现 panel.Provider：x25519 返回 FakeX25519，其余种类返回空对象。
+// GenerateKeys 实现 panel.Provider：x25519 返回 FakeX25519，vlessenc 返回 FakeVLESSEnc，其余种类返回空对象。
 func (f *Fake) GenerateKeys(_ context.Context, kind panel.KeyKind) (json.RawMessage, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if err := f.enter("GenerateKeys"); err != nil {
 		return nil, err
 	}
-	if kind == panel.KeyX25519 {
+	switch kind {
+	case panel.KeyX25519:
 		return json.RawMessage(FakeX25519), nil
+	case panel.KeyVLESSEnc:
+		return json.RawMessage(FakeVLESSEnc), nil
+	default:
 	}
 	return json.RawMessage(`{}`), nil
 }
