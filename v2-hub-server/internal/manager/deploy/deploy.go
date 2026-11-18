@@ -34,7 +34,16 @@ const (
 	ReasonCertFailed       Reason = "cert_failed"
 	ReasonInterrupted      Reason = "interrupted"
 	ReasonCommandFailed    Reason = "command_failed"
+	// ReasonPortInUse 是所选端口已被主机上的程序占用；ReasonXrayDown 是建完入站后面板的 Xray 没在运行（Ruling-76）。
+	ReasonPortInUse Reason = "port_in_use"
+	ReasonXrayDown  Reason = "xray_down"
 )
+
+// Port 是主机上的一个端口；UDP 为 false 表示 TCP。
+type Port struct {
+	Number int
+	UDP    bool
+}
 
 // PanelState 是主机上面板的安装情况。
 type PanelState string
@@ -147,6 +156,10 @@ type Deployer interface {
 	IssueCert(ctx context.Context, r remote.Runner, req CertRequest, log Logger) (reused bool, err error)
 	// InstallCert 把主机上已签好的 domain 的证书设给面板；文件或面板设置有变化时才重启面板并确认它在运行。
 	InstallCert(ctx context.Context, r remote.Runner, domain string) (InstalledCert, error)
+	// ListeningPorts 列出主机上正在监听的 TCP / UDP 端口（任何程序的，一键部署选端口用，Ruling-76）。
+	ListeningPorts(ctx context.Context, r remote.Runner) ([]Port, error)
+	// OpenPorts 在主机自带防火墙开着时放行这些端口；没开防火墙时什么都不做。
+	OpenPorts(ctx context.Context, r remote.Runner, ports []Port) error
 	// RestartPanel 重启面板（连带内核）并确认服务在运行。
 	RestartPanel(ctx context.Context, r remote.Runner) error
 	// RestartCore 只让面板重载内核。

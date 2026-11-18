@@ -68,7 +68,8 @@ func (f *fakePanel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	switch {
 	case path == "/server/status":
-		f.reply(w, true, "", map[string]any{"panelVersion": "3.11.0", "panelGuid": "guid-1", "cpu": 3.2, "publicIP": map[string]any{"ipv4": "203.0.113.1"}})
+		f.reply(w, true, "", map[string]any{"panelVersion": "3.11.0", "panelGuid": "guid-1", "cpu": 3.2, "publicIP": map[string]any{"ipv4": "203.0.113.1"},
+			"xray": map[string]any{"state": "error", "errorMsg": "listen tcp :443: bind: address already in use"}})
 	case path == "/clients/list":
 		rows := make([]map[string]any, 0, len(f.clients))
 		for _, c := range f.clients {
@@ -256,6 +257,9 @@ func TestProbe(t *testing.T) {
 	}
 	if strings.Contains(string(info.Status), "publicIP") || !strings.Contains(string(info.Status), "cpu") {
 		t.Fatalf("snapshot should keep whitelisted fields only: %s", info.Status)
+	}
+	if info.CoreState != "error" || !strings.Contains(info.CoreError, "address already in use") {
+		t.Fatalf("core state = %q, %q", info.CoreState, info.CoreError)
 	}
 	if info.PublicIP != "203.0.113.1" {
 		t.Fatalf("PublicIP = %q", info.PublicIP)

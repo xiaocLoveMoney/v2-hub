@@ -168,6 +168,8 @@ func truncate(s string) string {
 const (
 	statusPublicIP  = "publicIP"
 	publicIPUnknown = "N/A"
+	// statusXray 是状态里 Xray 运行状态的字段名。
+	statusXray = "xray"
 )
 
 // statusFields 是写进资源快照的字段白名单（不含公网 IP 等无关信息）。
@@ -202,7 +204,20 @@ func (c *Client) Probe(ctx context.Context) (panel.PanelInfo, error) {
 	}
 	info.Status = raw
 	info.PublicIP = publicIPOf(status[statusPublicIP])
+	info.CoreState, info.CoreError = coreStateOf(status[statusXray])
 	return info, nil
+}
+
+// coreStateOf 取状态里的 Xray 运行状态（3x-ui 的 xray.state：running / stop / error，与 errorMsg）；格式异常按没报处理。
+func coreStateOf(raw json.RawMessage) (state, message string) {
+	var x struct {
+		State    string `json:"state"`
+		ErrorMsg string `json:"errorMsg"`
+	}
+	if len(raw) == 0 || json.Unmarshal(raw, &x) != nil {
+		return "", ""
+	}
+	return x.State, x.ErrorMsg
 }
 
 // publicIPOf 取状态里的公网 IP：优先 IPv4，3x-ui 取不到时填的是 "N/A"。格式异常按没报处理（只影响位置扫描）。

@@ -40,7 +40,13 @@ type PanelInfo struct {
 	Status json.RawMessage
 	// PublicIP 是面板自报的服务器公网 IP（优先 IPv4）；面板没报为空。只用于扫描位置（Ruling-65），不落库。
 	PublicIP string
+	// CoreState 是内核（如 Xray）的运行状态：CoreRunning 为在运行，其它值为没在运行，空为面板没报；CoreError 是面板给的错误说明。
+	CoreState string
+	CoreError string
 }
+
+// CoreRunning 是 PanelInfo.CoreState 表示内核在运行的取值。
+const CoreRunning = "running"
 
 // Capabilities 描述面板能力差异。
 type Capabilities struct {

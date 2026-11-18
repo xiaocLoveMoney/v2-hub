@@ -43,7 +43,9 @@ type Fake struct {
 // New 创建一台空面板。
 func New() *Fake {
 	return &Fake{
-		info:     panel.PanelInfo{Version: "fake-1.0", GUID: "fake-guid", Status: json.RawMessage(`{"cpu":1.5}`), PublicIP: FakePublicIP},
+		info: panel.PanelInfo{
+			Version: "fake-1.0", GUID: "fake-guid", Status: json.RawMessage(`{"cpu":1.5}`), PublicIP: FakePublicIP, CoreState: panel.CoreRunning,
+		},
 		inbounds: make(map[string]panel.Inbound, 8),
 		clients:  make(map[string]*panel.Client, 8),
 		creds:    make(map[string][2]string, 8),
@@ -107,6 +109,13 @@ func (f *Fake) Capabilities() panel.Capabilities {
 
 // FakePublicIP 是假面板默认自报的公网 IP（文档地址段之外的公网地址，位置扫描测试用）。
 const FakePublicIP = "8.8.8.8"
+
+// SetCoreState 改假面板自报的内核运行状态（默认 running）与错误说明。
+func (f *Fake) SetCoreState(state, message string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.info.CoreState, f.info.CoreError = state, message
+}
 
 // SetPublicIP 改假面板自报的公网 IP；空串表示不报。
 func (f *Fake) SetPublicIP(ip string) {
