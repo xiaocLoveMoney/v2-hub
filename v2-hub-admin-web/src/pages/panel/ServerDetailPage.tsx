@@ -14,6 +14,7 @@ import { InboundPresetsModal } from './InboundPresetsModal'
 import type { OpenedHostTasks } from './host-actions'
 import { PLAIN_HTTP_TAG, PLAIN_HTTP_WARNING, isPlainHttpUrl } from './host-labels'
 import { EndpointModal } from './InboundModals'
+import { ServerNodeAffixModal } from './NodeAffixModal'
 import { InboundFormModal } from './inbound-form/InboundFormModal'
 import { serverDomainOf } from './inbound-form/model'
 import { ServerStatusTag } from './status'
@@ -76,6 +77,7 @@ export function ServerDetailPage() {
   const [isDeployingPresets, setIsDeployingPresets] = useState(false)
   const [presetTask, setPresetTask] = useState<OpenedHostTasks | null>(null)
   const [isFlowBusy, setIsFlowBusy] = useState(false)
+  const [isAffixingNodes, setIsAffixingNodes] = useState(false)
   // 一键部署要同时能改入站与操作主机（Ruling-76）
   const canDeployPresets = canWrite && can(PERMISSIONS.HOST_WRITE)
 
@@ -248,6 +250,9 @@ export function ServerDetailPage() {
             <Button onClick={() => setIsAddingEndpoint(true)} disabled={(inbounds.data ?? []).length === 0}>
               添加对外地址
             </Button>
+            <Button onClick={() => setIsAffixingNodes(true)} disabled={(inbounds.data ?? []).length === 0}>
+              批量改节点名
+            </Button>
             {canDeployPresets && (
               <Tooltip title={srv?.hostId === null ? '先在下方 SSH 运维里绑定 SSH' : undefined}>
                 <Button onClick={() => setIsDeployingPresets(true)} disabled={(srv?.isDisabled ?? true) || srv?.hostId === null}>
@@ -289,6 +294,7 @@ export function ServerDetailPage() {
         }}
         onChanged={reloadAll}
       />
+      <ServerNodeAffixModal serverId={serverId} isOpen={isAffixingNodes} onClose={() => setIsAffixingNodes(false)} onDone={() => setIsAffixingNodes(false)} />
       <EndpointModal
         serverId={serverId}
         inbounds={inbounds.data ?? []}

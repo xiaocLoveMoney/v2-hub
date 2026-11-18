@@ -8,6 +8,7 @@ import { PERMISSIONS } from '../../menu'
 import { TABLE_SCROLL } from '../system/format'
 import { formatCountry } from './countries'
 import { ErrorAlert } from '../../components/ErrorAlert'
+import { NodeAffixModal } from './NodeAffixModal'
 import { NodeReachButton } from './reach'
 
 const DEFAULT_PAGE_SIZE = 20
@@ -66,6 +67,9 @@ function NodeCatalog({ canWrite, servers, groups }: NodeCatalogProps) {
   const [groupId, setGroupId] = useState<number | undefined>(undefined)
   const [editing, setEditing] = useState<PanelNode | null>(null)
   const [error, setError] = useState<ApiError | null>(null)
+  // 勾选的节点跨页保留，供批量改节点名（Ruling-80）
+  const [selected, setSelected] = useState<PanelNode[]>([])
+  const [isAffixing, setIsAffixing] = useState(false)
 
   const load = useCallback(
     (signal: AbortSignal) => api.GET('/api/admin/nodes', { params: { query: { page, pageSize, serverId, groupId } }, signal }),
@@ -160,6 +164,11 @@ function NodeCatalog({ canWrite, servers, groups }: NodeCatalogProps) {
             setPage(1)
           }}
         />
+        {canWrite && (
+          <Button disabled={selected.length === 0} onClick={() => setIsAffixing(true)}>
+            批量改节点名{selected.length > 0 ? `（${selected.length}）` : ''}
+          </Button>
+        )}
       </Space>
       <ErrorAlert error={nodes.error} />
       <Table<PanelNode>
@@ -168,6 +177,11 @@ function NodeCatalog({ canWrite, servers, groups }: NodeCatalogProps) {
         loading={nodes.isLoading}
         columns={columns}
         dataSource={nodes.data?.items ?? []}
+        rowSelection={
+          canWrite
+            ? { preserveSelectedRowKeys: true, selectedRowKeys: selected.map((n) => n.id), onChange: (_, rows) => setSelected(rows) }
+            : undefined
+        }
         pagination={{
           current: page,
           pageSize,
@@ -176,6 +190,16 @@ function NodeCatalog({ canWrite, servers, groups }: NodeCatalogProps) {
             setPage(p)
             setPageSize(size)
           },
+        }}
+      />
+      <NodeAffixModal
+        nodes={selected}
+        isOpen={isAffixing}
+        onClose={() => setIsAffixing(false)}
+        onDone={() => {
+          setIsAffixing(false)
+          setSelected([])
+          nodes.reload()
         }}
       />
       <Modal

@@ -6,8 +6,12 @@ import { FormModal } from '../../components/FormModal'
 import { useRemote } from '../../hooks/use-remote'
 import { MAX_PORT, MIN_PORT } from '../form-limits'
 import { INBOUND_PRESET_LABELS, VISION_PRESETS } from './inbound-presets'
+import { NodeAffixInputs } from './NodeAffixInputs'
+import { EMPTY_NODE_AFFIX, affixName, isAffixEmpty, normalizeAffix, type NodeAffix } from './node-affix'
 
 const MODAL_WIDTH = 760
+/** 前后缀预览里用的示例默认名（第一个预设的入站备注）。 */
+const SAMPLE_NODE_NAME = 'VLESS-REALITY'
 
 interface InboundPresetsModalProps {
   serverId: number
@@ -19,7 +23,7 @@ interface InboundPresetsModalProps {
 
 /**
  * 服务器详情页的“一键部署入站”弹窗（docs/03 §5.1，Ruling-76；node:write 且 host:write，由调用方判断）。
- * 打开时先拿预览：7 个预设能否部署与建议端口；默认勾选全部可用的，端口可改，可选节点组；提交后排一条主机任务。
+ * 打开时先拿预览：7 个预设能否部署与建议端口；默认勾选全部可用的，端口可改，可选节点组与节点显示名的前后缀（Ruling-80）；提交后排一条主机任务。
  */
 export function InboundPresetsModal({ serverId, isOpen, onClose, onStarted }: InboundPresetsModalProps) {
   return (
@@ -45,6 +49,7 @@ function InboundPresetsBody({ serverId, onStarted }: Pick<InboundPresetsModalPro
   const [picked, setPicked] = useState<Partial<Record<InboundPresetKey, boolean>>>({})
   const [ports, setPorts] = useState<Partial<Record<InboundPresetKey, number>>>({})
   const [groupIds, setGroupIds] = useState<number[]>([])
+  const [affix, setAffix] = useState<NodeAffix>(EMPTY_NODE_AFFIX)
   const [error, setError] = useState<ApiError | null>(null)
   const [isBusy, setIsBusy] = useState(false)
 
@@ -58,12 +63,13 @@ function InboundPresetsBody({ serverId, onStarted }: Pick<InboundPresetsModalPro
 
   const handleSubmit = async () => {
     const items = chosen.map((r) => ({ key: r.key, port: portOf(r) }))
+    const { prefix, suffix } = normalizeAffix(affix)
     setIsBusy(true)
     setError(null)
     try {
       const { data: res, error: apiError } = await api.POST('/api/admin/servers/{id}/inbound-presets', {
         params: { ...csrfHeader(), path: { id: serverId } },
-        body: { items, nodeGroupIds: groupIds },
+        body: { items, nodeGroupIds: groupIds, namePrefix: prefix, nameSuffix: suffix },
       })
       if (apiError !== undefined || res?.data === undefined) {
         setError(toApiError(apiError))
@@ -135,6 +141,12 @@ function InboundPresetsBody({ serverId, onStarted }: Pick<InboundPresetsModalPro
           onChange={setGroupIds}
           options={(groups.data ?? []).map((g) => ({ value: g.id, label: g.name }))}
         />
+        <NodeAffixInputs value={affix} onChange={setAffix} />
+        <Typography.Text type="secondary">
+          {isAffixEmpty(affix)
+            ? '节点显示名默认取预设名；填了前缀 / 后缀会加在两头（可不填）。'
+            : `节点显示名形如「${affixName(SAMPLE_NODE_NAME, affix)}」；面板上的入站备注不变。`}
+        </Typography.Text>
         <Button type="primary" loading={isBusy} disabled={data === null || chosen.length === 0} onClick={() => void handleSubmit()}>
           部署 {chosen.length} 个入站
         </Button>

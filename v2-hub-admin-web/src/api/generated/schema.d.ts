@@ -941,7 +941,7 @@ export interface paths {
         put?: never;
         /**
          * 一键部署入站（node:write 且 host:write；Ruling-76，0.14.0），排一条 deploy_inbounds 主机任务
-         * @description 端口须在 1–65535 且互不相同，不能选当前不可用的预设（如主机没有 DNS 账号时的 TLS 预设，400）； 服务器没绑 SSH、主机有未结束的任务时返回 409。端口是否被占在任务执行时再查一次。
+         * @description 端口须在 1–65535 且互不相同，不能选当前不可用的预设（如主机没有 DNS 账号时的 TLS 预设，400）； 服务器没绑 SSH、主机有未结束的任务时返回 409。端口是否被占在任务执行时再查一次。 namePrefix / nameSuffix（0.14.1，Ruling-80）填了的话，新入站的直连节点显示名取“前缀 + 默认名 + 后缀”。
          */
         post: operations["deployInboundPresets"];
         delete?: never;
@@ -1260,6 +1260,26 @@ export interface paths {
         get: operations["listNodes"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/nodes/affix": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 给一批节点的显示名加前缀 / 后缀（node:write；docs/03 §5.1，Ruling-80，0.14.1）
+         * @description 选中节点的显示名变成“前缀 + 现有显示名 + 后缀”，只影响平台，不写回面板。前缀、后缀至少填一个； 包含不存在的节点、或有节点加上后超过 128 个字符时返回 400，一个都不改。
+         */
+        post: operations["affixNodeNames"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3572,6 +3592,8 @@ export interface components {
             }[];
             /** @description 新入站的直连节点要加进的节点组，可为空 */
             nodeGroupIds: number[];
+            namePrefix?: components["schemas"]["NodeNameAffix"];
+            nameSuffix?: components["schemas"]["NodeNameAffix"];
         };
         /** @enum {string} */
         HostTaskStatus: "queued" | "running" | "succeeded" | "failed" | "canceled";
@@ -3861,6 +3883,16 @@ export interface components {
             tags: string[];
             sortOrder: number;
             isEnabled: boolean;
+        };
+        /**
+         * @description 节点显示名的前缀或后缀（0.14.1，Ruling-80）：不含控制字符；前缀开头、后缀结尾的空白会被去掉，中间的空格保留；空串为不加
+         * @default
+         */
+        NodeNameAffix: string;
+        NodeAffixInput: {
+            nodeIds: number[];
+            prefix: components["schemas"]["NodeNameAffix"];
+            suffix: components["schemas"]["NodeNameAffix"];
         };
         NodeGroup: {
             /** Format: int64 */
@@ -8489,6 +8521,40 @@ export interface operations {
                             items: components["schemas"]["Node"][];
                             /** Format: int64 */
                             total: number;
+                        };
+                    };
+                };
+            };
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+        };
+    };
+    affixNodeNames: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NodeAffixInput"];
+            };
+        };
+        responses: {
+            /** @description 改了几个节点 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: {
+                            /** Format: int64 */
+                            updated: number;
                         };
                     };
                 };
