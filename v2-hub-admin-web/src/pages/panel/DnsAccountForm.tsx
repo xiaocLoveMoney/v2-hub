@@ -89,7 +89,7 @@ export function DnsAccountForm({ account, onSaved }: DnsAccountFormProps) {
         <Form.Item
           name="token"
           label="API 令牌"
-          extra="Cloudflare 后台用“编辑区域 DNS（Edit zone DNS）”模板创建，区域只选这个域名。保存后加密存储，不再显示；只在平台上使用，不会下发到任何主机"
+          extra="Cloudflare 后台用“编辑区域 DNS（Edit zone DNS）”模板创建，区域只选这个域名。保存后加密存储，不再显示；只在申请证书时临时传给对应主机、用完即删，不在主机上保存"
           rules={[{ required: !isEdit, message: '请输入 API 令牌' }]}
         >
           <Input.Password autoComplete="new-password" maxLength={MAX_TOKEN_LEN} placeholder={isEdit ? KEEP_PLACEHOLDER : ''} />

@@ -31,7 +31,7 @@ const OPS_ACTIONS: readonly OpsAction[] = [
   { action: 'diagnose', label: '查看状态与日志', title: '查看状态与最近日志？', description: '只读取面板的状态与最近日志，不改动机器；结果在任务日志里看' },
 ]
 
-/** “配置证书”的三种说法：没配 DNS 账号时生成自签证书；配了的申请公开证书，已有证书时是续期（docs/03 §5.22 运维动作）。 */
+/** “配置证书”的三种说法：没配 DNS 账号时生成自签证书；配了的申请公开证书，已有证书时是重新配置（没到续期时间就复用，docs/03 §5.22 运维动作）。 */
 const TLS_SELF_SIGNED: OpsAction = {
   action: ACTION_ENABLE_TLS,
   label: '配置证书',
@@ -39,11 +39,18 @@ const TLS_SELF_SIGNED: OpsAction = {
   description: '生成自签证书设给面板，并把这台服务器改成 https + 固定证书指纹接入，面板令牌不再明文传输',
 }
 const PUBLIC_CERT_DESCRIPTION =
-  '平台把域名解析到这台主机，向 Let’s Encrypt 申请证书并装到面板上，服务器改成按域名接入；面板会重启一次，整个过程通常要一两分钟'
+  '平台把域名解析到这台主机，在主机上用 acme.sh 向 Let’s Encrypt 申请证书并装到面板上，服务器改成按域名接入；面板会重启一次，整个过程通常要一两分钟'
+const RECONFIGURE_CERT_DESCRIPTION =
+  '主机上的证书还没到续期时间就直接复用、不重签，只重新设给面板并按域名接入；到了续期时间系统会自动续，一般不需要手动做'
 const TLS_ISSUE: OpsAction = { action: ACTION_ENABLE_TLS, label: '申请证书', title: '给面板申请公开证书？', description: PUBLIC_CERT_DESCRIPTION }
-const TLS_RENEW: OpsAction = { action: ACTION_ENABLE_TLS, label: '续期证书', title: '现在就续期面板证书？', description: PUBLIC_CERT_DESCRIPTION }
+const TLS_RENEW: OpsAction = {
+  action: ACTION_ENABLE_TLS,
+  label: '重新配置证书',
+  title: '重新配置面板证书？',
+  description: RECONFIGURE_CERT_DESCRIPTION,
+}
 
-/** 证书动作：主机配了域名就是申请或续期公开证书；没配时只有明文 HTTP 的面板才能生成自签证书，其余没有这个动作。 */
+/** 证书动作：主机配了域名就是申请或重新配置公开证书；没配时只有明文 HTTP 的面板才能生成自签证书，其余没有这个动作。 */
 function tlsAction(hasDomain: boolean, hasCert: boolean, isPlainHttp: boolean): OpsAction | null {
   if (hasDomain) {
     return hasCert ? TLS_RENEW : TLS_ISSUE

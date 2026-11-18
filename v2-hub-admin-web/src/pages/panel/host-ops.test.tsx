@@ -92,7 +92,7 @@ describe('HostOpsCard：已绑定主机', () => {
     expect(screen.queryByRole('button', { name: '绑定 SSH' })).toBeNull()
   })
 
-  it('主机配了域名：HTTPS 面板也有证书动作，没申请到时叫“申请证书”，申请到后叫“续期证书”并显示到期日', async () => {
+  it('主机配了域名：HTTPS 面板也有证书动作，没申请到时叫“申请证书”，申请到后叫“重新配置证书”并显示到期日', async () => {
     const pending = hostOf({ dnsAccountId: 7, dnsAccountName: 'cf-main', domain: 'hk-01.example.com' })
     const issue = taskOf({ id: 22, kind: 'enable_tls', status: 'queued', step: '' })
     const calls = mockServer({
@@ -105,14 +105,14 @@ describe('HostOpsCard：已绑定主机', () => {
     expect(await screen.findByText('hk-01.example.com')).toBeDefined()
     expect(screen.getByText(/还没申请到证书/)).toBeDefined()
     fireEvent.click(screen.getByRole('button', { name: '申请证书' }))
-    expect(await screen.findByText(/向 Let’s Encrypt 申请证书/)).toBeDefined()
+    expect(await screen.findByText(/用 acme.sh 向 Let’s Encrypt 申请证书/)).toBeDefined()
     fireEvent.click(await screen.findByRole('button', { name: CONFIRM }))
     await waitFor(() => expect(calls.find((c) => c.method === 'POST')?.body).toEqual({ action: 'enable_tls' }))
     view.unmount()
 
     mockServer({ [`GET ${HOST_PATH}`]: () => ok({ ...pending, certNotAfter: '2027-02-14T08:00:00Z' }) })
     renderCard(READ_WRITE, <HostOpsCard server={boundServer} onChanged={noop} />)
-    expect(await screen.findByRole('button', { name: '续期证书' })).toBeDefined()
+    expect(await screen.findByRole('button', { name: '重新配置证书' })).toBeDefined()
     expect(screen.getByText(/证书到期 2027-02-14/)).toBeDefined()
     expect(screen.queryByRole('button', { name: '申请证书' })).toBeNull()
   })

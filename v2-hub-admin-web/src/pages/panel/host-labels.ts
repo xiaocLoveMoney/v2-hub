@@ -62,8 +62,8 @@ const HOST_ERROR_TEXT: Record<Exclude<HostErrorCode, ''>, string> = {
   unreachable: 'SSH 连不上；请检查地址、SSH 端口，以及目标机防火墙是否放行平台的 IP',
   host_key_changed: '主机密钥与上次记录的不一致；确认机器确实重装过后，先重置主机密钥',
   name_taken: '服务器名已被占用；请把主机名称改成别的，再重新部署',
-  dns_failed: 'DNS 服务商拒绝了请求，或解析记录迟迟没有生效；请检查 DNS 账号的令牌权限与根域名，再重做“配置证书”',
-  cert_failed: '证书签发方拒绝或超时，详见失败摘要；被限流时过一段时间再重做“配置证书”',
+  dns_failed: 'DNS 服务商拒绝了改解析的请求；请检查 DNS 账号的令牌权限与根域名，下一轮检查会自动重试，也可以手动重做“配置证书”',
+  cert_failed: '主机上的 acme.sh 申请证书失败，失败摘要与日志里有它的报错；排除问题后等下一轮自动重试，或手动重做“配置证书”',
   interrupted: '平台重启时任务被中断；重新发起即可',
   command_failed: '命令执行失败，详见日志；排除问题后重新发起',
 }
