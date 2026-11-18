@@ -4,6 +4,8 @@ import { MAX_NAME_LEN } from '../form-limits'
 export const MAX_HOST_BATCH = 50
 /** 主机地址的最大长度（hub-api.yaml HostAddress）。 */
 export const MAX_HOST_ADDRESS_LEN = 255
+/** 在部署平台的机器上托管它自己时地址怎么填（docs/03 §5.22 “与平台同机”，Ruling-75）：平台跑在容器里，回环是容器自己。 */
+export const SAME_MACHINE_ADDRESS_HINT = '平台和面板在同一台机器时，填这台机器的公网 IP 或 Docker 网关 172.17.0.1，不能填 127.0.0.1'
 /** SSH 端口的默认值。 */
 export const DEFAULT_SSH_PORT = 22
 
