@@ -421,7 +421,7 @@ func (h *handlers) createInbound(w http.ResponseWriter, r *http.Request, p *serv
 		return
 	}
 	enabled := req.Enabled == nil || *req.Enabled
-	in, err := h.panels.CreateInbound(r.Context(), p, id, service.InboundCreateInput{
+	in, err := h.hosts.CreateInbound(r.Context(), p, id, service.InboundCreateInput{
 		Remark: req.Remark, Port: req.Port, Listen: req.Listen, Enabled: enabled, Template: req.Template,
 		TemplateParams: req.TemplateParams, Protocol: req.Protocol, Config: req.Config,
 	}, clientIP(r, h.trustedProxies))
@@ -453,7 +453,7 @@ func (h *handlers) updateInbound(w http.ResponseWriter, r *http.Request, p *serv
 		writeError(w, r, err)
 		return
 	}
-	in, err := h.panels.UpdateInbound(r.Context(), p, id, service.InboundUpdateInput{
+	in, err := h.hosts.UpdateInbound(r.Context(), p, id, service.InboundUpdateInput{
 		Remark: req.Remark, Port: req.Port, Listen: req.Listen, Config: req.Config,
 	}, clientIP(r, h.trustedProxies))
 	if err != nil {
@@ -470,7 +470,7 @@ func (h *handlers) setInboundEnabled(w http.ResponseWriter, r *http.Request, p *
 		writeError(w, r, err)
 		return
 	}
-	in, err := h.panels.SetInboundEnabled(r.Context(), p, id, req.Enabled, clientIP(r, h.trustedProxies))
+	in, err := h.hosts.SetInboundEnabled(r.Context(), p, id, req.Enabled, clientIP(r, h.trustedProxies))
 	if err != nil {
 		writeError(w, r, err)
 		return

@@ -34,6 +34,10 @@ type HostManager interface {
 	CancelTask(ctx context.Context, actor *service.AdminPrincipal, id int64, ip *netip.Addr) (*service.HostTask, error)
 	ResetPanelLogin(ctx context.Context, actor *service.AdminPrincipal, hostID int64, ip *netip.Addr) (*deploy.PanelLogin, error)
 	PreviewInboundPresets(ctx context.Context, actor *service.AdminPrincipal, serverID int64) (*service.InboundPresetPreview, error)
+	// CreateInbound / UpdateInbound / SetInboundEnabled 是带主机端口检查的入站写入（Ruling-78）。
+	CreateInbound(ctx context.Context, actor *service.AdminPrincipal, serverID int64, in service.InboundCreateInput, ip *netip.Addr) (*service.Inbound, error)
+	UpdateInbound(ctx context.Context, actor *service.AdminPrincipal, id int64, in service.InboundUpdateInput, ip *netip.Addr) (*service.Inbound, error)
+	SetInboundEnabled(ctx context.Context, actor *service.AdminPrincipal, id int64, enabled bool, ip *netip.Addr) (*service.Inbound, error)
 	DeployInboundPresets(ctx context.Context, actor *service.AdminPrincipal, serverID int64, in service.InboundPresetDeployInput, ip *netip.Addr) (*service.HostTask, error)
 }
 
