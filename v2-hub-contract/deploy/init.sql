@@ -872,7 +872,7 @@ CREATE TABLE dns_account (
 -- host_key_sha256 是首次连接时记录并固定的主机公钥指纹，空串 = 还没记录；os_id、arch 取自最近一次检测。
 -- 删服务器时主机保留、解除关联；删主机时任务历史一并删除。
 -- dns_account_id 与 domain 同有同无：有则面板证书由主机上的 acme.sh 申请（Ruling-74），cert_not_after 是这张证书的到期时间，空 = 还没申请到；
--- cert_renew_at 是 acme.sh 给出的下次续期时间，空 = 还没记下，下一轮检查就排“配置证书”。
+-- cert_renew_at 是下次续期时间：成功时取 acme.sh 给出的，没成功时记为当时（下一轮重试）；空 = 不自动申请。
 CREATE TABLE server_host (
     id              BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     name            VARCHAR(64)  NOT NULL,                 -- 接入时用作服务器名
