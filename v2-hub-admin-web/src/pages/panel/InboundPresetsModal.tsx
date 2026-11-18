@@ -13,8 +13,8 @@ interface InboundPresetsModalProps {
   serverId: number
   isOpen: boolean
   onClose: () => void
-  /** 任务排上之后调用：参数是排队中的任务与它所在的主机。 */
-  onStarted: (task: HostTask, hostId: number) => void
+  /** 任务排上之后调用：参数是排队中的任务（自带所在主机的 hostId）。 */
+  onStarted: (task: HostTask) => void
 }
 
 /**
@@ -29,12 +29,7 @@ export function InboundPresetsModal({ serverId, isOpen, onClose, onStarted }: In
   )
 }
 
-interface PresetRow {
-  key: InboundPresetKey
-  available: boolean
-  reason: string
-  needsCert: boolean
-}
+type PresetRow = InboundPresetPreview['items'][number]
 
 const loadGroups = (signal: AbortSignal) => api.GET('/api/admin/node-groups', { signal })
 
@@ -56,13 +51,13 @@ function InboundPresetsBody({ serverId, onStarted }: Pick<InboundPresetsModalPro
   const data = preview.data
   const rows: PresetRow[] = data?.items ?? []
   const isPicked = (r: PresetRow) => r.available && (picked[r.key] ?? true)
-  const portOf = (key: InboundPresetKey) => ports[key] ?? data?.items.find((i) => i.key === key)?.port ?? null
+  const portOf = (r: PresetRow) => ports[r.key] ?? r.port
   const chosen = rows.filter(isPicked)
   const needsCertFirst = data !== null && data.domain !== '' && !data.certReady && chosen.some((r) => r.needsCert)
   const turnsOnVision = chosen.some((r) => VISION_PRESETS.includes(r.key))
 
   const handleSubmit = async () => {
-    const items = chosen.map((r) => ({ key: r.key, port: portOf(r.key) ?? 0 }))
+    const items = chosen.map((r) => ({ key: r.key, port: portOf(r) }))
     setIsBusy(true)
     setError(null)
     try {
@@ -70,12 +65,12 @@ function InboundPresetsBody({ serverId, onStarted }: Pick<InboundPresetsModalPro
         params: { ...csrfHeader(), path: { id: serverId } },
         body: { items, nodeGroupIds: groupIds },
       })
-      if (apiError !== undefined || res?.data === undefined || data === null) {
+      if (apiError !== undefined || res?.data === undefined) {
         setError(toApiError(apiError))
         return
       }
       void message.success('已开始部署')
-      onStarted(res.data, data.hostId)
+      onStarted(res.data)
     } catch (err) {
       reportError(err)
       setError(toApiError(err))
@@ -117,7 +112,7 @@ function InboundPresetsBody({ serverId, onStarted }: Pick<InboundPresetsModalPro
                 min={MIN_PORT}
                 max={MAX_PORT}
                 precision={0}
-                value={portOf(r.key)}
+                value={portOf(r)}
                 disabled={!isPicked(r)}
                 onChange={(v) => setPorts({ ...ports, [r.key]: v ?? undefined })}
               />

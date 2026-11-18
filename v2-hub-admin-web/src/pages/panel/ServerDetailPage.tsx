@@ -119,9 +119,9 @@ export function ServerDetailPage() {
     server.reload()
   }
 
-  const handlePresetsStarted = (task: HostTask, hostId: number) => {
+  const handlePresetsStarted = (task: HostTask) => {
     setIsDeployingPresets(false)
-    setPresetTask({ host: { id: hostId, name: server.data?.name ?? '' }, taskId: task.id })
+    setPresetTask({ host: { id: task.hostId, name: server.data?.name ?? '' }, taskId: task.id })
   }
 
   const columns: TableProps<Inbound>['columns'] = [
