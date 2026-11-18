@@ -54,6 +54,9 @@ const (
 	maxPort            = 65535
 )
 
+// encryptionNone 是 VLESS 不加密时 encryption 参数的取值。
+const encryptionNone = "none"
+
 // ErrUnsupportedLink 表示链接的协议或形状不在支持范围内（调用方跳过该链接）。
 var ErrUnsupportedLink = errors.New("unsupported share link")
 
@@ -69,6 +72,8 @@ type ProxyNode struct {
 	Password string // trojan / shadowsocks / hysteria2 / socks / http
 	Method   string // shadowsocks 加密方式；vmess 的 scy
 	Flow     string // vless flow
+	// Encryption 是 VLESS Encryption 的客户端参数（链接的 encryption=），空或 none 为不加密（Ruling-77）。
+	Encryption string
 	AlterID  int    // vmess
 
 	Network     string // tcp / ws / grpc / httpupgrade / xhttp ...
@@ -92,6 +97,11 @@ type ProxyNode struct {
 
 	// Info 为 true 表示这是一条不可连通的说明节点（剩余流量、到期时间等）。
 	Info bool
+}
+
+// hasVLESSEncryption 报告节点是否开了 VLESS Encryption；不认识它的格式不能把它当成不加密输出。
+func (n ProxyNode) hasVLESSEncryption() bool {
+	return n.Protocol == ProtoVLESS && n.Encryption != "" && n.Encryption != encryptionNone
 }
 
 // ParseLink 把一条分享链接解析为 ProxyNode。协议不支持或形状不对返回 ErrUnsupportedLink。
@@ -176,6 +186,9 @@ func parseURLLink(link, proto string) (ProxyNode, error) {
 	}
 	if proto == ProtoVLESS {
 		n.UUID, n.Flow = secret, q.Get("flow")
+		if enc := q.Get("encryption"); enc != encryptionNone {
+			n.Encryption = enc
+		}
 	} else {
 		n.Password = secret
 	}

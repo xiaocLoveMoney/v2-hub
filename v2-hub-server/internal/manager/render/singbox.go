@@ -14,6 +14,10 @@ const (
 )
 
 func singBoxSupports(n ProxyNode) bool {
+	// sing-box 官方不支持 VLESS Encryption（Ruling-77）：当成不加密输出会连不上，不输出
+	if n.hasVLESSEncryption() {
+		return false
+	}
 	switch n.Network {
 	case NetTCP, NetWS, NetGRPC, NetHTTPUpgrade:
 	default:
