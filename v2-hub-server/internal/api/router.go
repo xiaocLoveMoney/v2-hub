@@ -246,6 +246,7 @@ func NewRouter(deps Deps) http.Handler {
 	mux.HandleFunc("GET /api/admin/subscribe-logs", h.requireAdmin(service.PermUserRead, h.listSubscribeLogs))
 	mux.HandleFunc("DELETE /api/admin/endpoints/{id}", h.requireAdmin(service.PermNodeWrite, h.deleteEndpoint))
 	mux.HandleFunc("GET /api/admin/nodes", h.requireAdmin(service.PermNodeRead, h.listNodes))
+	mux.HandleFunc("POST /api/admin/nodes/affix", h.requireAdmin(service.PermNodeWrite, h.affixNodeNames))
 	mux.HandleFunc("PUT /api/admin/nodes/{id}", h.requireAdmin(service.PermNodeWrite, h.updateNode))
 	mux.HandleFunc("GET /api/admin/nodes/{id}/reach", h.requireAdmin(service.PermNodeRead, h.getNodeReach))
 	mux.HandleFunc("POST /api/admin/nodes/{id}/reach/check", h.requireAdmin(service.PermNodeWrite, h.checkNodeReach))

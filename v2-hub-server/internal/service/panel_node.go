@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/netip"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -13,20 +14,31 @@ import (
 )
 
 const (
-	maxNodeNameLen    = 128
-	maxNodeTags       = 16
-	maxNodeTagLen     = 32
-	maxNodeSortOrder  = 100000
+	maxNodeNameLen   = 128
+	maxNodeTags      = 16
+	maxNodeTagLen    = 32
+	maxNodeSortOrder = 100000
+	// maxNodeAffixLen / maxAffixNodes 与 hub-api NodeNameAffix、NodeAffixInput.nodeIds 的上限一致（Ruling-80）。
+	maxNodeAffixLen   = 32
+	maxAffixNodes     = 500
 	maxGroupNameLen   = 64
 	maxGroupNodes     = 5000
 	msgNodeNotFound   = "节点不存在"
 	msgGroupNotFound  = "节点组不存在"
 	ActionNodeUpdate  = "node.update"
+	ActionNodeAffix   = "node.affix"
 	ActionGroupCreate = "node_group.create"
 	ActionGroupUpdate = "node_group.update"
 	ActionGroupDelete = "node_group.delete"
 	targetNode        = "node"
 	targetNodeGroup   = "node_group"
+
+	msgAffixTooLong   = "前缀、后缀各不超过 %d 个字符"
+	msgAffixControl   = "前缀、后缀不能含换行等控制字符"
+	msgAffixEmpty     = "前缀和后缀至少填一个"
+	msgAffixNodeCount = "一次选 1–%d 个节点"
+	msgAffixOverflow  = "有 %d 个节点加上前后缀后显示名超过 %d 个字符"
+	msgNodesMissing   = "包含不存在的节点"
 )
 
 // Node 是节点目录项。
@@ -60,6 +72,13 @@ type NodeInput struct {
 	Tags        []string
 	SortOrder   int
 	IsEnabled   bool
+}
+
+// NodeAffixInput 是批量给节点显示名加前缀 / 后缀的参数（Ruling-80）。
+type NodeAffixInput struct {
+	NodeIDs []int64
+	Prefix  string
+	Suffix  string
 }
 
 // NodeGroup 是节点组。
@@ -179,6 +198,70 @@ func (s *PanelService) UpdateNode(ctx context.Context, actor *AdminPrincipal, id
 	})
 }
 
+// normalizeNodeAffix 整理显示名的前缀与后缀（Ruling-80）：前缀去掉开头的空白、后缀去掉结尾的空白，中间用来分隔的空格保留。
+// 超过长度上限或含控制字符返回 400。
+func normalizeNodeAffix(prefix, suffix string) (string, string, error) {
+	prefix = strings.TrimLeftFunc(prefix, unicode.IsSpace)
+	suffix = strings.TrimRightFunc(suffix, unicode.IsSpace)
+	for _, part := range []string{prefix, suffix} {
+		if utf8.RuneCountInString(part) > maxNodeAffixLen {
+			return "", "", newError(CodeInvalidArgument, fmt.Sprintf(msgAffixTooLong, maxNodeAffixLen))
+		}
+		if strings.ContainsFunc(part, unicode.IsControl) {
+			return "", "", newError(CodeInvalidArgument, msgAffixControl)
+		}
+	}
+	return prefix, suffix, nil
+}
+
+// AffixNodeNames 给一批节点的显示名加前缀 / 后缀（docs/03 §5.1，Ruling-80），返回改了几个；只影响平台，不写回面板。
+// 前后缀都为空、节点数不在 1–500、包含不存在的节点、有节点加上后超过长度上限时返回 400，一个都不改。
+func (s *PanelService) AffixNodeNames(ctx context.Context, actor *AdminPrincipal, in NodeAffixInput, ip *netip.Addr) (int64, error) {
+	prefix, suffix, err := normalizeNodeAffix(in.Prefix, in.Suffix)
+	if err != nil {
+		return 0, err
+	}
+	if prefix == "" && suffix == "" {
+		return 0, newError(CodeInvalidArgument, msgAffixEmpty)
+	}
+	if len(in.NodeIDs) == 0 || len(in.NodeIDs) > maxAffixNodes {
+		return 0, newError(CodeInvalidArgument, fmt.Sprintf(msgAffixNodeCount, maxAffixNodes))
+	}
+	ids := dedupeIDs(in.NodeIDs)
+	added := utf8.RuneCountInString(prefix) + utf8.RuneCountInString(suffix)
+	var updated int64
+	err = s.inTx(ctx, func(q *sqlcgen.Queries) error {
+		rows, err := q.LockNodeNameLengths(ctx, ids)
+		if err != nil {
+			return fmt.Errorf("lock nodes for affix: %w", err)
+		}
+		if len(rows) != len(ids) {
+			return newError(CodeInvalidArgument, msgNodesMissing)
+		}
+		overflow := 0
+		for _, r := range rows {
+			if int(r.NameLength)+added > maxNodeNameLen {
+				overflow++
+			}
+		}
+		if overflow > 0 {
+			return newError(CodeInvalidArgument, fmt.Sprintf(msgAffixOverflow, overflow, maxNodeNameLen))
+		}
+		updated, err = q.AffixNodeDisplayNames(ctx, sqlcgen.AffixNodeDisplayNamesParams{Prefix: prefix, Suffix: suffix, Ids: ids})
+		if err != nil {
+			return fmt.Errorf("affix %d node names: %w", len(ids), err)
+		}
+		return writeAudit(ctx, q, AuditEntry{
+			ActorType: ActorAdmin, ActorID: actor.AdminID, Action: ActionNodeAffix, TargetType: targetNode,
+			ClientIP: ip, Detail: map[string]any{"prefix": prefix, "suffix": suffix, "nodes": len(ids)},
+		})
+	})
+	if err != nil {
+		return 0, err
+	}
+	return updated, nil
+}
+
 // ListNodeGroups 返回全部节点组。
 func (s *PanelService) ListNodeGroups(ctx context.Context) ([]NodeGroup, error) {
 	rows, err := s.q.ListNodeGroups(ctx)
@@ -213,7 +296,7 @@ func validateGroupInput(ctx context.Context, q *sqlcgen.Queries, in NodeGroupInp
 		return in, fmt.Errorf("count nodes: %w", err)
 	}
 	if int(n) != len(unique) {
-		return in, newError(CodeInvalidArgument, "包含不存在的节点")
+		return in, newError(CodeInvalidArgument, msgNodesMissing)
 	}
 	return in, nil
 }

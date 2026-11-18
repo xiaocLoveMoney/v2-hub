@@ -21,6 +21,8 @@ type Querier interface {
 	AdvanceAdminTOTPStep(ctx context.Context, arg AdvanceAdminTOTPStepParams) (int64, error)
 	// 原子地推进已用步长；返回 0 行表示该步长已被用过（并发重放）
 	AdvanceUserTOTPStep(ctx context.Context, arg AdvanceUserTOTPStepParams) (int64, error)
+	// 显示名两头加前缀 / 后缀（Ruling-80）；长度由调用方先查过
+	AffixNodeDisplayNames(ctx context.Context, arg AffixNodeDisplayNamesParams) (int64, error)
 	// 每个自然日有流量的去重用户数
 	AnalyticsActiveDays(ctx context.Context, arg AnalyticsActiveDaysParams) ([]AnalyticsActiveDaysRow, error)
 	AnalyticsChainFailed(ctx context.Context, rowLimit int32) ([]AnalyticsChainFailedRow, error)
@@ -500,6 +502,8 @@ type Querier interface {
 	ListUsersByIDs(ctx context.Context, ids []int64) ([]ListUsersByIDsRow, error)
 	// 用户端：已发布，且没有限定套餐或限定里包含该用户的套餐
 	ListVisibleSharedAccounts(ctx context.Context, planID int64) ([]ListVisibleSharedAccountsRow, error)
+	// 批量加前后缀前锁住这些节点、取现有显示名的字符数（Ruling-80）；按 id 排序加锁，避免两批互相等锁
+	LockNodeNameLengths(ctx context.Context, ids []int64) ([]LockNodeNameLengthsRow, error)
 	// R5 的并发保护：改动可能影响 super_admin 数量的事务先锁住该角色行，串行化判断。
 	LockSuperAdminRole(ctx context.Context) error
 	// 余额、流水与充值码（docs/03 §5.14、§5.15）-------------------------------------------

@@ -631,6 +631,97 @@ func TestNodeGroups(t *testing.T) {
 	}
 }
 
+// displayNamesByNode 取服务器下各节点的显示名（按节点 id）。
+func displayNamesByNode(t *testing.T, f *panelFixture, serverID int64) map[int64]string {
+	t.Helper()
+	nodes, err := f.panels.ListNodes(context.Background(), NodeFilter{ServerID: serverID}, PageQuery{PageSize: maxPageSize})
+	if err != nil {
+		t.Fatalf("ListNodes: %v", err)
+	}
+	out := make(map[int64]string, len(nodes.Items))
+	for _, n := range nodes.Items {
+		out[n.ID] = n.DisplayName
+	}
+	return out
+}
+
+// TestAffixNodeNames：批量给节点显示名加前缀 / 后缀（Ruling-80）；不合规或会超长时整批拒绝。
+func TestAffixNodeNames(t *testing.T) {
+	f := newPanelFixture(t)
+	ctx := context.Background()
+	fake := f.fleet.get(fakeBase)
+	seedInbound(fake, "1", 443, "a")
+	seedInbound(fake, "2", 8443, "b")
+	srv, err := f.panels.CreateServer(ctx, f.actor, serverInput("hk-1"), nil)
+	if err != nil {
+		t.Fatalf("CreateServer: %v", err)
+	}
+	nodes, err := f.panels.ListNodes(ctx, NodeFilter{ServerID: srv.ID}, PageQuery{})
+	if err != nil || nodes.Total != 2 {
+		t.Fatalf("nodes = %+v, %v", nodes, err)
+	}
+	first, second := nodes.Items[0].ID, nodes.Items[1].ID
+
+	// 前缀开头、后缀结尾的空白去掉，中间的分隔空格保留；重复的 id 只算一次；没选中的节点不动
+	updated, err := f.panels.AffixNodeNames(ctx, f.actor, NodeAffixInput{NodeIDs: []int64{first, first}, Prefix: "  香港 ", Suffix: " | 01 "}, nil)
+	if err != nil || updated != 1 {
+		t.Fatalf("AffixNodeNames = %d, %v", updated, err)
+	}
+	names := displayNamesByNode(t, f, srv.ID)
+	if names[first] != "香港 a | 01" || names[second] != "b" {
+		t.Fatalf("names = %v", names)
+	}
+	// 只填后缀；同步不覆盖改过的显示名
+	if _, err := f.panels.AffixNodeNames(ctx, f.actor, NodeAffixInput{NodeIDs: []int64{first, second}, Suffix: "-x"}, nil); err != nil {
+		t.Fatalf("AffixNodeNames suffix only: %v", err)
+	}
+	if _, err := f.panels.SyncServer(ctx, f.actor, srv.ID, nil); err != nil {
+		t.Fatalf("SyncServer: %v", err)
+	}
+	names = displayNamesByNode(t, f, srv.ID)
+	if names[first] != "香港 a | 01-x" || names[second] != "b-x" {
+		t.Fatalf("names after suffix = %v", names)
+	}
+
+	tooMany := make([]int64, maxAffixNodes+1)
+	for i := range tooMany {
+		tooMany[i] = int64(i + 1)
+	}
+	bad := []NodeAffixInput{
+		{NodeIDs: []int64{first}},
+		{NodeIDs: []int64{first}, Prefix: "  ", Suffix: " "},
+		{Prefix: "x"},
+		{NodeIDs: tooMany, Prefix: "x"},
+		{NodeIDs: []int64{first, 999999}, Prefix: "x"},
+		{NodeIDs: []int64{first}, Prefix: strings.Repeat("长", maxNodeAffixLen+1)},
+		{NodeIDs: []int64{first}, Suffix: "a\nb"},
+	}
+	for i, in := range bad {
+		if _, err := f.panels.AffixNodeNames(ctx, f.actor, in, nil); !errors.Is(err, ErrInvalidArgument) {
+			t.Fatalf("case %d err = %v", i, err)
+		}
+	}
+	// 有一个节点加上后超长：整批拒绝，另一个也不改
+	long := strings.Repeat("节", maxNodeNameLen-2)
+	if err := f.panels.UpdateNode(ctx, f.actor, second, NodeInput{DisplayName: long, IsEnabled: true}, nil); err != nil {
+		t.Fatalf("UpdateNode: %v", err)
+	}
+	if _, err := f.panels.AffixNodeNames(ctx, f.actor, NodeAffixInput{NodeIDs: []int64{first, second}, Prefix: "abc"}, nil); !errors.Is(err, ErrInvalidArgument) {
+		t.Fatalf("overflow err = %v", err)
+	}
+	names = displayNamesByNode(t, f, srv.ID)
+	if names[first] != "香港 a | 01-x" || names[second] != long {
+		t.Fatalf("names after rejected batch = %v", names)
+	}
+	// 刚好到上限可以
+	if _, err := f.panels.AffixNodeNames(ctx, f.actor, NodeAffixInput{NodeIDs: []int64{second}, Prefix: "ab"}, nil); err != nil {
+		t.Fatalf("AffixNodeNames at limit: %v", err)
+	}
+	if names = displayNamesByNode(t, f, srv.ID); names[second] != "ab"+long {
+		t.Fatalf("name at limit = %q", names[second])
+	}
+}
+
 // TestPanelWebCertFiles：取面板自己的网页证书路径（Ruling-53）；没配时是两个空串，服务器不存在 404，面板连不上 502 类错误。
 func TestPanelWebCertFiles(t *testing.T) {
 	f := newPanelFixture(t)

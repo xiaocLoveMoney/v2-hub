@@ -11,6 +11,28 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const affixNodeDisplayNames = `-- name: AffixNodeDisplayNames :execrows
+UPDATE node
+SET display_name = $1::text || display_name || $2::text,
+    updated_at   = now()
+WHERE id = ANY($3::bigint[])
+`
+
+type AffixNodeDisplayNamesParams struct {
+	Prefix string
+	Suffix string
+	Ids    []int64
+}
+
+// 显示名两头加前缀 / 后缀（Ruling-80）；长度由调用方先查过
+func (q *Queries) AffixNodeDisplayNames(ctx context.Context, arg AffixNodeDisplayNamesParams) (int64, error) {
+	result, err := q.db.Exec(ctx, affixNodeDisplayNames, arg.Prefix, arg.Suffix, arg.Ids)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const clearNodeGroupItems = `-- name: ClearNodeGroupItems :exec
 DELETE FROM node_group_item WHERE node_group_id = $1
 `
@@ -245,6 +267,40 @@ func (q *Queries) ListNodes(ctx context.Context, arg ListNodesParams) ([]ListNod
 			&i.IsMissing,
 			&i.GroupIds,
 		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const lockNodeNameLengths = `-- name: LockNodeNameLengths :many
+SELECT id, char_length(display_name)::int AS name_length
+FROM node
+WHERE id = ANY($1::bigint[])
+ORDER BY id
+FOR UPDATE
+`
+
+type LockNodeNameLengthsRow struct {
+	ID         int64
+	NameLength int32
+}
+
+// 批量加前后缀前锁住这些节点、取现有显示名的字符数（Ruling-80）；按 id 排序加锁，避免两批互相等锁
+func (q *Queries) LockNodeNameLengths(ctx context.Context, ids []int64) ([]LockNodeNameLengthsRow, error) {
+	rows, err := q.db.Query(ctx, lockNodeNameLengths, ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []LockNodeNameLengthsRow{}
+	for rows.Next() {
+		var i LockNodeNameLengthsRow
+		if err := rows.Scan(&i.ID, &i.NameLength); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
