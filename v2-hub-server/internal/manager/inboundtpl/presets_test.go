@@ -75,6 +75,9 @@ func TestPresetsMatchUpstreamShapes(t *testing.T) {
 	if cfg.Settings["decryption"] != testDecrypt || cfg.Settings["encryption"] != testEncrypt {
 		t.Fatalf("mlkem settings: %+v", cfg.Settings)
 	}
+	if _, has := cfg.Settings["fallbacks"]; has {
+		t.Fatal("xray refuses fallbacks together with decryption")
+	}
 
 	_, cfg = buildPreset(t, PresetVLESSXHTTPTLS, fullParams())
 	xhttp, _ := cfg.StreamSettings["xhttpSettings"].(map[string]any)
