@@ -887,6 +887,69 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/admin/servers/{id}/client-flow": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /** 开关服务器的 VLESS 流控（server:write；Ruling-77，0.14.0）；平台下发的 client 带上或去掉 flow，由下发对账写到面板 */
+        put: operations["setServerClientFlow"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/servers/{id}/inbound-presets/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 一键部署入站的预览（node:write 且 host:write；docs/03 §5.1，Ruling-76，0.14.0）
+         * @description 给出 7 个预设各自能否部署（不能时附原因）与建议端口。经 SSH 读一次主机正在监听的端口， 与面板已有入站一起避开；按管理员频控（与主机连接测试共用额度）。服务器没绑 SSH 时返回 409。
+         */
+        post: operations["previewInboundPresets"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/servers/{id}/inbound-presets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 一键部署入站（node:write 且 host:write；Ruling-76，0.14.0），排一条 deploy_inbounds 主机任务
+         * @description 端口须在 1–65535 且互不相同，不能选当前不可用的预设（如主机没有 DNS 账号时的 TLS 预设，400）； 服务器没绑 SSH、主机有未结束的任务时返回 409。端口是否被占在任务执行时再查一次。
+         */
+        post: operations["deployInboundPresets"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/admin/ssh-credentials": {
         parameters: {
             query?: never;
@@ -3396,6 +3459,7 @@ export interface components {
              * @description 关联的托管主机（0.12.0，docs/03 §5.22）；没有为 null
              */
             hostId: number | null;
+            clientFlow: components["schemas"]["ClientFlow"];
             /** @description 这台服务器上的大陆连通检测目标数（0.11.0，Ruling-67）；功能没开为 null */
             reach: {
                 /** @description 这台服务器上的检测目标数 */
@@ -3468,17 +3532,54 @@ export interface components {
         /** @description IP 或域名；不能是回环或未指定地址 */
         HostAddress: string;
         /**
-         * @description provision 部署（安装或接管）、verify 校验连接、restart_panel 重启面板、restart_core 重启内核、 upgrade 升级或修复到平台基线版本、reissue_token 重签令牌、enable_tls 配置证书、diagnose 查看状态与最近日志
+         * @description provision 部署（安装或接管）、verify 校验连接、restart_panel 重启面板、restart_core 重启内核、 upgrade 升级或修复到平台基线版本、reissue_token 重签令牌、enable_tls 配置证书、diagnose 查看状态与最近日志、 deploy_inbounds 一键部署入站（0.14.0）
          * @enum {string}
          */
-        HostTaskKind: "provision" | "verify" | "restart_panel" | "restart_core" | "upgrade" | "reissue_token" | "enable_tls" | "diagnose";
+        HostTaskKind: "provision" | "verify" | "restart_panel" | "restart_core" | "upgrade" | "reissue_token" | "enable_tls" | "diagnose" | "deploy_inbounds";
+        /**
+         * @description 服务器的 VLESS 流控（Ruling-77）：空串为不带；打开后平台下发的 client 带这个 flow，只在支持它的 VLESS 入站上生效
+         * @enum {string}
+         */
+        ClientFlow: "" | "xtls-rprx-vision";
+        /**
+         * @description 一键部署的预设（docs/03 §5.1）：vless_reality_vision VLESS+TCP+REALITY+Vision、vless_reality_mlkem 同上加 ML-KEM-768 VLESS Encryption、 vless_xhttp_tls VLESS+XHTTP+TLS、vmess_ws_tls VMess+WebSocket+TLS、trojan_tls Trojan+TCP+TLS、 shadowsocks_2022 Shadowsocks 2022-blake3-aes-256-gcm、hysteria2_salamander Hysteria2+TLS+Salamander
+         * @enum {string}
+         */
+        InboundPresetKey: "vless_reality_vision" | "vless_reality_mlkem" | "vless_xhttp_tls" | "vmess_ws_tls" | "trojan_tls" | "shadowsocks_2022" | "hysteria2_salamander";
+        InboundPresetOption: {
+            key: components["schemas"]["InboundPresetKey"];
+            available: boolean;
+            /** @description 不能部署的原因，可直接展示；能部署为空串 */
+            reason: string;
+            /** @description 建议端口（避开主机正在监听的端口与面板已有入站） */
+            port: number;
+            /** @description 要主机的域名证书 */
+            needsCert: boolean;
+        };
+        InboundPresetPreview: {
+            /** Format: int64 */
+            hostId: number;
+            /** @description 主机域名，没有 DNS 账号为空串 */
+            domain: string;
+            /** @description 主机上已有平台签的证书；为 false 且有域名时部署会先配置证书 */
+            certReady: boolean;
+            items: components["schemas"]["InboundPresetOption"][];
+        };
+        InboundPresetDeployInput: {
+            items: {
+                key: components["schemas"]["InboundPresetKey"];
+                port: number;
+            }[];
+            /** @description 新入站的直连节点要加进的节点组，可为空 */
+            nodeGroupIds: number[];
+        };
         /** @enum {string} */
         HostTaskStatus: "queued" | "running" | "succeeded" | "failed" | "canceled";
         /**
-         * @description 失败或不能部署的原因大类（docs/03 §5.22），空串为没有
+         * @description 失败或不能部署的原因大类（docs/03 §5.22），空串为没有；port_in_use（所选端口已被主机上的程序占用）、xray_down（建完入站后面板的 Xray 没在运行）自 0.14.0
          * @enum {string}
          */
-        HostErrorCode: "" | "unsupported_os" | "no_systemd" | "no_root" | "nonstandard_install" | "listen_local" | "version_too_old" | "download_failed" | "panel_unreachable" | "auth_failed" | "unreachable" | "host_key_changed" | "name_taken" | "dns_failed" | "cert_failed" | "interrupted" | "command_failed";
+        HostErrorCode: "" | "unsupported_os" | "no_systemd" | "no_root" | "nonstandard_install" | "listen_local" | "version_too_old" | "download_failed" | "panel_unreachable" | "auth_failed" | "unreachable" | "host_key_changed" | "name_taken" | "dns_failed" | "cert_failed" | "interrupted" | "command_failed" | "port_in_use" | "xray_down";
         HostTask: {
             /** Format: int64 */
             id: number;
@@ -3486,7 +3587,7 @@ export interface components {
             hostId: number;
             kind: components["schemas"]["HostTaskKind"];
             status: components["schemas"]["HostTaskStatus"];
-            /** @description 当前或最后所在的步骤：connect、detect、install、adopt、register、run、dns、issue、install_cert，还没开始为空串 */
+            /** @description 当前或最后所在的步骤：connect、detect、install、adopt、register、run、dns、issue、install_cert、ports、inbounds、firewall、xray、node_groups，还没开始为空串 */
             step: string;
             errorCode: components["schemas"]["HostErrorCode"];
             /** @description 脱敏后的失败摘要，没有为空串 */
@@ -7628,6 +7729,108 @@ export interface operations {
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             502: components["responses"]["UpstreamUnavailable"];
+        };
+    };
+    setServerClientFlow: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    clientFlow: components["schemas"]["ClientFlow"];
+                };
+            };
+        };
+        responses: {
+            /** @description 修改后的服务器 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ServerEnvelope"];
+                };
+            };
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    previewInboundPresets: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 预览 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["InboundPresetPreview"];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            429: components["responses"]["RateLimited"];
+            502: components["responses"]["UpstreamUnavailable"];
+        };
+    };
+    deployInboundPresets: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InboundPresetDeployInput"];
+            };
+        };
+        responses: {
+            /** @description 排队中的任务 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["HostTask"];
+                    };
+                };
+            };
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            429: components["responses"]["RateLimited"];
         };
     };
     listSshCredentials: {

@@ -1,4 +1,4 @@
-import { Alert, Button, Collapse, Form, Select } from 'antd'
+import { Alert, Button, Collapse, Form, Select, Switch } from 'antd'
 import { KeyValueField, NumberField, SelectField, SwitchField, TagsField, TextField, type Binder } from './fields'
 import {
   NETWORKS,
@@ -11,6 +11,7 @@ import {
   networkKey,
   networkOf,
   prefillNetwork,
+  randomHex,
   randomPath,
   randomServiceName,
   withNetwork,
@@ -165,13 +166,48 @@ function NetworkFields({ b, network }: { b: Binder; network: string }) {
   }
 }
 
+/** Salamander 混淆密码的随机字节数（Xray 要求密码至少 4 字节）。 */
+const SALAMANDER_PASSWORD_BYTES = 16
+const FINALMASK_PATH: Path = ['streamSettings', 'finalmask']
+const SALAMANDER_PASSWORD_PATH: Path = [...FINALMASK_PATH, 'udp', 0, 'settings', 'password']
+
+/** 一份只带 Salamander 的 FinalMask（3x-ui v3.11 的 Hysteria2 混淆，docs/03 §5.1 入站表单）。 */
+function salamanderMask(password: string) {
+  return { udp: [{ type: 'salamander', settings: { password } }] }
+}
+
+/** Hysteria2 的 Salamander 混淆：开关与密码都在传输的 FinalMask 里，不是 hysteriaSettings.auth。 */
+function SalamanderField({ b }: { b: Binder }) {
+  const isOn = getAt(b.draft, [...FINALMASK_PATH, 'udp', 0, 'type']) === 'salamander'
+  return (
+    <>
+      <Form.Item label="Salamander 混淆" extra="打开后客户端要填同样的混淆密码；订阅里会自动带上">
+        <Switch
+          aria-label="Salamander 混淆"
+          checked={isOn}
+          onChange={(on) => b.set(FINALMASK_PATH, on ? salamanderMask(randomHex(SALAMANDER_PASSWORD_BYTES)) : undefined)}
+        />
+      </Form.Item>
+      {isOn && (
+        <TextField
+          b={b}
+          path={SALAMANDER_PASSWORD_PATH}
+          label="混淆密码"
+          extra="至少 4 个字符"
+          action={<Button onClick={() => b.set(SALAMANDER_PASSWORD_PATH, randomHex(SALAMANDER_PASSWORD_BYTES))}>随机</Button>}
+        />
+      )}
+    </>
+  )
+}
+
 function HysteriaFields({ b }: { b: Binder }) {
   const base: Path = ['streamSettings', networkKey(NETWORK_HYSTERIA)]
   const masq: Path = [...base, 'masquerade']
   const type = String(getAt(b.draft, [...masq, 'type']) ?? '')
   return (
     <>
-      <TextField b={b} path={[...base, 'auth']} label="混淆密码" extra="留空表示不混淆" />
+      <SalamanderField b={b} />
       <NumberField b={b} path={[...base, 'udpIdleTimeout']} label="UDP 空闲超时（秒）" min={2} max={600} />
       <SelectField b={b} path={[...masq, 'type']} label="伪装" options={MASQUERADE_TYPES} onChange={(t) => b.set(masq, t === '' ? undefined : { type: t, url: '', dir: '', content: '', rewriteHost: false, insecure: false, headers: {}, statusCode: 0 })} />
       {type === 'proxy' && (

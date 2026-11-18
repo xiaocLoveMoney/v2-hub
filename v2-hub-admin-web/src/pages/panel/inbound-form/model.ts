@@ -271,7 +271,8 @@ export function defaultNetworkSettings(network: string): JsonObject {
     case 'xhttp':
       return { path: '/', host: '', mode: 'auto', xPaddingBytes: '100-1000', noSSEHeader: false, scMaxBufferedPosts: 30, scStreamUpServerSecs: '20-80', headers: {} }
     case NETWORK_HYSTERIA:
-      return { version: 2, auth: '', udpIdleTimeout: 60 }
+      // 用户凭据由平台下发，入站上不设 auth；混淆在 finalmask 里（Ruling-76）
+      return { version: 2, udpIdleTimeout: 60 }
     case 'tcp':
     default:
       return { acceptProxyProtocol: false, header: { type: 'none' } }

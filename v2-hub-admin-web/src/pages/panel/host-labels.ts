@@ -14,6 +14,7 @@ export const HOST_TASK_KIND_LABELS: Record<HostTaskKind, string> = {
   reissue_token: '重签令牌',
   enable_tls: '配置证书',
   diagnose: '查看状态与日志',
+  deploy_inbounds: '一键部署入站',
 }
 
 /** 任务状态的显示名与颜色（docs/03 §5.22：queued → running → succeeded / failed，queued 可取消）。 */
@@ -36,6 +37,11 @@ const HOST_TASK_STEP_LABELS: Record<string, string> = {
   dns: '设置解析',
   issue: '申请证书',
   install_cert: '安装证书',
+  ports: '检查端口',
+  inbounds: '建入站',
+  firewall: '放行防火墙',
+  xray: '确认 Xray',
+  node_groups: '加进节点组',
 }
 
 const STEP_NOT_STARTED = '未开始'
@@ -66,6 +72,8 @@ const HOST_ERROR_TEXT: Record<Exclude<HostErrorCode, ''>, string> = {
   cert_failed: '主机上的 acme.sh 申请证书失败，失败摘要与日志里有它的报错；排除问题后等下一轮自动重试，或手动重做“配置证书”',
   interrupted: '平台重启时任务被中断；重新发起即可',
   command_failed: '命令执行失败，详见日志；排除问题后重新发起',
+  port_in_use: '所选端口已被主机上的程序或面板已有入站占用；换个端口再部署',
+  xray_down: '入站建好了，但面板的 Xray 没在运行，节点暂不可用；看日志里的报错，必要时删掉新建的入站',
 }
 
 /** 原因大类的中文说明；空串（没有原因）返回空串，表里没有的大类（后端先于前端加了新值）原样显示。 */
