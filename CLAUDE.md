@@ -35,7 +35,7 @@ cd v2-hub-contract/deploy/it && bash run_all.sh
 - 生产自动部署：`main` 检查全绿后由生产机上的自托管 Runner 执行 `deploy_prod.sh`（Ruling-62，docs/02 §6）。
 
 契约（全部在 v2-hub-contract/）：`hub-api.yaml`（server → 前端）、`deploy/init.sql`（server 的表结构）、
-`upstream/3x-ui/openapi-v3.11.0.json`（3x-ui → server 的上游基准）。契约版本用 git tag `vX.Y`，当前 `v0.22`。
+`upstream/3x-ui/openapi-v3.11.0.json`（3x-ui → server 的上游基准）。契约版本用 git tag `vX.Y`，当前 `v0.23`。
 
 ## 跨目录纪律
 
@@ -97,6 +97,12 @@ GitHub 仓库设置见 `docs/github-仓库设置清单.md`。
   令牌经临时文件传入、用完即删，证书装到 `/root/cert/<域名>/`；没到续期时间就复用不重签，续期时间取 acme.sh 给出的（ARI），失败下一轮自动重试。
   实现在 `deploy/xui/cert.go`；真实主机测试（默认跳过，环境变量开启）在测试机上从全新系统走通，Let's Encrypt 测试与正式环境各签一次。
   真实的到期自动续期、管理端页面登录后的浏览器实测待人工验证。
+  补充（tag `v0.23`，Ruling-75 – Ruling-77）：主机域名的解析只替换平台自己建的记录（别处建的冲突记录不动、任务失败）、带 DNS 账号的主机地址须是公网，支持在平台所在机器上托管它自己；
+  服务器详情页“一键部署入站”：7 个预设（VLESS REALITY + Vision、同上加 ML-KEM、VLESS XHTTP + TLS、VMess WS + TLS、Trojan TLS、SS2022 aes-256、Hysteria2 + Salamander），
+  作为主机任务 `deploy_inbounds`：先读主机监听端口避免冲突、要证书的先配置证书、建完连续确认 Xray 在跑（`xray_down`）、加进节点组；
+  VLESS 流控按服务器开关（3x-ui 的 client flow 是全局的）；订阅支持 VLESS Encryption（mihomo / xray，sing-box 不输出）与 mihomo 的 XHTTP。
+  实现在 `inboundtpl/presets.go`、`service/host_inbound_presets.go`；测试机上同机部署的平台给自己一键部署 7 项成功，7 个节点都实测出网（REALITY 两项在测试机上用 Xray 客户端测，本机网络按 SNI 干扰）。
+  管理端一键部署弹窗登录后的浏览器实测、真实客户端导入待人工验证。
 - 路线图 M3–M8、M9（链式改造）、M10（出口补全与入站预填）与 M11（SSH 托管与面板部署）已完成；后续工作待定。
 - 路线（2026-11-13，Ruling-17 – Ruling-22）：参考 SSPanel-Uim Malio 的功能与界面，自行实现；里程碑为
   M3 订阅与用户端基础 → M4 自助运营 → M5 商店与钱包 → M6 / M7 两种链式 → M8 运营，见 docs/07。
