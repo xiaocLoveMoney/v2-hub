@@ -35,7 +35,7 @@ cd v2-hub-contract/deploy/it && bash run_all.sh
 - 生产自动部署：`main` 检查全绿后由生产机上的自托管 Runner 执行 `deploy_prod.sh`（Ruling-62，docs/02 §6）。
 
 契约（全部在 v2-hub-contract/）：`hub-api.yaml`（server → 前端）、`deploy/init.sql`（server 的表结构）、
-`upstream/3x-ui/openapi-v3.11.0.json`（3x-ui → server 的上游基准）。契约版本用 git tag `vX.Y`，当前 `v0.21`。
+`upstream/3x-ui/openapi-v3.11.0.json`（3x-ui → server 的上游基准）。契约版本用 git tag `vX.Y`，当前 `v0.22`。
 
 ## 跨目录纪律
 
@@ -92,8 +92,11 @@ GitHub 仓库设置见 `docs/github-仓库设置清单.md`。
   全新安装与升级（真实 systemd、从 GitHub 下载）、管理端 M11 页面登录后的浏览器实测未自动化，待人工验证。
   补充（tag `v0.21`，Ruling-72、Ruling-73）：面板的公开证书——管理端配一个 DNS 账号（目前只有 Cloudflare，令牌加密、只写不读、只在平台上使用），
   主机选了它并有域名时，平台建解析、经 ACME DNS-01 向 Let's Encrypt 申请证书、经 SSH 装到面板上，服务器改按 `https://域名` + `verify` 接入，
-  离到期不足 30 天自动续期；没选 DNS 账号的主机仍用自签证书 + `pin`。DNS 抽象在 `manager/dns`，签发在 `manager/acmecert`。
-  签发协议由进程内的假 ACME 服务端单测覆盖，真实 Cloudflare 域名上的首次申请与续期待人工验证。
+  没选 DNS 账号的主机仍用自签证书 + `pin`。DNS 抽象在 `manager/dns`。
+  修订（tag `v0.22`，Ruling-74）：照 3x-ui 的做法改为在主机上用 acme.sh 签发——平台经 SSH 传固定版本的 acme.sh 与 `dns_cf` 钩子（快照在 `upstream/acme.sh/`），
+  令牌经临时文件传入、用完即删，证书装到 `/root/cert/<域名>/`；没到续期时间就复用不重签，续期时间取 acme.sh 给出的（ARI），失败下一轮自动重试。
+  实现在 `deploy/xui/cert.go`；真实主机测试（默认跳过，环境变量开启）在测试机上从全新系统走通，Let's Encrypt 测试与正式环境各签一次。
+  真实的到期自动续期、管理端页面登录后的浏览器实测待人工验证。
 - 路线图 M3–M8、M9（链式改造）、M10（出口补全与入站预填）与 M11（SSH 托管与面板部署）已完成；后续工作待定。
 - 路线（2026-11-13，Ruling-17 – Ruling-22）：参考 SSPanel-Uim Malio 的功能与界面，自行实现；里程碑为
   M3 订阅与用户端基础 → M4 自助运营 → M5 商店与钱包 → M6 / M7 两种链式 → M8 运营，见 docs/07。
