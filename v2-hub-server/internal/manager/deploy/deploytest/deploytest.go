@@ -19,14 +19,18 @@ type Fake struct {
 	CertPin     string
 	Diagnosis   string
 	Login       deploy.PanelLogin
-	Errors      map[string]error
+	// Reused 是 IssueCert 的结果（主机上已有证书、没重签）；Installed 是 InstallCert 的结果。
+	Reused    bool
+	Installed deploy.InstalledCert
+	Errors    map[string]error
 	// OnCall 非 nil 时在每个方法开始时调用，参数是方法名；用来在某一步前后插入动作（如取消 ctx）。
 	OnCall func(method string)
 
 	mu    sync.Mutex
 	calls []string
-	// installedCert 是最近一次 InstallCert 收到的证书链。
-	installedCert []byte
+	// requests 是每次 IssueCert 收到的参数；installed 是每次 InstallCert 收到的域名。
+	requests  []deploy.CertRequest
+	installed []string
 }
 
 var _ deploy.Deployer = (*Fake)(nil)
@@ -48,11 +52,18 @@ func (f *Fake) Calls() []string {
 	return append([]string(nil), f.calls...)
 }
 
-// InstalledCert 返回最近一次 InstallCert 收到的证书链；没装过为 nil。
-func (f *Fake) InstalledCert() []byte {
+// CertRequests 返回每次 IssueCert 收到的参数。
+func (f *Fake) CertRequests() []deploy.CertRequest {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return f.installedCert
+	return append([]deploy.CertRequest(nil), f.requests...)
+}
+
+// InstalledDomains 返回每次 InstallCert 收到的域名。
+func (f *Fake) InstalledDomains() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.installed...)
 }
 
 // Detect 见 deploy.Deployer。
@@ -79,15 +90,27 @@ func (f *Fake) IssueToken(context.Context, remote.Runner) (string, error) {
 	return f.Token, nil
 }
 
-// InstallCert 见 deploy.Deployer；记下收到的证书。
-func (f *Fake) InstallCert(_ context.Context, _ remote.Runner, certPEM, _ []byte) error {
+// IssueCert 见 deploy.Deployer；记下收到的参数（失败时也记）。
+func (f *Fake) IssueCert(_ context.Context, _ remote.Runner, req deploy.CertRequest, _ deploy.Logger) (bool, error) {
+	err := f.enter("IssueCert")
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.requests = append(f.requests, req)
+	if err != nil {
+		return false, err
+	}
+	return f.Reused, nil
+}
+
+// InstallCert 见 deploy.Deployer；记下收到的域名。
+func (f *Fake) InstallCert(_ context.Context, _ remote.Runner, domain string) (deploy.InstalledCert, error) {
 	if err := f.enter("InstallCert"); err != nil {
-		return err
+		return deploy.InstalledCert{}, err
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.installedCert = certPEM
-	return nil
+	f.installed = append(f.installed, domain)
+	return f.Installed, nil
 }
 
 // EnableTLS 见 deploy.Deployer。

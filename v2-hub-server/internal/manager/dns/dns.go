@@ -56,6 +56,13 @@ type Account struct {
 	Token string
 }
 
+// ACMEHook 是主机上的 acme.sh 用这个服务商做 DNS-01 验证时要的钩子名与环境变量（docs/03 §5.22，Ruling-74）。
+// Env 含令牌明文，只给签发那一次用。
+type ACMEHook struct {
+	Name string
+	Env  map[string]string
+}
+
 // Provider 管理一个根域名下的记录。实现须并发安全；所有 name 都是完整域名（小写、不带结尾的点）。
 type Provider interface {
 	// CheckZone 确认令牌能看到并管理这个根域名；不能时返回 *Error。
@@ -63,8 +70,8 @@ type Provider interface {
 	// PointTo 把 name 解析到 target：target 是 IPv4 建 A、IPv6 建 AAAA、是域名建 CNAME，仅解析、不开代理。
 	// name 下已有的 A / AAAA / CNAME 记录会被换成这一条；已经是这一条时什么都不做。
 	PointTo(ctx context.Context, name, target string) error
-	// SetTXT 在 name 下加一条 TXT 记录，返回删掉这条记录的函数；调用方用完必须调用。
-	SetTXT(ctx context.Context, name, value string) (remove func(ctx context.Context) error, err error)
+	// ACMEHook 给出在主机上用 acme.sh 签发证书时的钩子与凭据；不发起网络请求。
+	ACMEHook() ACMEHook
 }
 
 // Factory 按账号创建一个 Provider；创建时不得发起网络请求。

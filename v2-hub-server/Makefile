@@ -38,6 +38,7 @@ sqlc:
 # 把契约目录里的上游安装与升级脚本快照拷进 deploy/xui 供内嵌（生成物入库，Ruling-69）；升级基线版本时重跑并 review diff。
 gen-upstream:
 	cp contract/upstream/3x-ui/install-v*.sh contract/upstream/3x-ui/update-v*.sh internal/manager/deploy/xui/upstream/
+	cp contract/upstream/acme.sh/acme-*.sh contract/upstream/acme.sh/dns_cf-*.sh internal/manager/deploy/xui/upstream/
 
 # 扫描代码实际调用到的已知漏洞（标准库与依赖）；有可达漏洞时退出码非 0，CI 据此失败。
 vuln:

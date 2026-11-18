@@ -44,7 +44,6 @@ type hostFixture struct {
 	runner   *remotetest.Runner
 	deployer *deploytest.Fake
 	dnsFake  *dnstest.Fake
-	issuer   *fakeIssuer
 	credID   int64
 }
 
@@ -73,17 +72,18 @@ func newHostFixture(t *testing.T) *hostFixture {
 		Token:       issuedToken, CertPin: testCertPin, Errors: map[string]error{},
 		Login: deploy.PanelLogin{Username: "newuser", Password: "newpassword1234567890"},
 	}
+	deployer.Installed = testInstalledCert(pf.clock.now())
 	dnsFake := dnstest.New()
-	issuer := &fakeIssuer{notAfter: pf.clock.now().Add(testCertLifetime)}
+	dnsFake.Hook = dns.ACMEHook{Name: testDNSHook, Env: map[string]string{testDNSEnv: testDNSValue}}
 	hosts := NewHostService(pf.pool, testSealer(t), HostDeps{
 		Dialer: dialer, Deployers: deploy.NewRegistry(map[string]deploy.Deployer{fakeType: deployer}),
-		DNS: dns.NewRegistry(map[string]dns.Factory{fakeDNSType: dnsFake.Factory()}), Issuer: issuer, Panels: pf.panels,
+		DNS: dns.NewRegistry(map[string]dns.Factory{fakeDNSType: dnsFake.Factory()}), Panels: pf.panels,
 	}, HostConfig{
-		CommandTimeout: time.Minute, InstallTimeout: time.Minute, CertTimeout: time.Minute, RenewBefore: testRenewBefore,
+		CommandTimeout: time.Minute, InstallTimeout: time.Minute, CertTimeout: time.Minute, ACMEDirectoryURL: fakeACMEURL,
 		TestLimit: hostTestLimit, TestWindow: time.Minute,
 		ActionLimit: hostActionsMax, ActionWindow: time.Minute, MaxBatch: 3, PanelWaitAttempts: 2, PanelWaitInterval: time.Millisecond, Now: pf.clock.now,
 	})
-	f := &hostFixture{panelFixture: pf, hosts: hosts, dialer: dialer, runner: runner, deployer: deployer, dnsFake: dnsFake, issuer: issuer}
+	f := &hostFixture{panelFixture: pf, hosts: hosts, dialer: dialer, runner: runner, deployer: deployer, dnsFake: dnsFake}
 	cred, err := hosts.CreateCredential(context.Background(), pf.actor, SSHCredentialInput{Name: "root-key", Username: "root", AuthType: SSHAuthKey, Secret: testPrivateKey(t)}, nil)
 	if err != nil {
 		t.Fatalf("CreateCredential: %v", err)

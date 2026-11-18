@@ -84,9 +84,9 @@ type HostConfig struct {
 	MaxBatch int
 	// AllowLoopback 允许回环地址，只给联调用。
 	AllowLoopback bool
-	// CertTimeout 是申请公开证书的任务的总时限（改解析、等签发、装证书）；RenewBefore 是证书离到期多久开始自动续期。
-	CertTimeout time.Duration
-	RenewBefore time.Duration
+	// CertTimeout 是申请公开证书的任务的总时限（改解析、主机上签发、装证书）；ACMEDirectoryURL 是传给主机上 acme.sh 的签发方目录地址。
+	CertTimeout      time.Duration
+	ACMEDirectoryURL string
 	// PanelWaitAttempts / PanelWaitInterval 是面板重启后等它回来的探测次数与间隔。
 	PanelWaitAttempts int
 	PanelWaitInterval time.Duration
@@ -98,13 +98,12 @@ type HostConfig struct {
 type HostDeps struct {
 	Dialer    remote.Dialer
 	Deployers *deploy.Registry
-	// DNS 是 DNS 服务商的注册表，Issuer 向签发方申请证书（Ruling-72、Ruling-73）。
+	// DNS 是 DNS 服务商的注册表（Ruling-72）。
 	DNS    *dns.Registry
-	Issuer CertIssuer
 	Panels *PanelService
 }
 
-// HostService 负责 SSH 凭据、DNS 账号、托管主机与主机任务（docs/03 §5.22，Ruling-68 – Ruling-73）。
+// HostService 负责 SSH 凭据、DNS 账号、托管主机与主机任务（docs/03 §5.22，Ruling-68 – Ruling-74）。
 // 只经 remote.Dialer 连主机、经 deploy.Deployer 执行动作，自己不拼任何命令行。
 type HostService struct {
 	store
@@ -112,7 +111,6 @@ type HostService struct {
 	dialer    remote.Dialer
 	deployers *deploy.Registry
 	dns       *dns.Registry
-	issuer    CertIssuer
 	panels    *PanelService
 	cfg       HostConfig
 	tests     *ratelimit.FailureGuard
@@ -133,7 +131,7 @@ func NewHostService(pool *pgxpool.Pool, sealer *crypto.Sealer, deps HostDeps, cf
 		return ratelimit.NewFailureGuard(ratelimit.FailureGuardConfig{MaxFailures: limit, Window: window, Lockout: window, MaxKeys: hostGuardMaxKeys}, now)
 	}
 	return &HostService{
-		store: newStore(pool), sealer: sealer, dialer: deps.Dialer, deployers: deps.Deployers, dns: deps.DNS, issuer: deps.Issuer,
+		store: newStore(pool), sealer: sealer, dialer: deps.Dialer, deployers: deps.Deployers, dns: deps.DNS,
 		panels: deps.Panels, cfg: cfg,
 		tests: guard(cfg.TestLimit, cfg.TestWindow), actions: guard(cfg.ActionLimit, cfg.ActionWindow),
 		logins: newExitTestLocks(), kick: make(chan struct{}, 1), now: now,

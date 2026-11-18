@@ -568,7 +568,7 @@ func (t *taskRun) operate(ctx context.Context, d deploy.Deployer, r remote.Runne
 		return withServerLock(serverID, func() error { return t.reissueToken(ctx, d, r, serverID) })
 	case HostTaskEnableTLS:
 		if t.hasDNS() {
-			// 改解析与等签发可能要几分钟，不占对账锁；certify 只在装证书的那一段占
+			// 改解析与主机上签发可能要几分钟，不占对账锁；certify 只在装证书的那一段占
 			return t.certify(ctx, d, r, serverID)
 		}
 		return withServerLock(serverID, func() error { return t.enableTLS(ctx, d, r, serverID) })

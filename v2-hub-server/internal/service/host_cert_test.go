@@ -4,11 +4,9 @@ import (
 	"bytes"
 	"context"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
-	"v2-hub-server/internal/manager/acmecert"
 	"v2-hub-server/internal/manager/deploy"
 	"v2-hub-server/internal/manager/dns"
 	"v2-hub-server/internal/manager/panel"
@@ -18,59 +16,37 @@ const (
 	fakeDNSType      = "fakedns"
 	testZone         = "example.com"
 	testDNSValue     = "dns-api-value-0123456789abcdef"
+	testDNSHook      = "dns_fake"
+	testDNSEnv       = "FAKE_Token"
 	testCertLifetime = 90 * 24 * time.Hour
-	testRenewBefore  = 30 * 24 * time.Hour
+	testRenewIn      = 60 * 24 * time.Hour
 	domainNodeA      = "node-a.example.com"
 	urlDomainNodeA   = "https://node-a.example.com:2053/abc"
 	fakeACMEURL      = "https://acme.test/directory"
 )
 
-// fakeIssuer 是假的证书签发方：照样经 solver 写、删验证记录，然后给出一张假证书。
-type fakeIssuer struct {
-	mu       sync.Mutex
-	err      error
-	notAfter time.Time
-	domains  []string
-	keys     [][]byte
+var testLeaf = []byte("leaf " + domainNodeA)
+
+// testInstalledCert 是假部署器装到面板上的证书：从 now 起 90 天到期，acme.sh 排的续期在 60 天后。
+func testInstalledCert(now time.Time) deploy.InstalledCert {
+	return deploy.InstalledCert{NotAfter: now.Add(testCertLifetime), LeafDER: testLeaf, RenewAt: now.Add(testRenewIn), Changed: true}
 }
 
-func (f *fakeIssuer) DirectoryURL() string { return fakeACMEURL }
-
-func (f *fakeIssuer) Issue(ctx context.Context, accountKey []byte, domain string, solver acmecert.Solver) (*acmecert.Certificate, error) {
-	f.mu.Lock()
-	f.domains = append(f.domains, domain)
-	f.keys = append(f.keys, accountKey)
-	err, notAfter := f.err, f.notAfter
-	f.mu.Unlock()
-	if err != nil {
-		return nil, err
+// certRenewAt 读主机的下次续期时间；nil 表示没记。
+func (f *hostFixture) certRenewAt(t *testing.T, hostID int64) *time.Time {
+	t.Helper()
+	var at *time.Time
+	if err := f.pool.QueryRow(context.Background(), "SELECT cert_renew_at FROM server_host WHERE id = $1", hostID).Scan(&at); err != nil {
+		t.Fatalf("read cert_renew_at: %v", err)
 	}
-	cleanup, err := solver.Present(ctx, "_acme-challenge."+domain, "challenge-value")
-	if err != nil {
-		return nil, err
+	return at
+}
+
+func (f *hostFixture) wantRenewDue(t *testing.T, hostID int64) {
+	t.Helper()
+	if at := f.certRenewAt(t, hostID); at == nil || at.After(f.clock.now()) {
+		t.Fatalf("renewal must be due now, got %v", at)
 	}
-	if err := cleanup(ctx); err != nil {
-		return nil, err
-	}
-	return &acmecert.Certificate{CertPEM: []byte("CERT " + domain), KeyPEM: []byte("KEY " + domain), NotAfter: notAfter, Leaf: []byte("leaf " + domain)}, nil
-}
-
-func (f *fakeIssuer) setErr(err error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.err = err
-}
-
-func (f *fakeIssuer) setNotAfter(t time.Time) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.notAfter = t
-}
-
-func (f *fakeIssuer) issued() []string {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return append([]string(nil), f.domains...)
 }
 
 func (f *hostFixture) createDNSAccount(t *testing.T) DNSAccount {
@@ -253,21 +229,22 @@ func TestHostDomainRules(t *testing.T) {
 		t.Fatalf("seed cert expiry: %v", err)
 	}
 	in := ServerHostInput{Name: "Node A", Address: hostAddrA, SSHPort: 22, CredentialID: f.credID, DNSAccountID: &account.ID, Domain: domainNodeA}
-	// 域名没变：到期时间保留
+	// 域名没变：到期时间保留，续期时间（这里还没记）也不动
 	kept, err := f.hosts.UpdateHost(ctx, f.actor, host.ID, in, nil)
-	if err != nil || kept.CertNotAfter == nil {
+	if err != nil || kept.CertNotAfter == nil || f.certRenewAt(t, host.ID) != nil {
 		t.Fatalf("unchanged domain must keep the expiry: %+v, err = %v", kept, err)
 	}
-	// 换了域名：到期时间清空，等下一次“配置证书”
+	// 换了域名：到期时间清空，续期时间记为现在，下一轮按新域名申请
 	in.Domain = "moved.example.com"
 	moved, err := f.hosts.UpdateHost(ctx, f.actor, host.ID, in, nil)
 	if err != nil || moved.Domain != "moved.example.com" || moved.CertNotAfter != nil {
 		t.Fatalf("changed domain must clear the expiry: %+v, err = %v", moved, err)
 	}
-	// 去掉 DNS 账号：域名一并清掉
+	f.wantRenewDue(t, host.ID)
+	// 去掉 DNS 账号：域名一并清掉，不再续期
 	in.DNSAccountID, in.Domain = nil, ""
 	cleared, err := f.hosts.UpdateHost(ctx, f.actor, host.ID, in, nil)
-	if err != nil || cleared.DNSAccountID != nil || cleared.Domain != "" {
+	if err != nil || cleared.DNSAccountID != nil || cleared.Domain != "" || f.certRenewAt(t, host.ID) != nil {
 		t.Fatalf("cleared = %+v, err = %v", cleared, err)
 	}
 }
@@ -278,12 +255,16 @@ func TestProvisionIssuesPublicCertificate(t *testing.T) {
 	f.freshInstall()
 	account := f.createDNSAccount(t)
 	host := f.createHostWithDNS(t, hostAddrA, "node-a", account.ID)
+	want := f.deployer.Installed
 
 	task := f.runNext(t)
 	wantTask(t, task, HostTaskSucceeded, deploy.ReasonNone)
 	got, err := f.hosts.GetHost(ctx, host.ID)
-	if err != nil || got.ServerID == nil || got.CertNotAfter == nil || !got.CertNotAfter.Equal(f.issuer.notAfter) {
+	if err != nil || got.ServerID == nil || got.CertNotAfter == nil || !got.CertNotAfter.Equal(want.NotAfter) {
 		t.Fatalf("host after provision = %+v, err = %v", got, err)
+	}
+	if at := f.certRenewAt(t, host.ID); at == nil || !at.Equal(want.RenewAt) {
+		t.Fatalf("renewal time must come from acme.sh: %v", at)
 	}
 	srv, err := f.panels.GetServer(ctx, *got.ServerID)
 	if err != nil || srv.BaseURL != urlDomainNodeA || srv.TLSMode != panel.TLSVerify || srv.CertPinSHA256 != nil {
@@ -292,40 +273,37 @@ func TestProvisionIssuesPublicCertificate(t *testing.T) {
 	if f.fleet.tokens[urlDomainNodeA] != issuedToken {
 		t.Fatal("the token must carry over to the domain address")
 	}
-	points, txt, removed := f.dnsFake.Snapshot()
-	if points[domainNodeA] != hostAddrA || len(txt) != 0 || removed != 1 {
-		t.Fatalf("dns: points = %v, txt left = %v, removed = %d", points, txt, removed)
+	if points := f.dnsFake.Snapshot(); points[domainNodeA] != hostAddrA {
+		t.Fatalf("dns points = %v", points)
 	}
-	if string(f.deployer.InstalledCert()) != "CERT "+domainNodeA {
-		t.Fatalf("installed cert = %q", f.deployer.InstalledCert())
+	reqs := f.deployer.CertRequests()
+	wantReq := deploy.CertRequest{Domain: domainNodeA, DirectoryURL: fakeACMEURL, DNSHook: testDNSHook}
+	if len(reqs) != 1 || reqs[0].Domain != wantReq.Domain || reqs[0].DirectoryURL != wantReq.DirectoryURL || reqs[0].DNSHook != wantReq.DNSHook ||
+		reqs[0].Env[testDNSEnv] != testDNSValue {
+		t.Fatalf("cert requests = %d, first %+v", len(reqs), wantReq)
 	}
-	if calls := strings.Join(f.deployer.Calls(), ","); calls != "Detect,Provision,InstallCert" {
+	if domains := f.deployer.InstalledDomains(); len(domains) != 1 || domains[0] != domainNodeA {
+		t.Fatalf("installed domains = %v", domains)
+	}
+	if calls := strings.Join(f.deployer.Calls(), ","); calls != "Detect,Provision,IssueCert,InstallCert" {
 		t.Fatalf("deployer calls = %s", calls)
-	}
-	if issued := f.issuer.issued(); len(issued) != 1 || issued[0] != domainNodeA {
-		t.Fatalf("issued = %v", issued)
 	}
 	if task.Step != hostStepInstallCert {
 		t.Fatalf("last step = %q", task.Step)
 	}
-	for _, secret := range []string{testDNSValue, issuedToken, "KEY " + domainNodeA} {
+	for _, secret := range []string{testDNSValue, issuedToken} {
 		if strings.Contains(task.Log, secret) || strings.Contains(task.LastError, secret) {
 			t.Fatalf("task log leaks %q:\n%s", secret, task.Log)
 		}
 	}
 
-	// ACME 账号密钥：首次生成后加密保存，之后复用同一把
+	// 再做一次“配置证书”：主机上的 acme.sh 说还没到续期时间、面板上已是这张证书，不重签也不重启
 	f.installed()
-	wantTask(t, f.action(t, host.ID, HostTaskEnableTLS), HostTaskSucceeded, deploy.ReasonNone)
-	if len(f.issuer.keys) != 2 || !bytes.Equal(f.issuer.keys[0], f.issuer.keys[1]) || len(f.issuer.keys[0]) == 0 {
-		t.Fatal("the acme account key must be generated once and reused")
-	}
-	var sealed []byte
-	if err := f.pool.QueryRow(ctx, "SELECT key_enc FROM acme_account WHERE directory_url = $1", fakeACMEURL).Scan(&sealed); err != nil {
-		t.Fatalf("read acme account: %v", err)
-	}
-	if bytes.Equal(sealed, f.issuer.keys[0]) {
-		t.Fatal("acme account key is stored in plain text")
+	f.deployer.Reused, f.deployer.Installed.Changed = true, false
+	again := f.action(t, host.ID, HostTaskEnableTLS)
+	wantTask(t, again, HostTaskSucceeded, deploy.ReasonNone)
+	if !strings.Contains(again.Log, "直接复用") || !strings.Contains(again.Log, "没有重启") {
+		t.Fatalf("log should say the certificate was reused:\n%s", again.Log)
 	}
 }
 
@@ -336,17 +314,18 @@ func TestCertificateFailureKeepsServerAttached(t *testing.T) {
 	account := f.createDNSAccount(t)
 	host := f.createHostWithDNS(t, hostAddrA, "node-a", account.ID)
 
-	// 签发方拒绝：部署任务失败，但面板已按自签证书接入
-	f.issuer.setErr(&acmecert.Error{Kind: acmecert.KindCA, Message: "证书签发方限流，请晚些再试"})
+	// 主机上签发失败：部署任务失败，但面板已按自签证书接入；续期时间记为现在，下一轮自动重试
+	f.deployer.Errors["IssueCert"] = deploy.NewError(deploy.ReasonCertFailed, "主机上的 acme.sh 申请证书失败：rateLimited")
 	task := f.runNext(t)
 	wantTask(t, task, HostTaskFailed, deploy.ReasonCertFailed)
-	if !strings.Contains(task.Log, "不需要重新部署") {
-		t.Fatalf("log should say the panel is attached:\n%s", task.Log)
+	if !strings.Contains(task.Log, "不需要重新部署") || !strings.Contains(task.LastError, "rateLimited") {
+		t.Fatalf("log should say the panel is attached:\n%s\n%s", task.Log, task.LastError)
 	}
 	got, err := f.hosts.GetHost(ctx, host.ID)
 	if err != nil || got.ServerID == nil || got.CertNotAfter != nil {
 		t.Fatalf("host = %+v, err = %v", got, err)
 	}
+	f.wantRenewDue(t, host.ID)
 	serverID := *got.ServerID
 	srv, err := f.panels.GetServer(ctx, serverID)
 	if err != nil || srv.BaseURL != urlHTTPSHostA || srv.TLSMode != panel.TLSPin || srv.CertPinSHA256 == nil || *srv.CertPinSHA256 != testCertPin {
@@ -355,34 +334,46 @@ func TestCertificateFailureKeepsServerAttached(t *testing.T) {
 	if strings.Contains(strings.Join(f.deployer.Calls(), ","), "InstallCert") {
 		t.Fatal("nothing must be installed when issuing failed")
 	}
+	if n, err := f.hosts.QueueCertRenewals(ctx); err != nil || n != 1 {
+		t.Fatalf("a failed first attempt must be retried by the next check: queued %d, err = %v", n, err)
+	}
+	f.deployer.Errors["IssueCert"] = nil
 
-	// 验证记录没生效 → dns_failed；DNS 服务商拒绝 → dns_failed
+	// DNS 服务商拒绝改解析 → dns_failed
 	f.installed()
-	f.issuer.setErr(&acmecert.Error{Kind: acmecert.KindDNS, Message: "验证用的 TXT 记录迟迟没有生效"})
-	wantTask(t, f.action(t, host.ID, HostTaskEnableTLS), HostTaskFailed, deploy.ReasonDNSFailed)
-	f.issuer.setErr(nil)
 	f.dnsFake.SetError("PointTo", &dns.Error{Kind: dns.KindRejected, Message: "Cloudflare 拒绝了请求"})
-	wantTask(t, f.action(t, host.ID, HostTaskEnableTLS), HostTaskFailed, deploy.ReasonDNSFailed)
+	wantTask(t, f.runNext(t), HostTaskFailed, deploy.ReasonDNSFailed)
 	f.dnsFake.SetError("PointTo", nil)
 
-	// 证书装好了但按域名连不上：退回“原地址 + 新证书指纹”，任务记失败
+	// 证书装好了但按域名连不上：退回“原地址 + 新证书指纹”，任务记失败，到期时间不记、下一轮重试
 	f.fleet.get(urlDomainNodeA).FailWith(&panel.Error{Kind: panel.KindUnreachable, Message: "解析不到"})
 	wantTask(t, f.action(t, host.ID, HostTaskEnableTLS), HostTaskFailed, deploy.ReasonPanelUnreachable)
 	srv, err = f.panels.GetServer(ctx, serverID)
-	wantPin := leafPin([]byte("leaf " + domainNodeA))
-	if err != nil || srv.BaseURL != urlHTTPSHostA || srv.TLSMode != panel.TLSPin || srv.CertPinSHA256 == nil || *srv.CertPinSHA256 != wantPin {
+	if err != nil || srv.BaseURL != urlHTTPSHostA || srv.TLSMode != panel.TLSPin || srv.CertPinSHA256 == nil || *srv.CertPinSHA256 != leafPin(testLeaf) {
 		t.Fatalf("server should fall back to the new certificate's pin: %+v, err = %v", srv, err)
 	}
-	if got, err := f.hosts.GetHost(ctx, host.ID); err != nil || got.CertNotAfter == nil {
-		t.Fatalf("the installed certificate's expiry must be recorded: %+v, err = %v", got, err)
+	if got, err := f.hosts.GetHost(ctx, host.ID); err != nil || got.CertNotAfter != nil {
+		t.Fatalf("the expiry must wait until the domain works: %+v, err = %v", got, err)
 	}
+	f.wantRenewDue(t, host.ID)
 
-	// 解析通了再做一次：换成域名 + verify
+	// 解析通了再做一次：换成域名 + verify，记下到期与续期时间
 	f.fleet.get(urlDomainNodeA).FailWith(nil)
 	wantTask(t, f.action(t, host.ID, HostTaskEnableTLS), HostTaskSucceeded, deploy.ReasonNone)
 	srv, err = f.panels.GetServer(ctx, serverID)
 	if err != nil || srv.BaseURL != urlDomainNodeA || srv.TLSMode != panel.TLSVerify || srv.CertPinSHA256 != nil {
 		t.Fatalf("server after retry = %+v, err = %v", srv, err)
+	}
+	if got, err := f.hosts.GetHost(ctx, host.ID); err != nil || got.CertNotAfter == nil {
+		t.Fatalf("expiry after retry: %+v, err = %v", got, err)
+	}
+
+	// 证书没换、面板原本就按域名接入，这次却探测不通：接入信息原样保留，不退回 pin
+	f.deployer.Reused, f.deployer.Installed.Changed = true, false
+	f.fleet.get(urlDomainNodeA).FailWith(&panel.Error{Kind: panel.KindUnreachable, Message: "超时"})
+	wantTask(t, f.action(t, host.ID, HostTaskEnableTLS), HostTaskFailed, deploy.ReasonPanelUnreachable)
+	if srv, err = f.panels.GetServer(ctx, serverID); err != nil || srv.BaseURL != urlDomainNodeA || srv.TLSMode != panel.TLSVerify {
+		t.Fatalf("an unchanged certificate must keep the domain connection: %+v, err = %v", srv, err)
 	}
 }
 
@@ -391,16 +382,19 @@ func TestAdoptWithDNSAccount(t *testing.T) {
 	ctx := context.Background()
 	account := f.createDNSAccount(t)
 
-	// 接管的面板自己有证书：不动它
+	// 接管的面板自己有证书：不动它，也不会被自动续期排上
 	f.deployer.Provisioned.Access.HasTLS, f.deployer.Provisioned.Access.CertSHA256 = true, testCertPin
 	host := f.createHostWithDNS(t, hostAddrA, "node-a", account.ID)
 	wantTask(t, f.runNext(t), HostTaskSucceeded, deploy.ReasonNone)
-	if len(f.issuer.issued()) != 0 {
+	if len(f.deployer.CertRequests()) != 0 {
 		t.Fatal("a panel that already has a certificate must be left alone")
 	}
 	got, err := f.hosts.GetHost(ctx, host.ID)
-	if err != nil || got.ServerID == nil || got.CertNotAfter != nil {
+	if err != nil || got.ServerID == nil || got.CertNotAfter != nil || f.certRenewAt(t, host.ID) != nil {
 		t.Fatalf("host = %+v, err = %v", got, err)
+	}
+	if n, err := f.hosts.QueueCertRenewals(ctx); err != nil || n != 0 {
+		t.Fatalf("an adopted panel with its own certificate must not be queued: %d, %v", n, err)
 	}
 	// 平台早先给它申请过证书的面板：按域名就能通过校验，直接用域名接入
 	if srv, err := f.panels.GetServer(ctx, *got.ServerID); err != nil || srv.BaseURL != urlDomainNodeA || srv.TLSMode != panel.TLSVerify {
@@ -411,8 +405,8 @@ func TestAdoptWithDNSAccount(t *testing.T) {
 	f.deployer.Provisioned.Access.HasTLS, f.deployer.Provisioned.Access.CertSHA256 = false, ""
 	plain := f.createHostWithDNS(t, hostAddrB, "node-b", account.ID)
 	wantTask(t, f.runNext(t), HostTaskSucceeded, deploy.ReasonNone)
-	if issued := f.issuer.issued(); len(issued) != 1 || issued[0] != "node-b.example.com" {
-		t.Fatalf("issued = %v", issued)
+	if reqs := f.deployer.CertRequests(); len(reqs) != 1 || reqs[0].Domain != "node-b.example.com" {
+		t.Fatalf("cert requests = %+v", reqs)
 	}
 	got, err = f.hosts.GetHost(ctx, plain.ID)
 	if err != nil || got.ServerID == nil || got.CertNotAfter == nil {
@@ -435,12 +429,12 @@ func TestQueueCertRenewals(t *testing.T) {
 	f.deployer.Provisioned = deploy.Provisioned{Access: deploy.PanelAccess{Port: testPanelPort, BasePath: testBasePath}, Token: issuedToken}
 	wantTask(t, f.runNext(t), HostTaskSucceeded, deploy.ReasonNone)
 
-	// 离到期还远：不排
+	// 还没到 acme.sh 给的续期时间：不排
 	if n, err := f.hosts.QueueCertRenewals(ctx); err != nil || n != 0 {
 		t.Fatalf("fresh certificate: queued %d, err = %v", n, err)
 	}
-	// 进入续期窗口：只给带证书的那台排一条，没有发起人
-	f.clock.advance(testCertLifetime - testRenewBefore + time.Hour)
+	// 到了续期时间：只给带证书的那台排一条，没有发起人
+	f.clock.advance(testRenewIn + time.Hour)
 	if n, err := f.hosts.QueueCertRenewals(ctx); err != nil || n != 1 {
 		t.Fatalf("due certificate: queued %d, err = %v", n, err)
 	}
@@ -455,11 +449,17 @@ func TestQueueCertRenewals(t *testing.T) {
 	if n, err := f.hosts.QueueCertRenewals(ctx); err != nil || n != 0 {
 		t.Fatalf("pending renewal: queued %d, err = %v", n, err)
 	}
-	// 跑完后到期时间更新，不再排
-	renewed := f.clock.now().Add(testCertLifetime)
-	f.issuer.setNotAfter(renewed)
+	// 续期失败：续期时间仍已到，下一轮再排
+	f.deployer.Errors["IssueCert"] = deploy.NewError(deploy.ReasonCertFailed, "主机上的 acme.sh 申请证书失败")
+	wantTask(t, f.runNext(t), HostTaskFailed, deploy.ReasonCertFailed)
+	if n, err := f.hosts.QueueCertRenewals(ctx); err != nil || n != 1 {
+		t.Fatalf("failed renewal must be queued again: %d, %v", n, err)
+	}
+	// 这次成功：到期与续期时间更新，不再排
+	f.deployer.Errors["IssueCert"] = nil
+	f.deployer.Installed = testInstalledCert(f.clock.now())
 	wantTask(t, f.runNext(t), HostTaskSucceeded, deploy.ReasonNone)
-	if got, err := f.hosts.GetHost(ctx, host.ID); err != nil || got.CertNotAfter == nil || !got.CertNotAfter.Equal(renewed) {
+	if got, err := f.hosts.GetHost(ctx, host.ID); err != nil || got.CertNotAfter == nil || !got.CertNotAfter.Equal(f.deployer.Installed.NotAfter) {
 		t.Fatalf("host after renewal = %+v, err = %v", got, err)
 	}
 	if n, err := f.hosts.QueueCertRenewals(ctx); err != nil || n != 0 {
@@ -476,6 +476,19 @@ func TestQueueCertRenewals(t *testing.T) {
 	}
 	if !bySystem {
 		t.Fatal("the renewal task must be audited with the system as actor")
+	}
+}
+
+func TestSaveCertDatesFallsBackWithoutRenewTime(t *testing.T) {
+	f := newHostFixture(t)
+	f.freshInstall()
+	account := f.createDNSAccount(t)
+	host := f.createHostWithDNS(t, hostAddrA, "node-a", account.ID)
+	f.deployer.Installed.RenewAt = time.Time{}
+	wantTask(t, f.runNext(t), HostTaskSucceeded, deploy.ReasonNone)
+	want := f.deployer.Installed.NotAfter.Add(-certRenewFallback)
+	if at := f.certRenewAt(t, host.ID); at == nil || !at.Equal(want) {
+		t.Fatalf("renewal time without acme.sh's value = %v, want %v", at, want)
 	}
 }
 
@@ -512,7 +525,7 @@ func TestDefaultDomain(t *testing.T) {
 	}
 }
 
-// 证书换到面板上之后任务被取消或超时：收尾仍要做完——记下到期时间，并按新证书的指纹接入，不能把服务器留在对不上的旧指纹上。
+// 证书换到面板上之后任务被取消或超时：收尾仍要做完——按新证书的指纹接入，不能把服务器留在对不上的旧指纹上；到期时间不记，下一轮重试。
 func TestCertificateSettlesAfterDeadline(t *testing.T) {
 	f := newHostFixture(t)
 	ctx := context.Background()
@@ -537,12 +550,12 @@ func TestCertificateSettlesAfterDeadline(t *testing.T) {
 		t.Fatalf("task = %+v, err = %v", task, err)
 	}
 	got, err := f.hosts.GetHost(ctx, host.ID)
-	if err != nil || got.ServerID == nil || got.CertNotAfter == nil {
-		t.Fatalf("the installed certificate's expiry must be recorded: %+v, err = %v", got, err)
+	if err != nil || got.ServerID == nil || got.CertNotAfter != nil {
+		t.Fatalf("host = %+v, err = %v", got, err)
 	}
+	f.wantRenewDue(t, host.ID)
 	srv, err := f.panels.GetServer(ctx, *got.ServerID)
-	wantPin := leafPin([]byte("leaf " + domainNodeA))
-	if err != nil || srv.BaseURL != urlHTTPSHostA || srv.TLSMode != panel.TLSPin || srv.CertPinSHA256 == nil || *srv.CertPinSHA256 != wantPin {
+	if err != nil || srv.BaseURL != urlHTTPSHostA || srv.TLSMode != panel.TLSPin || srv.CertPinSHA256 == nil || *srv.CertPinSHA256 != leafPin(testLeaf) {
 		t.Fatalf("server must be pinned to the new certificate: %+v, err = %v", srv, err)
 	}
 }

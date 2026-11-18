@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"time"
 
 	"v2-hub-server/internal/manager/remote"
 )
@@ -106,6 +107,29 @@ type PanelLogin struct {
 // Logger 接收一行可进任务日志的文字；实现方负责再脱敏一遍。
 type Logger func(line string)
 
+// CertRequest 是在主机上签发一张面板证书的参数（docs/03 §5.22 “公开证书”，Ruling-74）。
+type CertRequest struct {
+	// Domain 是证书的唯一域名（已校验、小写）。
+	Domain string
+	// DirectoryURL 是 ACME 签发方的目录地址；与主机上已有证书的签发方不同时强制重签。
+	DirectoryURL string
+	// DNSHook 是 acme.sh 的 DNS 钩子名（如 dns_cf），由实现内嵌的快照提供。
+	DNSHook string
+	// Env 是钩子要的凭据（如 CF_Token）：只经权限 600 的临时文件传到主机，读完即删，签完从 acme.sh 的配置里擦掉。
+	Env map[string]string
+}
+
+// InstalledCert 是装到面板上的证书。
+type InstalledCert struct {
+	// NotAfter 是证书的到期时间；LeafDER 是叶子证书（算 pin 用）。
+	NotAfter time.Time
+	LeafDER  []byte
+	// RenewAt 是 acme.sh 给出的下次续期时间；零值表示没读到。
+	RenewAt time.Time
+	// Changed 表示这次换了面板上的证书（因而重启了面板）；false 表示面板上本来就是这张。
+	Changed bool
+}
+
 // Deployer 是一种面板的部署与运维动作。所有方法只执行实现内部的固定脚本模板。
 type Deployer interface {
 	// Detect 检测系统、权限与面板安装情况，并给出部署会走安装还是接管。
@@ -118,9 +142,11 @@ type Deployer interface {
 	IssueToken(ctx context.Context, r remote.Runner) (string, error)
 	// EnableTLS 生成自签证书设给面板并重启；address 写进证书的主体，返回证书的 SHA-256（Base64）。
 	EnableTLS(ctx context.Context, r remote.Runner, address string) (string, error)
-	// InstallCert 把一份证书链与私钥（PEM）装到面板上并重启；用于平台申请到的公开证书（Ruling-73）。
-	// 私钥只经 SSH 的标准输入传过去，不进命令行与日志。
-	InstallCert(ctx context.Context, r remote.Runner, certPEM, keyPEM []byte) error
+	// IssueCert 在主机上用 DNS-01 为 req.Domain 签发证书（Ruling-74）；主机上已有没到续期时间的证书就不重签，reused 为 true。
+	// 签发失败返回 ReasonCertFailed，签发工具的报错行写进 log。不动面板。
+	IssueCert(ctx context.Context, r remote.Runner, req CertRequest, log Logger) (reused bool, err error)
+	// InstallCert 把主机上已签好的 domain 的证书设给面板；文件或面板设置有变化时才重启面板并确认它在运行。
+	InstallCert(ctx context.Context, r remote.Runner, domain string) (InstalledCert, error)
 	// RestartPanel 重启面板（连带内核）并确认服务在运行。
 	RestartPanel(ctx context.Context, r remote.Runner) error
 	// RestartCore 只让面板重载内核。
