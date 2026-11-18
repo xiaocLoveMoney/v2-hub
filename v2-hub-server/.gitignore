@@ -1,1 +1,3 @@
 bin/
+# 在模块根目录直接 go build ./cmd/hub 的产物
+/hub
