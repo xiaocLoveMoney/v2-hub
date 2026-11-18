@@ -21,6 +21,8 @@ const (
 	KindUnreachable ErrorKind = "unreachable"
 	// KindRejected 表示服务商收到请求但拒绝执行。
 	KindRejected ErrorKind = "rejected"
+	// KindConflict 表示域名上有别处建的、与要建的记录冲突的解析，平台不覆盖（Ruling-75）。
+	KindConflict ErrorKind = "conflict"
 )
 
 // Error 是带大类的 DNS 错误；Message 可直接展示，不含令牌。
@@ -68,7 +70,8 @@ type Provider interface {
 	// CheckZone 确认令牌能看到并管理这个根域名；不能时返回 *Error。
 	CheckZone(ctx context.Context) error
 	// PointTo 把 name 解析到 target：target 是 IPv4 建 A、IPv6 建 AAAA、是域名建 CNAME，仅解析、不开代理。
-	// name 下已有的 A / AAAA / CNAME 记录会被换成这一条；已经是这一条时什么都不做。
+	// 只删平台自己建的 A / AAAA / CNAME；别处建的记录不动，与要建的这条冲突时返回 KindConflict（Ruling-75）。
+	// 已经是这一条时什么都不做。
 	PointTo(ctx context.Context, name, target string) error
 	// ACMEHook 给出在主机上用 acme.sh 签发证书时的钩子与凭据；不发起网络请求。
 	ACMEHook() ACMEHook
