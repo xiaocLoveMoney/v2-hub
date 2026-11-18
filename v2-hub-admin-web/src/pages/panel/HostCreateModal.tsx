@@ -7,7 +7,7 @@ import { mutate } from '../../hooks/use-remote'
 import { MAX_PORT, MIN_PORT } from '../form-limits'
 import { DnsAccountSelect } from './DnsAccountSelect'
 import { HostDetectionResult } from './HostDetectionResult'
-import { DEFAULT_SSH_PORT, MAX_HOST_BATCH, formatHostListErrors, parseHostList } from './host-list'
+import { DEFAULT_SSH_PORT, MAX_HOST_BATCH, SAME_MACHINE_ADDRESS_HINT, formatHostListErrors, parseHostList } from './host-list'
 import { DEFAULT_PROVIDER, PROVIDER_OPTIONS } from './providers'
 import { SshCredentialSelect } from './SshCredentialSelect'
 
@@ -157,7 +157,7 @@ function HostCreateBody({ onSaved }: { onSaved: () => void }) {
         <Form.Item
           name="hostsText"
           label="主机清单"
-          extra={`每行一台：“地址 名称”，用空白分隔；不写名称时用地址当名称（名称在接入时用作服务器名）。一次最多 ${MAX_HOST_BATCH} 台，任一行不合法则整批都不保存`}
+          extra={`每行一台：“地址 名称”，用空白分隔；不写名称时用地址当名称（名称在接入时用作服务器名）。一次最多 ${MAX_HOST_BATCH} 台，任一行不合法则整批都不保存。${SAME_MACHINE_ADDRESS_HINT}`}
           rules={[{ validator: validateHostList }]}
           validateTrigger="onBlur"
         >

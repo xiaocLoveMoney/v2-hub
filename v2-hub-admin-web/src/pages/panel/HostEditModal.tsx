@@ -6,7 +6,7 @@ import { useSubmit } from '../../hooks/use-submit'
 import { MAX_NAME_LEN, MAX_PORT, MIN_PORT } from '../form-limits'
 import { COUNTRY_OPTIONS } from './countries'
 import { DnsAccountSelect } from './DnsAccountSelect'
-import { MAX_HOST_ADDRESS_LEN, validateHostAddressField } from './host-list'
+import { MAX_HOST_ADDRESS_LEN, SAME_MACHINE_ADDRESS_HINT, validateHostAddressField } from './host-list'
 import { SshCredentialSelect } from './SshCredentialSelect'
 
 interface HostEditForm {
@@ -86,7 +86,7 @@ function HostEditBody({ host, onSaved }: { host: ServerHost; onSaved: () => void
         <Form.Item name="name" label="名称" extra="接入时用作服务器名" rules={[{ required: true, whitespace: true, max: MAX_NAME_LEN, message: `1–${MAX_NAME_LEN} 个字符` }]}>
           <Input autoComplete="off" />
         </Form.Item>
-        <Form.Item name="address" label="地址" rules={[{ validator: validateHostAddressField }]}>
+        <Form.Item name="address" label="地址" extra={SAME_MACHINE_ADDRESS_HINT} rules={[{ validator: validateHostAddressField }]}>
           <Input autoComplete="off" maxLength={MAX_HOST_ADDRESS_LEN} placeholder="IP 或域名" />
         </Form.Item>
         <Form.Item name="sshPort" label="SSH 端口" rules={[{ required: true, message: '请输入 SSH 端口' }]}>
