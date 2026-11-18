@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"regexp"
 	"strconv"
 	"strings"
@@ -101,4 +102,26 @@ func (s *PanelService) ScanRealityTargets(ctx context.Context, serverID int64, t
 		return nil, panelError(err)
 	}
 	return res, nil
+}
+
+// CoreStatus 探测一次面板，返回内核的运行状态与面板给的错误说明（Ruling-76：建完入站确认 Xray 在跑）。
+func (s *PanelService) CoreStatus(ctx context.Context, serverID int64) (state, message string, err error) {
+	p, _, err := s.openEnabledProvider(ctx, serverID)
+	if err != nil {
+		return "", "", err
+	}
+	info, err := p.Probe(ctx)
+	if err != nil {
+		return "", "", panelError(err)
+	}
+	return info.CoreState, info.CoreError, nil
+}
+
+// DirectNodeID 返回入站的直连节点 id。
+func (s *PanelService) DirectNodeID(ctx context.Context, inboundID int64) (int64, error) {
+	id, err := s.q.GetDirectNodeID(ctx, inboundID)
+	if err != nil {
+		return 0, fmt.Errorf("direct node of inbound %d: %w", inboundID, err)
+	}
+	return id, nil
 }

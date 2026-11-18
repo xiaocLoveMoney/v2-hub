@@ -100,6 +100,18 @@ func (q *Queries) EnsureNode(ctx context.Context, arg EnsureNodeParams) error {
 	return err
 }
 
+const getDirectNodeID = `-- name: GetDirectNodeID :one
+SELECT id FROM node WHERE inbound_id = $1 AND endpoint_id IS NULL
+`
+
+// 入站的直连节点（一键部署把它加进节点组，Ruling-76）
+func (q *Queries) GetDirectNodeID(ctx context.Context, inboundID int64) (int64, error) {
+	row := q.db.QueryRow(ctx, getDirectNodeID, inboundID)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}
+
 const insertNodeGroupItems = `-- name: InsertNodeGroupItems :exec
 INSERT INTO node_group_item (node_group_id, node_id)
 SELECT $1::bigint, unnest($2::bigint[])

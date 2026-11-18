@@ -65,7 +65,7 @@ func xrayOutbound(n ProxyNode, tag string) map[string]any {
 	o := map[string]any{"tag": tag, "streamSettings": xrayStream(n)}
 	switch n.Protocol {
 	case ProtoVLESS:
-		user := map[string]any{"id": n.UUID, "encryption": "none"}
+		user := map[string]any{"id": n.UUID, "encryption": orDefault(n.Encryption, encryptionNone)}
 		if n.Flow != "" {
 			user["flow"] = n.Flow
 		}
@@ -149,9 +149,9 @@ func Xray(nodes []ProxyNode, chains []Chain) ([]byte, error) {
 }
 
 // XrayOutbound 返回节点对应的一个 Xray 出站（服务端链式在入口面板上用它连落地，docs/03 §5.19）；
-// 节点的协议或传输 Xray 表达不了时第二个返回值为 false。
+// 节点的协议或传输 Xray 表达不了时第二个返回值为 false。带 VLESS Encryption 的节点不作落地（Ruling-77）。
 func XrayOutbound(n ProxyNode, tag string) (map[string]any, bool) {
-	if !xraySupports(n) {
+	if !xraySupports(n) || n.hasVLESSEncryption() {
 		return nil, false
 	}
 	return xrayOutbound(n, tag), true

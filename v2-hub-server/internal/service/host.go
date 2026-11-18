@@ -94,6 +94,11 @@ type HostConfig struct {
 	Now func() time.Time
 }
 
+// Reconciler 请求尽快做一次下发对账（由 UserService 实现）。
+type Reconciler interface {
+	TriggerReconcile()
+}
+
 // HostDeps 是 HostService 依赖的外部能力；都以接口或注册表的形式注入，单测里换成假的。
 type HostDeps struct {
 	Dialer    remote.Dialer
@@ -101,6 +106,8 @@ type HostDeps struct {
 	// DNS 是 DNS 服务商的注册表（Ruling-72）。
 	DNS    *dns.Registry
 	Panels *PanelService
+	// Reconciler 在一键部署建完入站后请求一次下发对账（Ruling-76）；nil 时只等定时对账。
+	Reconciler Reconciler
 }
 
 // HostService 负责 SSH 凭据、DNS 账号、托管主机与主机任务（docs/03 §5.22，Ruling-68 – Ruling-74）。
@@ -112,9 +119,11 @@ type HostService struct {
 	deployers *deploy.Registry
 	dns       *dns.Registry
 	panels    *PanelService
-	cfg       HostConfig
-	tests     *ratelimit.FailureGuard
-	actions   *ratelimit.FailureGuard
+	// reconciler 可为 nil。
+	reconciler Reconciler
+	cfg        HostConfig
+	tests      *ratelimit.FailureGuard
+	actions    *ratelimit.FailureGuard
 	// logins 保证同一台主机同时只有一次“重置面板登录口令”。
 	logins *exitTestLocks
 	kick   chan struct{}
@@ -132,7 +141,7 @@ func NewHostService(pool *pgxpool.Pool, sealer *crypto.Sealer, deps HostDeps, cf
 	}
 	return &HostService{
 		store: newStore(pool), sealer: sealer, dialer: deps.Dialer, deployers: deps.Deployers, dns: deps.DNS,
-		panels: deps.Panels, cfg: cfg,
+		panels: deps.Panels, reconciler: deps.Reconciler, cfg: cfg,
 		tests: guard(cfg.TestLimit, cfg.TestWindow), actions: guard(cfg.ActionLimit, cfg.ActionWindow),
 		logins: newExitTestLocks(), kick: make(chan struct{}, 1), now: now,
 	}

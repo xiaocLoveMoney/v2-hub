@@ -72,3 +72,7 @@ DELETE FROM node_group_item WHERE node_group_id = $1;
 -- name: InsertNodeGroupItems :exec
 INSERT INTO node_group_item (node_group_id, node_id)
 SELECT sqlc.arg(group_id)::bigint, unnest(sqlc.arg(node_ids)::bigint[]);
+
+-- name: GetDirectNodeID :one
+-- 入站的直连节点（一键部署把它加进节点组，Ruling-76）
+SELECT id FROM node WHERE inbound_id = $1 AND endpoint_id IS NULL;

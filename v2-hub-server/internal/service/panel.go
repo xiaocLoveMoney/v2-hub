@@ -121,6 +121,8 @@ type Server struct {
 	CreatedAt      time.Time
 	// HostID 是关联的托管主机（docs/03 §5.22）；nil 表示没有绑定 SSH。
 	HostID *int64
+	// ClientFlow 是 VLESS 流控（Ruling-77），空串为不带。
+	ClientFlow string
 }
 
 func (s *PanelService) validateConn(in ServerConnInput, requireToken bool) (ServerConnInput, error) {
@@ -299,6 +301,7 @@ func serverFromRow(r sqlcgen.GetServerRow) Server {
 		Region: r.Region, Remark: r.Remark, IsDisabled: r.IsDisabled, Status: r.Status, LastError: r.LastError,
 		PanelVersion: r.PanelVersion, StatusSnapshot: r.StatusSnapshot, InboundCount: int(r.InboundCount),
 		CreatedAt: r.CreatedAt.Time, LastSeenAt: timePtr(r.LastSeenAt), LastSyncedAt: timePtr(r.LastSyncedAt),
+		ClientFlow: r.ClientFlow,
 	}
 	if r.CertPinSha256.Valid {
 		v := r.CertPinSha256.String

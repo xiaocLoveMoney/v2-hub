@@ -148,6 +148,10 @@ func NewRouter(deps Deps) http.Handler {
 	mux.HandleFunc("GET /api/admin/servers/{id}", h.requireAdmin(service.PermServerRead, h.getServer))
 	mux.HandleFunc("PUT /api/admin/servers/{id}", h.requireAdmin(service.PermServerWrite, h.updateServer))
 	mux.HandleFunc("DELETE /api/admin/servers/{id}", h.requireAdmin(service.PermServerWrite, h.deleteServer))
+	mux.HandleFunc("PUT /api/admin/servers/{id}/client-flow", h.requireAdmin(service.PermServerWrite, h.setServerClientFlow))
+	// 一键部署入站：node:write 由路由查，host:write 在 handler 里再查（Ruling-76）
+	mux.HandleFunc("POST /api/admin/servers/{id}/inbound-presets/preview", h.requireAdmin(service.PermNodeWrite, h.previewInboundPresets))
+	mux.HandleFunc("POST /api/admin/servers/{id}/inbound-presets", h.requireAdmin(service.PermNodeWrite, h.deployInboundPresets))
 	mux.HandleFunc("POST /api/admin/servers/{id}/sync", h.requireAdmin(service.PermServerWrite, h.syncServer))
 	mux.HandleFunc("GET /api/admin/servers/{id}/chain-apply", h.requireAdmin(service.PermServerRead, h.getServerChainApply))
 	mux.HandleFunc("POST /api/admin/servers/{id}/chain-apply/retry", h.requireAdmin(service.PermServerWrite, h.retryServerChainApply))

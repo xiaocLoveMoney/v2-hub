@@ -14,6 +14,7 @@ import (
 	"math/big"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -398,10 +399,13 @@ func TestServiceActions(t *testing.T) {
 	if err := d.RestartCore(ctx, r); err != nil {
 		t.Fatalf("restart core: %v", err)
 	}
-	if err := d.OpenFirewall(ctx, r, 2053); err != nil {
+	if err := d.OpenPorts(ctx, r, []deploy.Port{{Number: 2053}, {Number: 2054, UDP: true}}); err != nil {
 		t.Fatalf("firewall: %v", err)
 	}
-	if err := d.OpenFirewall(ctx, r, 0); err == nil {
+	if script := r.Scripts()[len(r.Scripts())-1]; !strings.Contains(script, "specs='2053/tcp 2054/udp'") {
+		t.Fatalf("firewall specs: %s", script)
+	}
+	if err := d.OpenPorts(ctx, r, []deploy.Port{{Number: 0}}); err == nil {
 		t.Fatal("port 0 must be rejected")
 	}
 	down := &remotetest.Runner{Handle: func(string) (remote.Result, error) { return exit(3, "") }}
@@ -431,5 +435,22 @@ func TestEmbeddedScriptsMatchContract(t *testing.T) {
 		if !bytes.Equal(want, embedded) {
 			t.Errorf("%s differs from the contract snapshot; run make gen-upstream", name)
 		}
+	}
+}
+
+func TestParseListening(t *testing.T) {
+	listing := "tcp 0.0.0.0:22\ntcp [::]:22\nudp 0.0.0.0:443\ntcp *:80\nudp 127.0.0.53%lo:53\ntcp 172.17.0.1:9000\nnoise\nsctp 0.0.0.0:1\n"
+	got := parseListening(listing)
+	want := []deploy.Port{{Number: 22}, {Number: 443, UDP: true}, {Number: 80}, {Number: 53, UDP: true}, {Number: 9000}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("parseListening = %+v, want %+v", got, want)
+	}
+	r := &remotetest.Runner{Handle: func(string) (remote.Result, error) { return out("tcp 0.0.0.0:2053\n") }}
+	if ports, err := New().ListeningPorts(ctx, r); err != nil || len(ports) != 1 || ports[0].Number != 2053 {
+		t.Fatalf("ListeningPorts = %+v, %v", ports, err)
+	}
+	missing := &remotetest.Runner{Handle: func(string) (remote.Result, error) { return exit(exitNotFound, "") }}
+	if _, err := New().ListeningPorts(ctx, missing); err == nil {
+		t.Fatal("a host without ss must fail")
 	}
 }

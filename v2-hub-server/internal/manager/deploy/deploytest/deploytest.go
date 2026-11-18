@@ -22,6 +22,8 @@ type Fake struct {
 	// Reused 是 IssueCert 的结果（主机上已有证书、没重签）；Installed 是 InstallCert 的结果。
 	Reused    bool
 	Installed deploy.InstalledCert
+	// Listening 是 ListeningPorts 的结果。
+	Listening []deploy.Port
 	Errors    map[string]error
 	// OnCall 非 nil 时在每个方法开始时调用，参数是方法名；用来在某一步前后插入动作（如取消 ctx）。
 	OnCall func(method string)
@@ -31,6 +33,8 @@ type Fake struct {
 	// requests 是每次 IssueCert 收到的参数；installed 是每次 InstallCert 收到的域名。
 	requests  []deploy.CertRequest
 	installed []string
+	// opened 是每次 OpenPorts 收到的端口。
+	opened [][]deploy.Port
 }
 
 var _ deploy.Deployer = (*Fake)(nil)
@@ -111,6 +115,34 @@ func (f *Fake) InstallCert(_ context.Context, _ remote.Runner, domain string) (d
 	defer f.mu.Unlock()
 	f.installed = append(f.installed, domain)
 	return f.Installed, nil
+}
+
+// ListeningPorts 见 deploy.Deployer。
+func (f *Fake) ListeningPorts(context.Context, remote.Runner) ([]deploy.Port, error) {
+	if err := f.enter("ListeningPorts"); err != nil {
+		return nil, err
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]deploy.Port(nil), f.Listening...), nil
+}
+
+// OpenPorts 见 deploy.Deployer；记下收到的端口。
+func (f *Fake) OpenPorts(_ context.Context, _ remote.Runner, ports []deploy.Port) error {
+	if err := f.enter("OpenPorts"); err != nil {
+		return err
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.opened = append(f.opened, append([]deploy.Port(nil), ports...))
+	return nil
+}
+
+// OpenedPorts 返回每次 OpenPorts 收到的端口。
+func (f *Fake) OpenedPorts() [][]deploy.Port {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([][]deploy.Port(nil), f.opened...)
 }
 
 // EnableTLS 见 deploy.Deployer。

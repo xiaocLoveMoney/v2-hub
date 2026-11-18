@@ -40,7 +40,13 @@ type PanelInfo struct {
 	Status json.RawMessage
 	// PublicIP 是面板自报的服务器公网 IP（优先 IPv4）；面板没报为空。只用于扫描位置（Ruling-65），不落库。
 	PublicIP string
+	// CoreState 是内核（如 Xray）的运行状态：CoreRunning 为在运行，其它值为没在运行，空为面板没报；CoreError 是面板给的错误说明。
+	CoreState string
+	CoreError string
 }
+
+// CoreRunning 是 PanelInfo.CoreState 表示内核在运行的取值。
+const CoreRunning = "running"
 
 // Capabilities 描述面板能力差异。
 type Capabilities struct {
@@ -144,7 +150,9 @@ type ClientSpec struct {
 	UUID  string
 	Auth  string
 	// Password 是用户自设的连接密码（Ruling-58）；空 = 沿用 Auth。用 PasswordOrAuth 取实际值。
-	Password    string
+	Password string
+	// Flow 是 VLESS 流控，由服务器的开关决定（Ruling-77）；空串为不带。
+	Flow        string
 	LimitIP     int
 	Enabled     bool
 	InboundRefs []string
@@ -160,9 +168,11 @@ func (c ClientSpec) PasswordOrAuth() string {
 
 // Client 是面板上一个 client 的现状；Up / Down 是面板累计的流量计数（字节）。
 type Client struct {
-	Email       string
-	Enabled     bool
-	LimitIP     int
+	Email   string
+	Enabled bool
+	LimitIP int
+	// Flow 是 client 的 VLESS 流控（如 xtls-rprx-vision），空为不带；面板只在支持它的入站上生效（Ruling-77）。
+	Flow        string
 	InboundRefs []string
 	Up          int64
 	Down        int64

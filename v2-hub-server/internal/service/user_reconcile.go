@@ -87,6 +87,8 @@ type desiredClient struct {
 	hasLinks      bool
 	// retryCount 是这台面板上下发记录已失败的次数（没有记录为 0），本轮失败时 +1 写回
 	retryCount int32
+	// flow 是服务器的 VLESS 流控（Ruling-77），对这台面板上的全部 client 相同
+	flow string
 	// ssKeyLen 是这台服务器上该用户挂的 SS2022 入站要的密钥字节数（0 = 没有）；ssErr 非空表示 128 / 256 位混用（Ruling-60）
 	ssKeyLen int
 	ssErr    error
@@ -99,7 +101,7 @@ func (d desiredClient) needsRotation() bool {
 
 // spec 返回期望的面板 client。password 字段：挂了 SS2022 入站时写 SS2022 密钥，否则写自设连接密码（空则面板沿用 Auth）。
 func (d desiredClient) spec() (panel.ClientSpec, error) {
-	spec := panel.ClientSpec{Email: d.email, UUID: d.cred.UUID, LimitIP: d.limitIP, Enabled: d.enabled, InboundRefs: d.refs}
+	spec := panel.ClientSpec{Email: d.email, UUID: d.cred.UUID, LimitIP: d.limitIP, Enabled: d.enabled, InboundRefs: d.refs, Flow: d.flow}
 	spec.Auth = d.cred.Auth
 	spec.Password = d.cred.Password
 	if d.ssKeyLen == 0 {
@@ -132,6 +134,9 @@ func (s *UserService) ReconcileServer(ctx context.Context, serverID int64) error
 	desired, err := s.loadDesired(ctx, serverID, refLen)
 	if err != nil {
 		return err
+	}
+	for i := range desired {
+		desired[i].flow = srv.ClientFlow
 	}
 	clients, err := p.ListClients(ctx)
 	if err != nil {
@@ -174,8 +179,9 @@ func (s *UserService) ReconcileServer(ctx context.Context, serverID int64) error
 		default:
 			var mounted bool
 			mounted, opErr = applyClientDiff(ctx, p, d, cur)
-			needLinks[d.userID] = mounted
-			if opErr == nil && cur.LimitIP == d.limitIP && cur.Enabled != d.enabled {
+			// flow 变了链接也变（vless 链接带 flow）
+			needLinks[d.userID] = mounted || cur.Flow != d.flow
+			if opErr == nil && !needsClientUpdate(d, cur) && cur.Enabled != d.enabled {
 				if d.enabled {
 					toEnable = append(toEnable, d.email)
 				} else {
@@ -238,13 +244,18 @@ func (s *UserService) fetchLinks(ctx context.Context, p panel.Provider, desired 
 	return out
 }
 
-// applyClientDiff 补齐挂载差异；IP 限制变了时连同启停一起改（UpdateClient）。返回挂载是否有变化。
+// needsClientUpdate 报告 IP 限制或流控与面板上不同，要整体改一次（连同启停，UpdateClient）。
+func needsClientUpdate(d desiredClient, cur panel.Client) bool {
+	return cur.LimitIP != d.limitIP || cur.Flow != d.flow
+}
+
+// applyClientDiff 补齐挂载差异；IP 限制或流控变了时连同启停一起改（UpdateClient）。返回挂载是否有变化。
 func applyClientDiff(ctx context.Context, p panel.Provider, d desiredClient, cur panel.Client) (bool, error) {
 	mounted, err := applyMounts(ctx, p, d, cur)
 	if err != nil {
 		return mounted, err
 	}
-	if cur.LimitIP != d.limitIP {
+	if needsClientUpdate(d, cur) {
 		spec, err := d.spec()
 		if err != nil {
 			return mounted, err

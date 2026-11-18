@@ -16,6 +16,9 @@ const (
 func mihomoSupports(n ProxyNode) bool {
 	switch n.Network {
 	case NetTCP, NetWS, NetGRPC, NetHTTPUpgrade:
+	case NetXHTTP:
+		// Mihomo 的 xhttp 只给 VLESS 用
+		return n.Protocol == ProtoVLESS
 	default:
 		return false
 	}
@@ -41,6 +44,16 @@ func mihomoTransport(p map[string]any, n ProxyNode) {
 	case NetGRPC:
 		p["network"] = NetGRPC
 		p["grpc-opts"] = map[string]any{"grpc-service-name": n.ServiceName}
+	case NetXHTTP:
+		p["network"] = NetXHTTP
+		opts := map[string]any{"path": orDefault(n.Path, "/")}
+		if n.Host != "" {
+			opts["host"] = n.Host
+		}
+		if n.Mode != "" {
+			opts["mode"] = n.Mode
+		}
+		p["xhttp-opts"] = opts
 	default:
 		p["network"] = NetTCP
 	}
@@ -76,6 +89,9 @@ func mihomoProxy(n ProxyNode, name string) map[string]any {
 		p["type"], p["uuid"] = "vless", n.UUID
 		if n.Flow != "" {
 			p["flow"] = n.Flow
+		}
+		if n.hasVLESSEncryption() {
+			p["encryption"] = n.Encryption
 		}
 		mihomoTransport(p, n)
 		mihomoTLS(p, n, "servername")

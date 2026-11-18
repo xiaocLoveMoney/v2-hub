@@ -251,6 +251,7 @@ type HostTask struct {
 	ErrorCode  string
 	LastError  string
 	Log        string
+	Payload    []byte
 	CreatedBy  pgtype.Int8
 	CreatedAt  pgtype.Timestamptz
 	StartedAt  pgtype.Timestamptz
@@ -495,6 +496,7 @@ type Server struct {
 	LastSyncedAt   pgtype.Timestamptz
 	OfflineSince   pgtype.Timestamptz
 	AlertSentAt    pgtype.Timestamptz
+	ClientFlow     string
 	CreatedAt      pgtype.Timestamptz
 	UpdatedAt      pgtype.Timestamptz
 }

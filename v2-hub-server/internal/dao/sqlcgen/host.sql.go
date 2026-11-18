@@ -122,8 +122,8 @@ func (q *Queries) CreateDNSAccount(ctx context.Context, arg CreateDNSAccountPara
 }
 
 const createHostTask = `-- name: CreateHostTask :one
-INSERT INTO host_task (host_id, kind, created_by)
-VALUES ($1, $2, $3)
+INSERT INTO host_task (host_id, kind, created_by, payload)
+VALUES ($1, $2, $3, $4)
 RETURNING id
 `
 
@@ -131,10 +131,17 @@ type CreateHostTaskParams struct {
 	HostID    int64
 	Kind      string
 	CreatedBy pgtype.Int8
+	Payload   []byte
 }
 
+// payload 是任务参数（deploy_inbounds 的预设、端口与节点组，Ruling-76），其它任务为空对象
 func (q *Queries) CreateHostTask(ctx context.Context, arg CreateHostTaskParams) (int64, error) {
-	row := q.db.QueryRow(ctx, createHostTask, arg.HostID, arg.Kind, arg.CreatedBy)
+	row := q.db.QueryRow(ctx, createHostTask,
+		arg.HostID,
+		arg.Kind,
+		arg.CreatedBy,
+		arg.Payload,
+	)
 	var id int64
 	err := row.Scan(&id)
 	return id, err
@@ -399,6 +406,17 @@ func (q *Queries) GetHostTaskLog(ctx context.Context, id int64) (string, error) 
 	return log, err
 }
 
+const getHostTaskPayload = `-- name: GetHostTaskPayload :one
+SELECT payload FROM host_task WHERE id = $1
+`
+
+func (q *Queries) GetHostTaskPayload(ctx context.Context, id int64) ([]byte, error) {
+	row := q.db.QueryRow(ctx, getHostTaskPayload, id)
+	var payload []byte
+	err := row.Scan(&payload)
+	return payload, err
+}
+
 const getSSHCredential = `-- name: GetSSHCredential :one
 SELECT c.id, c.name, c.username, c.auth_type, c.key_fingerprint, c.remark, c.created_at, c.updated_at,
        (SELECT COUNT(*) FROM server_host h WHERE h.credential_id = c.id)::int AS host_count
@@ -521,6 +539,18 @@ func (q *Queries) GetServerHost(ctx context.Context, id int64) (GetServerHostRow
 		&i.DnsAccountName,
 	)
 	return i, err
+}
+
+const getServerHostIDByServer = `-- name: GetServerHostIDByServer :one
+SELECT id FROM server_host WHERE server_id = $1
+`
+
+// 服务器关联的托管主机（docs/03 §5.22：一台服务器最多一台主机）
+func (q *Queries) GetServerHostIDByServer(ctx context.Context, serverID pgtype.Int8) (int64, error) {
+	row := q.db.QueryRow(ctx, getServerHostIDByServer, serverID)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
 }
 
 const listDNSAccounts = `-- name: ListDNSAccounts :many

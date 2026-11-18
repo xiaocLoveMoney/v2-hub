@@ -61,6 +61,10 @@ const (
 	msgTLSFailed      = "证书配置失败"
 	msgLoginFailed    = "面板登录口令重置失败"
 	msgFirewallFailed = "防火墙放行端口失败"
+	msgNoSS           = "主机上没有 ss 命令，读不到正在监听的端口"
+
+	protoTCP = "tcp"
+	protoUDP = "udp"
 )
 
 // detectMessages 是各原因的说明（docs/03 §5.22 “不能部署的原因”）；版本门槛等只有这种面板才有的细节写在这里。
@@ -129,11 +133,21 @@ systemctl restart x-ui
 cat "$d/panel.crt"
 `
 
-// firewallScript 只在主机自带防火墙开着时放行端口：%[1]d 端口。
-const firewallScript = `p=%[1]d
-if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q '^Status: active'; then ufw allow "$p"/tcp >/dev/null || exit 1; fi
-if command -v firewall-cmd >/dev/null 2>&1 && firewall-cmd --state >/dev/null 2>&1; then firewall-cmd --permanent --add-port="$p"/tcp >/dev/null && firewall-cmd --reload >/dev/null || exit 1; fi
+// firewallScript 只在主机自带防火墙开着时放行端口：%[1]s 是空格分隔的“端口/协议”列表（已校验，只有数字与 tcp / udp）。
+const firewallScript = `specs=%[1]s
+if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q '^Status: active'; then
+  for p in $specs; do ufw allow "$p" >/dev/null || exit 1; done
+fi
+if command -v firewall-cmd >/dev/null 2>&1 && firewall-cmd --state >/dev/null 2>&1; then
+  for p in $specs; do firewall-cmd --permanent --add-port="$p" >/dev/null || exit 1; done
+  firewall-cmd --reload >/dev/null || exit 1
+fi
 exit 0
+`
+
+// listeningScript 列出正在监听的 TCP / UDP 端口：每行“协议 本地地址”（ss 是 iproute2 的，受支持的发行版都有）。
+const listeningScript = `command -v ss >/dev/null 2>&1 || exit 127
+ss -Hltnu 2>/dev/null | awk '{print $1, $5}'
 `
 
 const (
@@ -278,7 +292,7 @@ func (d *Deployer) Provision(ctx context.Context, r remote.Runner, det deploy.De
 		return deploy.Provisioned{}, err
 	}
 	if isFresh {
-		if err := d.OpenFirewall(ctx, r, access.Port); err != nil {
+		if err := d.OpenPorts(ctx, r, []deploy.Port{{Number: access.Port}}); err != nil {
 			return deploy.Provisioned{}, err
 		}
 	}
@@ -428,12 +442,62 @@ func subjectAltName(address string) (string, error) {
 	return "DNS:" + address, nil
 }
 
-// OpenFirewall 在主机自带防火墙开着时放行面板端口。
-func (d *Deployer) OpenFirewall(ctx context.Context, r remote.Runner, port int) error {
-	if !isValidPort(port) {
-		return commandError(msgFirewallFailed)
+// OpenPorts 见 deploy.Deployer。
+func (d *Deployer) OpenPorts(ctx context.Context, r remote.Runner, ports []deploy.Port) error {
+	if len(ports) == 0 {
+		return nil
 	}
-	return expectOK(ctx, r, fmt.Sprintf(firewallScript, port), msgFirewallFailed)
+	specs := make([]string, 0, len(ports))
+	for _, p := range ports {
+		if !isValidPort(p.Number) {
+			return commandError(msgFirewallFailed)
+		}
+		specs = append(specs, strconv.Itoa(p.Number)+"/"+portProto(p))
+	}
+	return expectOK(ctx, r, fmt.Sprintf(firewallScript, remote.Quote(strings.Join(specs, " "))), msgFirewallFailed)
+}
+
+func portProto(p deploy.Port) string {
+	if p.UDP {
+		return protoUDP
+	}
+	return protoTCP
+}
+
+// ListeningPorts 见 deploy.Deployer。
+func (d *Deployer) ListeningPorts(ctx context.Context, r remote.Runner) ([]deploy.Port, error) {
+	res, err := r.Run(ctx, listeningScript)
+	if err != nil {
+		return nil, err
+	}
+	if res.ExitCode != 0 {
+		return nil, commandError(msgNoSS)
+	}
+	return parseListening(res.Output), nil
+}
+
+// parseListening 解析“协议 本地地址”行；地址形如 0.0.0.0:443、[::]:443、*:80、127.0.0.53%lo:53，取最后一个冒号后的端口。
+// 同一端口同一协议只留一条；认不出的行跳过。
+func parseListening(output string) []deploy.Port {
+	seen := make(map[deploy.Port]bool, 32)
+	out := make([]deploy.Port, 0, 32)
+	for _, line := range strings.Split(output, "\n") {
+		proto, addr, ok := strings.Cut(strings.TrimSpace(line), " ")
+		i := strings.LastIndex(addr, ":")
+		if !ok || i < 0 || (proto != protoTCP && proto != protoUDP) {
+			continue
+		}
+		n, err := strconv.Atoi(addr[i+1:])
+		if err != nil || !isValidPort(n) {
+			continue
+		}
+		p := deploy.Port{Number: n, UDP: proto == protoUDP}
+		if !seen[p] {
+			seen[p] = true
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 // RestartPanel 见 deploy.Deployer。

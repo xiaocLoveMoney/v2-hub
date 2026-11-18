@@ -237,10 +237,11 @@ func runServer(args []string) error {
 	// 公开证书：新增 DNS 服务商只在这里加一行（Ruling-72）；证书由主机上的 acme.sh 签发，签发方默认 Let's Encrypt（Ruling-74）
 	acmeCfg := cfg.Deploy.ACME
 	hosts := service.NewHostService(pool, sealer, service.HostDeps{
-		Dialer:    remote.NewSSHDialer(remote.Config{ConnectTimeout: cfg.Deploy.ConnectTimeout, AllowLoopback: cfg.Deploy.AllowLoopback}),
-		Deployers: deployers,
-		DNS:       dns.NewRegistry(map[string]dns.Factory{cloudflare.ProviderType: cloudflare.NewFactory(cloudflare.Config{BaseURL: cfg.Deploy.CloudflareAPIURL})}),
-		Panels:    panels,
+		Dialer:     remote.NewSSHDialer(remote.Config{ConnectTimeout: cfg.Deploy.ConnectTimeout, AllowLoopback: cfg.Deploy.AllowLoopback}),
+		Deployers:  deployers,
+		DNS:        dns.NewRegistry(map[string]dns.Factory{cloudflare.ProviderType: cloudflare.NewFactory(cloudflare.Config{BaseURL: cfg.Deploy.CloudflareAPIURL})}),
+		Panels:     panels,
+		Reconciler: users,
 	},
 		service.HostConfig{
 			CommandTimeout: cfg.Deploy.CommandTimeout, InstallTimeout: cfg.Deploy.InstallTimeout,
