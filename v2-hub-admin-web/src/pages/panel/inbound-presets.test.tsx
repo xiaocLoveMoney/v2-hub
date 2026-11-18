@@ -56,7 +56,7 @@ describe('InboundPresetsModal', () => {
     expect(body.items.find((i) => i.key === 'trojan_tls')?.port).toBe(8443)
     expect(body.items.find((i) => i.key === 'shadowsocks_2022')?.port).toBe(41006)
     expect(body.nodeGroupIds).toEqual([9])
-    expect(onStarted.mock.calls[0][1]).toBe(5)
+    expect(onStarted.mock.calls[0][0]).toMatchObject({ id: 30, kind: 'deploy_inbounds' })
   })
 
   it('不可用的预设置灰并写原因；主机还没证书时提示会先申请', async () => {
