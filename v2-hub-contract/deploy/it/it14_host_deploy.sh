@@ -4,6 +4,7 @@
 #   面板上多出 v2-hub 令牌而原有令牌照常可用，服务器在线、原有入站已同步；已接入后再部署 409
 # → 查看状态、重启面板、重签令牌各一次；同一主机同时只有一条未结束的任务（第二个动作 409）
 # → 配置证书：服务器变成 https + pin 并保持在线 → 重置面板登录口令，新口令能登录面板、审计不带口令
+# → 一键部署入站（Ruling-76）：没有 DNS 账号只能部署 REALITY×2 与 SS2022，要证书的预设 400，端口被占失败为 port_in_use 且一个不建，三项部署成功并打开 VLESS 流控
 # → 重建容器（机器重装，主机密钥变了）：任务失败 host_key_changed，重置主机密钥后恢复
 # → 任务日志与全部响应里不出现私钥、令牌、面板口令；只有 server 权限的管理员碰不到主机接口。
 # 黑盒，只用 curl / jq / docker / ssh-keygen。容器里没有 systemd，systemctl 是垫片；全新安装与升级不在本用例范围（需真机）。
@@ -190,6 +191,35 @@ PJAR="$WORK/panel.jar"
 PCSRF="$(curl -sk -b "$PJAR" -c "$PJAR" "$PANEL_HTTPS/csrf-token" | jq -r .obj)"
 curl -sk -b "$PJAR" -c "$PJAR" -X POST "$PANEL_HTTPS/login" -H 'Content-Type: application/json' -H "X-CSRF-Token: $PCSRF" \
   --data "$(login_body_of "$PANEL_USER" "$PANEL_PW")" | jq -e .success >/dev/null || fail "新口令应能登录面板"
+
+# ---- 7b. 一键部署入站（Ruling-76）：没有 DNS 账号只能部署不需要证书的三项；端口被占一个不建 ----
+hub POST "/api/admin/servers/$SERVER_ID/inbound-presets/preview" > "$WORK/preview.json"
+expect_code 200 "一键部署预览"
+[ "$(jq -c '[.data.items[] | select(.available) | .key]' "$WORK/preview.json")" = '["vless_reality_vision","vless_reality_mlkem","shadowsocks_2022"]' ] \
+  || fail "没有 DNS 账号时只应能部署三项：$(jq -c .data "$WORK/preview.json")"
+inbound_count() { hub GET "/api/admin/servers/$SERVER_ID/inbounds" | jq '.data | length'; }
+INBOUNDS_BEFORE="$(inbound_count)"
+# deploy_presets <items JSON>：提交一键部署并等任务结束，任务详情留在 $WORK/task.json
+deploy_presets() {
+  local id status
+  id="$(hub POST "/api/admin/servers/$SERVER_ID/inbound-presets" "$(jq -nc --argjson items "$1" '{items:$items,nodeGroupIds:[]}')" | jq -r '.data.id // empty')"
+  expect_code 200 "提交一键部署"
+  status="$(wait_task "$id")"
+  hub GET "/api/admin/host-tasks/$id" > "$WORK/task.json"
+  printf '%s' "$status"
+}
+hub POST "/api/admin/servers/$SERVER_ID/inbound-presets" '{"items":[{"key":"trojan_tls","port":41005}],"nodeGroupIds":[]}' >/dev/null
+expect_error 400 invalid_argument "没有 DNS 账号时不能部署要证书的预设"
+# 容器里 sshd 占着 22：任务失败、一个都不建
+[ "$(deploy_presets '[{"key":"shadowsocks_2022","port":22}]')" = "failed" ] && [ "$(jq -r .data.errorCode "$WORK/task.json")" = "port_in_use" ] \
+  || fail "端口被占应失败为 port_in_use：$(jq -c '{errorCode:.data.errorCode,lastError:.data.lastError}' "$WORK/task.json")"
+[ "$(inbound_count)" = "$INBOUNDS_BEFORE" ] || fail "端口被占时不应建任何入站"
+ITEMS="$(jq -c '[.data.items[] | select(.available) | {key, port}]' "$WORK/preview.json")"
+STATUS="$(deploy_presets "$ITEMS")"
+[ "$STATUS" = "succeeded" ] || fail "一键部署应成功：$(jq -c '{errorCode:.data.errorCode,lastError:.data.lastError,log:.data.log}' "$WORK/task.json")"
+[ "$(inbound_count)" = "$((INBOUNDS_BEFORE + 3))" ] || fail "应多出 3 个入站"
+[ "$(hub GET "/api/admin/servers/$SERVER_ID" | jq -r .data.clientFlow)" = "xtls-rprx-vision" ] || fail "建了 REALITY 入站后应打开 VLESS 流控"
+echo "  一键部署：$(jq -r '.data.log' "$WORK/task.json" | grep -c '✓') 项成功"
 
 # ---- 8. 权限：server:write 不等于 host:write ----
 hub POST /api/admin/roles '{"code":"it14_server_admin","name":"IT14 服务器管理","permissions":["server:read","server:write"]}' >/dev/null; expect_code 200 "建角色"
