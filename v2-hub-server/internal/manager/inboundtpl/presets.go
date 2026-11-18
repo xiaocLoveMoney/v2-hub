@@ -151,6 +151,8 @@ func vlessRealityMLKEM(p PresetParams) (string, map[string]any, error) {
 	}
 	settings, _ := cfg["settings"].(map[string]any)
 	settings["decryption"], settings["encryption"] = p.VLESSDecryption, p.VLESSEncryption
+	// Xray 不接受 decryption 与 fallbacks 同在（哪怕是空数组），带上整个内核起不来（测试机实测）
+	delete(settings, "fallbacks")
 	return protocol, cfg, nil
 }
 
