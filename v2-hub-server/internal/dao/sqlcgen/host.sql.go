@@ -541,18 +541,6 @@ func (q *Queries) GetServerHost(ctx context.Context, id int64) (GetServerHostRow
 	return i, err
 }
 
-const getServerHostIDByServer = `-- name: GetServerHostIDByServer :one
-SELECT id FROM server_host WHERE server_id = $1
-`
-
-// 服务器关联的托管主机（docs/03 §5.22：一台服务器最多一台主机）
-func (q *Queries) GetServerHostIDByServer(ctx context.Context, serverID pgtype.Int8) (int64, error) {
-	row := q.db.QueryRow(ctx, getServerHostIDByServer, serverID)
-	var id int64
-	err := row.Scan(&id)
-	return id, err
-}
-
 const listDNSAccounts = `-- name: ListDNSAccounts :many
 
 SELECT a.id, a.name, a.provider_type, a.zone, a.remark, a.created_at, a.updated_at,
@@ -572,7 +560,7 @@ type ListDNSAccountsRow struct {
 	HostCount    int32
 }
 
-// DNS 账号与 ACME 账号（docs/03 §5.22，Ruling-72、Ruling-73）-----------------------
+// DNS 账号（docs/03 §5.22，Ruling-72）---------------------------------------------
 func (q *Queries) ListDNSAccounts(ctx context.Context) ([]ListDNSAccountsRow, error) {
 	rows, err := q.db.Query(ctx, listDNSAccounts)
 	if err != nil {

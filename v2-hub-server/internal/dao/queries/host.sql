@@ -109,10 +109,6 @@ RETURNING id;
 -- name: GetHostTaskPayload :one
 SELECT payload FROM host_task WHERE id = $1;
 
--- name: GetServerHostIDByServer :one
--- 服务器关联的托管主机（docs/03 §5.22：一台服务器最多一台主机）
-SELECT id FROM server_host WHERE server_id = $1;
-
 -- name: GetHostTask :one
 -- 不带日志（上限 64 KB），列与 ListHostTasks 相同；要日志另取 GetHostTaskLog
 SELECT t.id, t.host_id, t.kind, t.status, t.step, t.error_code, t.last_error, t.created_by,
@@ -200,7 +196,7 @@ WHERE h.dns_account_id IS NOT NULL AND h.server_id IS NOT NULL AND h.cert_renew_
 ORDER BY h.cert_renew_at, h.id
 LIMIT $2;
 
--- DNS 账号与 ACME 账号（docs/03 §5.22，Ruling-72、Ruling-73）-----------------------
+-- DNS 账号（docs/03 §5.22，Ruling-72）---------------------------------------------
 
 -- name: ListDNSAccounts :many
 SELECT a.id, a.name, a.provider_type, a.zone, a.remark, a.created_at, a.updated_at,

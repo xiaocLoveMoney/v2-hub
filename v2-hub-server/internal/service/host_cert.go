@@ -194,7 +194,12 @@ func (t *taskRun) markCertRetry(ctx context.Context) {
 }
 
 // hasDNS 报告这台主机的面板证书是否由平台申请。
-func (t *taskRun) hasDNS() bool { return t.host.DnsAccountID.Valid && t.host.Domain != "" }
+func (t *taskRun) hasDNS() bool { return hostHasDNS(t.host) }
+
+// hostHasDNS 报告主机是否选了 DNS 账号并填了域名（平台才能给它申请证书）。
+func hostHasDNS(host sqlcgen.GetServerHostRow) bool {
+	return host.DnsAccountID.Valid && host.Domain != ""
+}
 
 // QueueCertRenewals 给已到续期时间的主机各排一条“配置证书”任务（docs/03 §5.22 “证书自动续期”），返回排了几条。
 // 任务没有发起人，审计记为系统；主机这时正好有了别的任务就跳过，下一轮再看；单台排不进去不影响其它主机。

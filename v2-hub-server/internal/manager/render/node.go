@@ -74,7 +74,7 @@ type ProxyNode struct {
 	Flow     string // vless flow
 	// Encryption 是 VLESS Encryption 的客户端参数（链接的 encryption=），空或 none 为不加密（Ruling-77）。
 	Encryption string
-	AlterID  int    // vmess
+	AlterID    int // vmess
 
 	Network     string // tcp / ws / grpc / httpupgrade / xhttp ...
 	Host        string // 传输层 Host 头

@@ -384,8 +384,6 @@ func (s *HostService) runTask(ctx context.Context, taskID int64) error {
 		return t.provision(ctx, deployer, runner, det)
 	case HostTaskDiagnose:
 		return t.diagnose(ctx, deployer, runner)
-	case HostTaskDeployInbounds:
-		return t.deployInbounds(ctx, deployer, runner, det)
 	default:
 		return t.operate(ctx, deployer, runner, det)
 	}
@@ -585,6 +583,8 @@ func (t *taskRun) operate(ctx context.Context, d deploy.Deployer, r remote.Runne
 			return t.certify(ctx, d, r, serverID)
 		}
 		return withServerLock(serverID, func() error { return t.enableTLS(ctx, d, r, serverID) })
+	case HostTaskDeployInbounds:
+		return t.deployInbounds(ctx, d, r, serverID)
 	default:
 		return deploy.NewError(deploy.ReasonCommandFailed, msgBadAction)
 	}

@@ -2,14 +2,13 @@ package xui
 
 import (
 	"context"
-	"crypto/x509"
 	_ "embed" // 内嵌 acme.sh 与 DNS 钩子的快照
-	"encoding/pem"
 	"fmt"
+	"maps"
 	"net/netip"
 	"net/url"
 	"regexp"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -172,7 +171,7 @@ func certRequestEnv(req deploy.CertRequest) ([]byte, error) {
 		return nil, commandError(msgBadCertRequest)
 	}
 	var b strings.Builder
-	for _, name := range sortedKeys(req.Env) {
+	for _, name := range slices.Sorted(maps.Keys(req.Env)) {
 		value := req.Env[name]
 		if !envNamePattern.MatchString(name) || value == "" || len(value) > maxEnvValueLen || strings.ContainsAny(value, "\x00\n") {
 			return nil, commandError(msgBadCertRequest)
@@ -185,19 +184,10 @@ func certRequestEnv(req deploy.CertRequest) ([]byte, error) {
 // scrubExpression 是删掉 acme.sh 记下的这些凭据的 sed 表达式：它把凭据存成 SAVED_<名> 或 <名>（变量名已校验）。
 func scrubExpression(env map[string]string) string {
 	parts := make([]string, 0, 2*len(env))
-	for _, name := range sortedKeys(env) {
+	for _, name := range slices.Sorted(maps.Keys(env)) {
 		parts = append(parts, "/^SAVED_"+name+"=/d", "/^"+name+"=/d")
 	}
 	return strings.Join(parts, ";")
-}
-
-func sortedKeys(m map[string]string) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	return keys
 }
 
 // isCertDomain 只接受小写的完整域名（至少两段），不接受 IP 与通配符。
@@ -262,11 +252,7 @@ func parseInstalled(output string) (deploy.InstalledCert, error) {
 	if !found {
 		return deploy.InstalledCert{}, commandError(msgBadCert)
 	}
-	block, _ := pem.Decode([]byte("-----BEGIN" + chain))
-	if block == nil {
-		return deploy.InstalledCert{}, commandError(msgBadCert)
-	}
-	leaf, err := x509.ParseCertificate(block.Bytes)
+	leaf, err := parseLeaf("-----BEGIN" + chain)
 	if err != nil {
 		return deploy.InstalledCert{}, commandError(msgBadCert)
 	}

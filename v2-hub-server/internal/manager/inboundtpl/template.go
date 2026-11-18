@@ -93,10 +93,15 @@ func Build(template string, base Base, params Params) (panel.InboundSpec, error)
 	if err != nil {
 		return panel.InboundSpec{}, err
 	}
+	return finishSpec(protocol, cfg, base)
+}
+
+// finishSpec 给模板或预设拼好的配置补上默认的 sniffing，编码成入站规格。
+func finishSpec(protocol string, cfg map[string]any, base Base) (panel.InboundSpec, error) {
 	cfg["sniffing"] = map[string]any{"enabled": true, "destOverride": []string{"http", "tls", "quic"}, "metadataOnly": false, "routeOnly": false}
 	raw, err := json.Marshal(cfg)
 	if err != nil {
-		return panel.InboundSpec{}, fmt.Errorf("encode template config: %w", err)
+		return panel.InboundSpec{}, fmt.Errorf("encode inbound config: %w", err)
 	}
 	return panel.InboundSpec{Protocol: protocol, Port: base.Port, Listen: base.Listen, Remark: base.Remark, Enabled: base.Enabled, Config: raw}, nil
 }
@@ -139,7 +144,7 @@ func vlessReality(p Params) (string, map[string]any, error) {
 				"privateKey": priv, "shortIds": []string{shortID},
 				"settings": map[string]any{"publicKey": pub, "fingerprint": fingerprintChrome, "serverName": "", "spiderX": "/"},
 			},
-			"tcpSettings": map[string]any{"acceptProxyProtocol": false, "header": map[string]any{"type": "none"}},
+			"tcpSettings": tcpNone(),
 		},
 	}, nil
 }
@@ -186,7 +191,7 @@ func shadowsocks2022(p Params) (string, map[string]any, error) {
 		},
 		"streamSettings": map[string]any{
 			"network": "tcp", "security": "none",
-			"tcpSettings": map[string]any{"acceptProxyProtocol": false, "header": map[string]any{"type": "none"}},
+			"tcpSettings": tcpNone(),
 		},
 	}, nil
 }

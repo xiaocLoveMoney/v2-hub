@@ -54,9 +54,9 @@ func newPresetFixture(t *testing.T, withDNS bool) *presetFixture {
 }
 
 func allPresetItems() []InboundPresetItem {
-	items := make([]InboundPresetItem, 0, len(inboundtpl.PresetKeys))
-	for i, key := range inboundtpl.PresetKeys {
-		items = append(items, InboundPresetItem{Key: key, Port: presetPortBase + i})
+	items := make([]InboundPresetItem, 0, len(inboundtpl.Presets))
+	for i, preset := range inboundtpl.Presets {
+		items = append(items, InboundPresetItem{Key: preset.Key, Port: presetPortBase + i})
 	}
 	return items
 }
@@ -113,7 +113,7 @@ func TestPreviewInboundPresets(t *testing.T) {
 			t.Fatalf("item = %+v", it)
 		}
 		ports[it.Port] = true
-		if it.NeedsCert != inboundtpl.PresetNeedsCert(it.Key) {
+		if it.NeedsCert != presetOf(InboundPresetItem{Key: it.Key}).NeedsCert {
 			t.Fatalf("needsCert of %s", it.Key)
 		}
 	}
@@ -125,7 +125,7 @@ func TestPreviewInboundPresets(t *testing.T) {
 		t.Fatalf("PreviewInboundPresets: %v", err)
 	}
 	for _, it := range preview.Items {
-		if it.Available == inboundtpl.PresetNeedsCert(it.Key) || (!it.Available && it.Reason != msgPresetNoDNS) {
+		if it.Available == presetOf(InboundPresetItem{Key: it.Key}).NeedsCert || (!it.Available && it.Reason != msgPresetNoDNS) {
 			t.Fatalf("item without dns = %+v", it)
 		}
 	}
@@ -195,7 +195,7 @@ func TestDeployAllInboundPresets(t *testing.T) {
 	}
 	for _, it := range allPresetItems() {
 		in, ok := after[it.Port]
-		if !ok || in.Protocol != wantProto[it.Key] || in.Remark != inboundtpl.PresetRemark(it.Key) {
+		if !ok || in.Protocol != wantProto[it.Key] || in.Remark != presetOf(it).Remark {
 			t.Fatalf("inbound for %s = %+v", it.Key, in)
 		}
 	}

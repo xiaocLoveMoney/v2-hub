@@ -2,19 +2,14 @@ package service
 
 import (
 	"context"
-	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math/big"
 	"net"
 	"net/netip"
 	"slices"
 	"strconv"
 	"strings"
-
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgtype"
 
 	"v2-hub-server/internal/dao/sqlcgen"
 	"v2-hub-server/internal/manager/deploy"
@@ -47,7 +42,6 @@ const (
 	msgPresetUnknown       = "不认识的预设："
 	msgPresetDuplicate     = "同一个预设只能选一次"
 	msgPresetPortDuplicate = "端口不能重复"
-	msgPresetPortRange     = "端口须在 1–65535 之间"
 	msgPresetNoItems       = "至少选一个预设"
 	msgPresetTooManyGroups = "节点组最多选 50 个"
 	msgPresetGroupMissing  = "节点组不存在"
@@ -94,25 +88,41 @@ type InboundPresetPreview struct {
 
 // hostOfServer 取服务器关联的主机；没绑 SSH 返回 409。
 func (s *HostService) hostOfServer(ctx context.Context, serverID int64) (sqlcgen.GetServerHostRow, error) {
-	if _, err := s.panels.GetServer(ctx, serverID); err != nil {
+	srv, err := s.panels.GetServer(ctx, serverID)
+	if err != nil {
 		return sqlcgen.GetServerHostRow{}, err
 	}
-	hostID, err := s.q.GetServerHostIDByServer(ctx, pgtype.Int8{Int64: serverID, Valid: true})
-	if errors.Is(err, pgx.ErrNoRows) {
+	if srv.HostID == nil {
 		return sqlcgen.GetServerHostRow{}, newError(CodeConflict, msgServerNoHost)
 	}
-	if err != nil {
-		return sqlcgen.GetServerHostRow{}, fmt.Errorf("host of server %d: %w", serverID, err)
-	}
-	return s.hostRow(ctx, hostID)
+	return s.hostRow(ctx, *srv.HostID)
 }
 
 // presetUnavailable 给出预设在这台主机上不能部署的原因；能部署为空串。
-func presetUnavailable(key string, host sqlcgen.GetServerHostRow) string {
-	if inboundtpl.PresetNeedsCert(key) && (!host.DnsAccountID.Valid || host.Domain == "") {
+func presetUnavailable(preset inboundtpl.Preset, host sqlcgen.GetServerHostRow) string {
+	if preset.NeedsCert && !hostHasDNS(host) {
 		return msgPresetNoDNS
 	}
 	return ""
+}
+
+// presetOf 取一项对应的预设；key 在排任务前已校验，不认识时得到零值（不监听任何端口，建入站时报不认识的模板）。
+func presetOf(it InboundPresetItem) inboundtpl.Preset {
+	preset, _ := inboundtpl.LookupPreset(it.Key)
+	return preset
+}
+
+// presetPorts 是预设在这个端口上要监听的协议。
+func presetPorts(it InboundPresetItem) []deploy.Port {
+	preset := presetOf(it)
+	ports := make([]deploy.Port, 0, 2)
+	if preset.TCP {
+		ports = append(ports, deploy.Port{Number: it.Port})
+	}
+	if preset.UDP {
+		ports = append(ports, deploy.Port{Number: it.Port, UDP: true})
+	}
+	return ports
 }
 
 // PreviewInboundPresets 给出 7 个预设能否部署与建议端口：经 SSH 读一次主机正在监听的端口，避开它们与面板已有入站。
@@ -139,67 +149,54 @@ func (s *HostService) PreviewInboundPresets(ctx context.Context, actor *AdminPri
 	if err != nil {
 		return nil, err
 	}
-	used, err := s.usedPorts(ctx, serverID, listening)
+	inbounds, err := s.panels.ListServerInbounds(ctx, serverID)
 	if err != nil {
 		return nil, err
 	}
-	out := &InboundPresetPreview{HostID: host.ID, Domain: host.Domain, CertReady: host.CertNotAfter.Valid, Items: make([]InboundPresetOption, 0, len(inboundtpl.PresetKeys))}
-	taken := make(map[int]bool, len(inboundtpl.PresetKeys))
-	for _, key := range inboundtpl.PresetKeys {
+	used := usedPorts(listening, inbounds)
+	out := &InboundPresetPreview{HostID: host.ID, Domain: host.Domain, CertReady: host.CertNotAfter.Valid, Items: make([]InboundPresetOption, 0, len(inboundtpl.Presets))}
+	taken := make(map[int]bool, len(inboundtpl.Presets))
+	for _, preset := range inboundtpl.Presets {
 		port, err := pickPresetPort(used, taken)
 		if err != nil {
 			return nil, err
 		}
 		taken[port] = true
-		reason := presetUnavailable(key, host)
-		out.Items = append(out.Items, InboundPresetOption{Key: key, Available: reason == "", Reason: reason, Port: port, NeedsCert: inboundtpl.PresetNeedsCert(key)})
+		reason := presetUnavailable(preset, host)
+		out.Items = append(out.Items, InboundPresetOption{Key: preset.Key, Available: reason == "", Reason: reason, Port: port, NeedsCert: preset.NeedsCert})
 	}
 	return out, nil
 }
 
-// portUse 记一个端口的 TCP / UDP 是否被占；面板已有入站的端口两种都算占用。
-type portUse map[int]struct{ tcp, udp bool }
+// portSet 是已被占用的端口（分 TCP / UDP）。
+type portSet map[deploy.Port]bool
 
-// usedPorts 合并主机正在监听的端口与面板上已有入站的端口。
-func (s *HostService) usedPorts(ctx context.Context, serverID int64, listening []deploy.Port) (portUse, error) {
-	inbounds, err := s.panels.ListServerInbounds(ctx, serverID)
-	if err != nil {
-		return nil, err
-	}
-	used := make(portUse, len(listening)+len(inbounds))
+// usedPorts 合并主机正在监听的端口与面板上已有入站的端口；已有入站的端口两种协议都算占用。
+func usedPorts(listening []deploy.Port, inbounds []Inbound) portSet {
+	used := make(portSet, len(listening)+2*len(inbounds))
 	for _, p := range listening {
-		u := used[p.Number]
-		if p.UDP {
-			u.udp = true
-		} else {
-			u.tcp = true
-		}
-		used[p.Number] = u
+		used[p] = true
 	}
 	for _, in := range inbounds {
-		used[in.Port] = struct{ tcp, udp bool }{true, true}
+		used[deploy.Port{Number: in.Port}], used[deploy.Port{Number: in.Port, UDP: true}] = true, true
 	}
-	return used, nil
+	return used
 }
 
 // conflicts 报告预设的端口是否与已占用的冲突（按它监听的协议）。
-func (u portUse) conflicts(key string, port int) bool {
-	tcp, udp := inboundtpl.PresetPorts(key)
-	cur := u[port]
-	return (tcp && cur.tcp) || (udp && cur.udp)
+func (u portSet) conflicts(it InboundPresetItem) bool {
+	return slices.ContainsFunc(presetPorts(it), func(p deploy.Port) bool { return u[p] })
 }
 
 // pickPresetPort 在建议范围里随机取一个两种协议都没被占、也没被这次别的预设取走的端口。
-func pickPresetPort(used portUse, taken map[int]bool) (int, error) {
-	span := big.NewInt(presetPortMax - presetPortMin + 1)
+func pickPresetPort(used portSet, taken map[int]bool) (int, error) {
 	for range presetPortMax - presetPortMin {
-		n, err := rand.Int(rand.Reader, span)
+		port, err := randomBetween(presetPortMin, presetPortMax)
 		if err != nil {
 			return 0, fmt.Errorf("pick preset port: %w", err)
 		}
-		port := presetPortMin + int(n.Int64())
-		cur := used[port]
-		if cur.tcp || cur.udp || taken[port] || slices.Contains(reservedPresetPorts, port) {
+		isUsed := used[deploy.Port{Number: port}] || used[deploy.Port{Number: port, UDP: true}]
+		if isUsed || taken[port] || slices.Contains(reservedPresetPorts, port) {
 			continue
 		}
 		return port, nil
@@ -209,7 +206,7 @@ func pickPresetPort(used portUse, taken map[int]bool) (int, error) {
 
 // validatePresetInput 校验预设、端口与节点组；不可用的预设（主机没有 DNS 账号时的 TLS 预设）返回 400。
 func (s *HostService) validatePresetInput(ctx context.Context, host sqlcgen.GetServerHostRow, in InboundPresetDeployInput) error {
-	if len(in.Items) == 0 || len(in.Items) > len(inboundtpl.PresetKeys) {
+	if len(in.Items) == 0 || len(in.Items) > len(inboundtpl.Presets) {
 		return newError(CodeInvalidArgument, msgPresetNoItems)
 	}
 	if len(in.NodeGroupIDs) > maxPresetNodeGroups {
@@ -218,17 +215,20 @@ func (s *HostService) validatePresetInput(ctx context.Context, host sqlcgen.GetS
 	keys := make(map[string]bool, len(in.Items))
 	ports := make(map[int]bool, len(in.Items))
 	for _, it := range in.Items {
+		preset, known := inboundtpl.LookupPreset(it.Key)
 		switch {
-		case !inboundtpl.IsPreset(it.Key):
+		case !known:
 			return newError(CodeInvalidArgument, msgPresetUnknown+it.Key)
 		case keys[it.Key]:
 			return newError(CodeInvalidArgument, msgPresetDuplicate)
-		case it.Port < minPresetPort || it.Port > maxPresetPort:
-			return newError(CodeInvalidArgument, msgPresetPortRange)
-		case ports[it.Port]:
+		}
+		if err := validatePort(it.Port); err != nil {
+			return err
+		}
+		if ports[it.Port] {
 			return newError(CodeInvalidArgument, msgPresetPortDuplicate)
 		}
-		if reason := presetUnavailable(it.Key, host); reason != "" {
+		if reason := presetUnavailable(preset, host); reason != "" {
 			return newError(CodeInvalidArgument, reason)
 		}
 		keys[it.Key], ports[it.Port] = true, true
@@ -236,22 +236,16 @@ func (s *HostService) validatePresetInput(ctx context.Context, host sqlcgen.GetS
 	if len(in.NodeGroupIDs) == 0 {
 		return nil
 	}
-	groups, err := s.panels.ListNodeGroups(ctx)
+	// in.NodeGroupIDs 已由调用方去重
+	found, err := s.q.CountNodeGroupsByIDs(ctx, in.NodeGroupIDs)
 	if err != nil {
-		return err
+		return fmt.Errorf("count node groups: %w", err)
 	}
-	for _, id := range in.NodeGroupIDs {
-		if !slices.ContainsFunc(groups, func(g NodeGroup) bool { return g.ID == id }) {
-			return newError(CodeInvalidArgument, msgPresetGroupMissing)
-		}
+	if int(found) != len(in.NodeGroupIDs) {
+		return newError(CodeInvalidArgument, msgPresetGroupMissing)
 	}
 	return nil
 }
-
-const (
-	minPresetPort = 1
-	maxPresetPort = 65535
-)
 
 // DeployInboundPresets 排一条 deploy_inbounds 主机任务；服务器没绑 SSH、主机有未结束的任务返回 409。按管理员频控。
 func (s *HostService) DeployInboundPresets(ctx context.Context, actor *AdminPrincipal, serverID int64, in InboundPresetDeployInput, ip *netip.Addr) (*HostTask, error) {
@@ -305,14 +299,8 @@ type presetEnv struct {
 
 // deployInbounds 执行一键部署（docs/03 §5.1）：查端口 → 需要时配证书 → 准备 REALITY 目标与 VLESS Encryption 参数
 // → 逐个建入站 → 放行防火墙 → 确认 Xray 在跑 → 打开 VLESS 流控、加进节点组、触发下发对账。
-func (t *taskRun) deployInbounds(ctx context.Context, d deploy.Deployer, r remote.Runner, det deploy.Detection) error {
-	if err := requireStandardPanel(det); err != nil {
-		return err
-	}
-	if !t.host.ServerID.Valid {
-		return deploy.NewError(deploy.ReasonCommandFailed, msgNeedsServer)
-	}
-	serverID := t.host.ServerID.Int64
+// 主机有标准安装的面板、已接入为服务器由调用方（operate）保证。
+func (t *taskRun) deployInbounds(ctx context.Context, d deploy.Deployer, r remote.Runner, serverID int64) error {
 	in, err := t.svc.presetPayload(ctx, t.id)
 	if err != nil {
 		return err
@@ -323,33 +311,31 @@ func (t *taskRun) deployInbounds(ctx context.Context, d deploy.Deployer, r remot
 	if err != nil {
 		return err
 	}
-	used, err := t.svc.usedPorts(ctx, serverID, listening)
+	existing, err := t.svc.panels.ListServerInbounds(ctx, serverID)
 	if err != nil {
 		return err
 	}
-	if busy := busyPorts(in.Items, used); len(busy) > 0 {
+	if busy := busyPorts(in.Items, usedPorts(listening, existing)); len(busy) > 0 {
 		return deploy.NewError(deploy.ReasonPortInUse, msgPortsInUse+strings.Join(busy, "、"))
 	}
 
 	env := t.preparePresets(ctx, d, r, serverID, in.Items)
 	t.step(ctx, hostStepInbounds, fmt.Sprintf("建 %d 个入站", len(in.Items)))
-	results, err := t.createPresetInbounds(ctx, serverID, in.Items, env)
-	if err != nil {
-		return err
-	}
+	results := t.createPresetInbounds(ctx, serverID, in.Items, existing, env)
 	created := make([]presetResult, 0, len(results))
 	for _, res := range results {
 		if res.err == nil {
 			created = append(created, res)
 		}
 	}
+	var finishErr error
 	if len(created) > 0 {
-		if err := t.finishPresets(ctx, d, r, serverID, in.NodeGroupIDs, created); err != nil {
-			t.logPresetSummary(results)
-			return err
-		}
+		finishErr = t.finishPresets(ctx, d, r, serverID, in.NodeGroupIDs, created)
 	}
 	t.logPresetSummary(results)
+	if finishErr != nil {
+		return finishErr
+	}
 	return presetsError(results)
 }
 
@@ -366,17 +352,17 @@ func (s *HostService) presetPayload(ctx context.Context, taskID int64) (InboundP
 }
 
 // busyPorts 列出与已占用端口冲突的预设端口（如 “443/tcp”）。
-func busyPorts(items []InboundPresetItem, used portUse) []string {
+func busyPorts(items []InboundPresetItem, used portSet) []string {
 	out := make([]string, 0, len(items))
 	for _, it := range items {
-		if used.conflicts(it.Key, it.Port) {
-			tcp, udp := inboundtpl.PresetPorts(it.Key)
-			proto := "tcp"
-			if udp && !tcp {
-				proto = "udp"
-			}
-			out = append(out, strconv.Itoa(it.Port)+"/"+proto)
+		if !used.conflicts(it) {
+			continue
 		}
+		proto := "tcp"
+		if preset := presetOf(it); preset.UDP && !preset.TCP {
+			proto = "udp"
+		}
+		out = append(out, strconv.Itoa(it.Port)+"/"+proto)
 	}
 	return out
 }
@@ -384,19 +370,16 @@ func busyPorts(items []InboundPresetItem, used portUse) []string {
 // preparePresets 准备证书、REALITY 目标与 ML-KEM 参数；只为选中的预设准备。
 func (t *taskRun) preparePresets(ctx context.Context, d deploy.Deployer, r remote.Runner, serverID int64, items []InboundPresetItem) presetEnv {
 	var env presetEnv
-	has := func(match func(string) bool) bool {
-		return slices.ContainsFunc(items, func(it InboundPresetItem) bool { return match(it.Key) })
+	has := func(match func(inboundtpl.Preset) bool) bool {
+		return slices.ContainsFunc(items, func(it InboundPresetItem) bool { return match(presetOf(it)) })
 	}
-	if has(inboundtpl.PresetNeedsCert) {
+	if has(func(p inboundtpl.Preset) bool { return p.NeedsCert }) {
 		env.cert, env.certErr = t.presetCert(ctx, d, r, serverID)
 	}
-	isReality := func(k string) bool {
-		return k == inboundtpl.PresetVLESSRealityVision || k == inboundtpl.PresetVLESSRealityMLKEM
-	}
-	if has(isReality) {
+	if has(func(p inboundtpl.Preset) bool { return p.NeedsRealityTarget }) {
 		env.target, env.realErr = t.presetRealityTarget(ctx, serverID)
 	}
-	if has(func(k string) bool { return k == inboundtpl.PresetVLESSRealityMLKEM }) {
+	if has(func(p inboundtpl.Preset) bool { return p.NeedsVLESSEncryption }) {
 		env.dec, env.enc, env.encErr = t.presetVLESSEncryption(ctx, serverID)
 	}
 	return env
@@ -472,19 +455,15 @@ func (t *taskRun) presetVLESSEncryption(ctx context.Context, serverID int64) (st
 // actor 是任务发起人（一键部署总有发起的管理员），写入面板时用它记审计。
 func (t *taskRun) actor() *AdminPrincipal { return &AdminPrincipal{AdminID: t.adminID} }
 
-// createPresetInbounds 逐个建入站；单项失败只记在这一项上。返回的 error 只表示读不到面板现有入站。
-func (t *taskRun) createPresetInbounds(ctx context.Context, serverID int64, items []InboundPresetItem, env presetEnv) ([]presetResult, error) {
-	existing, err := t.svc.panels.ListServerInbounds(ctx, serverID)
-	if err != nil {
-		return nil, err
-	}
+// createPresetInbounds 逐个建入站；单项失败只记在这一项上。existing 是面板现有的入站，用来避开重名的备注。
+func (t *taskRun) createPresetInbounds(ctx context.Context, serverID int64, items []InboundPresetItem, existing []Inbound, env presetEnv) []presetResult {
 	remarks := make(map[string]bool, len(existing)+len(items))
 	for _, in := range existing {
 		remarks[in.Remark] = true
 	}
 	results := make([]presetResult, 0, len(items))
 	for _, it := range items {
-		res := presetResult{item: it, remark: inboundtpl.PresetRemark(it.Key)}
+		res := presetResult{item: it, remark: presetOf(it).Remark}
 		if remarks[res.remark] {
 			res.remark += "-" + strconv.Itoa(it.Port)
 		}
@@ -495,18 +474,19 @@ func (t *taskRun) createPresetInbounds(ctx context.Context, serverID int64, item
 		}
 		results = append(results, res)
 	}
-	return results, nil
+	return results
 }
 
 func (t *taskRun) createPresetInbound(ctx context.Context, serverID int64, it InboundPresetItem, remark string, env presetEnv) (int64, error) {
 	params := inboundtpl.PresetParams{Domain: t.host.Domain, CertFile: env.cert.CertFile, KeyFile: env.cert.KeyFile, RealityTarget: env.target,
 		VLESSDecryption: env.dec, VLESSEncryption: env.enc}
+	preset := presetOf(it)
 	switch {
-	case inboundtpl.PresetNeedsCert(it.Key) && env.certErr != nil:
+	case preset.NeedsCert && env.certErr != nil:
 		return 0, env.certErr
-	case (it.Key == inboundtpl.PresetVLESSRealityVision || it.Key == inboundtpl.PresetVLESSRealityMLKEM) && env.realErr != nil:
+	case preset.NeedsRealityTarget && env.realErr != nil:
 		return 0, env.realErr
-	case it.Key == inboundtpl.PresetVLESSRealityMLKEM && env.encErr != nil:
+	case preset.NeedsVLESSEncryption && env.encErr != nil:
 		return 0, env.encErr
 	}
 	spec, err := inboundtpl.BuildPreset(it.Key, inboundtpl.Base{Remark: remark, Port: it.Port, Enabled: true}, params)
@@ -527,13 +507,7 @@ func (t *taskRun) finishPresets(ctx context.Context, d deploy.Deployer, r remote
 	t.step(ctx, hostStepFirewall, "放行防火墙端口（主机开着 ufw / firewalld 时）")
 	ports := make([]deploy.Port, 0, 2*len(created))
 	for _, res := range created {
-		tcp, udp := inboundtpl.PresetPorts(res.item.Key)
-		if tcp {
-			ports = append(ports, deploy.Port{Number: res.item.Port})
-		}
-		if udp {
-			ports = append(ports, deploy.Port{Number: res.item.Port, UDP: true})
-		}
+		ports = append(ports, presetPorts(res.item)...)
 	}
 	if err := d.OpenPorts(ctx, r, ports); err != nil {
 		return err
@@ -544,7 +518,7 @@ func (t *taskRun) finishPresets(ctx context.Context, d deploy.Deployer, r remote
 		return err
 	}
 
-	if slices.ContainsFunc(created, func(res presetResult) bool { return inboundtpl.PresetWantsVision(res.item.Key) }) {
+	if slices.ContainsFunc(created, func(res presetResult) bool { return presetOf(res.item).Vision }) {
 		_, err := t.svc.q.SetServerClientFlow(ctx, sqlcgen.SetServerClientFlowParams{ID: serverID, ClientFlow: ClientFlowVision})
 		if err != nil {
 			return fmt.Errorf("set client flow of server %d: %w", serverID, err)

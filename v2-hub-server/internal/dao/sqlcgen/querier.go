@@ -279,8 +279,6 @@ type Querier interface {
 	GetServer(ctx context.Context, id int64) (GetServerRow, error)
 	GetServerConn(ctx context.Context, id int64) (GetServerConnRow, error)
 	GetServerHost(ctx context.Context, id int64) (GetServerHostRow, error)
-	// 服务器关联的托管主机（docs/03 §5.22：一台服务器最多一台主机）
-	GetServerHostIDByServer(ctx context.Context, serverID pgtype.Int8) (int64, error)
 	// 影响分享链接的入站与对外地址摘要；变了就要重新向面板取全部链接（docs/03 §5.4 节点来源）
 	GetServerLinkFingerprint(ctx context.Context, serverID int64) (string, error)
 	GetSharedAccountCredential(ctx context.Context, id int64) ([]byte, error)
@@ -385,7 +383,7 @@ type Querier interface {
 	ListChainRoutes(ctx context.Context, userIds []int64) ([]ListChainRoutesRow, error)
 	ListCheckins(ctx context.Context, arg ListCheckinsParams) ([]ListCheckinsRow, error)
 	ListCoupons(ctx context.Context, arg ListCouponsParams) ([]ListCouponsRow, error)
-	// DNS 账号与 ACME 账号（docs/03 §5.22，Ruling-72、Ruling-73）-----------------------
+	// DNS 账号（docs/03 §5.22，Ruling-72）---------------------------------------------
 	ListDNSAccounts(ctx context.Context) ([]ListDNSAccountsRow, error)
 	// 期望状态：每个（用户, 服务器）上应挂的入站。来源 = 套餐节点组里启用的节点，入站未缺失、服务器未停用（docs/03 §5.2 授权）
 	ListDesiredClients(ctx context.Context, serverID int64) ([]ListDesiredClientsRow, error)
