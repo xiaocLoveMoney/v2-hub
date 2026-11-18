@@ -113,7 +113,7 @@ function HostEditBody({ host, onSaved }: { host: ServerHost; onSaved: () => void
           <Form.Item
             name="domain"
             label="域名"
-            extra="须是所选 DNS 账号的根域名或它的子域名；留空则按名称自动生成。改了域名或 DNS 账号后，要在 SSH 运维里重做一次“申请证书”才生效"
+            extra="须是所选 DNS 账号的根域名或它的子域名；留空则自动生成（地址是根域名下的域名就用地址，否则按名称）。改了域名或 DNS 账号后，要在 SSH 运维里重做一次“申请证书”才生效"
           >
             <Input autoComplete="off" maxLength={MAX_DOMAIN_LEN} placeholder="如 hk-01.example.com" />
           </Form.Item>
