@@ -2,13 +2,9 @@ package service
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"net/netip"
-
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgtype"
 
 	"v2-hub-server/internal/manager/deploy"
 	"v2-hub-server/internal/manager/remote"
@@ -75,14 +71,14 @@ func (s *HostService) SetInboundEnabled(ctx context.Context, actor *AdminPrincip
 // checkHostPort 经 SSH 读主机正在监听的端口，与 listen 冲突就拒绝（400）。
 // 服务器没绑 SSH 时不查；读不到（SSH 连不上、主机密钥变了等）时不拦，只记日志：这是防呆，不该挡住入站管理。
 func (s *HostService) checkHostPort(ctx context.Context, serverID int64, listen InboundListen) error {
-	hostID, err := s.q.GetServerHostIDByServer(ctx, pgtype.Int8{Int64: serverID, Valid: true})
-	if errors.Is(err, pgx.ErrNoRows) {
+	srv, err := s.panels.GetServer(ctx, serverID)
+	if err != nil {
+		return err
+	}
+	if srv.HostID == nil {
 		return nil
 	}
-	if err != nil {
-		return fmt.Errorf("host of server %d: %w", serverID, err)
-	}
-	host, err := s.hostRow(ctx, hostID)
+	host, err := s.hostRow(ctx, *srv.HostID)
 	if err != nil {
 		return err
 	}
