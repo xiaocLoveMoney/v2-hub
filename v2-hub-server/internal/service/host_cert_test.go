@@ -522,6 +522,13 @@ func TestDefaultDomain(t *testing.T) {
 		{"香港", "2001:db8::1", "ip-2001-db8-1.example.com"},
 		{"香港", "origin.example.net", "origin-example-net.example.com"},
 		{strings.Repeat("a", 80), "203.0.113.1", strings.Repeat("a", 63) + ".example.com"},
+		// 地址本身在根域名之下：直接用地址，不按名称生成（Ruling-79）
+		{"test", "node1.example.com", "node1.example.com"},
+		{"test", "a.b.example.com", "a.b.example.com"},
+		{"test", "example.com", "example.com"},
+		// 只是后缀像根域名、并不在它之下的，照旧按名称生成
+		{"test", "node1.notexample.com", "test.example.com"},
+		{"test", "origin.example.net", "test.example.com"},
 	}
 	for _, c := range cases {
 		if got := defaultDomain(c.name, c.address, testZone); got != c.want {
