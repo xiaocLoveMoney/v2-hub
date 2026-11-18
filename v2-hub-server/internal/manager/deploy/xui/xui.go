@@ -9,6 +9,7 @@ import (
 	_ "embed" // 内嵌上游安装与升级脚本的快照
 	"encoding/base64"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"net/netip"
 	"regexp"
@@ -387,16 +388,25 @@ func normalizeBasePath(p string) string {
 
 // certFingerprint 取 PEM 里第一张证书（叶子）的 SHA-256，标准 Base64，与 server.cert_pin_sha256 的格式一致。
 func certFingerprint(pemText string) (string, error) {
-	block, _ := pem.Decode([]byte(pemText))
-	if block == nil {
-		return "", fmt.Errorf("no pem block")
-	}
-	cert, err := x509.ParseCertificate(block.Bytes)
+	cert, err := parseLeaf(pemText)
 	if err != nil {
-		return "", fmt.Errorf("parse certificate: %w", err)
+		return "", err
 	}
 	sum := sha256.Sum256(cert.Raw)
 	return base64.StdEncoding.EncodeToString(sum[:]), nil
+}
+
+// parseLeaf 解析 PEM 里的第一张证书（叶子）；没有 PEM 块或证书不合法时返回 error。
+func parseLeaf(pemText string) (*x509.Certificate, error) {
+	block, _ := pem.Decode([]byte(pemText))
+	if block == nil {
+		return nil, errors.New("no pem block")
+	}
+	cert, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		return nil, fmt.Errorf("parse certificate: %w", err)
+	}
+	return cert, nil
 }
 
 // IssueToken 见 deploy.Deployer。命令的输出含令牌明文，只在这里解析，不向外传。

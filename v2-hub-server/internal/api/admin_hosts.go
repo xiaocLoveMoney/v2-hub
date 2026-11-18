@@ -543,9 +543,6 @@ func (h *handlers) deployInboundPresets(w http.ResponseWriter, r *http.Request, 
 		writeError(w, r, err)
 		return
 	}
-	if req.NodeGroupIDs == nil {
-		req.NodeGroupIDs = []int64{}
-	}
 	task, err := h.hosts.DeployInboundPresets(r.Context(), p, id, req, clientIP(r, h.trustedProxies))
 	writeTask(w, r, task, err)
 }

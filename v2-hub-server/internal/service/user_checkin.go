@@ -182,11 +182,11 @@ func (s *UserService) Checkin(ctx context.Context, p *UserPrincipal) (*CheckinRe
 	return res, nil
 }
 
-// randomBetween 返回 [lo, hi] 内均匀分布的整数；lo ≤ hi 由设置校验保证。
+// randomBetween 返回 [lo, hi] 内均匀分布的整数；lo ≤ hi 由调用方保证。
 func randomBetween(lo, hi int) (int, error) {
 	n, err := rand.Int(rand.Reader, big.NewInt(int64(hi-lo+1)))
 	if err != nil {
-		return 0, fmt.Errorf("generate checkin reward: %w", err)
+		return 0, fmt.Errorf("random integer in [%d, %d]: %w", lo, hi, err)
 	}
 	return lo + int(n.Int64()), nil
 }

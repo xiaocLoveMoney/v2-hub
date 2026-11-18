@@ -64,7 +64,7 @@ const (
 	msgServerHasHost       = "这台服务器已绑定 SSH"
 	msgBadHostAddress      = "地址须为 IP 或域名"
 	msgLoopbackAddress     = "不能使用回环或未指定地址"
-	msgBadSSHPort          = "端口须在 1–65535 之间"
+	msgBadPort             = "端口须在 1–65535 之间"
 	msgBadProviderType     = "不支持的面板类型："
 )
 
@@ -467,7 +467,7 @@ func normalizeHostAddress(address string, allowLoopback bool) (string, error) {
 
 func validatePort(port int) error {
 	if port < minPort || port > maxPort {
-		return newError(CodeInvalidArgument, msgBadSSHPort)
+		return newError(CodeInvalidArgument, msgBadPort)
 	}
 	return nil
 }

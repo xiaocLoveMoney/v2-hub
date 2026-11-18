@@ -1,13 +1,10 @@
 package inboundtpl
 
 import (
-	"crypto/rand"
-	"encoding/base64"
-	"encoding/json"
 	"fmt"
-	"net"
 	"strings"
 
+	"v2-hub-server/internal/manager/crypto"
 	"v2-hub-server/internal/manager/panel"
 )
 
@@ -41,47 +38,44 @@ const (
 	udpIdleTimeoutSeconds   = 60
 )
 
-// PresetKeys 是全部预设，按弹窗里的顺序。
-var PresetKeys = []string{
-	PresetVLESSRealityVision, PresetVLESSRealityMLKEM, PresetVLESSXHTTPTLS, PresetVMessWSTLS,
-	PresetTrojanTLS, PresetShadowsocks2022, PresetHysteria2Salamander,
+// Preset 是一个预设的固定属性。
+type Preset struct {
+	Key string
+	// Remark 是预设建出的入站备注（重名时调用方再加端口）。
+	Remark string
+	// NeedsCert 要主机的域名证书；NeedsRealityTarget 要 REALITY 伪装目标；NeedsVLESSEncryption 要面板生成的 VLESS Encryption 参数。
+	NeedsCert            bool
+	NeedsRealityTarget   bool
+	NeedsVLESSEncryption bool
+	// TCP / UDP 是预设监听的协议（查端口冲突、放行防火墙用）。
+	TCP bool
+	UDP bool
+	// Vision 要服务器打开 VLESS Vision 流控（Ruling-77）。
+	Vision bool
+	build  func(PresetParams) (string, map[string]any, error)
 }
 
-// presetMeta 是每个预设的固定属性。
-type presetMeta struct {
-	remark    string
-	needsCert bool
-	tcp, udp  bool
-	vision    bool
+// Presets 是全部预设，按弹窗里的顺序。
+var Presets = []Preset{
+	{Key: PresetVLESSRealityVision, Remark: "VLESS-REALITY", NeedsRealityTarget: true, TCP: true, Vision: true, build: vlessRealityVision},
+	{Key: PresetVLESSRealityMLKEM, Remark: "VLESS-REALITY-MLKEM", NeedsRealityTarget: true, NeedsVLESSEncryption: true, TCP: true, Vision: true,
+		build: vlessRealityMLKEM},
+	{Key: PresetVLESSXHTTPTLS, Remark: "VLESS-XHTTP", NeedsCert: true, TCP: true, build: vlessXHTTPTLS},
+	{Key: PresetVMessWSTLS, Remark: "VMess-WS", NeedsCert: true, TCP: true, build: vmessWSTLS},
+	{Key: PresetTrojanTLS, Remark: "Trojan", NeedsCert: true, TCP: true, build: trojanTLS},
+	{Key: PresetShadowsocks2022, Remark: "SS2022", TCP: true, UDP: true, build: shadowsocks2022AES256},
+	{Key: PresetHysteria2Salamander, Remark: "Hysteria2", NeedsCert: true, UDP: true, build: hysteria2Salamander},
 }
 
-var presets = map[string]presetMeta{
-	PresetVLESSRealityVision:  {remark: "VLESS-REALITY", tcp: true, vision: true},
-	PresetVLESSRealityMLKEM:   {remark: "VLESS-REALITY-MLKEM", tcp: true, vision: true},
-	PresetVLESSXHTTPTLS:       {remark: "VLESS-XHTTP", needsCert: true, tcp: true},
-	PresetVMessWSTLS:          {remark: "VMess-WS", needsCert: true, tcp: true},
-	PresetTrojanTLS:           {remark: "Trojan", needsCert: true, tcp: true},
-	PresetShadowsocks2022:     {remark: "SS2022", tcp: true, udp: true},
-	PresetHysteria2Salamander: {remark: "Hysteria2", needsCert: true, udp: true},
+// LookupPreset 按 key 取预设；不认识的 key 返回 false。
+func LookupPreset(key string) (Preset, bool) {
+	for _, p := range Presets {
+		if p.Key == key {
+			return p, true
+		}
+	}
+	return Preset{}, false
 }
-
-// IsPreset 报告 key 是不是已知的预设。
-func IsPreset(key string) bool {
-	_, ok := presets[key]
-	return ok
-}
-
-// PresetNeedsCert 报告预设是否要主机的域名证书。
-func PresetNeedsCert(key string) bool { return presets[key].needsCert }
-
-// PresetRemark 是预设建出的入站备注（重名时调用方再加端口）。
-func PresetRemark(key string) string { return presets[key].remark }
-
-// PresetPorts 报告预设要监听 TCP 与 / 或 UDP（放行防火墙用）。
-func PresetPorts(key string) (tcp, udp bool) { return presets[key].tcp, presets[key].udp }
-
-// PresetWantsVision 报告预设要服务器打开 VLESS Vision 流控（Ruling-77）。
-func PresetWantsVision(key string) bool { return presets[key].vision }
 
 // PresetParams 是预设用到的参数；没用到的字段忽略。
 type PresetParams struct {
@@ -97,47 +91,35 @@ type PresetParams struct {
 }
 
 // BuildPreset 按预设生成入站规格；随机值（REALITY 密钥、Short ID、路径、SS 服务端密钥、Salamander 密码）在这里生成。
+// 不认识的 key 返回 ErrUnknownTemplate，参数不够返回 *ParamError。
 func BuildPreset(key string, base Base, p PresetParams) (panel.InboundSpec, error) {
-	meta, ok := presets[key]
+	preset, ok := LookupPreset(key)
 	if !ok {
 		return panel.InboundSpec{}, ErrUnknownTemplate
 	}
-	if meta.needsCert && (!hostnamePattern.MatchString(p.Domain) || p.CertFile == "" || p.KeyFile == "") {
+	if preset.NeedsCert && (!hostnamePattern.MatchString(p.Domain) || p.CertFile == "" || p.KeyFile == "") {
 		return panel.InboundSpec{}, &ParamError{Message: "这个预设要主机的域名与证书"}
 	}
-	var (
-		protocol string
-		cfg      map[string]any
-		err      error
-	)
-	switch key {
-	case PresetVLESSRealityVision:
-		protocol, cfg, err = vlessReality(Params{Target: p.RealityTarget})
-	case PresetVLESSRealityMLKEM:
-		protocol, cfg, err = vlessRealityMLKEM(p)
-	case PresetVLESSXHTTPTLS:
-		protocol, cfg, err = vlessXHTTPTLS(p)
-	case PresetVMessWSTLS:
-		protocol, cfg, err = vmessWSTLS(p)
-	case PresetTrojanTLS:
-		protocol, cfg = protocolTrojan, map[string]any{
-			"settings":       map[string]any{"clients": []any{}, "fallbacks": []any{}},
-			"streamSettings": tlsStream(networkTCP, "tcpSettings", tcpNone(), p, []string{"h2", "http/1.1"}),
-		}
-	case PresetShadowsocks2022:
-		protocol, cfg, err = shadowsocks2022(Params{Method: ss2022AES256})
-	default:
-		protocol, cfg, err = hysteria2Salamander(p)
-	}
+	protocol, cfg, err := preset.build(p)
 	if err != nil {
 		return panel.InboundSpec{}, err
 	}
-	cfg["sniffing"] = map[string]any{"enabled": true, "destOverride": []string{"http", "tls", "quic"}, "metadataOnly": false, "routeOnly": false}
-	raw, err := json.Marshal(cfg)
-	if err != nil {
-		return panel.InboundSpec{}, fmt.Errorf("encode preset config: %w", err)
-	}
-	return panel.InboundSpec{Protocol: protocol, Port: base.Port, Listen: base.Listen, Remark: base.Remark, Enabled: base.Enabled, Config: raw}, nil
+	return finishSpec(protocol, cfg, base)
+}
+
+func vlessRealityVision(p PresetParams) (string, map[string]any, error) {
+	return vlessReality(Params{Target: p.RealityTarget})
+}
+
+func trojanTLS(p PresetParams) (string, map[string]any, error) {
+	return protocolTrojan, map[string]any{
+		"settings":       map[string]any{"clients": []any{}, "fallbacks": []any{}},
+		"streamSettings": tlsStream(networkTCP, "tcpSettings", tcpNone(), p, []string{"h2", "http/1.1"}),
+	}, nil
+}
+
+func shadowsocks2022AES256(PresetParams) (string, map[string]any, error) {
+	return shadowsocks2022(Params{Method: ss2022AES256})
 }
 
 func vlessRealityMLKEM(p PresetParams) (string, map[string]any, error) {
@@ -182,15 +164,15 @@ func vmessWSTLS(p PresetParams) (string, map[string]any, error) {
 }
 
 func hysteria2Salamander(p PresetParams) (string, map[string]any, error) {
-	buf := make([]byte, salamanderPasswordBytes)
-	if _, err := rand.Read(buf); err != nil {
+	password, err := crypto.RandomToken(salamanderPasswordBytes)
+	if err != nil {
 		return "", nil, fmt.Errorf("generate salamander password: %w", err)
 	}
 	stream := tlsStream(networkHysteria, "hysteriaSettings",
 		map[string]any{"version": hysteriaVersion, "udpIdleTimeout": udpIdleTimeoutSeconds}, p, []string{"h3"})
 	// 3x-ui v3.11 的 Salamander 在 FinalMask 的 UDP 掩码里；分享链接据此输出 obfs=salamander
 	stream["finalmask"] = map[string]any{"udp": []any{map[string]any{
-		"type": "salamander", "settings": map[string]any{"password": base64.RawURLEncoding.EncodeToString(buf)},
+		"type": "salamander", "settings": map[string]any{"password": password},
 	}}}
 	return protocolHysteria, map[string]any{
 		"settings":       map[string]any{"version": hysteriaVersion, "clients": []any{}},
@@ -220,13 +202,4 @@ func randomPath() (string, error) {
 		return "", err
 	}
 	return "/" + s, nil
-}
-
-// RealityHost 取 REALITY 目标（域名:端口）的主机名；不合法时返回空串。
-func RealityHost(target string) string {
-	host, _, err := net.SplitHostPort(target)
-	if err != nil || !hostnamePattern.MatchString(host) {
-		return ""
-	}
-	return host
 }

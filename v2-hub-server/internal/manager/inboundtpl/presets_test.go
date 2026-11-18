@@ -29,7 +29,8 @@ func fullParams() PresetParams {
 
 func buildPreset(t *testing.T, key string, p PresetParams) (string, presetConfig) {
 	t.Helper()
-	spec, err := BuildPreset(key, Base{Remark: PresetRemark(key), Port: presetBasePort, Enabled: true}, p)
+	preset, _ := LookupPreset(key)
+	spec, err := BuildPreset(key, Base{Remark: preset.Remark, Port: presetBasePort, Enabled: true}, p)
 	if err != nil {
 		t.Fatalf("BuildPreset(%s): %v", key, err)
 	}
@@ -58,11 +59,11 @@ func tlsOf(t *testing.T, key string, cfg presetConfig) map[string]any {
 }
 
 func TestPresetsMatchUpstreamShapes(t *testing.T) {
-	if len(PresetKeys) != 7 {
-		t.Fatalf("want 7 presets, got %d", len(PresetKeys))
+	if len(Presets) != 7 {
+		t.Fatalf("want 7 presets, got %d", len(Presets))
 	}
-	for _, key := range PresetKeys {
-		buildPreset(t, key, fullParams())
+	for _, preset := range Presets {
+		buildPreset(t, preset.Key, fullParams())
 	}
 
 	proto, cfg := buildPreset(t, PresetVLESSRealityVision, fullParams())
@@ -138,11 +139,11 @@ func TestPresetsRandomizeSecrets(t *testing.T) {
 func TestPresetRejectsMissingInputs(t *testing.T) {
 	noCert := fullParams()
 	noCert.CertFile = ""
-	for _, key := range PresetKeys {
-		_, err := BuildPreset(key, Base{Port: presetBasePort}, noCert)
+	for _, preset := range Presets {
+		_, err := BuildPreset(preset.Key, Base{Port: presetBasePort}, noCert)
 		var pe *ParamError
-		if PresetNeedsCert(key) != errors.As(err, &pe) {
-			t.Fatalf("%s: needsCert=%v, err=%v", key, PresetNeedsCert(key), err)
+		if preset.NeedsCert != errors.As(err, &pe) {
+			t.Fatalf("%s: needsCert=%v, err=%v", preset.Key, preset.NeedsCert, err)
 		}
 	}
 	noKeys := fullParams()
@@ -158,13 +159,16 @@ func TestPresetRejectsMissingInputs(t *testing.T) {
 	if _, err := BuildPreset("nope", Base{}, fullParams()); !errors.Is(err, ErrUnknownTemplate) {
 		t.Fatalf("unknown preset err = %v", err)
 	}
-	if tcp, udp := PresetPorts(PresetHysteria2Salamander); tcp || !udp {
+	if hy, _ := LookupPreset(PresetHysteria2Salamander); hy.TCP || !hy.UDP {
 		t.Fatal("hysteria2 listens on udp only")
 	}
-	if !PresetWantsVision(PresetVLESSRealityMLKEM) || PresetWantsVision(PresetVLESSXHTTPTLS) {
-		t.Fatal("only the two REALITY presets want vision")
-	}
-	if RealityHost(testTarget) != "www.example.org" || RealityHost("bad") != "" {
-		t.Fatal("RealityHost")
+	for _, preset := range Presets {
+		isReality := preset.Key == PresetVLESSRealityVision || preset.Key == PresetVLESSRealityMLKEM
+		if preset.Vision != isReality || preset.NeedsRealityTarget != isReality {
+			t.Fatalf("%s: only the two REALITY presets want vision and a target", preset.Key)
+		}
+		if preset.NeedsVLESSEncryption != (preset.Key == PresetVLESSRealityMLKEM) {
+			t.Fatalf("%s: only the ML-KEM preset needs VLESS Encryption parameters", preset.Key)
+		}
 	}
 }
