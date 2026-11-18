@@ -104,10 +104,12 @@ CREATE TABLE server (
     last_synced_at  TIMESTAMPTZ,
     offline_since   TIMESTAMPTZ,                           -- 离开 online 的时刻；online 时为空（docs/03 §5.20 掉线告警）
     alert_sent_at   TIMESTAMPTZ,                           -- 这次掉线已发告警的时刻；未发为空
+    client_flow     VARCHAR(32)  NOT NULL DEFAULT '',      -- VLESS 流控（Ruling-77）：空串为不带；打开后平台下发的 client 带这个 flow
     created_at      TIMESTAMPTZ  NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ  NOT NULL DEFAULT now(),
     CONSTRAINT uk_server_name UNIQUE (name),
-    CONSTRAINT ck_server_region CHECK (region ~ '^([A-Z]{2})?$')
+    CONSTRAINT ck_server_region CHECK (region ~ '^([A-Z]{2})?$'),
+    CONSTRAINT ck_server_client_flow CHECK (client_flow IN ('', 'xtls-rprx-vision'))
 );
 
 -- 服务器负载采样：健康探测成功时按 5 分钟对齐记一条，同一时段只留最后一次，保留 7 天（docs/03 §5.1，Ruling-65）
@@ -915,11 +917,12 @@ CREATE TABLE host_task (
     error_code  VARCHAR(32)  NOT NULL DEFAULT '',
     last_error  VARCHAR(500) NOT NULL DEFAULT '',
     log         TEXT         NOT NULL DEFAULT '',
+    payload     JSONB        NOT NULL DEFAULT '{}',         -- 任务参数（deploy_inbounds 的预设、端口与节点组，Ruling-76）
     created_by  BIGINT       REFERENCES admin (id) ON DELETE SET NULL,
     created_at  TIMESTAMPTZ  NOT NULL DEFAULT now(),
     started_at  TIMESTAMPTZ,
     finished_at TIMESTAMPTZ,
-    CONSTRAINT ck_host_task_kind CHECK (kind IN ('provision', 'verify', 'restart_panel', 'restart_core', 'upgrade', 'reissue_token', 'enable_tls', 'diagnose')),
+    CONSTRAINT ck_host_task_kind CHECK (kind IN ('provision', 'verify', 'restart_panel', 'restart_core', 'upgrade', 'reissue_token', 'enable_tls', 'diagnose', 'deploy_inbounds')),
     CONSTRAINT ck_host_task_status CHECK (status IN ('queued', 'running', 'succeeded', 'failed', 'canceled'))
 );
 CREATE UNIQUE INDEX uk_host_task_active ON host_task (host_id) WHERE status IN ('queued', 'running');
