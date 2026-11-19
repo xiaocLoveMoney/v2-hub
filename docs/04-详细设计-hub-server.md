@@ -18,6 +18,8 @@ v2-hub-server/
 │   │   ├── deploy/              # Deployer 接口、中立结果、注册表（M11）
 │   │   ├── deploy/xui/          # 3x-ui 的安装、接管、运维动作与主机上的证书签发；内嵌上游脚本与 acme.sh 快照（M11）
 │   │   ├── dns/                 # DNS 服务商接口与注册表；dns/cloudflare 是 Cloudflare 实现（M11 补充）
+│   │   ├── ipprobe/             # IP 质量检测的服务器侧：固定的 sh + curl 探测脚本、输出解析、流媒体与邮局判定（Ruling-81）
+│   │   ├── ipquality/           # IP 质量检测的平台侧：各数据源、中立模型、等级与类型归一、DNS 黑名单（Ruling-82）
 │   │   ├── render/              # 分享链接解析 → ProxyNode → 各订阅格式（M3）
 │   │   ├── chain/               # 服务端链式的面板配置变更（M7）；客户端链式的渲染在 render/（M6）；M9 起一条规则可带多个入站
 │   │   └── crypto/              # AES-GCM、argon2id、token 生成（M0）
@@ -136,6 +138,14 @@ IP 换国家在 `internal/manager/geoip`：`Locator` 接口 + HTTP 实现，查�
 再发被墙告警与恢复通知（走 `OpsService.broadcast`，同掉线告警的渠道）；按小时的探测额度记在内存里（`reachBudget`，留一成余量），同一目标的检测互斥（`reachLocks`），
 手动检测按管理员频控（`ratelimit.FailureGuard`）。`job.RunReach` 按配置 `reach.checkInterval`（默认 1 分钟）驱动；功能开关、检测间隔与是否通知在系统设置的 `reach` 分组。
 节点列表与服务器列表的结论由 handler 调 `ReachService.NodeBriefs` / `ServerCounts` 拼上，`PanelService` 不依赖连通检测。
+
+IP 质量检测（docs/03 §5.23，Ruling-81、Ruling-82）分三块：`manager/ipprobe` 只认 `remote.Runner`，把探测表渲染成一段 POSIX `sh` 脚本（参数先过白名单正则再经 `remote.Quote`），
+解析回传的 `键=值` 行（只收表里声明过的键并限长）并按表里的判定函数出结论，不认识面板也不连数据库；`manager/ipquality` 是平台侧：`Source` 接口每源一个实现
+（HTTP 源统一经 `fetchJSON`：超时、限长、剥掉错误里带 key 的 URL；429 后进程内冷却一小时），`DNSBL` 用可注入的解析器并发查精选列表；
+`service/ip_quality.go` 的 `IPQualityService` 管记录与流程：排队（`server_ip_check`，同一服务器一条进行中靠部分唯一索引）、领取执行（与主机任务共用 `job` 里的任务循环）、
+经 `HostService.withServerHost` 连主机（只连已固定主机密钥的，不套 `withRunner` 的 502 转换，失败归类后写进报告）、组装结果与摘要列、定期复检与清理。
+不走主机任务队列：检测只读，进队列会挡住部署与证书续期。数据源 key 只在 `cmd/hub/main.go` 读环境变量 `HUB_IPQ_*` 注入；
+联调用的覆盖（数据源基址、服务器侧探测基址与邮局地址、DNS 解析器）在配置 `ipQuality.testOverrides`，非空时启动打警告日志。
 
 ## 7. 接口待补 / 契约缺口
 

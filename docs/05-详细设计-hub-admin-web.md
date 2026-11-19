@@ -80,7 +80,7 @@ REALITY 的“目标”旁有“扫描”，结果显示在输入框下方（可
 
 M11 SSH 托管（docs/03 §5.22）：`pages/panel/` 下 `HostsPage`（主机列表与新建 / 批量）、`SshCredentialsModal`（凭据管理）、
 `HostTaskDrawer`（任务步骤与日志）、`HostOpsCard`（服务器详情页里的绑定与运维动作）。任务未结束时每 2 秒刷新一次，
-用 `hooks/use-polling.ts`（卸载或任务结束即停）；这是管理端唯一的轮询。
+用 `hooks/use-polling.ts`（卸载或任务结束即停）；管理端的轮询只走这个 hook，用在两处：主机任务未结束、IP 质量检测未结束。
 M11 补充（Ruling-72 – Ruling-74）：`DnsAccountsModal`（DNS 账号管理，令牌只写）；新建 / 编辑主机可选 DNS 账号并填域名（留空自动生成），
 主机列表多一列“域名 / 证书”（到期日，或“还没申请到证书”），配了域名的主机在运维卡里始终有证书动作：还没申请到时叫“申请证书”，申请到之后叫“重新配置证书”（主机上的证书没到续期时间就复用）；
 没配域名的主机照旧只在面板是明文 HTTP 时有“配置证书”（自签）。批量新建时域名一律由平台生成，要改在编辑主机里改。
@@ -118,3 +118,8 @@ Vitest + Testing Library；`fetch` 用 `vi.stubGlobal` 模拟。
 ## 7. 接口待补 / 契约缺口
 
 - 见《任务与边界》。
+
+IP 质量检测（docs/03 §5.23，Ruling-81）：服务器详情页在 SSH 运维卡之后加“IP 质量”卡片（`IpQualityCard`，要 `server:read`）：最近一次检测的摘要、“立即检测”（`server:write`；没有 `host:write` 时按钮旁注明只做平台侧）
+与“历史”；检测未结束时每 3 秒刷新。历史抽屉（`IpQualityDrawer`）按时间倒序分页，勾选恰好两条成功的记录可“对比所选”，点一行看完整报告（`IpQualityReport`，六个分区，没配的源灰显“未配置”，
+服务器侧没做的写明原因）。对比（`IpQualityCompare`）在前端做：两条结果各压平成“路径 → 值”（`ip-quality-diff.ts` 的纯函数），两列并排，变化行高亮，默认只看变化项。
+枚举码到中文与颜色的映射集中在 `ip-quality-labels.ts`。系统设置加“IP 质量检测”卡片：定期复检开关、间隔天数、各数据源是否已配置 key，并写明检测会把服务器 IP 发给第三方数据源。
