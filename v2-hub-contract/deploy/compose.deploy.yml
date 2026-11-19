@@ -24,6 +24,10 @@ services:
       HUB_SMTP_TLS: ${HUB_SMTP_TLS:-starttls}
       HUB_TELEGRAM_BOT_TOKEN: ${HUB_TELEGRAM_BOT_TOKEN:-}
       HUB_GLOBALPING_TOKEN: ${HUB_GLOBALPING_TOKEN:-}
+      HUB_IPQ_IP2LOCATION_KEY: ${HUB_IPQ_IP2LOCATION_KEY:-}
+      HUB_IPQ_IPAPIIS_KEY: ${HUB_IPQ_IPAPIIS_KEY:-}
+      HUB_IPQ_ABUSEIPDB_KEY: ${HUB_IPQ_ABUSEIPDB_KEY:-}
+      HUB_IPQ_IPQS_KEY: ${HUB_IPQ_IPQS_KEY:-}
     depends_on:
       postgres: { condition: service_healthy }
 

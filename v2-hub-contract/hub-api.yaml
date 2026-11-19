@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: v2-hub API
-  version: 0.14.1
+  version: 0.15.0
   description: |
     v2-hub 对外接口契约（hub-server 提供，v2-hub-admin-web / v2-hub-user-web 消费）。
     - 管理端接口前缀 /api/admin，客户端接口前缀 /api/user，订阅端点前缀 /sub。
@@ -30,6 +30,7 @@ info:
     0.12.0：SSH 托管与面板部署（docs/03 §5.22，Ruling-68 – Ruling-71）——新增 SSH 凭据、托管主机、主机任务与动作接口（权限码 host:read / host:write），
       给已接入的服务器绑定 SSH（PUT /api/admin/servers/{id}/host），服务器带 hostId。
     0.14.1：节点显示名的前缀 / 后缀（Ruling-80）——一键部署参数加 namePrefix / nameSuffix，新增 POST /api/admin/nodes/affix。
+    0.15.0：服务器 IP 质量检测（docs/03 §5.23，Ruling-81、Ruling-82）——新增 /api/admin/servers/{id}/ip-checks（发起、历史）与 /api/admin/ip-checks/{id}（报告），系统设置增加 ipQuality 分组。
 servers:
   - url: http://127.0.0.1:8080
     description: 本地开发
@@ -1271,6 +1272,87 @@ paths:
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
         "502": { $ref: "#/components/responses/UpstreamUnavailable" }
+  /api/admin/servers/{id}/ip-checks:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    get:
+      tags: [admin-panel]
+      operationId: listServerIpChecks
+      summary: 服务器的 IP 质量检测历史，新的在前（server:read；docs/03 §5.23，Ruling-81，0.15.0）
+      description: 只带摘要，不带完整报告；完整报告用 GET /api/admin/ip-checks/{id}。
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+      responses:
+        "200":
+          description: 检测记录分页
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        required: [items, total]
+                        properties:
+                          items:
+                            type: array
+                            items: { $ref: "#/components/schemas/IpCheck" }
+                          total: { type: integer, format: int64 }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    post:
+      tags: [admin-panel]
+      operationId: startServerIpCheck
+      summary: 对服务器发起一次 IP 质量检测（server:write；Ruling-81，0.15.0）
+      description: >-
+        排一条检测并立即返回（状态 queued），由后台执行，前端按 id 轮询报告。
+        发起人有 host:write 时范围为 full（服务器侧经 SSH 检测），没有时为 platform（服务器侧标 no_permission）。
+        该服务器已有进行中的检测 409；每个管理员 10 分钟内最多 10 次，超出 429。写审计 ip_check.create。
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      responses:
+        "200":
+          description: 新排的检测
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/IpCheck" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /api/admin/ip-checks/{id}:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    get:
+      tags: [admin-panel]
+      operationId: getIpCheck
+      summary: 一次 IP 质量检测的完整报告（server:read；Ruling-81，0.15.0）
+      description: 还没执行完的检测 result 为 null。
+      responses:
+        "200":
+          description: 检测记录与报告
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/IpCheckDetail" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "404": { $ref: "#/components/responses/NotFound" }
   /api/admin/servers/{id}/reality-scan:
     parameters:
       - $ref: "#/components/parameters/IdPath"
@@ -5337,6 +5419,223 @@ components:
       pattern: "^([A-Z]{2})?$"
       maxLength: 2
       description: ISO 3166-1 两位国家码（大写），空串表示未知（Ruling-65）
+    IpCheckStatus:
+      type: string
+      enum: [queued, running, succeeded, failed]
+      description: queued 排队中、running 检测中、succeeded 完成（部分源或服务器侧失败也算完成）、failed 整次检测做不下去
+    IpCheckOrigin:
+      type: string
+      enum: [manual, auto]
+      description: manual 管理员手动发起、auto 定期复检
+    IpCheckScope:
+      type: string
+      enum: [full, platform]
+      description: full 平台侧与服务器侧都做；platform 只做平台侧
+    IpHostProbe:
+      type: string
+      enum: ["", done, no_host, no_permission, host_unverified, ssh_failed, no_curl]
+      description: >-
+        服务器侧的情况：done 已做；no_host 服务器没绑 SSH；no_permission 发起人没有 host:write；host_unverified 主机密钥还没固定；
+        ssh_failed SSH 连不上、认证失败或主机密钥变了；no_curl 主机上没有 curl；还没执行到为空串
+    IpAddressSource:
+      type: string
+      enum: ["", host, panel, address]
+      description: 被测 IP 的来源：host 服务器侧取到的出口 IP、panel 面板报告的公网 IP、address 面板地址里的 IP；还没取到为空串
+    IpKind:
+      type: string
+      enum: ["", native, broadcast, unknown]
+      description: native 原生（使用地与注册地国家相同）、broadcast 广播（不同）、unknown 缺一项
+    IpNetType:
+      type: string
+      enum: ["", hosting, residential, mobile, business, education, government, military, organization, library, banking, cdn, crawler, reserved, unknown]
+      description: 归一后的使用类型（docs/03 §5.23 使用类型）；没有为空串
+    IpRiskLevel:
+      type: string
+      enum: ["", low, medium, high, very_high]
+    IpPort25:
+      type: string
+      enum: ["", open, blocked, unknown]
+      description: 本机 25 端口出站：open 至少一家邮局拿到 220、blocked 全部被拒或超时、unknown 其余；服务器侧没做为空串
+    IpCheckErrorCode:
+      type: string
+      enum: ["", no_public_ip, interrupted, timeout, internal]
+    IpCheck:
+      type: object
+      description: 一次检测的记录与摘要（docs/03 §5.23 记录）
+      required: [id, serverId, status, origin, scope, hostProbe, ip, ipSource, country, regCountry, ipKind, asn, asOrg, usageType, riskLevel, dnsblListed, dnsblTotal, mediaOk, mediaTotal, port25, errorCode, lastError, createdByName, createdAt, startedAt, finishedAt]
+      properties:
+        id: { type: integer, format: int64 }
+        serverId: { type: integer, format: int64 }
+        status: { $ref: "#/components/schemas/IpCheckStatus" }
+        origin: { $ref: "#/components/schemas/IpCheckOrigin" }
+        scope: { $ref: "#/components/schemas/IpCheckScope" }
+        hostProbe: { $ref: "#/components/schemas/IpHostProbe" }
+        ip: { type: string, description: 被测 IP，还没取到为空串 }
+        ipSource: { $ref: "#/components/schemas/IpAddressSource" }
+        country: { type: string, description: 使用地国家码，没有为空串 }
+        regCountry: { type: string, description: 注册地国家码，没有为空串 }
+        ipKind: { $ref: "#/components/schemas/IpKind" }
+        asn: { type: [integer, "null"], format: int64 }
+        asOrg: { type: string }
+        usageType: { $ref: "#/components/schemas/IpNetType" }
+        riskLevel: { $ref: "#/components/schemas/IpRiskLevel" }
+        dnsblListed: { type: integer, description: 上榜的黑名单数 }
+        dnsblTotal: { type: integer, description: 本次可用的黑名单数 }
+        mediaOk: { type: integer, description: 可用（含仅自制、仅网页、仅 App）的流媒体与 AI 服务数 }
+        mediaTotal: { type: integer, description: 检测了的服务数；服务器侧没做为 0 }
+        port25: { $ref: "#/components/schemas/IpPort25" }
+        errorCode: { $ref: "#/components/schemas/IpCheckErrorCode" }
+        lastError: { type: string, description: 整次失败的原因摘要，没有为空串 }
+        createdByName: { type: string, description: 发起人用户名；定期复检或管理员已被删除为空串 }
+        createdAt: { type: string, format: date-time }
+        startedAt: { type: [string, "null"], format: date-time }
+        finishedAt: { type: [string, "null"], format: date-time }
+    IpCheckDetail:
+      allOf:
+        - $ref: "#/components/schemas/IpCheck"
+        - type: object
+          required: [result]
+          properties:
+            result:
+              oneOf:
+                - $ref: "#/components/schemas/IpCheckResult"
+                - type: "null"
+    IpCheckResult:
+      type: object
+      description: 完整报告，一律是枚举码；数组按 key 排序，便于逐项对比
+      required: [schema, stacks]
+      properties:
+        schema: { type: integer, description: 报告格式版本，当前为 1 }
+        stacks:
+          type: object
+          description: 按协议栈分段，第一期只有 v4
+          properties:
+            v4: { $ref: "#/components/schemas/IpCheckStack" }
+    IpCheckStack:
+      type: object
+      required: [ip, ipSource, basics, sources, dnsbl, egress, media, mail]
+      properties:
+        ip: { type: string }
+        ipSource: { $ref: "#/components/schemas/IpAddressSource" }
+        basics: { $ref: "#/components/schemas/IpBasics" }
+        sources:
+          type: array
+          items: { $ref: "#/components/schemas/IpSourceResult" }
+        dnsbl: { $ref: "#/components/schemas/IpDnsblReport" }
+        egress: { $ref: "#/components/schemas/IpEgress" }
+        media: { $ref: "#/components/schemas/IpMediaReport" }
+        mail: { $ref: "#/components/schemas/IpMailReport" }
+    IpBasics:
+      type: object
+      required: [country, region, city, timezone, latitude, longitude, asn, asOrg, prefix, regCountry, registry, ipKind]
+      properties:
+        country: { type: string }
+        region: { type: string }
+        city: { type: string }
+        timezone: { type: string, description: 如 "-08:00" }
+        latitude: { type: [number, "null"] }
+        longitude: { type: [number, "null"] }
+        asn: { type: [integer, "null"], format: int64 }
+        asOrg: { type: string }
+        prefix: { type: string, description: BGP 前缀，如 8.8.8.0/24 }
+        regCountry: { type: string }
+        registry: { type: string, description: 注册机构，如 arin }
+        ipKind: { $ref: "#/components/schemas/IpKind" }
+    IpSourceResult:
+      type: object
+      required: [key, status, usageType, companyType, score, factors]
+      properties:
+        key: { type: string, enum: [abuseipdb, cymru, ip2location, ipapiis, ipqs, tor] }
+        status: { type: string, enum: [ok, not_configured, rate_limited, auth_failed, error] }
+        usageType: { $ref: "#/components/schemas/IpNetType" }
+        companyType: { $ref: "#/components/schemas/IpNetType" }
+        score:
+          oneOf:
+            - type: "null"
+            - type: object
+              required: [value, level]
+              properties:
+                value: { type: number, minimum: 0, maximum: 100 }
+                level: { $ref: "#/components/schemas/IpRiskLevel" }
+        factors: { $ref: "#/components/schemas/IpFactors" }
+    IpFactors:
+      type: object
+      description: 风险因子；null 为该源不提供或未知
+      required: [country, proxy, tor, vpn, server, abuser, robot]
+      properties:
+        country: { type: string, description: 该源给的国家码，没有为空串 }
+        proxy: { type: [boolean, "null"] }
+        tor: { type: [boolean, "null"] }
+        vpn: { type: [boolean, "null"] }
+        server: { type: [boolean, "null"], description: 机房 IP }
+        abuser: { type: [boolean, "null"] }
+        robot: { type: [boolean, "null"], description: 爬虫或机器人 }
+    IpDnsblReport:
+      type: object
+      required: [listed, policy, clean, unavailable, items]
+      properties:
+        listed: { type: integer }
+        policy: { type: integer }
+        clean: { type: integer }
+        unavailable: { type: integer }
+        items:
+          type: array
+          items:
+            type: object
+            required: [key, result, answer]
+            properties:
+              key: { type: string, description: 列表域名，如 zen.spamhaus.org }
+              result: { type: string, enum: [clean, listed, policy, unavailable] }
+              answer: { type: string, description: 列表返回的地址（多个以逗号分隔），没有为空串 }
+    IpEgress:
+      type: object
+      description: 服务器侧取到的出口信息；服务器侧没做时各项为空
+      required: [ip, country]
+      properties:
+        ip: { type: string }
+        country: { type: string, description: 出口探测给的国家码 }
+    IpMediaReport:
+      type: object
+      required: [status, items]
+      properties:
+        status: { $ref: "#/components/schemas/IpHostProbe" }
+        items:
+          type: array
+          items:
+            type: object
+            required: [key, status, region, method, evidence]
+            properties:
+              key: { type: string, enum: [chatgpt, netflix, prime_video, reddit, tiktok, youtube_premium] }
+              status: { type: string, enum: [yes, no, originals_only, web_only, app_only, failed, unknown] }
+              region: { type: string, description: 两位国家码，取不到为空串 }
+              method: { type: string, enum: [native, dns, unknown] }
+              evidence:
+                type: object
+                additionalProperties: { type: string }
+                description: 排查用的证据（各次请求的 HTTP 状态码、特征命中数等），键名随服务而定，不参与对比
+    IpMailReport:
+      type: object
+      required: [status, port25, items]
+      properties:
+        status: { $ref: "#/components/schemas/IpHostProbe" }
+        port25: { $ref: "#/components/schemas/IpPort25" }
+        items:
+          type: array
+          items:
+            type: object
+            required: [key, mx, result, code]
+            properties:
+              key: { type: string, enum: [aol, gmail, gmx, icloud, mailcom, mailru, netease163, outlook, qq, sina, sohu, yahoo] }
+              mx: { type: string, description: 连的 MX 主机，查不到为空串 }
+              result: { type: string, enum: [ok, rejected, refused, timeout, dns_failed, no_tool, failed] }
+              code: { type: string, description: 欢迎行的三位应答码，没有为空串 }
+    IpQualitySource:
+      type: object
+      required: [key, needsKey, isConfigured]
+      properties:
+        key: { type: string }
+        needsKey: { type: boolean, description: 是否要配 key 才启用 }
+        isConfigured: { type: boolean, description: 对应的环境变量是否已配置（免 key 的源始终为 true） }
     ServerLocation:
       type: object
       required: [region, publicIp]
@@ -6142,7 +6441,7 @@ components:
     Settings:
       type: object
       description: 全部系统设置（docs/03 §5.6 设置清单），键名去掉点号改驼峰分组
-      required: [site, register, invite, checkin, ticket, shared, mail, subscription, shop, rebate, notify, mailEnabled, alert, telegram, report, landing, support, routing, menu, telegramEnabled, reach]
+      required: [site, register, invite, checkin, ticket, shared, mail, subscription, shop, rebate, notify, mailEnabled, alert, telegram, report, landing, support, routing, menu, telegramEnabled, reach, ipQuality]
       properties:
         mailEnabled: { type: boolean, readOnly: true, description: SMTP 环境变量是否已配置（Ruling-24），不可经接口修改 }
         telegramEnabled: { type: boolean, readOnly: true, description: 环境变量 HUB_TELEGRAM_BOT_TOKEN 是否已配置（0.4.3，Ruling-42） }
@@ -6199,6 +6498,18 @@ components:
             intervalMinutes: { type: integer, minimum: 10, maximum: 1440, description: 同一目标两次检测的最小间隔 }
             notify: { type: boolean, description: 被墙与恢复时是否发通知 }
             hasToken: { type: boolean, readOnly: true, description: 环境变量 HUB_GLOBALPING_TOKEN 是否已配置（决定每小时额度），不可经接口修改 }
+        ipQuality:
+          type: object
+          description: IP 质量检测（0.15.0，docs/03 §5.23，Ruling-81、Ruling-82）
+          required: [autoEnabled, intervalDays, sources]
+          properties:
+            autoEnabled: { type: boolean, description: 定期复检开关，默认关；手动检测不受它约束 }
+            intervalDays: { type: integer, minimum: 1, maximum: 90, description: 定期复检时同一服务器两次检测的最小间隔（天） }
+            sources:
+              type: array
+              readOnly: true
+              description: 各数据源与是否已配置 key（环境变量 HUB_IPQ_*），不可经接口修改
+              items: { $ref: "#/components/schemas/IpQualitySource" }
         menu:
           type: object
           description: 侧栏菜单顺序（0.7.3，docs/03 §5.6 菜单顺序，Ruling-57）；空数组 = 默认顺序
@@ -6309,6 +6620,7 @@ components:
         support: { type: object, additionalProperties: true }
         routing: { type: object, additionalProperties: true }
         reach: { type: object, additionalProperties: true }
+        ipQuality: { type: object, additionalProperties: true }
         menu: { type: object, additionalProperties: true }
     MenuOrder:
       type: array

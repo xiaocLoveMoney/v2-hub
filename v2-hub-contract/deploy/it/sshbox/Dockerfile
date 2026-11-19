@@ -1,10 +1,10 @@
-# IT-14 用的“托管主机”：Debian + sshd + 按官方目录布局放好的 3x-ui（docs/08，docs/03 §5.22）。
+# IT-14、IT-15 用的“托管主机”（IT-15 用 python3 在容器里跑服务器侧探测的模拟端）：Debian + sshd + 按官方目录布局放好的 3x-ui（docs/08，docs/03 §5.22）。
 # 容器里没有 systemd，systemctl 是只实现了几个子命令的垫片；真实的 systemd 行为要在真机上人工验证。
 FROM debian:12-slim
 ARG XUI_TAG=v3.11.0
 # 装 openssh-server 时会顺带生成主机密钥；删掉，留给 entrypoint 在每次启动时现生成，否则所有容器共用镜像里那一套
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends openssh-server ca-certificates curl tar openssl procps iproute2 \
+    && apt-get install -y --no-install-recommends openssh-server ca-certificates curl tar openssl procps iproute2 python3-minimal \
     && rm -rf /var/lib/apt/lists/* \
     && rm -f /etc/ssh/ssh_host_* \
     && mkdir -p /run/sshd /root/.ssh /etc/x-ui \
