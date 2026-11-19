@@ -4,7 +4,7 @@ FROM debian:12-slim
 ARG XUI_TAG=v3.11.0
 # 装 openssh-server 时会顺带生成主机密钥；删掉，留给 entrypoint 在每次启动时现生成，否则所有容器共用镜像里那一套
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends openssh-server ca-certificates curl tar openssl procps iproute2 python3-minimal \
+    && apt-get install -y --no-install-recommends openssh-server ca-certificates curl tar openssl procps iproute2 python3 \
     && rm -rf /var/lib/apt/lists/* \
     && rm -f /etc/ssh/ssh_host_* \
     && mkdir -p /run/sshd /root/.ssh /etc/x-ui \
