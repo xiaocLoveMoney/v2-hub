@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-// HostTaskRunner 是主机任务循环需要的能力（由 service.HostService 实现）。
+// HostTaskRunner 是任务循环需要的能力（由 service.HostService 与 service.IPQualityService 实现）。
 type HostTaskRunner interface {
 	FailInterrupted(ctx context.Context) (int64, error)
 	ClaimTasks(ctx context.Context, limit int) ([]int64, error)
@@ -18,10 +18,15 @@ type HostTaskRunner interface {
 // RunHostTasks 领取并执行排队的主机任务（docs/03 §5.22，Ruling-71），阻塞到 ctx 取消。
 // 启动时先把上次没跑完的任务记为失败；之后定时与收到信号时各领取一轮，同时执行的任务数不超过 concurrency。
 func RunHostTasks(ctx context.Context, r HostTaskRunner, interval time.Duration, concurrency int) {
+	runTaskLoop(ctx, "host tasks", r, interval, concurrency)
+}
+
+// runTaskLoop 是“排队 → 领取 → 执行”的通用循环，主机任务与 IP 质量检测共用（name 只用于日志）。
+func runTaskLoop(ctx context.Context, name string, r HostTaskRunner, interval time.Duration, concurrency int) {
 	if n, err := r.FailInterrupted(ctx); err != nil {
-		slog.Error("host tasks: mark interrupted", "err", err)
+		slog.Error(name+": mark interrupted", "err", err)
 	} else if n > 0 {
-		slog.Warn("host tasks: marked interrupted tasks as failed", "count", n)
+		slog.Warn(name+": marked interrupted tasks as failed", "count", n)
 	}
 	slots := make(chan struct{}, concurrency)
 	// freed 在有任务结束、空出名额时发信号，排队的任务不必等到下一个 tick
@@ -31,7 +36,7 @@ func RunHostTasks(ctx context.Context, r HostTaskRunner, interval time.Duration,
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {
-		claimHostTasks(ctx, r, slots, freed, &running)
+		claimTasks(ctx, name, r, slots, freed, &running)
 		select {
 		case <-ctx.Done():
 			return
@@ -68,15 +73,15 @@ func RunCertRenewal(ctx context.Context, r CertRenewer, interval time.Duration) 
 	}
 }
 
-// claimHostTasks 按空闲的名额领取任务，每条各起一个 goroutine；名额占满时这一轮什么都不领。
-func claimHostTasks(ctx context.Context, r HostTaskRunner, slots, freed chan struct{}, running *sync.WaitGroup) {
+// claimTasks 按空闲的名额领取任务，每条各起一个 goroutine；名额占满时这一轮什么都不领。
+func claimTasks(ctx context.Context, name string, r HostTaskRunner, slots, freed chan struct{}, running *sync.WaitGroup) {
 	free := cap(slots) - len(slots)
 	if free <= 0 || ctx.Err() != nil {
 		return
 	}
 	ids, err := r.ClaimTasks(ctx, free)
 	if err != nil {
-		slog.Error("host tasks: claim", "err", err)
+		slog.Error(name+": claim", "err", err)
 		return
 	}
 	for _, id := range ids {
@@ -93,7 +98,7 @@ func claimHostTasks(ctx context.Context, r HostTaskRunner, slots, freed chan str
 			}()
 			defer func() {
 				if p := recover(); p != nil {
-					slog.Error("host task panicked", "task_id", id, "panic", p)
+					slog.Error(name+": task panicked", "task_id", id, "panic", p)
 				}
 			}()
 			r.RunTask(ctx, id)

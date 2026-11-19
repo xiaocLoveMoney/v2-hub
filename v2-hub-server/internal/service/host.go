@@ -111,7 +111,7 @@ type HostDeps struct {
 }
 
 // HostService 负责 SSH 凭据、DNS 账号、托管主机与主机任务（docs/03 §5.22，Ruling-68 – Ruling-74）。
-// 只经 remote.Dialer 连主机、经 deploy.Deployer 执行动作，自己不拼任何命令行。
+// 只经 remote.Dialer 连主机、经 deploy.Deployer 执行动作，自己不拼任何命令行；IP 质量检测经 withServerHost 借用连接（Ruling-81）。
 type HostService struct {
 	store
 	sealer    *crypto.Sealer

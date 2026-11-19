@@ -56,6 +56,27 @@ reach:
   apiUrl: https://api.globalping.io
   timeout: 40s
   checkInterval: 1m
+# 服务器 IP 质量检测，语义见 docs/03 §5.23（Ruling-81、Ruling-82）：同时执行的检测数、领取排队检测的间隔、单次检测与单个数据源的时限、
+# 定期复检的检查周期与每轮台数（开关与间隔天数在系统设置里）、每个管理员手动发起的频率、记录保留的天数与每台条数。
+# dnsResolver 是查 DNS 黑名单、Cymru、Tor 与邮局 MX 的 DNS 服务器（host:port，空 = 系统解析器；Spamhaus 拒绝公共解析器）。
+# 数据源 key 只走环境变量 HUB_IPQ_IP2LOCATION_KEY / HUB_IPQ_IPAPIIS_KEY / HUB_IPQ_ABUSEIPDB_KEY / HUB_IPQ_IPQS_KEY（都可空）。
+# testOverrides 只给联调用，这里必须留空。
+ipQuality:
+  concurrency: 2
+  pollInterval: 5s
+  checkTimeout: 3m
+  sourceTimeout: 10s
+  scheduleInterval: 1h
+  autoBatch: 5
+  manualLimit: 10
+  manualWindow: 10m
+  retentionDays: 180
+  keepPerServer: 60
+  dnsResolver: ""
+  testOverrides:
+    sourceBaseUrl: ""
+    probeBaseUrl: ""
+    probeMailAddr: ""
 # SSH 托管与面板部署，语义见 docs/03 §5.22：同时执行的主机任务数、领取排队任务的间隔、SSH 连接 / 普通动作 / 安装升级的时限、
 # 每个管理员做连接测试与发起动作的频率、一次批量新建的上限。allowLoopback 只给联调用，这里必须是 false。
 deploy:

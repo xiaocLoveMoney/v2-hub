@@ -31,6 +31,8 @@ import (
 	"v2-hub-server/internal/manager/dns"
 	"v2-hub-server/internal/manager/dns/cloudflare"
 	"v2-hub-server/internal/manager/geoip"
+	"v2-hub-server/internal/manager/ipprobe"
+	"v2-hub-server/internal/manager/ipquality"
 	"v2-hub-server/internal/manager/mail"
 	"v2-hub-server/internal/manager/panel"
 	"v2-hub-server/internal/manager/panel/xui"
@@ -66,6 +68,11 @@ const (
 	// envReachToken 是大陆连通检测用的探测服务令牌（可空，Ruling-67）；envReachAPIURL 覆盖配置里的接口地址（联调指向模拟端）
 	envReachToken  = "HUB_GLOBALPING_TOKEN"
 	envReachAPIURL = "HUB_REACH_API_URL"
+	// IP 质量检测的数据源 key（docs/03 §5.23，Ruling-82）：都可空，空的源在报告里标“未配置”
+	envIPQIP2LocationKey = "HUB_IPQ_IP2LOCATION_KEY"
+	envIPQIPAPIIsKey     = "HUB_IPQ_IPAPIIS_KEY"
+	envIPQAbuseIPDBKey   = "HUB_IPQ_ABUSEIPDB_KEY"
+	envIPQIPQSKey        = "HUB_IPQ_IPQS_KEY"
 	// serverLocateInterval 是位置为空的服务器的补扫周期（docs/03 §5.1）。
 	serverLocateInterval = time.Hour
 	// telegramOutboxInterval 是 Telegram 发件箱任务的周期；opsInterval 是掉线告警与日报的检查周期。
@@ -254,6 +261,15 @@ func runServer(args []string) error {
 	go job.RunHostTasks(ctx, hosts, cfg.Deploy.PollInterval, cfg.Deploy.Concurrency)
 	go job.RunCertRenewal(ctx, hosts, acmeCfg.RenewInterval)
 
+	// 服务器 IP 质量检测（docs/03 §5.23，Ruling-81、Ruling-82）
+	ipQuality, err := newIPQualityService(pool, cfg.IPQuality, panels, hosts, settings)
+	if err != nil {
+		return err
+	}
+	go job.RunIPChecks(ctx, ipQuality, cfg.IPQuality.PollInterval, cfg.IPQuality.Concurrency)
+	go job.RunIPCheckSchedule(ctx, ipQuality, cfg.IPQuality.ScheduleInterval)
+	go job.RunSessionCleanup(ctx, job.PurgeFunc(ipQuality.PurgeChecks), cfg.Auth.SessionCleanupInterval)
+
 	srv := &http.Server{
 		Addr: cfg.Server.ListenAddr,
 		Handler: api.NewRouter(api.Deps{
@@ -266,6 +282,7 @@ func runServer(args []string) error {
 			PortalAuth:     portalAuth,
 			Portal:         users,
 			Settings:       settings,
+			IPQuality:      ipQuality,
 			Mail:           mails,
 			Account:        account,
 			Content:        service.NewContentService(pool, sealer, settings, mails, nil),
@@ -442,4 +459,37 @@ func geoLocatorFromConfig(cfg config.GeoIPConfig) (geoip.Locator, error) {
 		return nil, nil
 	}
 	return client, nil
+}
+
+// newIPQualityService 组装 IP 质量检测：数据源 key 只从环境变量读；联调覆盖非空时打警告（生产必须留空）。
+func newIPQualityService(pool *pgxpool.Pool, c config.IPQualityConfig, panels *service.PanelService, hosts *service.HostService,
+	settings *service.SettingsService) (*service.IPQualityService, error) {
+	ov := c.TestOverrides
+	if ov.Active() {
+		slog.Warn("ipQuality.testOverrides is set; IP quality checks go to mock endpoints (for integration tests only)")
+	}
+	resolver, err := ipquality.NewResolver(c.DNSResolver)
+	if err != nil {
+		return nil, fmt.Errorf("init ip quality resolver: %w", err)
+	}
+	sources, err := ipquality.NewRegistry(ipquality.Config{
+		Keys: ipquality.Keys{
+			IP2Location: os.Getenv(envIPQIP2LocationKey), IPAPIIs: os.Getenv(envIPQIPAPIIsKey),
+			AbuseIPDB: os.Getenv(envIPQAbuseIPDBKey), IPQS: os.Getenv(envIPQIPQSKey),
+		},
+		BaseURL: ov.SourceBaseURL, Resolver: resolver, Timeout: c.SourceTimeout,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("init ip quality sources: %w", err)
+	}
+	prober, err := ipprobe.New(resolver, ipprobe.Overrides{BaseURL: ov.ProbeBaseURL, MailAddr: ov.ProbeMailAddr})
+	if err != nil {
+		return nil, fmt.Errorf("init ip quality prober: %w", err)
+	}
+	return service.NewIPQualityService(pool, service.IPQualityDeps{
+		Panels: panels, Hosts: hosts, Settings: settings, Sources: sources, DNSBL: ipquality.NewDNSBL(resolver, nil), Prober: prober,
+	}, service.IPQualityConfig{
+		CheckTimeout: c.CheckTimeout, ManualLimit: c.ManualLimit, ManualWindow: c.ManualWindow, AutoBatch: c.AutoBatch,
+		RetentionDays: c.RetentionDays, KeepPerServer: c.KeepPerServer,
+	}), nil
 }

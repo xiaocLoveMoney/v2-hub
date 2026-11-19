@@ -80,6 +80,8 @@ type Deps struct {
 	Reach ReachManager
 	// Hosts 提供 SSH 凭据、托管主机与主机任务（docs/03 §5.22）。
 	Hosts HostManager
+	// IPQuality 提供服务器 IP 质量检测（docs/03 §5.23）；为 nil 时检测接口返回 404，设置里不带数据源。
+	IPQuality IPQualityManager
 	// Cookie 是会话 Cookie 属性。
 	Cookie CookieConfig
 	// TrustedProxies 是可采信 X-Forwarded-For 的直连网段（如 Caddy 所在 docker 网络）。
@@ -110,6 +112,7 @@ type handlers struct {
 	analytics      AnalyticsManager
 	reach          ReachManager
 	hosts          HostManager
+	ipQuality      IPQualityManager
 	cookie         CookieConfig
 	trustedProxies []netip.Prefix
 }
@@ -117,7 +120,7 @@ type handlers struct {
 // NewRouter 返回注册好全部路由的 http.Handler。路由与 hub-api.yaml 的 paths 逐条对应。
 func NewRouter(deps Deps) http.Handler {
 	h := &handlers{auth: deps.Auth, rbac: deps.RBAC, panels: deps.Panels, users: deps.Users, portalAuth: deps.PortalAuth, portal: deps.Portal,
-		settings: deps.Settings, mail: deps.Mail, account: deps.Account, content: deps.Content, tickets: deps.Tickets, wallet: deps.Wallet, shop: deps.Shop, finance: deps.Finance, pay: deps.Pay, chain: deps.Chain, chainApply: deps.ChainApply, chainAdmin: deps.ChainAdmin, telegram: deps.Telegram, ops: deps.Ops, analytics: deps.Analytics, reach: deps.Reach, hosts: deps.Hosts, cookie: deps.Cookie, trustedProxies: deps.TrustedProxies}
+		settings: deps.Settings, mail: deps.Mail, account: deps.Account, content: deps.Content, tickets: deps.Tickets, wallet: deps.Wallet, shop: deps.Shop, finance: deps.Finance, pay: deps.Pay, chain: deps.Chain, chainApply: deps.ChainApply, chainAdmin: deps.ChainAdmin, telegram: deps.Telegram, ops: deps.Ops, analytics: deps.Analytics, reach: deps.Reach, hosts: deps.Hosts, ipQuality: deps.IPQuality, cookie: deps.Cookie, trustedProxies: deps.TrustedProxies}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", handleHealthz)
 	mux.HandleFunc("GET /readyz", newReadyzHandler(deps.Database, deps.PingTimeout))
@@ -196,6 +199,9 @@ func NewRouter(deps Deps) http.Handler {
 	mux.HandleFunc("POST /api/admin/servers/{id}/keys", h.requireAdmin(service.PermNodeWrite, h.generatePanelKeys))
 	mux.HandleFunc("GET /api/admin/servers/{id}/web-cert", h.requireAdmin(service.PermNodeWrite, h.getServerWebCert))
 	mux.HandleFunc("POST /api/admin/servers/{id}/locate", h.requireAdmin(service.PermServerWrite, h.locateServer))
+	mux.HandleFunc("GET /api/admin/servers/{id}/ip-checks", h.requireAdmin(service.PermServerRead, h.listServerIPChecks))
+	mux.HandleFunc("POST /api/admin/servers/{id}/ip-checks", h.requireAdmin(service.PermServerWrite, h.startServerIPCheck))
+	mux.HandleFunc("GET /api/admin/ip-checks/{id}", h.requireAdmin(service.PermServerRead, h.getIPCheck))
 	mux.HandleFunc("POST /api/admin/servers/{id}/reality-scan", h.requireAdmin(service.PermNodeWrite, h.scanRealityTarget))
 	mux.HandleFunc("POST /api/admin/servers/{id}/reality-targets", h.requireAdmin(service.PermNodeWrite, h.scanRealityTargets))
 

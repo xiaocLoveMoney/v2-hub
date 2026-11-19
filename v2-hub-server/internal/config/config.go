@@ -72,6 +72,18 @@ const (
 	defaultReachTimeout       = 40 * time.Second
 	defaultReachCheckInterval = time.Minute
 
+	// 服务器 IP 质量检测，语义见 docs/03 §5.23（Ruling-81）
+	defaultIPQualityConcurrency      = 2
+	defaultIPQualityPollInterval     = 5 * time.Second
+	defaultIPQualityCheckTimeout     = 3 * time.Minute
+	defaultIPQualitySourceTimeout    = 10 * time.Second
+	defaultIPQualityScheduleInterval = time.Hour
+	defaultIPQualityAutoBatch        = 5
+	defaultIPQualityManualLimit      = 10
+	defaultIPQualityManualWindow     = 10 * time.Minute
+	defaultIPQualityRetentionDays    = 180
+	defaultIPQualityKeepPerServer    = 60
+
 	// SSH 托管与面板部署，语义见 docs/03 §5.22（Ruling-68、Ruling-71）
 	defaultDeployConcurrency    = 3
 	defaultDeployPollInterval   = 5 * time.Second
@@ -108,6 +120,8 @@ type Config struct {
 	Reach     ReachConfig     `yaml:"reach"`
 	// Deploy 是 SSH 托管与面板部署（docs/03 §5.22）。
 	Deploy DeployConfig `yaml:"deploy"`
+	// IPQuality 是服务器 IP 质量检测（docs/03 §5.23，Ruling-81）。
+	IPQuality IPQualityConfig `yaml:"ipQuality"`
 	// Subscription 是订阅设置（docs/03 §5.4）；M4 起移入系统设置表。
 	Subscription SubscriptionConfig `yaml:"subscription"`
 }
@@ -143,6 +157,40 @@ type ReachConfig struct {
 	APIURL        string        `yaml:"apiUrl"`
 	Timeout       time.Duration `yaml:"timeout"`
 	CheckInterval time.Duration `yaml:"checkInterval"`
+}
+
+// IPQualityConfig 是服务器 IP 质量检测（docs/03 §5.23，Ruling-81、Ruling-82）：Concurrency 是同时执行的检测数，
+// PollInterval 是后台领取排队检测的间隔，CheckTimeout 是单次检测的总时限，SourceTimeout 是单个数据源请求的时限；
+// ScheduleInterval 是定期复检的检查周期，AutoBatch 是每轮最多排几台；ManualLimit / ManualWindow 是每个管理员手动发起的频率；
+// RetentionDays / KeepPerServer 是记录保留的天数与每台服务器保留的条数；DNSResolver 是查黑名单、Cymru、Tor 与邮局 MX 用的
+// DNS 服务器（host:port，空 = 系统解析器）。数据源 key 只走环境变量 HUB_IPQ_*；定期复检开关与间隔在系统设置里。
+// TestOverrides 只给联调用，生产必须留空。
+type IPQualityConfig struct {
+	Concurrency      int                    `yaml:"concurrency"`
+	PollInterval     time.Duration          `yaml:"pollInterval"`
+	CheckTimeout     time.Duration          `yaml:"checkTimeout"`
+	SourceTimeout    time.Duration          `yaml:"sourceTimeout"`
+	ScheduleInterval time.Duration          `yaml:"scheduleInterval"`
+	AutoBatch        int                    `yaml:"autoBatch"`
+	ManualLimit      int                    `yaml:"manualLimit"`
+	ManualWindow     time.Duration          `yaml:"manualWindow"`
+	RetentionDays    int                    `yaml:"retentionDays"`
+	KeepPerServer    int                    `yaml:"keepPerServer"`
+	DNSResolver      string                 `yaml:"dnsResolver"`
+	TestOverrides    IPQualityTestOverrides `yaml:"testOverrides"`
+}
+
+// IPQualityTestOverrides 把检测目标换成模拟端（只给联调用）：SourceBaseURL 是平台侧各 HTTP 数据源的基址，
+// ProbeBaseURL 是服务器侧各 HTTP 探测的基址，ProbeMailAddr 是服务器侧连的邮局地址（host:port）。
+type IPQualityTestOverrides struct {
+	SourceBaseURL string `yaml:"sourceBaseUrl"`
+	ProbeBaseURL  string `yaml:"probeBaseUrl"`
+	ProbeMailAddr string `yaml:"probeMailAddr"`
+}
+
+// Active 报告是否设置了任何联调覆盖。
+func (o IPQualityTestOverrides) Active() bool {
+	return o.SourceBaseURL != "" || o.ProbeBaseURL != "" || o.ProbeMailAddr != ""
 }
 
 // DeployConfig 是 SSH 托管与面板部署（docs/03 §5.22）：Concurrency 是同时执行的主机任务数，PollInterval 是后台领取排队任务的间隔；
@@ -322,6 +370,17 @@ func defaults() Config {
 		APIURL:        defaultReachAPIURL,
 		Timeout:       defaultReachTimeout,
 		CheckInterval: defaultReachCheckInterval,
+	}, IPQuality: IPQualityConfig{
+		Concurrency:      defaultIPQualityConcurrency,
+		PollInterval:     defaultIPQualityPollInterval,
+		CheckTimeout:     defaultIPQualityCheckTimeout,
+		SourceTimeout:    defaultIPQualitySourceTimeout,
+		ScheduleInterval: defaultIPQualityScheduleInterval,
+		AutoBatch:        defaultIPQualityAutoBatch,
+		ManualLimit:      defaultIPQualityManualLimit,
+		ManualWindow:     defaultIPQualityManualWindow,
+		RetentionDays:    defaultIPQualityRetentionDays,
+		KeepPerServer:    defaultIPQualityKeepPerServer,
 	}, Deploy: DeployConfig{
 		Concurrency:    defaultDeployConcurrency,
 		PollInterval:   defaultDeployPollInterval,
@@ -391,6 +450,11 @@ func (c Config) validate() error {
 	}
 	if c.Reach.APIURL == "" || c.Reach.Timeout <= 0 || c.Reach.CheckInterval <= 0 {
 		return fmt.Errorf("%w: reach.apiUrl, reach.timeout and reach.checkInterval must be set", ErrInvalidConfig)
+	}
+	iq := c.IPQuality
+	if iq.Concurrency <= 0 || iq.PollInterval <= 0 || iq.CheckTimeout <= 0 || iq.SourceTimeout <= 0 || iq.ScheduleInterval <= 0 ||
+		iq.AutoBatch <= 0 || iq.ManualLimit <= 0 || iq.ManualWindow <= 0 || iq.RetentionDays <= 0 || iq.KeepPerServer <= 0 {
+		return fmt.Errorf("%w: ipQuality concurrency, intervals, timeouts, limits and retention must be positive", ErrInvalidConfig)
 	}
 	dc := c.Deploy
 	if dc.Concurrency <= 0 || dc.PollInterval <= 0 || dc.ConnectTimeout <= 0 || dc.CommandTimeout <= 0 || dc.InstallTimeout <= 0 {

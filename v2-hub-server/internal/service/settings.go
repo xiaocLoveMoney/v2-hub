@@ -73,6 +73,11 @@ const (
 	minReachIntervalMinutes     = 10
 	maxReachIntervalMinutes     = 1440
 
+	// IP 质量定期复检的间隔（天），docs/03 §5.6（Ruling-81）
+	defaultIPQualityIntervalDays = 7
+	minIPQualityIntervalDays     = 1
+	maxIPQualityIntervalDays     = 90
+
 	// 运营设置（docs/03 §5.20）
 	maxAlertEmails          = 10
 	defaultOfflineMinutes   = 5
@@ -135,6 +140,7 @@ type Settings struct {
 	Support      SupportSettings
 	Routing      RoutingSettings
 	Reach        ReachSettings
+	IPQuality    IPQualitySettings
 	Menu         MenuSettings
 
 	// loc 是 Site.Timezone 解析出的时区，由 load / Update 填入，免得每次 Location 都查时区库；
@@ -160,6 +166,13 @@ type ReachSettings struct {
 	Enabled         bool
 	IntervalMinutes int
 	Notify          bool
+}
+
+// IPQualitySettings 是服务器 IP 质量检测（docs/03 §5.23，Ruling-81）：定期复检开关与同一服务器两次检测的最小间隔（天）。
+// 数据源的 key 只走环境变量，不在这里。
+type IPQualitySettings struct {
+	AutoEnabled  bool
+	IntervalDays int
 }
 
 // AlertSettings 是掉线告警（docs/03 §5.20，Ruling-43）：收件人与连续不在线多少分钟才告警。
@@ -715,6 +728,18 @@ var settingDefs = map[string]settingDef{
 			return decodeSetting(raw, nil, func(v bool) { s.Reach.Notify = v })
 		},
 	},
+	"ipQuality.autoEnabled": {
+		get: func(s *Settings) any { return s.IPQuality.AutoEnabled },
+		set: func(s *Settings, raw json.RawMessage) error {
+			return decodeSetting(raw, nil, func(v bool) { s.IPQuality.AutoEnabled = v })
+		},
+	},
+	"ipQuality.intervalDays": {
+		get: func(s *Settings) any { return s.IPQuality.IntervalDays },
+		set: func(s *Settings, raw json.RawMessage) error {
+			return decodeSetting(raw, intBetween(minIPQualityIntervalDays, maxIPQualityIntervalDays), func(v int) { s.IPQuality.IntervalDays = v })
+		},
+	},
 	"menu.admin": {
 		get: func(s *Settings) any { return s.Menu.Admin },
 		set: func(s *Settings, raw json.RawMessage) error {
@@ -792,22 +817,23 @@ func defaultSettings(sub SubscriptionConfig) Settings {
 		retention = defaultLogRetentionDay
 	}
 	return Settings{
-		Site:     SiteSettings{Name: defaultSiteName, Timezone: defaultSiteTimezone},
-		Register: RegisterSettings{Mode: RegisterInvite, EmailVerify: true, EmailAllow: []string{}, EmailBlock: []string{}},
-		Invite:   InviteSettings{UserEnabled: true, UserMaxUses: defaultInviteMaxUses},
-		Checkin:  CheckinSettings{MinMB: defaultCheckinMinMB, MaxMB: defaultCheckinMaxMB},
-		Ticket:   TicketSettings{Enabled: true},
-		Mail:     MailSettings{RatePerMinute: defaultMailRatePerMin},
-		Shop:     ShopSettings{Currency: defaultCurrency},
-		Rebate:   RebateSettings{Mode: RebateFirst},
-		Notify:   NotifySettings{ExpireDays: defaultNotifyExpireDays, TrafficPercent: defaultNotifyTrafficPct},
-		Alert:    AlertSettings{Emails: []string{}, OfflineMinutes: defaultOfflineMinutes},
-		Telegram: TelegramSettings{NotifyAlerts: true, NotifyTickets: true},
-		Report:   ReportSettings{DailyHour: defaultReportDailyHour},
-		Support:  SupportSettings{Label: defaultSupportLabel},
-		Routing:  RoutingSettings{BlockRule: true},
-		Reach:    ReachSettings{IntervalMinutes: defaultReachIntervalMinutes, Notify: true},
-		Menu:     MenuSettings{Admin: []string{}, User: []string{}},
+		Site:      SiteSettings{Name: defaultSiteName, Timezone: defaultSiteTimezone},
+		Register:  RegisterSettings{Mode: RegisterInvite, EmailVerify: true, EmailAllow: []string{}, EmailBlock: []string{}},
+		Invite:    InviteSettings{UserEnabled: true, UserMaxUses: defaultInviteMaxUses},
+		Checkin:   CheckinSettings{MinMB: defaultCheckinMinMB, MaxMB: defaultCheckinMaxMB},
+		Ticket:    TicketSettings{Enabled: true},
+		Mail:      MailSettings{RatePerMinute: defaultMailRatePerMin},
+		Shop:      ShopSettings{Currency: defaultCurrency},
+		Rebate:    RebateSettings{Mode: RebateFirst},
+		Notify:    NotifySettings{ExpireDays: defaultNotifyExpireDays, TrafficPercent: defaultNotifyTrafficPct},
+		Alert:     AlertSettings{Emails: []string{}, OfflineMinutes: defaultOfflineMinutes},
+		Telegram:  TelegramSettings{NotifyAlerts: true, NotifyTickets: true},
+		Report:    ReportSettings{DailyHour: defaultReportDailyHour},
+		Support:   SupportSettings{Label: defaultSupportLabel},
+		Routing:   RoutingSettings{BlockRule: true},
+		Reach:     ReachSettings{IntervalMinutes: defaultReachIntervalMinutes, Notify: true},
+		IPQuality: IPQualitySettings{IntervalDays: defaultIPQualityIntervalDays},
+		Menu:      MenuSettings{Admin: []string{}, User: []string{}},
 		Subscription: SubscriptionSettings{
 			BaseURL: strings.TrimRight(sub.BaseURL, "/"), Title: title, UpdateIntervalHours: interval, InfoNodes: sub.InfoNodes, LogRetentionDays: retention,
 			// 首次启动前的兜底；EnsureSubscriptionPath 会生成随机前缀并保存

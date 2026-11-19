@@ -18,6 +18,7 @@ import (
 	"v2-hub-server/internal/manager/deploy/deploytest"
 	"v2-hub-server/internal/manager/dns"
 	"v2-hub-server/internal/manager/dns/dnstest"
+	"v2-hub-server/internal/manager/ipquality"
 	"v2-hub-server/internal/manager/panel"
 	"v2-hub-server/internal/manager/pay"
 	"v2-hub-server/internal/manager/pay/paytest"
@@ -98,8 +99,14 @@ func newAPIServer(t *testing.T) (*httptest.Server, *service.RBACService) {
 		CommandTimeout: time.Second, InstallTimeout: time.Second, TestLimit: 10, TestWindow: time.Minute,
 		ActionLimit: 10, ActionWindow: time.Minute, MaxBatch: 5, PanelWaitAttempts: 1, PanelWaitInterval: time.Millisecond,
 	})
+	// IP 质量检测：只配了 IPQS 的 key；接口用例不执行检测（没有后台任务），只看接口与设置
+	ipSources, err := ipquality.NewRegistry(ipquality.Config{Keys: ipquality.Keys{IPQS: testIPQSKey}})
+	if err != nil {
+		t.Fatalf("NewRegistry: %v", err)
+	}
+	ipq := service.NewIPQualityService(pool, service.IPQualityDeps{Panels: panels, Hosts: hosts, Settings: settings, Sources: ipSources}, service.IPQualityConfig{})
 	srv := httptest.NewServer(NewRouter(Deps{
-		Database: pool, PingTimeout: time.Second, Auth: auth, RBAC: rbac, Hosts: hosts,
+		Database: pool, PingTimeout: time.Second, Auth: auth, RBAC: rbac, Hosts: hosts, IPQuality: ipq,
 		Settings: settings, Mail: mails, Account: account, Users: users, PortalAuth: portal, Portal: users,
 		Content: service.NewContentService(pool, sealer, settings, mails, nil), Tickets: service.NewTicketService(pool, settings, mails, nil, nil),
 		Wallet: service.NewWalletService(pool, sealer, settings, nil), Shop: shop, Finance: shop, Pay: service.NewPayService(pool, settings, testGateways(t), nil, nil),

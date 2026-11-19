@@ -7,6 +7,7 @@ import (
 	"net/netip"
 	"time"
 
+	"v2-hub-server/internal/manager/ipquality"
 	"v2-hub-server/internal/service"
 )
 
@@ -153,6 +154,19 @@ type reachSettingsVO struct {
 	HasToken        bool `json:"hasToken"`
 }
 
+// ipQualitySettingsVO 是 IP 质量检测设置；Sources 只读，表示各数据源与是否配了 key（docs/03 §5.23）。
+type ipQualitySettingsVO struct {
+	AutoEnabled  bool                `json:"autoEnabled"`
+	IntervalDays int                 `json:"intervalDays"`
+	Sources      []ipQualitySourceVO `json:"sources"`
+}
+
+type ipQualitySourceVO struct {
+	Key          string `json:"key"`
+	NeedsKey     bool   `json:"needsKey"`
+	IsConfigured bool   `json:"isConfigured"`
+}
+
 type menuSettingsVO struct {
 	Admin []string `json:"admin"`
 	User  []string `json:"user"`
@@ -169,6 +183,7 @@ type settingsVO struct {
 	Support         supportSettingsVO      `json:"support"`
 	Routing         routingSettingsVO      `json:"routing"`
 	Reach           reachSettingsVO        `json:"reach"`
+	IPQuality       ipQualitySettingsVO    `json:"ipQuality"`
 	Menu            menuSettingsVO         `json:"menu"`
 	Site            siteSettingsVO         `json:"site"`
 	Register        registerSettingsVO     `json:"register"`
@@ -202,10 +217,12 @@ func toSettingsVO(s service.Settings, mailEnabled, telegramEnabled, hasReachToke
 		Routing: routingSettingsVO{BlockRule: s.Routing.BlockRule},
 		Reach:   reachSettingsVO{Enabled: s.Reach.Enabled, IntervalMinutes: s.Reach.IntervalMinutes, Notify: s.Reach.Notify, HasToken: hasReachToken},
 		Menu:    menuSettingsVO{Admin: nonNil(s.Menu.Admin), User: nonNil(s.Menu.User)},
-		Site:    siteSettingsVO{Name: s.Site.Name, Timezone: s.Site.Timezone, PortalURL: s.Site.PortalURL},
-		Shop:    shopSettingsVO{Enabled: s.Shop.Enabled, Currency: s.Shop.Currency},
-		Rebate:  rebateSettingsVO{Percent: s.Rebate.Percent, Mode: s.Rebate.Mode},
-		Notify:  notifySettingsVO{ExpireDays: s.Notify.ExpireDays, TrafficPercent: s.Notify.TrafficPercent},
+		IPQuality: ipQualitySettingsVO{AutoEnabled: s.IPQuality.AutoEnabled, IntervalDays: s.IPQuality.IntervalDays,
+			Sources: []ipQualitySourceVO{}},
+		Site:   siteSettingsVO{Name: s.Site.Name, Timezone: s.Site.Timezone, PortalURL: s.Site.PortalURL},
+		Shop:   shopSettingsVO{Enabled: s.Shop.Enabled, Currency: s.Shop.Currency},
+		Rebate: rebateSettingsVO{Percent: s.Rebate.Percent, Mode: s.Rebate.Mode},
+		Notify: notifySettingsVO{ExpireDays: s.Notify.ExpireDays, TrafficPercent: s.Notify.TrafficPercent},
 		Register: registerSettingsVO{Mode: s.Register.Mode, EmailVerify: s.Register.EmailVerify, EmailAllow: nonNil(s.Register.EmailAllow),
 			EmailBlock: nonNil(s.Register.EmailBlock), PlanID: s.Register.PlanID},
 		Invite:  inviteSettingsVO{UserEnabled: s.Invite.UserEnabled, UserMaxUses: s.Invite.UserMaxUses},
@@ -220,6 +237,17 @@ func toSettingsVO(s service.Settings, mailEnabled, telegramEnabled, hasReachToke
 	}
 }
 
+// settingsVO 组装设置响应，附上只读的环境信息（邮件、Telegram、探测令牌、IP 质量数据源）。
+func (h *handlers) settingsVO(s service.Settings) settingsVO {
+	vo := toSettingsVO(s, h.mail.Enabled(), h.telegram.Enabled(), h.hasReachToken())
+	if h.ipQuality != nil {
+		vo.IPQuality.Sources = mapSlice(h.ipQuality.Sources(), func(src ipquality.SourceInfo) ipQualitySourceVO {
+			return ipQualitySourceVO{Key: src.Key, NeedsKey: src.NeedsKey, IsConfigured: src.Configured}
+		})
+	}
+	return vo
+}
+
 // hasReachToken 报告探测服务是否带了令牌；没接连通检测时为假。
 func (h *handlers) hasReachToken() bool {
 	return h.reach != nil && h.reach.HasToken()
@@ -231,7 +259,7 @@ func (h *handlers) getSettings(w http.ResponseWriter, r *http.Request, _ *servic
 		writeError(w, r, err)
 		return
 	}
-	writeOK(w, toSettingsVO(cur, h.mail.Enabled(), h.telegram.Enabled(), h.hasReachToken()))
+	writeOK(w, h.settingsVO(cur))
 }
 
 func (h *handlers) updateSettings(w http.ResponseWriter, r *http.Request, p *service.AdminPrincipal) {
@@ -251,7 +279,7 @@ func (h *handlers) updateSettings(w http.ResponseWriter, r *http.Request, p *ser
 		writeError(w, r, err)
 		return
 	}
-	writeOK(w, toSettingsVO(next, h.mail.Enabled(), h.telegram.Enabled(), h.hasReachToken()))
+	writeOK(w, h.settingsVO(next))
 }
 
 type testMailRequest struct {

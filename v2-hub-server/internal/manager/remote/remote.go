@@ -1,5 +1,6 @@
 // Package remote 经 SSH 在托管主机上执行脚本、上传文件（docs/03 §5.22，Ruling-68）。
-// 这一层不认识面板：跑什么脚本由 manager/deploy 里的固定模板决定，本包只负责连接、主机密钥固定、提权与输出限长。
+// 这一层不认识面板：跑什么脚本由 manager/deploy（部署与运维）与 manager/ipprobe（IP 质量检测的服务器侧，Ruling-81）里的
+// 固定模板决定，本包只负责连接、主机密钥固定、提权与输出限长。
 package remote
 
 import (
