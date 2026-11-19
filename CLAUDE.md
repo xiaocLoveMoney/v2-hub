@@ -103,6 +103,12 @@ GitHub 仓库设置见 `docs/github-仓库设置清单.md`。
   VLESS 流控按服务器开关（3x-ui 的 client flow 是全局的）；订阅支持 VLESS Encryption（mihomo / xray，sing-box 不输出）与 mihomo 的 XHTTP。
   实现在 `inboundtpl/presets.go`、`service/host_inbound_presets.go`；测试机上同机部署的平台给自己一键部署 7 项成功，7 个节点都实测出网（REALITY 两项在测试机上用 Xray 客户端测，本机网络按 SNI 干扰）。
   管理端一键部署弹窗登录后的浏览器实测、真实客户端导入待人工验证。
+  补充（hub-api 0.15.0，Ruling-81、Ruling-82，docs/03 §5.23）：服务器 IP 质量检测——参考开源脚本 IPQuality 的检测项自行实现（不运行、不复制该脚本，不向它作者的服务器发请求）：
+  平台侧查 IP 库与风险库（IP2Location.io、Team Cymru、Tor 免 key；ipapi.is、AbuseIPDB、IPQS 配 `HUB_IPQ_*` 才查）与 17 个 DNS 黑名单，
+  服务器侧经 SSH 跑固定的 sh + curl 脚本测出口 IP、流媒体与 AI 解锁（Netflix、YouTube Premium、Prime Video、TikTok、Reddit、ChatGPT）、12 家邮局 25 端口，不在主机上装软件；
+  每次检测存档（`server_ip_check`），服务器详情页可翻历史、勾两条逐项对比；定期复检默认关。没绑 SSH 或没有 `host:write` 时只做平台侧。第一期只测 IPv4，Disney+ 不做。
+  实现在 `manager/ipprobe`、`manager/ipquality`、`service/ip_quality.go`；IT-15 通过（数据源、DNS、服务器侧目标都指向模拟端）。
+  真实服务器上流媒体特征与邮局结果的核对（`ipprobe` 的真机测试默认跳过）、配真实 key 后各源的数据、管理端页面登录后的浏览器实测待人工验证。
 - 路线图 M3–M8、M9（链式改造）、M10（出口补全与入站预填）与 M11（SSH 托管与面板部署）已完成；后续工作待定。
 - 路线（2026-11-13，Ruling-17 – Ruling-22）：参考 SSPanel-Uim Malio 的功能与界面，自行实现；里程碑为
   M3 订阅与用户端基础 → M4 自助运营 → M5 商店与钱包 → M6 / M7 两种链式 → M8 运营，见 docs/07。
