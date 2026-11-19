@@ -75,6 +75,8 @@ type Querier interface {
 	ClaimDueTelegram(ctx context.Context, arg ClaimDueTelegramParams) ([]ClaimDueTelegramRow, error)
 	// 领取排队的任务：按先后取至多 N 条置为进行中；SKIP LOCKED 让并发领取互不等待
 	ClaimQueuedHostTasks(ctx context.Context, limit int32) ([]int64, error)
+	// 领取排队的检测：按先后取至多 N 条置为进行中；SKIP LOCKED 让并发领取互不等待
+	ClaimQueuedIPChecks(ctx context.Context, limit int32) ([]int64, error)
 	ClearAdminTOTP(ctx context.Context, id int64) (int64, error)
 	ClearCouponPlans(ctx context.Context, couponID int64) error
 	ClearNodeGroupItems(ctx context.Context, nodeGroupID int64) error
@@ -105,6 +107,7 @@ type Querier interface {
 	CountEmailCodesByIPSince(ctx context.Context, arg CountEmailCodesByIPSinceParams) (int64, error)
 	// 用于 R5：除 excluded_admin_id 外，仍持有该角色且启用的管理员数。
 	CountEnabledAdminsWithRoleExcluding(ctx context.Context, arg CountEnabledAdminsWithRoleExcludingParams) (int64, error)
+	CountIPChecks(ctx context.Context, serverID int64) (int64, error)
 	CountInviteCodes(ctx context.Context, kind string) (int64, error)
 	CountLedger(ctx context.Context, arg CountLedgerParams) (int64, error)
 	CountLiveUsersByIDs(ctx context.Context, ids []int64) (int64, error)
@@ -145,6 +148,9 @@ type Querier interface {
 	CreateDNSAccount(ctx context.Context, arg CreateDNSAccountParams) (int64, error)
 	// payload 是任务参数（deploy_inbounds 的预设、端口与节点组，Ruling-76），其它任务为空对象
 	CreateHostTask(ctx context.Context, arg CreateHostTaskParams) (int64, error)
+	// 服务器 IP 质量检测（docs/03 §5.23，Ruling-81、Ruling-82）
+	// 同一服务器已有 queued / running 的检测时违反 uk_server_ip_check_active
+	CreateIPCheck(ctx context.Context, arg CreateIPCheckParams) (int64, error)
 	CreateNodeGroup(ctx context.Context, arg CreateNodeGroupParams) (int64, error)
 	CreatePlan(ctx context.Context, arg CreatePlanParams) (int64, error)
 	CreateRole(ctx context.Context, arg CreateRoleParams) (int64, error)
@@ -224,9 +230,12 @@ type Querier interface {
 	ExpirePayments(ctx context.Context, expiresAt pgtype.Timestamptz) (int64, error)
 	// 进程重启后，上次没跑完的任务一律记为失败（Ruling-71）
 	FailRunningHostTasks(ctx context.Context, arg FailRunningHostTasksParams) (int64, error)
+	// 进程重启后，上次没跑完的检测一律记为失败（docs/03 §5.23 记录）
+	FailRunningIPChecks(ctx context.Context, arg FailRunningIPChecksParams) (int64, error)
 	// 扫描结果只填进仍为空的位置，不覆盖管理员这期间的选择（Ruling-65）
 	FillServerRegion(ctx context.Context, arg FillServerRegionParams) (int64, error)
 	FinishHostTask(ctx context.Context, arg FinishHostTaskParams) (int64, error)
+	FinishIPCheck(ctx context.Context, arg FinishIPCheckParams) (int64, error)
 	GetActiveEmailCodeForUpdate(ctx context.Context, arg GetActiveEmailCodeForUpdateParams) (GetActiveEmailCodeForUpdateRow, error)
 	GetAdminByID(ctx context.Context, id int64) (GetAdminByIDRow, error)
 	GetAdminByUsername(ctx context.Context, username string) (GetAdminByUsernameRow, error)
@@ -258,6 +267,11 @@ type Querier interface {
 	GetHostTask(ctx context.Context, id int64) (GetHostTaskRow, error)
 	GetHostTaskLog(ctx context.Context, id int64) (string, error)
 	GetHostTaskPayload(ctx context.Context, id int64) ([]byte, error)
+	// 不带完整报告，列与 ListIPChecks 相同；报告另取 GetIPCheckResult
+	GetIPCheck(ctx context.Context, id int64) (GetIPCheckRow, error)
+	GetIPCheckResult(ctx context.Context, id int64) ([]byte, error)
+	// 执行一条检测需要的参数
+	GetIPCheckRun(ctx context.Context, id int64) (GetIPCheckRunRow, error)
 	// 兑换时锁住票据行，一张票只能换一次会话
 	GetImpersonateTicketForUpdate(ctx context.Context, ticketHash []byte) (GetImpersonateTicketForUpdateRow, error)
 	GetInbound(ctx context.Context, id int64) (GetInboundRow, error)
@@ -400,6 +414,8 @@ type Querier interface {
 	ListHostTasks(ctx context.Context, arg ListHostTasksParams) ([]ListHostTasksRow, error)
 	// 已到续期时间、已接入且没有未结束任务的带 DNS 账号的主机；早的在前。续期时间为空（接管来的、面板自带证书）的不动
 	ListHostsDueForCertRenewal(ctx context.Context, arg ListHostsDueForCertRenewalParams) ([]int64, error)
+	// 新的在前
+	ListIPChecks(ctx context.Context, arg ListIPChecksParams) ([]ListIPChecksRow, error)
 	ListInboundsByIDs(ctx context.Context, ids []int64) ([]ListInboundsByIDsRow, error)
 	// 入站与对外地址缓存（docs/03 §5.1）------------------------------------------
 	ListInboundsByServer(ctx context.Context, serverID int64) ([]ListInboundsByServerRow, error)
@@ -464,6 +480,9 @@ type Querier interface {
 	ListServers(ctx context.Context) ([]ListServersRow, error)
 	// 面板标识相同的服务器；部署任务再比对地址，同一台才关联而不重复新建
 	ListServersByPanelGUID(ctx context.Context, panelGuid string) ([]ListServersByPanelGUIDRow, error)
+	// 定期复检挑选：启用且在线、没有进行中的检测、绑定的主机没有未结束的主机任务、最近一次检测早于截止时刻；
+	// 从没测过的最优先，其次最久没测的
+	ListServersDueForIPCheck(ctx context.Context, arg ListServersDueForIPCheckParams) ([]int64, error)
 	// 系统设置、发件箱与邮箱验证码（docs/03 §5.6、§5.7）。
 	ListSettings(ctx context.Context) ([]ListSettingsRow, error)
 	// ---- 共享账号 ----
@@ -532,6 +551,8 @@ type Querier interface {
 	// 待删除且各面板 client 已删完的用户，删除记录（docs/03 §5.2 删除用户）
 	PurgeDeletedUsers(ctx context.Context) (int64, error)
 	PurgeEmailCodes(ctx context.Context, createdAt pgtype.Timestamptz) (int64, error)
+	// 清理：早于截止时刻的，以及每台服务器超出保留条数的（进行中的不删）
+	PurgeIPChecks(ctx context.Context, arg PurgeIPChecksParams) (int64, error)
 	PurgeMailOutbox(ctx context.Context, createdAt pgtype.Timestamptz) (int64, error)
 	PurgeServerMetrics(ctx context.Context, bucketAt pgtype.Timestamptz) (int64, error)
 	PurgeTelegramOutbox(ctx context.Context, createdAt pgtype.Timestamptz) (int64, error)

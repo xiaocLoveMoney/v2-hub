@@ -522,6 +522,36 @@ type ServerHost struct {
 	UpdatedAt     pgtype.Timestamptz
 }
 
+type ServerIpCheck struct {
+	ID          int64
+	ServerID    int64
+	Status      string
+	Origin      string
+	Scope       string
+	HostProbe   string
+	Ip          string
+	IpSource    string
+	Country     string
+	RegCountry  string
+	IpKind      string
+	Asn         pgtype.Int8
+	AsOrg       string
+	UsageType   string
+	RiskLevel   string
+	DnsblListed int32
+	DnsblTotal  int32
+	MediaOk     int32
+	MediaTotal  int32
+	Port25      string
+	Result      []byte
+	ErrorCode   string
+	LastError   string
+	CreatedBy   pgtype.Int8
+	CreatedAt   pgtype.Timestamptz
+	StartedAt   pgtype.Timestamptz
+	FinishedAt  pgtype.Timestamptz
+}
+
 type ServerMetric struct {
 	ServerID      int64
 	BucketAt      pgtype.Timestamptz
