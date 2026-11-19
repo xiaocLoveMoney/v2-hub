@@ -1,5 +1,5 @@
 import { Alert, Button, Card, Form, Input, InputNumber, Select, Space, Switch, Tag } from 'antd'
-import { api, csrfHeader } from '../../api/client'
+import { api, csrfHeader, type IpQualitySource } from '../../api/client'
 import { ErrorAlert } from '../../components/ErrorAlert'
 import { useSubmit } from '../../hooks/use-submit'
 import { MAX_EMAIL_LEN } from '../form-limits'
@@ -17,6 +17,18 @@ const INTRO_ROWS = 6
 // 大陆连通检测的间隔范围（分钟），与 hub-api.yaml 的 Settings.reach 一致
 const MIN_REACH_INTERVAL = 10
 const MAX_REACH_INTERVAL = 1440
+// IP 质量定期复检的间隔范围（天），与 hub-api.yaml 的 Settings.ipQuality 一致
+const MIN_IPQ_INTERVAL_DAYS = 1
+const MAX_IPQ_INTERVAL_DAYS = 90
+/** 数据源的显示名与要配的环境变量（docs/03 §5.23 数据源，Ruling-82）。 */
+const IPQ_SOURCE_INFO: Record<string, { name: string; env?: string }> = {
+  ip2location: { name: 'IP2Location.io', env: 'HUB_IPQ_IP2LOCATION_KEY' },
+  cymru: { name: 'Team Cymru' },
+  tor: { name: 'Tor 出口' },
+  ipapiis: { name: 'ipapi.is', env: 'HUB_IPQ_IPAPIIS_KEY' },
+  abuseipdb: { name: 'AbuseIPDB', env: 'HUB_IPQ_ABUSEIPDB_KEY' },
+  ipqs: { name: 'IPQS', env: 'HUB_IPQ_IPQS_KEY' },
+}
 /** Telegram 会话 id：数字（群组为负数）或 @频道用户名；与后端校验一致。 */
 const CHAT_ID_PATTERN = /^(-?[0-9]{1,20}|@[A-Za-z][A-Za-z0-9_]{4,31})?$/
 const HTTPS_PREFIX = 'https://'
@@ -49,10 +61,28 @@ interface OpsSettingsCardsProps {
   isTelegramEnabled: boolean
   /** 环境变量里配了探测服务的令牌（决定大陆连通检测的每小时额度）。 */
   hasReachToken: boolean
+  /** IP 质量检测的数据源与是否配了 key（只读）。 */
+  ipQualitySources: IpQualitySource[]
 }
 
-/** 掉线告警、Telegram、日报、落地页、客服入口、服务器路由与大陆连通检测的设置卡片；放在系统设置的同一张表单里整体保存。 */
-export function OpsSettingsCards({ isTelegramEnabled, hasReachToken }: OpsSettingsCardsProps) {
+/** 一个数据源的状态标签：免 key 的标“免 key”，要 key 的标是否已配置。 */
+function SourceTag({ source }: { source: IpQualitySource }) {
+  const info = IPQ_SOURCE_INFO[source.key] ?? { name: source.key }
+  let text = '免 key'
+  let color: string | undefined = 'green'
+  if (source.needsKey) {
+    text = source.isConfigured ? '已配置 key' : '未配置'
+    color = source.isConfigured ? 'green' : undefined
+  }
+  return (
+    <Tag color={color} title={info.env === undefined ? undefined : `环境变量 ${info.env}`}>
+      {info.name}：{text}
+    </Tag>
+  )
+}
+
+/** 掉线告警、Telegram、日报、落地页、客服入口、服务器路由、大陆连通检测与 IP 质量检测的设置卡片；放在系统设置的同一张表单里整体保存。 */
+export function OpsSettingsCards({ isTelegramEnabled, hasReachToken, ipQualitySources }: OpsSettingsCardsProps) {
   return (
     <>
       <Card title="掉线告警与日报" className="settings-card">
@@ -160,6 +190,29 @@ export function OpsSettingsCards({ isTelegramEnabled, hasReachToken }: OpsSettin
         </Form.Item>
         <Form.Item name={['reach', 'notify']} label="被墙与恢复时发通知" extra="连续 2 轮判为被墙才告警；渠道同掉线告警（邮件与 Telegram）" valuePropName="checked">
           <Switch />
+        </Form.Item>
+      </Card>
+
+      <Card title="IP 质量检测" className="settings-card">
+        {/* docs/03 §5.23，Ruling-81、Ruling-82 */}
+        <Alert
+          type="warning"
+          showIcon
+          className="page-alert"
+          title="检测会把服务器 IP 发给下面的第三方数据源，并从服务器向流媒体站点与邮局 25 端口发起连接（只读欢迎行，不发信）"
+        />
+        <Form.Item label="数据源" extra="要 key 的数据源只能经环境变量配置（鼠标停在标签上看变量名），没配的在报告里标“未配置”；改了要重启 hub-server">
+          <Space wrap>
+            {ipQualitySources.map((src) => (
+              <SourceTag key={src.key} source={src} />
+            ))}
+          </Space>
+        </Form.Item>
+        <Form.Item name={['ipQuality', 'autoEnabled']} label="定期复检" extra="每小时挑一轮：启用且在线、到了间隔的服务器，每轮最多 5 台；手动检测不受这个开关约束" valuePropName="checked">
+          <Switch />
+        </Form.Item>
+        <Form.Item name={['ipQuality', 'intervalDays']} label="同一服务器两次复检的间隔（天）" rules={required}>
+          <InputNumber min={MIN_IPQ_INTERVAL_DAYS} max={MAX_IPQ_INTERVAL_DAYS} precision={0} className="full-width" />
         </Form.Item>
       </Card>
     </>

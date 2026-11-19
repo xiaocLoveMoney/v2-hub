@@ -67,6 +67,14 @@ export type ReachProblem = components['schemas']['ReachProblem']
 export type ReachProbe = components['schemas']['ReachProbe']
 export type NodeReach = components['schemas']['NodeReach']
 export type NodeReachDetail = components['schemas']['NodeReachDetail']
+export type IpCheck = components['schemas']['IpCheck']
+export type IpCheckDetail = components['schemas']['IpCheckDetail']
+export type IpCheckResult = components['schemas']['IpCheckResult']
+export type IpCheckStack = components['schemas']['IpCheckStack']
+export type IpSourceResult = components['schemas']['IpSourceResult']
+export type IpFactors = components['schemas']['IpFactors']
+export type IpHostProbe = components['schemas']['IpHostProbe']
+export type IpQualitySource = components['schemas']['IpQualitySource']
 
 /** 分页结果（hub-api.yaml 各分页接口的 data 形状）。 */
 export interface PageData<T> {

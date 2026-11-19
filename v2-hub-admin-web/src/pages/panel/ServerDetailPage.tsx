@@ -11,6 +11,7 @@ import { ChainApplyCard } from './ChainApplyCard'
 import { HostOpsCard } from './HostOpsCard'
 import { HostTaskDrawer } from './HostTaskDrawer'
 import { InboundPresetsModal } from './InboundPresetsModal'
+import { IpQualityCard } from './IpQualityCard'
 import type { OpenedHostTasks } from './host-actions'
 import { PLAIN_HTTP_TAG, PLAIN_HTTP_WARNING, isPlainHttpUrl } from './host-labels'
 import { EndpointModal } from './InboundModals'
@@ -242,6 +243,7 @@ export function ServerDetailPage() {
       {srv !== null && isPlainHttpUrl(srv.baseUrl) && <Alert type="warning" showIcon className="page-alert" title={`${PLAIN_HTTP_TAG}：${PLAIN_HTTP_WARNING}`} />}
       {srv !== null && can(PERMISSIONS.SERVER_READ) && <ChainApplyCard serverId={serverId} />}
       {srv !== null && can(PERMISSIONS.HOST_READ) && <HostOpsCard server={srv} onChanged={reloadAll} />}
+      {srv !== null && can(PERMISSIONS.SERVER_READ) && <IpQualityCard server={srv} />}
       <PageHeader
         title="入站"
         level={4}

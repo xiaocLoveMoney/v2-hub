@@ -821,6 +821,54 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/admin/servers/{id}/ip-checks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        /**
+         * 服务器的 IP 质量检测历史，新的在前（server:read；docs/03 §5.23，Ruling-81，0.15.0）
+         * @description 只带摘要，不带完整报告；完整报告用 GET /api/admin/ip-checks/{id}。
+         */
+        get: operations["listServerIpChecks"];
+        put?: never;
+        /**
+         * 对服务器发起一次 IP 质量检测（server:write；Ruling-81，0.15.0）
+         * @description 排一条检测并立即返回（状态 queued），由后台执行，前端按 id 轮询报告。 发起人有 host:write 时范围为 full（服务器侧经 SSH 检测），没有时为 platform（服务器侧标 no_permission）。 该服务器已有进行中的检测 409；每个管理员 10 分钟内最多 10 次，超出 429。写审计 ip_check.create。
+         */
+        post: operations["startServerIpCheck"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/ip-checks/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        /**
+         * 一次 IP 质量检测的完整报告（server:read；Ruling-81，0.15.0）
+         * @description 还没执行完的检测 result 为 null。
+         */
+        get: operations["getIpCheck"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/admin/servers/{id}/reality-scan": {
         parameters: {
             query?: never;
@@ -3415,6 +3463,218 @@ export interface components {
         };
         /** @description ISO 3166-1 两位国家码（大写），空串表示未知（Ruling-65） */
         CountryCode: string;
+        /**
+         * @description queued 排队中、running 检测中、succeeded 完成（部分源或服务器侧失败也算完成）、failed 整次检测做不下去
+         * @enum {string}
+         */
+        IpCheckStatus: "queued" | "running" | "succeeded" | "failed";
+        /**
+         * @description manual 管理员手动发起、auto 定期复检
+         * @enum {string}
+         */
+        IpCheckOrigin: "manual" | "auto";
+        /**
+         * @description full 平台侧与服务器侧都做；platform 只做平台侧
+         * @enum {string}
+         */
+        IpCheckScope: "full" | "platform";
+        /**
+         * @description 服务器侧的情况：done 已做；no_host 服务器没绑 SSH；no_permission 发起人没有 host:write；host_unverified 主机密钥还没固定； ssh_failed SSH 连不上、认证失败或主机密钥变了；no_curl 主机上没有 curl；还没执行到为空串
+         * @enum {string}
+         */
+        IpHostProbe: "" | "done" | "no_host" | "no_permission" | "host_unverified" | "ssh_failed" | "no_curl";
+        /**
+         * @description 被测 IP 的来源：host 服务器侧取到的出口 IP、panel 面板报告的公网 IP、address 面板地址里的 IP；还没取到为空串
+         * @enum {string}
+         */
+        IpAddressSource: "" | "host" | "panel" | "address";
+        /**
+         * @description native 原生（使用地与注册地国家相同）、broadcast 广播（不同）、unknown 缺一项
+         * @enum {string}
+         */
+        IpKind: "" | "native" | "broadcast" | "unknown";
+        /**
+         * @description 归一后的使用类型（docs/03 §5.23 使用类型）；没有为空串
+         * @enum {string}
+         */
+        IpNetType: "" | "hosting" | "residential" | "mobile" | "business" | "education" | "government" | "military" | "organization" | "library" | "banking" | "cdn" | "crawler" | "reserved" | "unknown";
+        /** @enum {string} */
+        IpRiskLevel: "" | "low" | "medium" | "high" | "very_high";
+        /**
+         * @description 本机 25 端口出站：open 至少一家邮局拿到 220、blocked 全部被拒或超时、unknown 其余；服务器侧没做为空串
+         * @enum {string}
+         */
+        IpPort25: "" | "open" | "blocked" | "unknown";
+        /** @enum {string} */
+        IpCheckErrorCode: "" | "no_public_ip" | "interrupted" | "timeout" | "internal";
+        /** @description 一次检测的记录与摘要（docs/03 §5.23 记录） */
+        IpCheck: {
+            /** Format: int64 */
+            id: number;
+            /** Format: int64 */
+            serverId: number;
+            status: components["schemas"]["IpCheckStatus"];
+            origin: components["schemas"]["IpCheckOrigin"];
+            scope: components["schemas"]["IpCheckScope"];
+            hostProbe: components["schemas"]["IpHostProbe"];
+            /** @description 被测 IP，还没取到为空串 */
+            ip: string;
+            ipSource: components["schemas"]["IpAddressSource"];
+            /** @description 使用地国家码，没有为空串 */
+            country: string;
+            /** @description 注册地国家码，没有为空串 */
+            regCountry: string;
+            ipKind: components["schemas"]["IpKind"];
+            /** Format: int64 */
+            asn: number | null;
+            asOrg: string;
+            usageType: components["schemas"]["IpNetType"];
+            riskLevel: components["schemas"]["IpRiskLevel"];
+            /** @description 上榜的黑名单数 */
+            dnsblListed: number;
+            /** @description 本次可用的黑名单数 */
+            dnsblTotal: number;
+            /** @description 可用（含仅自制、仅网页、仅 App）的流媒体与 AI 服务数 */
+            mediaOk: number;
+            /** @description 检测了的服务数；服务器侧没做为 0 */
+            mediaTotal: number;
+            port25: components["schemas"]["IpPort25"];
+            errorCode: components["schemas"]["IpCheckErrorCode"];
+            /** @description 整次失败的原因摘要，没有为空串 */
+            lastError: string;
+            /** @description 发起人用户名；定期复检或管理员已被删除为空串 */
+            createdByName: string;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            startedAt: string | null;
+            /** Format: date-time */
+            finishedAt: string | null;
+        };
+        IpCheckDetail: components["schemas"]["IpCheck"] & {
+            result: components["schemas"]["IpCheckResult"] | null;
+        };
+        /** @description 完整报告，一律是枚举码；数组按 key 排序，便于逐项对比 */
+        IpCheckResult: {
+            /** @description 报告格式版本，当前为 1 */
+            schema: number;
+            /** @description 按协议栈分段，第一期只有 v4 */
+            stacks: {
+                v4?: components["schemas"]["IpCheckStack"];
+            };
+        };
+        IpCheckStack: {
+            ip: string;
+            ipSource: components["schemas"]["IpAddressSource"];
+            basics: components["schemas"]["IpBasics"];
+            sources: components["schemas"]["IpSourceResult"][];
+            dnsbl: components["schemas"]["IpDnsblReport"];
+            egress: components["schemas"]["IpEgress"];
+            media: components["schemas"]["IpMediaReport"];
+            mail: components["schemas"]["IpMailReport"];
+        };
+        IpBasics: {
+            country: string;
+            region: string;
+            city: string;
+            /** @description 如 "-08:00" */
+            timezone: string;
+            latitude: number | null;
+            longitude: number | null;
+            /** Format: int64 */
+            asn: number | null;
+            asOrg: string;
+            /** @description BGP 前缀，如 8.8.8.0/24 */
+            prefix: string;
+            regCountry: string;
+            /** @description 注册机构，如 arin */
+            registry: string;
+            ipKind: components["schemas"]["IpKind"];
+        };
+        IpSourceResult: {
+            /** @enum {string} */
+            key: "abuseipdb" | "cymru" | "ip2location" | "ipapiis" | "ipqs" | "tor";
+            /** @enum {string} */
+            status: "ok" | "not_configured" | "rate_limited" | "auth_failed" | "error";
+            usageType: components["schemas"]["IpNetType"];
+            companyType: components["schemas"]["IpNetType"];
+            score: null | {
+                value: number;
+                level: components["schemas"]["IpRiskLevel"];
+            };
+            factors: components["schemas"]["IpFactors"];
+        };
+        /** @description 风险因子；null 为该源不提供或未知 */
+        IpFactors: {
+            /** @description 该源给的国家码，没有为空串 */
+            country: string;
+            proxy: boolean | null;
+            tor: boolean | null;
+            vpn: boolean | null;
+            /** @description 机房 IP */
+            server: boolean | null;
+            abuser: boolean | null;
+            /** @description 爬虫或机器人 */
+            robot: boolean | null;
+        };
+        IpDnsblReport: {
+            listed: number;
+            policy: number;
+            clean: number;
+            unavailable: number;
+            items: {
+                /** @description 列表域名，如 zen.spamhaus.org */
+                key: string;
+                /** @enum {string} */
+                result: "clean" | "listed" | "policy" | "unavailable";
+                /** @description 列表返回的地址（多个以逗号分隔），没有为空串 */
+                answer: string;
+            }[];
+        };
+        /** @description 服务器侧取到的出口信息；服务器侧没做时各项为空 */
+        IpEgress: {
+            ip: string;
+            /** @description 出口探测给的国家码 */
+            country: string;
+        };
+        IpMediaReport: {
+            status: components["schemas"]["IpHostProbe"];
+            items: {
+                /** @enum {string} */
+                key: "chatgpt" | "netflix" | "prime_video" | "reddit" | "tiktok" | "youtube_premium";
+                /** @enum {string} */
+                status: "yes" | "no" | "originals_only" | "web_only" | "app_only" | "failed" | "unknown";
+                /** @description 两位国家码，取不到为空串 */
+                region: string;
+                /** @enum {string} */
+                method: "native" | "dns" | "unknown";
+                /** @description 排查用的证据（各次请求的 HTTP 状态码、特征命中数等），键名随服务而定，不参与对比 */
+                evidence: {
+                    [key: string]: string;
+                };
+            }[];
+        };
+        IpMailReport: {
+            status: components["schemas"]["IpHostProbe"];
+            port25: components["schemas"]["IpPort25"];
+            items: {
+                /** @enum {string} */
+                key: "aol" | "gmail" | "gmx" | "icloud" | "mailcom" | "mailru" | "netease163" | "outlook" | "qq" | "sina" | "sohu" | "yahoo";
+                /** @description 连的 MX 主机，查不到为空串 */
+                mx: string;
+                /** @enum {string} */
+                result: "ok" | "rejected" | "refused" | "timeout" | "dns_failed" | "no_tool" | "failed";
+                /** @description 欢迎行的三位应答码，没有为空串 */
+                code: string;
+            }[];
+        };
+        IpQualitySource: {
+            key: string;
+            /** @description 是否要配 key 才启用 */
+            needsKey: boolean;
+            /** @description 对应的环境变量是否已配置（免 key 的源始终为 true） */
+            isConfigured: boolean;
+        };
         ServerLocation: {
             region: components["schemas"]["CountryCode"];
             /** @description 面板报出的公网 IP */
@@ -4297,6 +4557,15 @@ export interface components {
                 /** @description 环境变量 HUB_GLOBALPING_TOKEN 是否已配置（决定每小时额度），不可经接口修改 */
                 readonly hasToken: boolean;
             };
+            /** @description IP 质量检测（0.15.0，docs/03 §5.23，Ruling-81、Ruling-82） */
+            ipQuality: {
+                /** @description 定期复检开关，默认关；手动检测不受它约束 */
+                autoEnabled: boolean;
+                /** @description 定期复检时同一服务器两次检测的最小间隔（天） */
+                intervalDays: number;
+                /** @description 各数据源与是否已配置 key（环境变量 HUB_IPQ_*），不可经接口修改 */
+                readonly sources: components["schemas"]["IpQualitySource"][];
+            };
             /** @description 侧栏菜单顺序（0.7.3，docs/03 §5.6 菜单顺序，Ruling-57）；空数组 = 默认顺序 */
             menu: {
                 admin: components["schemas"]["MenuOrder"];
@@ -4437,6 +4706,9 @@ export interface components {
                 [key: string]: unknown;
             };
             reach?: {
+                [key: string]: unknown;
+            };
+            ipQuality?: {
                 [key: string]: unknown;
             };
             menu?: {
@@ -7660,6 +7932,99 @@ export interface operations {
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             502: components["responses"]["UpstreamUnavailable"];
+        };
+    };
+    listServerIpChecks: {
+        parameters: {
+            query?: {
+                page?: components["parameters"]["Page"];
+                pageSize?: components["parameters"]["PageSize"];
+            };
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 检测记录分页 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: {
+                            items: components["schemas"]["IpCheck"][];
+                            /** Format: int64 */
+                            total: number;
+                        };
+                    };
+                };
+            };
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    startServerIpCheck: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 新排的检测 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["IpCheck"];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    getIpCheck: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 检测记录与报告 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["IpCheckDetail"];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
         };
     };
     scanRealityTarget: {

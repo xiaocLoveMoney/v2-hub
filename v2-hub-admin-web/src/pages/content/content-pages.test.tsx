@@ -213,6 +213,7 @@ describe('SettingsPage', () => {
     support: { url: '', label: '在线客服' },
     routing: { blockRule: true },
     reach: { enabled: false, intervalMinutes: 30, notify: true, hasToken: false },
+    ipQuality: { autoEnabled: false, intervalDays: 7, sources: [{ key: 'ipqs', needsKey: true, isConfigured: false }, { key: 'cymru', needsKey: false, isConfigured: true }] },
     menu: { admin: ['users'], user: [] },
   }
 
@@ -256,6 +257,8 @@ describe('SettingsPage', () => {
       site: { ...settings.site, name: '新站名' },
       routing: { blockRule: false },
       reach: { enabled: false, intervalMinutes: 30, notify: true },
+      // 数据源目录只读，不随表单提交（Ruling-82）
+      ipQuality: { autoEnabled: false, intervalDays: 7 },
       subscription,
     })
   })

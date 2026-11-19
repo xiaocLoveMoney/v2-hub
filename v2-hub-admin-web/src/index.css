@@ -304,6 +304,16 @@ body {
   margin-bottom: 16px;
 }
 
+/* IP 质量检测（docs/05）：没配 key 的数据源灰显；对比时变化的行加底色 */
+.ipq-muted td {
+  color: var(--hub-body);
+  opacity: 0.6;
+}
+
+.ipq-changed td {
+  background: color-mix(in srgb, var(--hub-warning) 10%, var(--hub-surface));
+}
+
 .modal-footer {
   display: flex;
   justify-content: flex-end;

@@ -260,7 +260,7 @@ function SettingsFormBody({ settings, canWrite, canReadPlans, onSaved }: Setting
           </Form.Item>
         </Card>
 
-        <OpsSettingsCards isTelegramEnabled={telegramEnabled} hasReachToken={settings.reach.hasToken} />
+        <OpsSettingsCards isTelegramEnabled={telegramEnabled} hasReachToken={settings.reach.hasToken} ipQualitySources={settings.ipQuality.sources} />
       </Form>
       {canWrite && (
         <div className="card-grid card-grid-follow">
