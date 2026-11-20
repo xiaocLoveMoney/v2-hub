@@ -69,7 +69,7 @@ function ServerReachCell({ reach }: { reach: Server['reach'] }) {
   )
 }
 
-/** 服务器管理（server:read 查看，server:write 接入 / 编辑 / 同步 / 移除 / 账单）；默认以状态卡片显示，可切到表格（Ruling-81）。 */
+/** 服务器管理（server:read 查看，server:write 接入 / 编辑 / 同步 / 移除 / 账单）；默认以状态卡片显示，可切到表格（Ruling-83）。 */
 export function ServersPage() {
   const { can } = useSession()
   const { message } = App.useApp()
@@ -79,7 +79,7 @@ export function ServersPage() {
   const [viewMode, setViewMode] = useState<ViewMode>(readViewMode)
   const [billing, setBilling] = useState<Server | null>(null)
   const trendById = useMemo(() => new Map((trends.data ?? []).map((t) => [t.serverId, t])), [trends.data])
-  // 延迟检测开着时接口里每台都带 latency（Ruling-84）；拿不到趋势时不出延迟区
+  // 延迟检测开着时接口里每台都带 latency（Ruling-86）；拿不到趋势时不出延迟区
   const hasLatency = (trends.data ?? []).some((t) => t.latency !== null)
   // 页面在前台时定时刷新状态（切到后台不刷）
   usePollRemote([servers, trends], usePageVisible(), SERVER_STATUS_POLL_INTERVAL_MS)

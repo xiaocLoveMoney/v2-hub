@@ -56,7 +56,7 @@ type PanelManager interface {
 type panelInfoVO struct {
 	Version string `json:"version"`
 	GUID    string `json:"guid"`
-	// Resources 是资源快照（Ruling-81），面板没给为 null。
+	// Resources 是资源快照（Ruling-83），面板没给为 null。
 	Resources *panel.Resources `json:"resources"`
 }
 
@@ -83,12 +83,12 @@ type serverVO struct {
 	ClientFlow string `json:"clientFlow"`
 	// Reach 是这台服务器上大陆连通检测的目标数（Ruling-67）；功能没开为 null。
 	Reach *serverReachVO `json:"reach"`
-	// Resources 是最近一次探测成功的资源快照（Ruling-81）；还没探测成功过为 null。
+	// Resources 是最近一次探测成功的资源快照（Ruling-83）；还没探测成功过为 null。
 	Resources     *panel.Resources `json:"resources"`
 	PublicIPv4    string           `json:"publicIpv4"`
 	PublicIPv6    string           `json:"publicIpv6"`
 	OnlineClients int              `json:"onlineClients"`
-	// Billing、Traffic 是账单、流量额度与本周期用量（Ruling-82）；Host 是托管主机的系统信息，没有关联为 null。
+	// Billing、Traffic 是账单、流量额度与本周期用量（Ruling-84）；Host 是托管主机的系统信息，没有关联为 null。
 	Billing serverBillingVO      `json:"billing"`
 	Traffic serverCycleTrafficVO `json:"traffic"`
 	Host    *serverHostBriefVO   `json:"host"`

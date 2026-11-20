@@ -15,7 +15,7 @@ import (
 	"v2-hub-server/internal/manager/panel"
 )
 
-// 服务器账单与流量额度（docs/03 §5.1 “账单与流量额度”，Ruling-82）。
+// 服务器账单与流量额度（docs/03 §5.1 “账单与流量额度”，Ruling-84）。
 const (
 	// 计费周期。
 	BillingCycleMonth    = "month"
@@ -258,7 +258,7 @@ func nicDelta(last pgtype.Int8, cur int64) int64 {
 	}
 }
 
-// recordNicTraffic 在一次成功的健康探测后把网卡累计计数的增量记到当天（Ruling-82）。
+// recordNicTraffic 在一次成功的健康探测后把网卡累计计数的增量记到当天（Ruling-84）。
 // 面板没给资源快照或没报累计计数（收发都是 0）时不动基线。
 func (s *PanelService) recordNicTraffic(ctx context.Context, serverID int64, res *panel.Resources) error {
 	if res == nil || (res.NetSent == 0 && res.NetRecv == 0) {

@@ -99,15 +99,15 @@ CREATE TABLE server (
     last_seen_at    TIMESTAMPTZ,
     panel_version   VARCHAR(32)  NOT NULL DEFAULT '',
     panel_guid      VARCHAR(64)  NOT NULL DEFAULT '',
-    status_snapshot JSONB,                                 -- 最近一次探测成功的资源快照，平台的中立模型（Ruling-81）
+    status_snapshot JSONB,                                 -- 最近一次探测成功的资源快照，平台的中立模型（Ruling-83）
     online_clients  INTEGER      NOT NULL DEFAULT 0,       -- 面板在线 client 数（docs/03 §5.5）
     last_synced_at  TIMESTAMPTZ,
     offline_since   TIMESTAMPTZ,                           -- 离开 online 的时刻；online 时为空（docs/03 §5.20 掉线告警）
     alert_sent_at   TIMESTAMPTZ,                           -- 这次掉线已发告警的时刻；未发为空
     client_flow     VARCHAR(32)  NOT NULL DEFAULT '',      -- VLESS 流控（Ruling-77）：空串为不带；打开后平台下发的 client 带这个 flow
-    public_ipv4     VARCHAR(45)  NOT NULL DEFAULT '',      -- 面板自报的公网 IPv4，没报为空串（Ruling-81）
+    public_ipv4     VARCHAR(45)  NOT NULL DEFAULT '',      -- 面板自报的公网 IPv4，没报为空串（Ruling-83）
     public_ipv6     VARCHAR(45)  NOT NULL DEFAULT '',      -- 面板自报的公网 IPv6，没报为空串
-    price_cents     INTEGER,                               -- 价格，整数分；空 = 没填（Ruling-82）
+    price_cents     INTEGER,                               -- 价格，整数分；空 = 没填（Ruling-84）
     price_currency  VARCHAR(3)   NOT NULL DEFAULT 'USD',   -- 币种，三位大写字母
     billing_cycle   VARCHAR(16)  NOT NULL DEFAULT 'month', -- month / quarter / half_year / year / once
     expires_on      DATE,                                  -- 到期日（站点时区）；空 = 没填
@@ -118,7 +118,7 @@ CREATE TABLE server (
     traffic_adjust_cycle DATE,                             -- 校准值所属周期的起始日；与当前周期不同即作废
     nic_last_sent   BIGINT,                                -- 上次探测时面板报的网卡累计发送字节；空 = 还没有基线
     nic_last_recv   BIGINT,                                -- 上次探测时面板报的网卡累计接收字节
-    latency_checked_at TIMESTAMPTZ,                        -- 最近一次三网延迟检测的时间（含失败，Ruling-84）
+    latency_checked_at TIMESTAMPTZ,                        -- 最近一次三网延迟检测的时间（含失败，Ruling-86）
     created_at      TIMESTAMPTZ  NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ  NOT NULL DEFAULT now(),
     CONSTRAINT uk_server_name UNIQUE (name),
@@ -132,8 +132,8 @@ CREATE TABLE server (
     CONSTRAINT ck_server_traffic_mode CHECK (traffic_mode IN ('both', 'out', 'max'))
 );
 
--- 服务器采样：健康探测成功时按 5 分钟对齐记一条，同一时段只留最后一次，保留 7 天（docs/03 §5.1，Ruling-65、Ruling-83）。
--- 除 cpu 与 online_clients 外的列是 Ruling-83 加的，之前的行为空；负载乘 100 存整数。
+-- 服务器采样：健康探测成功时按 5 分钟对齐记一条，同一时段只留最后一次，保留 7 天（docs/03 §5.1，Ruling-65、Ruling-85）。
+-- 除 cpu 与 online_clients 外的列是 Ruling-85 加的，之前的行为空；负载乘 100 存整数。
 CREATE TABLE server_metric (
     server_id      BIGINT           NOT NULL REFERENCES server (id) ON DELETE CASCADE,
     bucket_at      TIMESTAMPTZ      NOT NULL,          -- 5 分钟时段的起点
@@ -152,7 +152,7 @@ CREATE TABLE server_metric (
 );
 CREATE INDEX idx_server_metric_bucket_at ON server_metric (bucket_at);
 
--- 服务器网卡流量按天累计（docs/03 §5.1 账单与流量额度，Ruling-82）：day 是站点时区的日期，
+-- 服务器网卡流量按天累计（docs/03 §5.1 账单与流量额度，Ruling-84）：day 是站点时区的日期，
 -- sent / recv 是当天各次探测算出的增量之和；保留 62 天。
 CREATE TABLE server_nic_traffic_daily (
     server_id BIGINT NOT NULL REFERENCES server (id) ON DELETE CASCADE,
@@ -163,7 +163,7 @@ CREATE TABLE server_nic_traffic_daily (
 );
 CREATE INDEX idx_server_nic_traffic_daily_day ON server_nic_traffic_daily (day);
 
--- 三网延迟（docs/03 §5.20 三网延迟检测，Ruling-84）：一次检测每家运营商一行，保留 7 天。
+-- 三网延迟（docs/03 §5.20 三网延迟检测，Ruling-86）：一次检测每家运营商一行，保留 7 天。
 -- avg_ms 是平均延迟（毫秒，四舍五入），全丢为空；loss_percent 是丢包率。
 CREATE TABLE server_latency (
     server_id    BIGINT      NOT NULL REFERENCES server (id) ON DELETE CASCADE,

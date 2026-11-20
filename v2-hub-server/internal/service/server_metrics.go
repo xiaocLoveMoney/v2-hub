@@ -12,7 +12,7 @@ import (
 	"v2-hub-server/internal/dao/sqlcgen"
 )
 
-// 服务器资源趋势与三网延迟的读取（docs/03 §5.1 负载采样、§5.20 三网延迟检测；Ruling-83、Ruling-84）。
+// 服务器资源趋势与三网延迟的读取（docs/03 §5.1 负载采样、§5.20 三网延迟检测；Ruling-85、Ruling-86）。
 const (
 	// 运营商标识。
 	LatencyISPTelecom = "telecom"
@@ -25,7 +25,7 @@ const (
 )
 
 // ServerMetricPoint 是一个时段的资源采样。除 OnlineClients 外的字段为 nil 表示这个时段没有该项数据
-// （面板没报，或是 Ruling-83 之前的采样）。Load1 已从“乘 100 的整数”换回小数。
+// （面板没报，或是 Ruling-85 之前的采样）。Load1 已从“乘 100 的整数”换回小数。
 type ServerMetricPoint struct {
 	At            time.Time
 	CPU           *float64

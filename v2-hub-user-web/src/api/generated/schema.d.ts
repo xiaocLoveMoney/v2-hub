@@ -427,7 +427,7 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * 各服务器最近的速率与三网延迟（server:read；Ruling-83、Ruling-84，0.15.0），给服务器列表的卡片用
+         * 各服务器最近的速率与三网延迟（server:read；Ruling-85、Ruling-86，0.16.0），给服务器列表的卡片用
          * @description 每台服务器最近 30 个 5 分钟时段的上下行速率，与三家运营商各自最近 30 次延迟检测；没有数据的服务器不出现在结果里。
          */
         get: operations["listServerTrends"];
@@ -936,7 +936,7 @@ export interface paths {
             cookie?: never;
         };
         get?: never;
-        /** 保存服务器的账单与流量额度（server:write；Ruling-82，0.15.0） */
+        /** 保存服务器的账单与流量额度（server:write；Ruling-84，0.16.0） */
         put: operations["setServerBilling"];
         post?: never;
         delete?: never;
@@ -955,7 +955,7 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * 一台服务器的资源趋势与三网延迟（server:read；Ruling-83、Ruling-84，0.15.0）
+         * 一台服务器的资源趋势与三网延迟（server:read；Ruling-85、Ruling-86，0.16.0）
          * @description 近 24 小时为原值（资源 5 分钟一点，延迟每次检测一点），近 7 天按小时平均；服务器不在线的时段没有点。
          */
         get: operations["getServerMetrics"];
@@ -3504,7 +3504,7 @@ export interface components {
         PanelInfo: {
             version: string;
             guid: string;
-            /** @description 资源快照（0.15.0，Ruling-81） */
+            /** @description 资源快照（0.16.0，Ruling-83） */
             resources?: components["schemas"]["ServerResources"] | null;
         };
         Server: {
@@ -3527,17 +3527,17 @@ export interface components {
             /** Format: date-time */
             lastSyncedAt?: string | null;
             panelVersion: string;
-            /** @description 最近一次探测成功的资源快照（0.15.0，Ruling-81）；还没探测成功过为 null。服务器不在线时是掉线前的最后一份 */
+            /** @description 最近一次探测成功的资源快照（0.16.0，Ruling-83）；还没探测成功过为 null。服务器不在线时是掉线前的最后一份 */
             resources: components["schemas"]["ServerResources"] | null;
-            /** @description 面板自报的公网 IPv4，没报为空串（0.15.0） */
+            /** @description 面板自报的公网 IPv4，没报为空串（0.16.0） */
             publicIpv4: string;
-            /** @description 面板自报的公网 IPv6，没报为空串（0.15.0） */
+            /** @description 面板自报的公网 IPv6，没报为空串（0.16.0） */
             publicIpv6: string;
-            /** @description 面板在线 client 数（0.15.0） */
+            /** @description 面板在线 client 数（0.16.0） */
             onlineClients: number;
             billing: components["schemas"]["ServerBilling"];
             traffic: components["schemas"]["ServerTraffic"];
-            /** @description 关联的托管主机的系统信息（0.15.0）；没有关联为 null */
+            /** @description 关联的托管主机的系统信息（0.16.0）；没有关联为 null */
             host: components["schemas"]["ServerHostBrief"] | null;
             inboundCount: number;
             /** Format: date-time */
@@ -3558,7 +3558,7 @@ export interface components {
                 partial: number;
             } | null;
         };
-        /** @description 服务器资源快照，平台的中立模型（0.15.0，Ruling-81）；面板没报的数值为 0 */
+        /** @description 服务器资源快照，平台的中立模型（0.16.0，Ruling-83）；面板没报的数值为 0 */
         ServerResources: {
             /** @description CPU 占用百分比，面板没报为 null */
             cpu: number | null;
@@ -3621,7 +3621,7 @@ export interface components {
          * @enum {string}
          */
         TrafficMode: "both" | "out" | "max";
-        /** @description 服务器的账单与流量额度（0.15.0，docs/03 §5.1，Ruling-82） */
+        /** @description 服务器的账单与流量额度（0.16.0，docs/03 §5.1，Ruling-84） */
         ServerBilling: {
             /** @description 价格，整数分；没填为 null */
             priceCents: number | null;
@@ -3649,7 +3649,7 @@ export interface components {
              */
             trafficUsedBytes?: number | null;
         };
-        /** @description 当前流量周期的用量（0.15.0，Ruling-82）；只有接入之后的数据 */
+        /** @description 当前流量周期的用量（0.16.0，Ruling-84）；只有接入之后的数据 */
         ServerTraffic: {
             /**
              * Format: date
@@ -3699,7 +3699,7 @@ export interface components {
             avgMs: number | null;
             lossPercent: number;
         };
-        /** @description 三家运营商各自的延迟序列，按时间升序（Ruling-84） */
+        /** @description 三家运营商各自的延迟序列，按时间升序（Ruling-86） */
         LatencySeries: {
             telecom: components["schemas"]["LatencyPoint"][];
             unicom: components["schemas"]["LatencyPoint"][];
@@ -3726,7 +3726,7 @@ export interface components {
             /** @description 每家最多 30 个点；三网延迟检测没开为 null */
             latency: components["schemas"]["LatencySeries"] | null;
         };
-        /** @description 一个时段的资源采样；Ruling-83 之前的采样只有 cpu 与 onlineClients，其余为 null */
+        /** @description 一个时段的资源采样；Ruling-85 之前的采样只有 cpu 与 onlineClients，其余为 null */
         ServerMetricPoint: {
             /**
              * Format: date-time
@@ -4564,7 +4564,7 @@ export interface components {
                 /** @description 环境变量 HUB_GLOBALPING_TOKEN 是否已配置（决定每小时额度），不可经接口修改 */
                 readonly hasToken: boolean;
             };
-            /** @description 三网延迟检测（0.15.0，docs/03 §5.20，Ruling-84） */
+            /** @description 三网延迟检测（0.16.0，docs/03 §5.20，Ruling-86） */
             latency: {
                 /** @description 开启后服务器的公网 IP 会发给第三方探测服务，默认关 */
                 enabled: boolean;

@@ -7,7 +7,7 @@ import (
 	"v2-hub-server/internal/service"
 )
 
-// 服务器状态卡片的接口（docs/03 §5.1、§5.20；Ruling-81 – Ruling-84）：账单与流量额度、资源趋势、三网延迟。
+// 服务器状态卡片的接口（docs/03 §5.1、§5.20；Ruling-83 – Ruling-86）：账单与流量额度、资源趋势、三网延迟。
 
 const msgBadExpiresOn = "到期日须为 YYYY-MM-DD"
 
@@ -169,7 +169,7 @@ type serverTrendVO struct {
 	Latency  *latencySeriesVO   `json:"latency"`
 }
 
-// isLatencyEnabled 报告三网延迟检测是否开着（Ruling-84）；关着时接口不带延迟数据。
+// isLatencyEnabled 报告三网延迟检测是否开着（Ruling-86）；关着时接口不带延迟数据。
 func (h *handlers) isLatencyEnabled(r *http.Request) (bool, error) {
 	cur, err := h.settings.Current(r.Context())
 	if err != nil {

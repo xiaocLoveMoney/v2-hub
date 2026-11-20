@@ -85,7 +85,7 @@ SELECT id FROM server WHERE NOT is_disabled AND region = '' ORDER BY id;
 UPDATE server SET region = sqlc.arg(region)::varchar, updated_at = now() WHERE id = sqlc.arg(id) AND region = '';
 
 -- name: RecordServerMetric :exec
--- 健康探测成功顺带记一条采样：对齐 5 分钟，同一时段覆盖为最新值，在线数取服务器缓存（Ruling-65、Ruling-83）
+-- 健康探测成功顺带记一条采样：对齐 5 分钟，同一时段覆盖为最新值，在线数取服务器缓存（Ruling-65、Ruling-85）
 INSERT INTO server_metric (server_id, bucket_at, cpu, online_clients, mem_used, mem_total, disk_used, disk_total,
                            load1_x100, net_up_rate, net_down_rate, tcp_count, udp_count)
 SELECT s.id, date_bin('5 minutes', sqlc.arg(sampled_at)::timestamptz, TIMESTAMPTZ '2000-01-01 00:00:00+00'),
@@ -118,7 +118,7 @@ WHERE server_id = $1 AND bucket_at >= $2
 GROUP BY 1 ORDER BY 1;
 
 -- name: ListServerResourceMetrics :many
--- 管理端资源趋势的 5 分钟原值（Ruling-83）；Ruling-83 之前的行除 cpu 与 online_clients 外为空
+-- 管理端资源趋势的 5 分钟原值（Ruling-85）；Ruling-85 之前的行除 cpu 与 online_clients 外为空
 SELECT bucket_at, cpu, online_clients, mem_used, mem_total, disk_used, disk_total, load1_x100,
        net_up_rate, net_down_rate, tcp_count, udp_count
 FROM server_metric
@@ -140,13 +140,13 @@ WHERE server_id = $1 AND bucket_at >= $2
 GROUP BY 1 ORDER BY 1;
 
 -- name: ListRecentServerNet :many
--- 各服务器近一段时间的上下行速率（列表卡片的小图，Ruling-83）
+-- 各服务器近一段时间的上下行速率（列表卡片的小图，Ruling-85）
 SELECT server_id, bucket_at, net_up_rate, net_down_rate
 FROM server_metric
 WHERE bucket_at >= $1 AND net_up_rate IS NOT NULL AND net_down_rate IS NOT NULL
 ORDER BY server_id, bucket_at;
 
--- 账单与流量额度（docs/03 §5.1，Ruling-82）-------------------------------------
+-- 账单与流量额度（docs/03 §5.1，Ruling-84）-------------------------------------
 
 -- name: SetServerBilling :execrows
 UPDATE server
@@ -181,7 +181,7 @@ SELECT server_id, day, sent, recv FROM server_nic_traffic_daily WHERE server_id 
 -- name: PurgeServerNicTraffic :execrows
 DELETE FROM server_nic_traffic_daily WHERE day < $1;
 
--- 三网延迟（docs/03 §5.20，Ruling-84）-----------------------------------------
+-- 三网延迟（docs/03 §5.20，Ruling-86）-----------------------------------------
 
 -- name: ListLatencyDueServers :many
 -- 到期该测延迟的服务器：启用、在线、有公网 IPv4；最久没测的在前

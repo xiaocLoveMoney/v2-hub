@@ -162,7 +162,7 @@ func runServer(args []string) error {
 	if err := settings.EnsureSubscriptionPath(ctx); err != nil {
 		return fmt.Errorf("ensure subscription path: %w", err)
 	}
-	// 流量周期与到期日按站点时区取“今天”（Ruling-82），所以面板服务要读系统设置
+	// 流量周期与到期日按站点时区取“今天”（Ruling-84），所以面板服务要读系统设置
 	panels := service.NewPanelService(pool, sealer, registry, service.PanelConfig{
 		RequestTimeout: cfg.Panel.RequestTimeout, Locator: locator, SiteLocation: settings.SiteLocation,
 	}, nil)
@@ -204,7 +204,7 @@ func runServer(args []string) error {
 	}
 	reachSvc := service.NewReachService(pool, settings, ops, prober, service.ReachOptions{HasToken: reachToken != ""})
 	go job.RunReach(ctx, reachSvc, cfg.Reach.CheckInterval)
-	// 三网延迟检测（Ruling-84）：与连通检测同一个探测服务、共用小时额度；开关在系统设置里，默认关
+	// 三网延迟检测（Ruling-86）：与连通检测同一个探测服务、共用小时额度；开关在系统设置里，默认关
 	go job.RunLatency(ctx, service.NewLatencyService(pool, settings, prober, reachSvc, nil), cfg.Reach.CheckInterval)
 	analytics := service.NewAnalyticsService(pool, settings, reachSvc, cfg.Analytics.CacheTTL, nil)
 	users := service.NewUserService(pool, sealer, panels, service.UserConfig{Location: quotaLoc, Subscription: subCfg, Settings: settings}, nil)

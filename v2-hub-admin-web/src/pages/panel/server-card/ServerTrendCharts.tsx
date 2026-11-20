@@ -105,7 +105,7 @@ function Charts({ data }: { data: ServerMetrics }) {
   )
 }
 
-/** 服务器详情页的趋势（Ruling-83、Ruling-84）：近 24 小时为 5 分钟原值，近 7 天按小时平均；三网延迟检测没开时不出延迟图。 */
+/** 服务器详情页的趋势（Ruling-85、Ruling-86）：近 24 小时为 5 分钟原值，近 7 天按小时平均；三网延迟检测没开时不出延迟图。 */
 export function ServerTrendCharts({ serverId }: { serverId: number }) {
   const [range, setRange] = useState<MetricRange>(RANGE_24H)
   const load = useCallback(

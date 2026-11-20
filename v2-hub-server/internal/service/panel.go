@@ -63,7 +63,7 @@ type PanelConfig struct {
 	RequestTimeout time.Duration
 	// Locator 把服务器公网 IP 换成国家码（Ruling-65）；nil 表示位置扫描已关闭。
 	Locator geoip.Locator
-	// SiteLocation 返回站点时区，流量周期与到期日按它取“今天”（Ruling-82）；nil 按 UTC。
+	// SiteLocation 返回站点时区，流量周期与到期日按它取“今天”（Ruling-84）；nil 按 UTC。
 	SiteLocation func(ctx context.Context) *time.Location
 }
 
@@ -125,13 +125,13 @@ type Server struct {
 	HostID *int64
 	// ClientFlow 是 VLESS 流控（Ruling-77），空串为不带。
 	ClientFlow string
-	// Resources 是最近一次探测成功的资源快照（Ruling-81）；nil 表示还没探测成功过。
+	// Resources 是最近一次探测成功的资源快照（Ruling-83）；nil 表示还没探测成功过。
 	Resources *panel.Resources
 	// PublicIPv4 / PublicIPv6 是面板自报的公网地址，没报为空串。
 	PublicIPv4    string
 	PublicIPv6    string
 	OnlineClients int
-	// Billing 与 Traffic 是账单、流量额度与本周期用量（Ruling-82）。
+	// Billing 与 Traffic 是账单、流量额度与本周期用量（Ruling-84）。
 	Billing ServerBilling
 	Traffic ServerCycleTraffic
 	// Host 是关联的托管主机的系统信息；nil 表示没有关联。
@@ -347,7 +347,7 @@ func serverFromRow(r sqlcgen.GetServerRow) Server {
 	return srv
 }
 
-// resourcesFromSnapshot 解出快照里的资源（Ruling-81）；没有快照返回 nil，解不出来记日志后同样返回 nil（下一次探测会写回）。
+// resourcesFromSnapshot 解出快照里的资源（Ruling-83）；没有快照返回 nil，解不出来记日志后同样返回 nil（下一次探测会写回）。
 func resourcesFromSnapshot(serverID int64, raw []byte) *panel.Resources {
 	if len(raw) == 0 {
 		return nil

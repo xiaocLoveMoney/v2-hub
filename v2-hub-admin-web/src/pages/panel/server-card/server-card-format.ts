@@ -1,6 +1,6 @@
 import type { LatencyPoint } from '../../../api/client'
 
-/** 服务器状态卡片的格式化与阈值（docs/05 服务器状态卡片，Ruling-81 – Ruling-84）。 */
+/** 服务器状态卡片的格式化与阈值（docs/05 服务器状态卡片，Ruling-83 – Ruling-86）。 */
 
 const BYTE_STEP = 1024
 const BYTE_UNITS = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'] as const

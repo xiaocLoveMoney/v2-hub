@@ -1,4 +1,4 @@
--- 0022：服务器状态卡片（docs/03 §5.1、§5.20，Ruling-81 – Ruling-84）。幂等，可重复执行。
+-- 0023：服务器状态卡片（docs/03 §5.1、§5.20，Ruling-83 – Ruling-86）。幂等，可重复执行。
 -- 已按 init.sql 全新建库的环境无需执行；本文件内容与 init.sql 对应段落保持一致。
 -- 公网 IP、账单与流量额度、网卡计数基线、延迟检测时间
 ALTER TABLE server ADD COLUMN IF NOT EXISTS public_ipv4 VARCHAR(45) NOT NULL DEFAULT '';
@@ -30,7 +30,7 @@ ALTER TABLE server ADD CONSTRAINT ck_server_traffic_mode CHECK (traffic_mode IN 
 -- 旧快照是面板原样字段，形状与中立模型不同；清掉，下一次探测成功即写回（至多 30 秒）
 UPDATE server SET status_snapshot = NULL WHERE status_snapshot IS NOT NULL AND NOT (status_snapshot ? 'memTotal');
 
--- 采样加字段（Ruling-83），之前的行为空
+-- 采样加字段（Ruling-85），之前的行为空
 ALTER TABLE server_metric ADD COLUMN IF NOT EXISTS mem_used BIGINT;
 ALTER TABLE server_metric ADD COLUMN IF NOT EXISTS mem_total BIGINT;
 ALTER TABLE server_metric ADD COLUMN IF NOT EXISTS disk_used BIGINT;

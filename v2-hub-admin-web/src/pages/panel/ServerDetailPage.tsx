@@ -94,7 +94,7 @@ export function ServerDetailPage() {
   const server = useRemote<Server>(loadServer)
   const inbounds = useRemote<Inbound[]>(loadInbounds)
   const canReadServer = can(PERMISSIONS.SERVER_READ)
-  // 卡片上的速率小图与三网延迟取自列表的近况接口（Ruling-83、Ruling-84）
+  // 卡片上的速率小图与三网延迟取自列表的近况接口（Ruling-85、Ruling-86）
   const trends = useRemote<ServerTrend[]>(loadTrends, canReadServer)
   const trend = trends.data?.find((t) => t.serverId === serverId)
   const [isEditingBilling, setIsEditingBilling] = useState(false)

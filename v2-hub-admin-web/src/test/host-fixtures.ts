@@ -80,7 +80,7 @@ export const DNS_ACCOUNT_OPTION = 'cf-main（Cloudflare，example.com）'
 /** 凭据下拉框里这份凭据的选项文字。 */
 export const CREDENTIAL_OPTION = 'root-key（root，私钥）'
 
-/** 服务器的状态卡片字段（Ruling-81、Ruling-82）：还没探测到资源、没填账单、本周期没有流量。 */
+/** 服务器的状态卡片字段（Ruling-83、Ruling-84）：还没探测到资源、没填账单、本周期没有流量。 */
 export const SERVER_STATUS_FIELDS: Pick<Server, 'resources' | 'publicIpv4' | 'publicIpv6' | 'onlineClients' | 'billing' | 'traffic' | 'host'> = {
   resources: null,
   publicIpv4: '',

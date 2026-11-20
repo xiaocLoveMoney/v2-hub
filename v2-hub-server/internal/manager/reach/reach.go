@@ -33,7 +33,7 @@ const (
 	pollInterval     = time.Second
 	maxResponseBytes = 1 << 20
 	pingPackets      = 3
-	// latencyPackets 是线路质量测量每个探测点发的包数（Ruling-84）；多发几个包丢包率才有区分度。
+	// latencyPackets 是线路质量测量每个探测点发的包数（Ruling-86）；多发几个包丢包率才有区分度。
 	latencyPackets = 8
 	percentBase    = 100
 	maxPort        = 65535
@@ -311,7 +311,7 @@ func (c *Client) measure(ctx context.Context, body measurementRequest) (measurem
 	}
 }
 
-// LatencyRequest 是一次线路质量测量（Ruling-84）：从大陆按 AS 号各取一个探测点去 ping Address。
+// LatencyRequest 是一次线路质量测量（Ruling-86）：从大陆按 AS 号各取一个探测点去 ping Address。
 type LatencyRequest struct {
 	Address string
 	ASNs    []int

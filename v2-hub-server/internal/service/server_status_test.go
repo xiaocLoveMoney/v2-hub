@@ -11,7 +11,7 @@ import (
 	"v2-hub-server/internal/manager/reach"
 )
 
-// 服务器状态卡片（Ruling-81 – Ruling-84）：资源快照、按天流量与周期、账单、趋势、三网延迟。
+// 服务器状态卡片（Ruling-83 – Ruling-86）：资源快照、按天流量与周期、账单、趋势、三网延迟。
 
 func calendarDay(y int, m time.Month, d int) time.Time {
 	return time.Date(y, m, d, 0, 0, 0, 0, time.UTC)

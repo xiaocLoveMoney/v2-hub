@@ -896,7 +896,7 @@ body {
 }
 
 
-/* 服务器状态卡片（docs/05 服务器状态卡片，Ruling-81 – Ruling-84）：只用上面的设计变量 */
+/* 服务器状态卡片（docs/05 服务器状态卡片，Ruling-83 – Ruling-86）：只用上面的设计变量 */
 .server-view-switch {
   display: flex;
   justify-content: flex-end;

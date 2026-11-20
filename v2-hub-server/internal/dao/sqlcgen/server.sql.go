@@ -315,7 +315,7 @@ type ListLatencyDueServersRow struct {
 	PublicIpv4 string
 }
 
-// 三网延迟（docs/03 §5.20，Ruling-84）-----------------------------------------
+// 三网延迟（docs/03 §5.20，Ruling-86）-----------------------------------------
 // 到期该测延迟的服务器：启用、在线、有公网 IPv4；最久没测的在前
 func (q *Queries) ListLatencyDueServers(ctx context.Context, arg ListLatencyDueServersParams) ([]ListLatencyDueServersRow, error) {
 	rows, err := q.db.Query(ctx, listLatencyDueServers, arg.DueBefore, arg.RowLimit)
@@ -401,7 +401,7 @@ type ListRecentServerNetRow struct {
 	NetDownRate pgtype.Int8
 }
 
-// 各服务器近一段时间的上下行速率（列表卡片的小图，Ruling-83）
+// 各服务器近一段时间的上下行速率（列表卡片的小图，Ruling-85）
 func (q *Queries) ListRecentServerNet(ctx context.Context, bucketAt pgtype.Timestamptz) ([]ListRecentServerNetRow, error) {
 	rows, err := q.db.Query(ctx, listRecentServerNet, bucketAt)
 	if err != nil {
@@ -693,7 +693,7 @@ type ListServerResourceMetricsRow struct {
 	UdpCount      pgtype.Int4
 }
 
-// 管理端资源趋势的 5 分钟原值（Ruling-83）；Ruling-83 之前的行除 cpu 与 online_clients 外为空
+// 管理端资源趋势的 5 分钟原值（Ruling-85）；Ruling-85 之前的行除 cpu 与 online_clients 外为空
 func (q *Queries) ListServerResourceMetrics(ctx context.Context, arg ListServerResourceMetricsParams) ([]ListServerResourceMetricsRow, error) {
 	rows, err := q.db.Query(ctx, listServerResourceMetrics, arg.ServerID, arg.BucketAt)
 	if err != nil {
@@ -1001,7 +1001,7 @@ type RecordServerMetricParams struct {
 	ServerID    int64
 }
 
-// 健康探测成功顺带记一条采样：对齐 5 分钟，同一时段覆盖为最新值，在线数取服务器缓存（Ruling-65、Ruling-83）
+// 健康探测成功顺带记一条采样：对齐 5 分钟，同一时段覆盖为最新值，在线数取服务器缓存（Ruling-65、Ruling-85）
 func (q *Queries) RecordServerMetric(ctx context.Context, arg RecordServerMetricParams) error {
 	_, err := q.db.Exec(ctx, recordServerMetric,
 		arg.SampledAt,
@@ -1045,7 +1045,7 @@ type SetServerBillingParams struct {
 	ID                 int64
 }
 
-// 账单与流量额度（docs/03 §5.1，Ruling-82）-------------------------------------
+// 账单与流量额度（docs/03 §5.1，Ruling-84）-------------------------------------
 func (q *Queries) SetServerBilling(ctx context.Context, arg SetServerBillingParams) (int64, error) {
 	result, err := q.db.Exec(ctx, setServerBilling,
 		arg.PriceCents,

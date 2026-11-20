@@ -6,7 +6,7 @@ import { FormModal } from '../../../components/FormModal'
 import { useSubmit } from '../../../hooks/use-submit'
 import { BILLING_CYCLE_LABELS, TRAFFIC_MODE_LABELS, bytesToGiB, centsToUnits, formatBytes, gibToBytes, unitsToCents } from './server-card-format'
 
-// 取值范围与 hub-api.yaml 的 ServerBilling 一致（Ruling-82）
+// 取值范围与 hub-api.yaml 的 ServerBilling 一致（Ruling-84）
 const MAX_PRICE_UNITS = 999999.99
 const PRICE_PRECISION = 2
 const GIB_PRECISION = 2
@@ -40,7 +40,7 @@ interface ServerBillingModalProps {
   onSaved: () => void
 }
 
-/** 服务器的账单与流量额度（docs/03 §5.1，Ruling-82）。 */
+/** 服务器的账单与流量额度（docs/03 §5.1，Ruling-84）。 */
 export function ServerBillingModal({ server, onClose, onSaved }: ServerBillingModalProps) {
   return (
     <FormModal title={server === null ? '账单与流量额度' : `账单与流量额度：${server.name}`} isOpen={server !== null} onClose={onClose} width={MODAL_WIDTH}>

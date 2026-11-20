@@ -28,7 +28,7 @@ const (
 	metricWindow7d      = 7 * 24 * time.Hour
 	metricHourlyCap     = 7 * 24
 	metricFiveMinuteCap = 24 * 12
-	// loadScale：负载乘 100 存整数（Ruling-83）。
+	// loadScale：负载乘 100 存整数（Ruling-85）。
 	loadScale = 100
 
 	msgLocateDisabled    = "位置扫描已关闭"
@@ -138,7 +138,7 @@ func (s *PanelService) BackfillServerLocations(ctx context.Context) (int, error)
 	return filled, nil
 }
 
-// recordMetric 在一次成功的健康探测后记一条采样（Ruling-65、Ruling-83）；面板没给资源快照时只记在线数。
+// recordMetric 在一次成功的健康探测后记一条采样（Ruling-65、Ruling-85）；面板没给资源快照时只记在线数。
 func (s *PanelService) recordMetric(ctx context.Context, serverID int64, res *panel.Resources) error {
 	params := sqlcgen.RecordServerMetricParams{ServerID: serverID, SampledAt: pgtype.Timestamptz{Time: s.now(), Valid: true}}
 	if res != nil {

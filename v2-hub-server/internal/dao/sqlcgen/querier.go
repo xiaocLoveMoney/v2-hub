@@ -409,7 +409,7 @@ type Querier interface {
 	ListInboundsByServer(ctx context.Context, serverID int64) ([]ListInboundsByServerRow, error)
 	ListInviteCodes(ctx context.Context, arg ListInviteCodesParams) ([]ListInviteCodesRow, error)
 	ListInvitees(ctx context.Context, arg ListInviteesParams) ([]ListInviteesRow, error)
-	// 三网延迟（docs/03 §5.20，Ruling-84）-----------------------------------------
+	// 三网延迟（docs/03 §5.20，Ruling-86）-----------------------------------------
 	// 到期该测延迟的服务器：启用、在线、有公网 IPv4；最久没测的在前
 	ListLatencyDueServers(ctx context.Context, arg ListLatencyDueServersParams) ([]ListLatencyDueServersRow, error)
 	// 每台主机最近的一条任务，供主机列表显示
@@ -444,7 +444,7 @@ type Querier interface {
 	ListRebatesByInviter(ctx context.Context, arg ListRebatesByInviterParams) ([]ListRebatesByInviterRow, error)
 	// 各服务器每家运营商最近的若干次检测（列表卡片用），按时间升序
 	ListRecentServerLatency(ctx context.Context, arg ListRecentServerLatencyParams) ([]ListRecentServerLatencyRow, error)
-	// 各服务器近一段时间的上下行速率（列表卡片的小图，Ruling-83）
+	// 各服务器近一段时间的上下行速率（列表卡片的小图，Ruling-85）
 	ListRecentServerNet(ctx context.Context, bucketAt pgtype.Timestamptz) ([]ListRecentServerNetRow, error)
 	// 发过告警、现在已恢复在线或已被停用的服务器
 	ListRecoveredServers(ctx context.Context) ([]ListRecoveredServersRow, error)
@@ -471,7 +471,7 @@ type Querier interface {
 	// 各服务器的面板类型，用来判断能否改内核配置
 	ListServerProviderTypes(ctx context.Context) ([]ListServerProviderTypesRow, error)
 	ListServerProvisions(ctx context.Context, serverID int64) ([]ListServerProvisionsRow, error)
-	// 管理端资源趋势的 5 分钟原值（Ruling-83）；Ruling-83 之前的行除 cpu 与 online_clients 外为空
+	// 管理端资源趋势的 5 分钟原值（Ruling-85）；Ruling-85 之前的行除 cpu 与 online_clients 外为空
 	ListServerResourceMetrics(ctx context.Context, arg ListServerResourceMetricsParams) ([]ListServerResourceMetricsRow, error)
 	// 管理端资源趋势按小时平均；cpu_samples / resource_samples 为 0 表示该小时对应的列全为空（此时数值无意义）
 	ListServerResourceMetricsHourly(ctx context.Context, arg ListServerResourceMetricsHourlyParams) ([]ListServerResourceMetricsHourlyRow, error)
@@ -558,7 +558,7 @@ type Querier interface {
 	PurgeServerMetrics(ctx context.Context, bucketAt pgtype.Timestamptz) (int64, error)
 	PurgeServerNicTraffic(ctx context.Context, day pgtype.Date) (int64, error)
 	PurgeTelegramOutbox(ctx context.Context, createdAt pgtype.Timestamptz) (int64, error)
-	// 健康探测成功顺带记一条采样：对齐 5 分钟，同一时段覆盖为最新值，在线数取服务器缓存（Ruling-65、Ruling-83）
+	// 健康探测成功顺带记一条采样：对齐 5 分钟，同一时段覆盖为最新值，在线数取服务器缓存（Ruling-65、Ruling-85）
 	RecordServerMetric(ctx context.Context, arg RecordServerMetricParams) error
 	RemoveChainRouteEntriesExcept(ctx context.Context, arg RemoveChainRouteEntriesExceptParams) error
 	RenameChainExit(ctx context.Context, arg RenameChainExitParams) (int64, error)
@@ -597,7 +597,7 @@ type Querier interface {
 	SetProvisionCounters(ctx context.Context, arg SetProvisionCountersParams) error
 	SetProvisionLinks(ctx context.Context, arg SetProvisionLinksParams) error
 	SetSSHCredentialSecret(ctx context.Context, arg SetSSHCredentialSecretParams) error
-	// 账单与流量额度（docs/03 §5.1，Ruling-82）-------------------------------------
+	// 账单与流量额度（docs/03 §5.1，Ruling-84）-------------------------------------
 	SetServerBilling(ctx context.Context, arg SetServerBillingParams) (int64, error)
 	// 服务器的 VLESS 流控（Ruling-77）：下发对账据此给 client 带上或去掉 flow
 	SetServerClientFlow(ctx context.Context, arg SetServerClientFlowParams) (int64, error)

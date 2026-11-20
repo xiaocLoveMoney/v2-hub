@@ -196,7 +196,7 @@ function TrafficQuota({ server, today }: { server: Server; today: string }) {
 }
 
 /**
- * 服务器状态卡片（docs/05 服务器状态卡片，Ruling-81 – Ruling-84）：资源四宫格、实时速率、流量额度、三网延迟、在线与到期。
+ * 服务器状态卡片（docs/05 服务器状态卡片，Ruling-83 – Ruling-86）：资源四宫格、实时速率、流量额度、三网延迟、在线与到期。
  * 服务器不在线时整卡置灰，读数是掉线前最后一份。
  */
 export function ServerStatusCard({ server, trend, hasLatency, canEditBilling, onEditBilling, isDetail = false, badges, actions }: ServerStatusCardProps) {

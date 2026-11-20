@@ -73,7 +73,7 @@ const (
 	defaultReachIntervalMinutes = 30
 	minReachIntervalMinutes     = 10
 	maxReachIntervalMinutes     = 1440
-	// 三网延迟检测的间隔（Ruling-84）。
+	// 三网延迟检测的间隔（Ruling-86）。
 	defaultLatencyIntervalMinutes = 30
 	minLatencyIntervalMinutes     = 15
 	maxLatencyIntervalMinutes     = 1440
@@ -160,7 +160,7 @@ type RoutingSettings struct {
 	BlockRule bool
 }
 
-// LatencySettings 是三网延迟检测（docs/03 §5.20，Ruling-84）：开关（开启后服务器的公网 IP 会发给第三方探测服务）
+// LatencySettings 是三网延迟检测（docs/03 §5.20，Ruling-86）：开关（开启后服务器的公网 IP 会发给第三方探测服务）
 // 与同一台服务器两次检测的最小间隔。
 type LatencySettings struct {
 	Enabled         bool

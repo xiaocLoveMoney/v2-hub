@@ -66,7 +66,7 @@ export function mockServer(handlers: Record<string, () => Response>): Recorded[]
   return calls
 }
 
-/** 把服务器列表切到表格视图（默认是卡片，Ruling-81）；切换会写本机存储，各测试文件的 afterEach 负责清掉。 */
+/** 把服务器列表切到表格视图（默认是卡片，Ruling-83）；切换会写本机存储，各测试文件的 afterEach 负责清掉。 */
 export async function showServerTable(): Promise<void> {
   fireEvent.click(await screen.findByText('表格'))
 }

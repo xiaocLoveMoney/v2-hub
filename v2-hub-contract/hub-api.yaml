@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: v2-hub API
-  version: 0.15.0
+  version: 0.16.0
   description: |
     v2-hub 对外接口契约（hub-server 提供，v2-hub-admin-web / v2-hub-user-web 消费）。
     - 管理端接口前缀 /api/admin，客户端接口前缀 /api/user，订阅端点前缀 /sub。
@@ -30,7 +30,7 @@ info:
     0.12.0：SSH 托管与面板部署（docs/03 §5.22，Ruling-68 – Ruling-71）——新增 SSH 凭据、托管主机、主机任务与动作接口（权限码 host:read / host:write），
       给已接入的服务器绑定 SSH（PUT /api/admin/servers/{id}/host），服务器带 hostId。
     0.14.1：节点显示名的前缀 / 后缀（Ruling-80）——一键部署参数加 namePrefix / nameSuffix，新增 POST /api/admin/nodes/affix。
-    0.15.0：服务器状态卡片（Ruling-81 – Ruling-84）——服务器的 statusSnapshot 换成类型化的 resources，另带 publicIpv4 / publicIpv6、onlineClients、
+    0.16.0：服务器状态卡片（Ruling-83 – Ruling-86）——服务器的 statusSnapshot 换成类型化的 resources，另带 publicIpv4 / publicIpv6、onlineClients、
       billing、traffic、host；连接测试结果的 status 同样换成 resources；新增 PUT /api/admin/servers/{id}/billing、GET /api/admin/servers/{id}/metrics、
       GET /api/admin/servers/trends；系统设置增加 latency 分组。
 servers:
@@ -641,7 +641,7 @@ paths:
     get:
       tags: [admin-panel]
       operationId: listServerTrends
-      summary: 各服务器最近的速率与三网延迟（server:read；Ruling-83、Ruling-84，0.15.0），给服务器列表的卡片用
+      summary: 各服务器最近的速率与三网延迟（server:read；Ruling-85、Ruling-86，0.16.0），给服务器列表的卡片用
       description: 每台服务器最近 30 个 5 分钟时段的上下行速率，与三家运营商各自最近 30 次延迟检测；没有数据的服务器不出现在结果里。
       responses:
         "200":
@@ -1417,7 +1417,7 @@ paths:
     put:
       tags: [admin-panel]
       operationId: setServerBilling
-      summary: 保存服务器的账单与流量额度（server:write；Ruling-82，0.15.0）
+      summary: 保存服务器的账单与流量额度（server:write；Ruling-84，0.16.0）
       parameters:
         - $ref: "#/components/parameters/CsrfHeader"
       requestBody:
@@ -1441,7 +1441,7 @@ paths:
     get:
       tags: [admin-panel]
       operationId: getServerMetrics
-      summary: 一台服务器的资源趋势与三网延迟（server:read；Ruling-83、Ruling-84，0.15.0）
+      summary: 一台服务器的资源趋势与三网延迟（server:read；Ruling-85、Ruling-86，0.16.0）
       description: 近 24 小时为原值（资源 5 分钟一点，延迟每次检测一点），近 7 天按小时平均；服务器不在线的时段没有点。
       parameters:
         - name: range
@@ -5448,7 +5448,7 @@ components:
           oneOf:
             - $ref: "#/components/schemas/ServerResources"
             - type: "null"
-          description: 资源快照（0.15.0，Ruling-81）
+          description: 资源快照（0.16.0，Ruling-83）
     Server:
       type: object
       required: [id, name, providerType, baseUrl, tlsMode, region, remark, isDisabled, status, lastError, panelVersion, inboundCount, createdAt, reach, hostId, clientFlow,
@@ -5472,17 +5472,17 @@ components:
           oneOf:
             - $ref: "#/components/schemas/ServerResources"
             - type: "null"
-          description: 最近一次探测成功的资源快照（0.15.0，Ruling-81）；还没探测成功过为 null。服务器不在线时是掉线前的最后一份
-        publicIpv4: { type: string, description: 面板自报的公网 IPv4，没报为空串（0.15.0） }
-        publicIpv6: { type: string, description: 面板自报的公网 IPv6，没报为空串（0.15.0） }
-        onlineClients: { type: integer, description: 面板在线 client 数（0.15.0） }
+          description: 最近一次探测成功的资源快照（0.16.0，Ruling-83）；还没探测成功过为 null。服务器不在线时是掉线前的最后一份
+        publicIpv4: { type: string, description: 面板自报的公网 IPv4，没报为空串（0.16.0） }
+        publicIpv6: { type: string, description: 面板自报的公网 IPv6，没报为空串（0.16.0） }
+        onlineClients: { type: integer, description: 面板在线 client 数（0.16.0） }
         billing: { $ref: "#/components/schemas/ServerBilling" }
         traffic: { $ref: "#/components/schemas/ServerTraffic" }
         host:
           oneOf:
             - $ref: "#/components/schemas/ServerHostBrief"
             - type: "null"
-          description: 关联的托管主机的系统信息（0.15.0）；没有关联为 null
+          description: 关联的托管主机的系统信息（0.16.0）；没有关联为 null
         inboundCount: { type: integer }
         createdAt: { type: string, format: date-time }
         hostId: { type: [integer, "null"], format: int64, description: 关联的托管主机（0.12.0，docs/03 §5.22）；没有为 null }
@@ -5498,7 +5498,7 @@ components:
             partial: { type: integer }
     ServerResources:
       type: object
-      description: 服务器资源快照，平台的中立模型（0.15.0，Ruling-81）；面板没报的数值为 0
+      description: 服务器资源快照，平台的中立模型（0.16.0，Ruling-83）；面板没报的数值为 0
       required: [cpu, cpuCores, memUsed, memTotal, swapUsed, swapTotal, diskUsed, diskTotal, load1, load5, load15, uptimeSeconds,
                  tcpCount, udpCount, netUpRate, netDownRate, netSent, netRecv, coreState, coreVersion]
       properties:
@@ -5531,7 +5531,7 @@ components:
       enum: [both, out, max]
     ServerBilling:
       type: object
-      description: 服务器的账单与流量额度（0.15.0，docs/03 §5.1，Ruling-82）
+      description: 服务器的账单与流量额度（0.16.0，docs/03 §5.1，Ruling-84）
       required: [priceCents, priceCurrency, billingCycle, expiresOn, trafficQuotaBytes, trafficResetDay, trafficMode]
       properties:
         priceCents: { type: [integer, "null"], minimum: 0, maximum: 99999999, description: 价格，整数分；没填为 null }
@@ -5553,7 +5553,7 @@ components:
               description: 校准：把本周期已用改成这个值；不带或 null 为不校准
     ServerTraffic:
       type: object
-      description: 当前流量周期的用量（0.15.0，Ruling-82）；只有接入之后的数据
+      description: 当前流量周期的用量（0.16.0，Ruling-84）；只有接入之后的数据
       required: [cycleStart, nextResetOn, sentBytes, recvBytes, usedBytes]
       properties:
         cycleStart: { type: string, format: date, description: 本周期起始日 }
@@ -5581,7 +5581,7 @@ components:
         lossPercent: { type: integer, minimum: 0, maximum: 100 }
     LatencySeries:
       type: object
-      description: 三家运营商各自的延迟序列，按时间升序（Ruling-84）
+      description: 三家运营商各自的延迟序列，按时间升序（Ruling-86）
       required: [telecom, unicom, mobile]
       properties:
         telecom: { type: array, items: { $ref: "#/components/schemas/LatencyPoint" } }
@@ -5607,7 +5607,7 @@ components:
           description: 每家最多 30 个点；三网延迟检测没开为 null
     ServerMetricPoint:
       type: object
-      description: 一个时段的资源采样；Ruling-83 之前的采样只有 cpu 与 onlineClients，其余为 null
+      description: 一个时段的资源采样；Ruling-85 之前的采样只有 cpu 与 onlineClients，其余为 null
       required: [at, cpu, onlineClients, memUsed, memTotal, diskUsed, diskTotal, load1, netUpRate, netDownRate, tcpCount, udpCount]
       properties:
         at: { type: string, format: date-time, description: 时段起点（5 分钟或 1 小时对齐） }
@@ -6433,7 +6433,7 @@ components:
             hasToken: { type: boolean, readOnly: true, description: 环境变量 HUB_GLOBALPING_TOKEN 是否已配置（决定每小时额度），不可经接口修改 }
         latency:
           type: object
-          description: 三网延迟检测（0.15.0，docs/03 §5.20，Ruling-84）
+          description: 三网延迟检测（0.16.0，docs/03 §5.20，Ruling-86）
           required: [enabled, intervalMinutes]
           properties:
             enabled: { type: boolean, description: 开启后服务器的公网 IP 会发给第三方探测服务，默认关 }

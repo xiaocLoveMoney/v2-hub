@@ -167,7 +167,7 @@ export function OpsSettingsCards({ isTelegramEnabled, hasReachToken }: OpsSettin
       </Card>
 
       <Card title="三网延迟检测" className="settings-card">
-        {/* docs/03 §5.20 三网延迟检测，Ruling-84 */}
+        {/* docs/03 §5.20 三网延迟检测，Ruling-86 */}
         <Alert
           type="warning"
           showIcon

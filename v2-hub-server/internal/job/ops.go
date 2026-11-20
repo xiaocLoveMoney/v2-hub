@@ -87,7 +87,7 @@ func RunReach(ctx context.Context, c ReachChecker, interval time.Duration) {
 	}
 }
 
-// LatencyChecker 能跑一轮三网延迟检测（由 service.LatencyService 实现，Ruling-84）。
+// LatencyChecker 能跑一轮三网延迟检测（由 service.LatencyService 实现，Ruling-86）。
 type LatencyChecker interface {
 	RunRound(ctx context.Context) (int, error)
 }

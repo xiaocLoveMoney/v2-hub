@@ -32,7 +32,7 @@ type ConnConfig struct {
 	Timeout       time.Duration
 }
 
-// Resources 是服务器资源快照的中立模型（Ruling-81）：各面板实现把自己的状态映射成它，业务层与前端不认面板字段。
+// Resources 是服务器资源快照的中立模型（Ruling-83）：各面板实现把自己的状态映射成它，业务层与前端不认面板字段。
 // 面板没报的数值为 0；CPU 为 nil 表示面板没报。字节数与速率都是 int64，速率的单位是字节每秒。
 // JSON 形状即 server.status_snapshot 的存储形状，也是接口输出的形状。
 type Resources struct {
@@ -64,11 +64,11 @@ type Resources struct {
 type PanelInfo struct {
 	Version string
 	GUID    string
-	// Resources 是资源快照（Ruling-81）；面板实现总是填上，测试替身可以为 nil。
+	// Resources 是资源快照（Ruling-83）；面板实现总是填上，测试替身可以为 nil。
 	Resources *Resources
 	// PublicIP 是面板自报的服务器公网 IP（优先 IPv4）；面板没报为空。用于扫描位置（Ruling-65）。
 	PublicIP string
-	// PublicIPv4 / PublicIPv6 是面板自报的两个公网地址，没报为空串（Ruling-81）。
+	// PublicIPv4 / PublicIPv6 是面板自报的两个公网地址，没报为空串（Ruling-83）。
 	PublicIPv4 string
 	PublicIPv6 string
 	// CoreState 是内核（如 Xray）的运行状态：CoreRunning 为在运行，其它值为没在运行，空为面板没报；CoreError 是面板给的错误说明。

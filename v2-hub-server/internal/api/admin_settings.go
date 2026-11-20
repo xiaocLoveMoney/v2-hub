@@ -145,7 +145,7 @@ type routingSettingsVO struct {
 	BlockRule bool `json:"blockRule"`
 }
 
-// latencySettingsVO 是三网延迟检测设置（Ruling-84）。
+// latencySettingsVO 是三网延迟检测设置（Ruling-86）。
 type latencySettingsVO struct {
 	Enabled         bool `json:"enabled"`
 	IntervalMinutes int  `json:"intervalMinutes"`
