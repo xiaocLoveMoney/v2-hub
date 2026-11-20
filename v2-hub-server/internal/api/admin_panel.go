@@ -23,8 +23,8 @@ type PanelManager interface {
 	DeleteServer(ctx context.Context, actor *service.AdminPrincipal, id int64, ip *netip.Addr) error
 	SyncServer(ctx context.Context, actor *service.AdminPrincipal, id int64, ip *netip.Addr) (*service.SyncResult, error)
 	SetServerBilling(ctx context.Context, actor *service.AdminPrincipal, id int64, in service.ServerBillingInput, ip *netip.Addr) (*service.Server, error)
-	GetServerMetrics(ctx context.Context, id int64, rng string, withLatency bool) (*service.ServerMetrics, error)
-	ListServerTrends(ctx context.Context, withLatency bool) ([]service.ServerTrend, error)
+	GetServerMetrics(ctx context.Context, id int64, rng string) (*service.ServerMetrics, error)
+	ListServerTrends(ctx context.Context) ([]service.ServerTrend, error)
 
 	ListServerInbounds(ctx context.Context, serverID int64) ([]service.Inbound, error)
 	GetInbound(ctx context.Context, id int64) (*service.Inbound, error)

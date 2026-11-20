@@ -195,6 +195,8 @@ func TestServerResourceMetricsAndTrends(t *testing.T) {
 	f := newPanelFixture(t)
 	ctx := context.Background()
 	f.clock.t = time.Date(2026, 11, 20, 10, 1, 0, 0, time.UTC)
+	withLatency := false
+	f.panels.cfg.LatencyEnabled = func(context.Context) (bool, error) { return withLatency, nil }
 	srv, err := f.panels.CreateServer(ctx, f.actor, serverInput("metrics"), nil)
 	if err != nil {
 		t.Fatalf("CreateServer: %v", err)
@@ -207,7 +209,7 @@ func TestServerResourceMetricsAndTrends(t *testing.T) {
 			t.Fatalf("ProbeServer: %v", err)
 		}
 	}
-	m, err := f.panels.GetServerMetrics(ctx, srv.ID, MetricRange24h, false)
+	m, err := f.panels.GetServerMetrics(ctx, srv.ID, MetricRange24h)
 	if err != nil || m.Latency != nil {
 		t.Fatalf("24h = %+v, %v", m, err)
 	}
@@ -215,17 +217,19 @@ func TestServerResourceMetricsAndTrends(t *testing.T) {
 	if last.MemTotal == nil || *last.MemTotal != 400 || last.Load1 == nil || *last.Load1 != 1.25 || *last.NetUpRate != 300 {
 		t.Fatalf("last point = %+v", last)
 	}
-	hourly, err := f.panels.GetServerMetrics(ctx, srv.ID, MetricRange7d, true)
+	withLatency = true
+	hourly, err := f.panels.GetServerMetrics(ctx, srv.ID, MetricRange7d)
 	if err != nil || len(hourly.Points) == 0 || hourly.Latency == nil || hourly.Points[0].MemTotal == nil {
 		t.Fatalf("7d = %+v, %v", hourly, err)
 	}
-	if _, err := f.panels.GetServerMetrics(ctx, srv.ID, "1h", false); !errors.Is(err, ErrInvalidArgument) {
+	if _, err := f.panels.GetServerMetrics(ctx, srv.ID, "1h"); !errors.Is(err, ErrInvalidArgument) {
 		t.Fatalf("bad range err = %v", err)
 	}
-	if _, err := f.panels.GetServerMetrics(ctx, srv.ID+1000, MetricRange24h, false); !errors.Is(err, ErrNotFound) {
+	if _, err := f.panels.GetServerMetrics(ctx, srv.ID+1000, MetricRange24h); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("missing server err = %v", err)
 	}
-	trends, err := f.panels.ListServerTrends(ctx, false)
+	withLatency = false
+	trends, err := f.panels.ListServerTrends(ctx)
 	if err != nil || len(trends) != 1 || trends[0].ServerID != srv.ID || trends[0].Latency != nil {
 		t.Fatalf("trends = %+v, %v", trends, err)
 	}
@@ -269,6 +273,7 @@ func TestLatencyRound(t *testing.T) {
 		{ASN: 45090, City: "Shenzhen", AvgMs: &rtt},
 	}}
 	svc := NewLatencyService(f.pool, f.settings, prober, f.reach, f.clock.now)
+	f.panels.cfg.LatencyEnabled = f.settings.LatencyEnabled
 
 	// 没开：不测
 	if n, err := svc.RunRound(ctx); err != nil || n != 0 || prober.callCount() != 0 {
@@ -292,7 +297,7 @@ func TestLatencyRound(t *testing.T) {
 	if n, _ := svc.RunRound(ctx); n != 0 {
 		t.Fatalf("within interval = %d", n)
 	}
-	m, err := f.panels.GetServerMetrics(ctx, f.server.ID, MetricRange24h, true)
+	m, err := f.panels.GetServerMetrics(ctx, f.server.ID, MetricRange24h)
 	if err != nil {
 		t.Fatalf("GetServerMetrics: %v", err)
 	}
@@ -303,7 +308,7 @@ func TestLatencyRound(t *testing.T) {
 	if len(l.Unicom) != 1 || l.Unicom[0].AvgMs != nil || l.Unicom[0].LossPercent != 100 || len(l.Mobile) != 0 {
 		t.Fatalf("unicom / mobile = %+v / %+v", l.Unicom, l.Mobile)
 	}
-	trends, err := f.panels.ListServerTrends(ctx, true)
+	trends, err := f.panels.ListServerTrends(ctx)
 	if err != nil || len(trends) != 1 || trends[0].Latency == nil || len(trends[0].Latency.Telecom) != 1 {
 		t.Fatalf("trends = %+v, %v", trends, err)
 	}
@@ -331,7 +336,7 @@ func TestLatencyRound(t *testing.T) {
 	if _, err := f.panels.PurgeServerMetrics(ctx); err != nil {
 		t.Fatalf("purge: %v", err)
 	}
-	if m, _ := f.panels.GetServerMetrics(ctx, f.server.ID, MetricRange7d, true); len(m.Latency.Telecom) != 0 {
+	if m, _ := f.panels.GetServerMetrics(ctx, f.server.ID, MetricRange7d); len(m.Latency.Telecom) != 0 {
 		t.Fatalf("latency should be purged: %+v", m.Latency.Telecom)
 	}
 }

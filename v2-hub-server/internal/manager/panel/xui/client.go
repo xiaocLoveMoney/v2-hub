@@ -216,16 +216,11 @@ func (c *Client) Probe(ctx context.Context) (panel.PanelInfo, error) {
 	if err := c.call(ctx, http.MethodGet, "/server/status", nil, &status); err != nil {
 		return panel.PanelInfo{}, err
 	}
-	info := panel.PanelInfo{
+	return panel.PanelInfo{
 		Version: status.PanelVersion, GUID: status.PanelGUID, Resources: resourcesOf(status),
 		PublicIPv4: reportedIP(status.PublicIP.IPv4), PublicIPv6: reportedIP(status.PublicIP.IPv6),
 		CoreState: status.Xray.State, CoreError: status.Xray.ErrorMsg,
-	}
-	info.PublicIP = info.PublicIPv4
-	if info.PublicIP == "" {
-		info.PublicIP = info.PublicIPv6
-	}
-	return info, nil
+	}, nil
 }
 
 // resourcesOf 把 3x-ui 的状态映射成中立模型（Ruling-83）；loads 不足三项时缺的按 0。

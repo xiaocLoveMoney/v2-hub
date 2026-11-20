@@ -32,9 +32,8 @@ const (
 	// ActionServerBilling 是保存账单与流量额度的审计动作。
 	ActionServerBilling = "server.billing.update"
 
-	maxServerPriceCents = 99999999
-	minTrafficResetDay  = 1
-	maxTrafficResetDay  = 31
+	minTrafficResetDay = 1
+	maxTrafficResetDay = 31
 	// trafficCycleLookbackDays 是一个流量周期最长的天数：列表按它取各台的按天流量，再按各自的周期求和。
 	trafficCycleLookbackDays = 31
 	// nicTrafficRetentionDays 是按天流量的保留天数。
@@ -99,7 +98,7 @@ func isValidTrafficMode(mode string) bool {
 
 func validateBilling(in ServerBillingInput) error {
 	switch {
-	case in.PriceCents != nil && (*in.PriceCents < 0 || *in.PriceCents > maxServerPriceCents):
+	case in.PriceCents != nil && (*in.PriceCents < 0 || int64(*in.PriceCents) > maxMoney):
 		return newError(CodeInvalidArgument, msgBadPrice)
 	case !currencyPattern.MatchString(in.PriceCurrency):
 		return newError(CodeInvalidArgument, msgBadCurrency)
@@ -168,22 +167,15 @@ func (s *PanelService) today(ctx context.Context) time.Time {
 	return civilDate(s.now(), loc)
 }
 
-// resetDateIn 返回某年某月的重置日；当月没有这一天取月末。
-func resetDateIn(year int, month time.Month, resetDay int) time.Time {
-	lastDay := time.Date(year, month+1, 0, 0, 0, 0, 0, time.UTC).Day()
-	return time.Date(year, month, min(resetDay, lastDay), 0, 0, 0, 0, time.UTC)
-}
-
 // trafficCycle 返回 today 所在流量周期的起始日与下一次重置的日期：
 // 周期从最近一个不晚于今天的重置日起，到下一个重置日的前一天。
 func trafficCycle(today time.Time, resetDay int) (start, next time.Time) {
 	year, month, _ := today.Date()
-	start = resetDateIn(year, month, resetDay)
+	start = clampedDate(year, month, resetDay, time.UTC)
 	if today.Before(start) {
-		next = start
-		return resetDateIn(year, month-1, resetDay), next
+		return clampedDate(year, month-1, resetDay, time.UTC), start
 	}
-	return start, resetDateIn(year, month+1, resetDay)
+	return start, clampedDate(year, month+1, resetDay, time.UTC)
 }
 
 // usedByMode 按计量方式把收发折算成已用。
@@ -208,20 +200,13 @@ func trafficOf(srv *Server, today time.Time, sent, recv int64) ServerCycleTraffi
 	return ServerCycleTraffic{CycleStart: start, NextResetOn: next, SentBytes: sent, RecvBytes: recv, UsedBytes: max(used, 0)}
 }
 
-// attachTraffic 给一批服务器填上本周期的流量用量：一次取出最长周期范围内的按天流量，再按各台自己的周期求和。
+// attachTraffic 给列表里的服务器填上本周期的流量用量：一次取出最长周期范围内的按天流量，再按各台自己的周期求和。
 func (s *PanelService) attachTraffic(ctx context.Context, servers []Server) error {
 	if len(servers) == 0 {
 		return nil
 	}
 	today := s.today(ctx)
-	since := dateOf(today.AddDate(0, 0, -trafficCycleLookbackDays))
-	var rows []sqlcgen.ServerNicTrafficDaily
-	var err error
-	if len(servers) == 1 {
-		rows, err = s.q.ListServerNicTrafficOf(ctx, sqlcgen.ListServerNicTrafficOfParams{ServerID: servers[0].ID, Day: since})
-	} else {
-		rows, err = s.q.ListServerNicTraffic(ctx, since)
-	}
+	rows, err := s.q.ListServerNicTraffic(ctx, dateOf(today.AddDate(0, 0, -trafficCycleLookbackDays)))
 	if err != nil {
 		return fmt.Errorf("list server nic traffic: %w", err)
 	}
@@ -296,7 +281,7 @@ func (s *PanelService) SetServerBilling(ctx context.Context, actor *AdminPrincip
 	if err := validateBilling(in); err != nil {
 		return nil, err
 	}
-	old, err := s.GetServer(ctx, id)
+	old, err := s.loadServer(ctx, id)
 	if err != nil {
 		return nil, err
 	}
@@ -314,10 +299,11 @@ func (s *PanelService) SetServerBilling(ctx context.Context, actor *AdminPrincip
 	isSameRule := old.Billing.TrafficResetDay == in.TrafficResetDay && old.Billing.TrafficMode == in.TrafficMode
 	switch {
 	case in.TrafficUsedBytes != nil:
-		measured, err := s.measuredTraffic(ctx, id, start, in.TrafficMode)
+		sent, recv, err := s.nicTrafficSince(ctx, id, start)
 		if err != nil {
 			return nil, err
 		}
+		measured := usedByMode(in.TrafficMode, sent, recv)
 		params.TrafficAdjustBytes, params.TrafficAdjustCycle = *in.TrafficUsedBytes-measured, dateOf(start)
 	case isSameRule:
 		params.TrafficAdjustBytes, params.TrafficAdjustCycle = old.trafficAdjust, dateOrNull(old.trafficAdjustCycle)
@@ -343,17 +329,16 @@ func (s *PanelService) SetServerBilling(ctx context.Context, actor *AdminPrincip
 	return s.GetServer(ctx, id)
 }
 
-// measuredTraffic 返回一台服务器自 start 起测得的流量，按计量方式折算、不含校准值。
-func (s *PanelService) measuredTraffic(ctx context.Context, id int64, start time.Time, mode string) (int64, error) {
+// nicTrafficSince 返回一台服务器自 start（含）起网卡收发的增量之和，不含校准值。
+func (s *PanelService) nicTrafficSince(ctx context.Context, id int64, start time.Time) (sent, recv int64, err error) {
 	rows, err := s.q.ListServerNicTrafficOf(ctx, sqlcgen.ListServerNicTrafficOfParams{ServerID: id, Day: dateOf(start)})
 	if err != nil {
-		return 0, fmt.Errorf("list nic traffic of server %d: %w", id, err)
+		return 0, 0, fmt.Errorf("list nic traffic of server %d: %w", id, err)
 	}
-	var sent, recv int64
 	for _, r := range rows {
 		sent, recv = sent+r.Sent, recv+r.Recv
 	}
-	return usedByMode(mode, sent, recv), nil
+	return sent, recv, nil
 }
 
 func billingAuditDetail(in ServerBillingInput) map[string]any {

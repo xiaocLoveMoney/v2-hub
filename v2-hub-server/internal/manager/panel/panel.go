@@ -66,14 +66,20 @@ type PanelInfo struct {
 	GUID    string
 	// Resources 是资源快照（Ruling-83）；面板实现总是填上，测试替身可以为 nil。
 	Resources *Resources
-	// PublicIP 是面板自报的服务器公网 IP（优先 IPv4）；面板没报为空。用于扫描位置（Ruling-65）。
-	PublicIP string
 	// PublicIPv4 / PublicIPv6 是面板自报的两个公网地址，没报为空串（Ruling-83）。
 	PublicIPv4 string
 	PublicIPv6 string
 	// CoreState 是内核（如 Xray）的运行状态：CoreRunning 为在运行，其它值为没在运行，空为面板没报；CoreError 是面板给的错误说明。
 	CoreState string
 	CoreError string
+}
+
+// PublicIP 返回面板自报的服务器公网 IP（优先 IPv4）；面板没报为空。用于扫描位置（Ruling-65）。
+func (i PanelInfo) PublicIP() string {
+	if i.PublicIPv4 != "" {
+		return i.PublicIPv4
+	}
+	return i.PublicIPv6
 }
 
 // CoreRunning 是 PanelInfo.CoreState 表示内核在运行的取值。

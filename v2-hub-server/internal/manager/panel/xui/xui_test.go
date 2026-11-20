@@ -263,8 +263,8 @@ func TestProbe(t *testing.T) {
 	if info.CoreState != "error" || !strings.Contains(info.CoreError, "address already in use") {
 		t.Fatalf("core state = %q, %q", info.CoreState, info.CoreError)
 	}
-	if info.PublicIP != "203.0.113.1" || info.PublicIPv4 != "203.0.113.1" || info.PublicIPv6 != "" {
-		t.Fatalf("public ip = %q / %q / %q", info.PublicIP, info.PublicIPv4, info.PublicIPv6)
+	if info.PublicIP() != "203.0.113.1" || info.PublicIPv4 != "203.0.113.1" || info.PublicIPv6 != "" {
+		t.Fatalf("public ip = %q / %q / %q", info.PublicIP(), info.PublicIPv4, info.PublicIPv6)
 	}
 	res := info.Resources
 	if res == nil || res.CPU == nil {

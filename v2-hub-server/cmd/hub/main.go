@@ -167,9 +167,10 @@ func runServer(args []string) error {
 	if err := settings.EnsureSubscriptionPath(ctx); err != nil {
 		return fmt.Errorf("ensure subscription path: %w", err)
 	}
-	// 流量周期与到期日按站点时区取“今天”（Ruling-84），所以面板服务要读系统设置
+	// 流量周期与到期日按站点时区取“今天”（Ruling-84）、趋势是否带延迟看开关（Ruling-86），所以面板服务要读系统设置
 	panels := service.NewPanelService(pool, sealer, registry, service.PanelConfig{
 		RequestTimeout: cfg.Panel.RequestTimeout, Locator: locator, SiteLocation: settings.SiteLocation,
+		LatencyEnabled: settings.LatencyEnabled,
 	}, nil)
 	go job.RunPanelPolling(ctx, panels, job.PanelPollConfig{
 		ProbeInterval: cfg.Panel.ProbeInterval, SyncInterval: cfg.Panel.SyncInterval, Concurrency: cfg.Panel.Concurrency,

@@ -64,48 +64,36 @@ func guarded(name string, fn func() error) {
 	}
 }
 
-// ReachChecker 能跑一轮大陆连通检测（由 service.ReachService 实现，Ruling-67）。
-type ReachChecker interface {
+// RoundRunner 能跑一轮按间隔重复的检测，返回这一轮测了多少个目标。
+type RoundRunner interface {
 	RunRound(ctx context.Context) (int, error)
 }
 
-// RunReach 按 interval 周期跑大陆连通检测，阻塞到 ctx 取消（docs/03 §5.20 大陆连通检测）。
+// runRounds 按 interval 周期跑 c 的一轮检测，阻塞到 ctx 取消；name 是日志里的任务名。
+func runRounds(ctx context.Context, name string, c RoundRunner, interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			guarded(name, func() error {
+				_, err := c.RunRound(ctx)
+				return err
+			})
+		}
+	}
+}
+
+// RunReach 按 interval 周期跑大陆连通检测（service.ReachService，Ruling-67），阻塞到 ctx 取消（docs/03 §5.20 大陆连通检测）。
 // 功能开关与同一目标的检测间隔在系统设置里，由 RunRound 自己判断。
-func RunReach(ctx context.Context, c ReachChecker, interval time.Duration) {
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			guarded("reach check", func() error {
-				_, err := c.RunRound(ctx)
-				return err
-			})
-		}
-	}
+func RunReach(ctx context.Context, c RoundRunner, interval time.Duration) {
+	runRounds(ctx, "reach check", c, interval)
 }
 
-// LatencyChecker 能跑一轮三网延迟检测（由 service.LatencyService 实现，Ruling-86）。
-type LatencyChecker interface {
-	RunRound(ctx context.Context) (int, error)
-}
-
-// RunLatency 按 interval 周期跑三网延迟检测，阻塞到 ctx 取消（docs/03 §5.20 三网延迟检测）。
+// RunLatency 按 interval 周期跑三网延迟检测（service.LatencyService，Ruling-86），阻塞到 ctx 取消（docs/03 §5.20 三网延迟检测）。
 // 功能开关与同一台服务器的检测间隔在系统设置里，由 RunRound 自己判断。
-func RunLatency(ctx context.Context, c LatencyChecker, interval time.Duration) {
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			guarded("latency check", func() error {
-				_, err := c.RunRound(ctx)
-				return err
-			})
-		}
-	}
+func RunLatency(ctx context.Context, c RoundRunner, interval time.Duration) {
+	runRounds(ctx, "latency check", c, interval)
 }

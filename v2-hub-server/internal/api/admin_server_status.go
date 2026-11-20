@@ -169,15 +169,6 @@ type serverTrendVO struct {
 	Latency  *latencySeriesVO   `json:"latency"`
 }
 
-// isLatencyEnabled 报告三网延迟检测是否开着（Ruling-86）；关着时接口不带延迟数据。
-func (h *handlers) isLatencyEnabled(r *http.Request) (bool, error) {
-	cur, err := h.settings.Current(r.Context())
-	if err != nil {
-		return false, err
-	}
-	return cur.Latency.Enabled, nil
-}
-
 func (h *handlers) getServerMetrics(w http.ResponseWriter, r *http.Request, _ *service.AdminPrincipal) {
 	id, err := pathID(r)
 	if err != nil {
@@ -188,12 +179,7 @@ func (h *handlers) getServerMetrics(w http.ResponseWriter, r *http.Request, _ *s
 	if rng == "" {
 		rng = service.MetricRange24h
 	}
-	withLatency, err := h.isLatencyEnabled(r)
-	if err != nil {
-		writeError(w, r, err)
-		return
-	}
-	m, err := h.panels.GetServerMetrics(r.Context(), id, rng, withLatency)
+	m, err := h.panels.GetServerMetrics(r.Context(), id, rng)
 	if err != nil {
 		writeError(w, r, err)
 		return
@@ -211,12 +197,7 @@ func (h *handlers) getServerMetrics(w http.ResponseWriter, r *http.Request, _ *s
 }
 
 func (h *handlers) listServerTrends(w http.ResponseWriter, r *http.Request, _ *service.AdminPrincipal) {
-	withLatency, err := h.isLatencyEnabled(r)
-	if err != nil {
-		writeError(w, r, err)
-		return
-	}
-	trends, err := h.panels.ListServerTrends(r.Context(), withLatency)
+	trends, err := h.panels.ListServerTrends(r.Context())
 	if err != nil {
 		writeError(w, r, err)
 		return
