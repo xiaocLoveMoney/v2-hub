@@ -32,6 +32,7 @@ import (
 	"v2-hub-server/internal/manager/dns/cloudflare"
 	"v2-hub-server/internal/manager/geoip"
 	"v2-hub-server/internal/manager/mail"
+	"v2-hub-server/internal/manager/objectstore"
 	"v2-hub-server/internal/manager/panel"
 	"v2-hub-server/internal/manager/panel/xui"
 	"v2-hub-server/internal/manager/pay"
@@ -66,6 +67,10 @@ const (
 	// envReachToken 是大陆连通检测用的探测服务令牌（可空，Ruling-67）；envReachAPIURL 覆盖配置里的接口地址（联调指向模拟端）
 	envReachToken  = "HUB_GLOBALPING_TOKEN"
 	envReachAPIURL = "HUB_REACH_API_URL"
+	// 公告 / 教程图片上传用的 MinIO 只写账号（Ruling-89），缺任一即上传不可用；envUploadEndpoint 覆盖配置里的地址（本机开发指向 :19000）
+	envUploadUser     = "HUB_UPLOAD_USER"
+	envUploadSecret   = "HUB_UPLOAD_PASSWORD"
+	envUploadEndpoint = "HUB_UPLOAD_ENDPOINT"
 	// serverLocateInterval 是位置为空的服务器的补扫周期（docs/03 §5.1）。
 	serverLocateInterval = time.Hour
 	// telegramOutboxInterval 是 Telegram 发件箱任务的周期；opsInterval 是掉线告警与日报的检查周期。
@@ -259,6 +264,14 @@ func runServer(args []string) error {
 	go job.RunHostTasks(ctx, hosts, cfg.Deploy.PollInterval, cfg.Deploy.Concurrency)
 	go job.RunCertRenewal(ctx, hosts, acmeCfg.RenewInterval)
 
+	objects, err := uploadStoreFromEnv(cfg.Upload)
+	if err != nil {
+		return err
+	}
+	uploads := service.NewUploadService(pool, objects, service.UploadConfig{
+		MaxBytes: cfg.Upload.MaxBytes, Limit: cfg.Upload.Limit, Window: cfg.Upload.Window,
+	})
+
 	srv := &http.Server{
 		Addr: cfg.Server.ListenAddr,
 		Handler: api.NewRouter(api.Deps{
@@ -287,6 +300,7 @@ func runServer(args []string) error {
 			Analytics:      analytics,
 			Reach:          reachSvc,
 			Hosts:          hosts,
+			Uploads:        uploads,
 			Cookie:         api.CookieConfig{Secure: secureCookie},
 			TrustedProxies: trusted,
 		}),
@@ -314,6 +328,26 @@ func runServer(args []string) error {
 	defer cancel()
 	slog.Info("hub-server shutting down")
 	return srv.Shutdown(shutdownCtx)
+}
+
+// uploadStoreFromEnv 按配置与环境变量创建图片存储；账号缺任一返回 nil（上传不可用），配置不合法时报错让进程启动失败。
+func uploadStoreFromEnv(cfg config.UploadConfig) (objectstore.Store, error) {
+	user, secret := os.Getenv(envUploadUser), os.Getenv(envUploadSecret)
+	if user == "" || secret == "" {
+		slog.Warn("image upload disabled: upload credentials not set", "env", envUploadUser)
+		return nil, nil
+	}
+	endpoint := cfg.Endpoint
+	if v := os.Getenv(envUploadEndpoint); v != "" {
+		endpoint = v
+	}
+	client, err := objectstore.New(objectstore.Config{
+		Endpoint: endpoint, Bucket: cfg.Bucket, Region: cfg.Region, AccessKey: user, SecretKey: secret, Timeout: cfg.Timeout,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("init upload store: %w", err)
+	}
+	return client, nil
 }
 
 // smtpSenderFromEnv 按环境变量创建 SMTP 发送器；未配置时返回 nil（邮件不可用），配置不合法时报错让进程启动失败。

@@ -12,11 +12,17 @@ DEV_DB_URL = $$( [ -f $(DEV_ENV_FILE) ] && set -a && . ./$(DEV_ENV_FILE) && set 
 	echo "postgres://$$POSTGRES_USER:$$POSTGRES_PASSWORD@127.0.0.1:$$POSTGRES_PORT/$$POSTGRES_DB?sslmode=disable" )
 
 DEV_ENC_KEY = $$( [ -f $(DEV_ENV_FILE) ] && set -a && . ./$(DEV_ENV_FILE) && set +a && echo "$$HUB_ENCRYPTION_KEY" )
+# 图片上传（Ruling-89）：账号取自 contract/deploy/.env（init_uploads.sh 生成），MinIO 走宿主机端口
+DEV_UPLOAD_USER = $$( [ -f $(DEV_ENV_FILE) ] && set -a && . ./$(DEV_ENV_FILE) && set +a && echo "$$HUB_UPLOAD_USER" )
+DEV_UPLOAD_SECRET = $$( [ -f $(DEV_ENV_FILE) ] && set -a && . ./$(DEV_ENV_FILE) && set +a && echo "$$HUB_UPLOAD_PASSWORD" )
+DEV_UPLOAD_ENDPOINT = $$( [ -f $(DEV_ENV_FILE) ] && set -a && . ./$(DEV_ENV_FILE) && set +a && echo "http://127.0.0.1:$${MINIO_API_PORT:-19000}" )
 
 # 本机 HTTP 开发：关闭会话 Cookie 的 Secure（生产不设置该变量）；加密主密钥取自 contract/deploy/.env
 run:
 	@HUB_INSECURE_DEV_COOKIE=1 HUB_DATABASE_URL="$${HUB_DATABASE_URL:-$(DEV_DB_URL)}" \
-		HUB_ENCRYPTION_KEY="$${HUB_ENCRYPTION_KEY:-$(DEV_ENC_KEY)}" go run ./cmd/hub -f $(CONFIG)
+		HUB_ENCRYPTION_KEY="$${HUB_ENCRYPTION_KEY:-$(DEV_ENC_KEY)}" \
+		HUB_UPLOAD_USER="$${HUB_UPLOAD_USER:-$(DEV_UPLOAD_USER)}" HUB_UPLOAD_PASSWORD="$${HUB_UPLOAD_PASSWORD:-$(DEV_UPLOAD_SECRET)}" \
+		HUB_UPLOAD_ENDPOINT="$${HUB_UPLOAD_ENDPOINT:-$(DEV_UPLOAD_ENDPOINT)}" go run ./cmd/hub -f $(CONFIG)
 
 # 创建超级管理员：make admin-create USERNAME=root（密码在终端无回显输入，或经管道传入一行）
 admin-create:

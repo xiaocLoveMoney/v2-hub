@@ -88,6 +88,15 @@ const (
 	defaultACMETimeout       = 10 * time.Minute
 	defaultACMERenewInterval = 12 * time.Hour
 	defaultCloudflareAPIURL  = "https://api.cloudflare.com/client/v4"
+
+	// 公告 / 教程图片上传，语义见 docs/03 §5.9（Ruling-89）：单张 5 MiB，每个管理员每小时 60 张
+	defaultUploadEndpoint = "http://minio:9000"
+	defaultUploadBucket   = "uploads"
+	defaultUploadRegion   = "us-east-1"
+	defaultUploadTimeout  = 30 * time.Second
+	defaultUploadMaxBytes = 5 << 20
+	defaultUploadLimit    = 60
+	defaultUploadWindow   = time.Hour
 )
 
 // ErrInvalidConfig 表示配置内容不合法。
@@ -110,6 +119,20 @@ type Config struct {
 	Deploy DeployConfig `yaml:"deploy"`
 	// Subscription 是订阅设置（docs/03 §5.4）；M4 起移入系统设置表。
 	Subscription SubscriptionConfig `yaml:"subscription"`
+	// Upload 是公告 / 教程图片上传（docs/03 §5.9，Ruling-89）。
+	Upload UploadConfig `yaml:"upload"`
+}
+
+// UploadConfig 是图片上传：Endpoint / Bucket / Region 指向 S3 兼容存储（生产为同一 compose 里的 MinIO），
+// MaxBytes 是单张上限，Limit / Window 是每个管理员的上传频率。账号只走环境变量，不在这里。
+type UploadConfig struct {
+	Endpoint string        `yaml:"endpoint"`
+	Bucket   string        `yaml:"bucket"`
+	Region   string        `yaml:"region"`
+	Timeout  time.Duration `yaml:"timeout"`
+	MaxBytes int64         `yaml:"maxBytes"`
+	Limit    int           `yaml:"limit"`
+	Window   time.Duration `yaml:"window"`
 }
 
 // ChainConfig 是服务端链式下发的节奏（docs/03 §5.19）：ApplyInterval 是后台检查间隔，
@@ -318,6 +341,14 @@ func defaults() Config {
 		Timeout:   defaultGeoIPTimeout,
 	}, Analytics: AnalyticsConfig{
 		CacheTTL: defaultAnalyticsCacheTTL,
+	}, Upload: UploadConfig{
+		Endpoint: defaultUploadEndpoint,
+		Bucket:   defaultUploadBucket,
+		Region:   defaultUploadRegion,
+		Timeout:  defaultUploadTimeout,
+		MaxBytes: defaultUploadMaxBytes,
+		Limit:    defaultUploadLimit,
+		Window:   defaultUploadWindow,
 	}, Reach: ReachConfig{
 		APIURL:        defaultReachAPIURL,
 		Timeout:       defaultReachTimeout,
@@ -402,6 +433,10 @@ func (c Config) validate() error {
 	ac := dc.ACME
 	if dc.CloudflareAPIURL == "" || ac.DirectoryURL == "" || ac.Timeout <= 0 || ac.RenewInterval <= 0 {
 		return fmt.Errorf("%w: deploy.cloudflareApiUrl, deploy.acme.directoryUrl, timeout and renewInterval must be set", ErrInvalidConfig)
+	}
+	uc := c.Upload
+	if uc.Endpoint == "" || uc.Bucket == "" || uc.Timeout <= 0 || uc.MaxBytes <= 0 || uc.Limit <= 0 || uc.Window <= 0 {
+		return fmt.Errorf("%w: upload endpoint, bucket, timeout, maxBytes, limit and window must be set", ErrInvalidConfig)
 	}
 	po := c.Portal
 	if po.SessionIdleTimeout <= a.SessionTouchInterval || po.SessionMaxAge < po.SessionIdleTimeout || po.LoginLogRetention <= 0 {

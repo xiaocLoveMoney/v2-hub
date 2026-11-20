@@ -80,6 +80,8 @@ type Deps struct {
 	Reach ReachManager
 	// Hosts 提供 SSH 凭据、托管主机与主机任务（docs/03 §5.22）。
 	Hosts HostManager
+	// Uploads 提供公告 / 教程图片上传（docs/03 §5.9，Ruling-89）。
+	Uploads UploadManager
 	// Cookie 是会话 Cookie 属性。
 	Cookie CookieConfig
 	// TrustedProxies 是可采信 X-Forwarded-For 的直连网段（如 Caddy 所在 docker 网络）。
@@ -110,6 +112,7 @@ type handlers struct {
 	analytics      AnalyticsManager
 	reach          ReachManager
 	hosts          HostManager
+	uploads        UploadManager
 	cookie         CookieConfig
 	trustedProxies []netip.Prefix
 }
@@ -117,7 +120,7 @@ type handlers struct {
 // NewRouter 返回注册好全部路由的 http.Handler。路由与 hub-api.yaml 的 paths 逐条对应。
 func NewRouter(deps Deps) http.Handler {
 	h := &handlers{auth: deps.Auth, rbac: deps.RBAC, panels: deps.Panels, users: deps.Users, portalAuth: deps.PortalAuth, portal: deps.Portal,
-		settings: deps.Settings, mail: deps.Mail, account: deps.Account, content: deps.Content, tickets: deps.Tickets, wallet: deps.Wallet, shop: deps.Shop, finance: deps.Finance, pay: deps.Pay, chain: deps.Chain, chainApply: deps.ChainApply, chainAdmin: deps.ChainAdmin, telegram: deps.Telegram, ops: deps.Ops, analytics: deps.Analytics, reach: deps.Reach, hosts: deps.Hosts, cookie: deps.Cookie, trustedProxies: deps.TrustedProxies}
+		settings: deps.Settings, mail: deps.Mail, account: deps.Account, content: deps.Content, tickets: deps.Tickets, wallet: deps.Wallet, shop: deps.Shop, finance: deps.Finance, pay: deps.Pay, chain: deps.Chain, chainApply: deps.ChainApply, chainAdmin: deps.ChainAdmin, telegram: deps.Telegram, ops: deps.Ops, analytics: deps.Analytics, reach: deps.Reach, hosts: deps.Hosts, uploads: deps.Uploads, cookie: deps.Cookie, trustedProxies: deps.TrustedProxies}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", handleHealthz)
 	mux.HandleFunc("GET /readyz", newReadyzHandler(deps.Database, deps.PingTimeout))
@@ -273,6 +276,7 @@ func NewRouter(deps Deps) http.Handler {
 	mux.HandleFunc("POST /api/admin/tutorials", h.requireAdmin(service.PermContentWrite, h.createTutorial))
 	mux.HandleFunc("PUT /api/admin/tutorials/{id}", h.requireAdmin(service.PermContentWrite, h.updateTutorial))
 	mux.HandleFunc("DELETE /api/admin/tutorials/{id}", h.requireAdmin(service.PermContentWrite, h.deleteTutorial))
+	mux.HandleFunc("POST /api/admin/uploads", h.requireAdmin(service.PermContentWrite, h.uploadImage))
 	mux.HandleFunc("GET /api/admin/shared-accounts", h.requireAdmin(service.PermContentRead, h.listSharedAccounts))
 	mux.HandleFunc("POST /api/admin/shared-accounts", h.requireAdmin(service.PermContentWrite, h.createSharedAccount))
 	mux.HandleFunc("PUT /api/admin/shared-accounts/{id}", h.requireAdmin(service.PermContentWrite, h.updateSharedAccount))
