@@ -480,8 +480,8 @@ describe('链式代理页：客户端链式与我的出口', () => {
     renderApp('/chain', 'en')
     expect(await screen.findByRole('tab', { name: 'Server-side (2 / 10)' })).toBeDefined()
     expect(screen.getByText('Overridden by #1')).toBeDefined()
-    // 规则列表与底部画布各一处
-    expect(screen.getAllByText('Applying')).toHaveLength(2)
+    // 规则列表与底部画布各一处；画布按需加载，等它出来再数
+    await waitFor(() => expect(screen.getAllByText('Applying')).toHaveLength(2))
     expect(screen.getByRole('button', { name: 'Move rule #2 up' })).toBeDefined()
     fireEvent.click(screen.getByRole('button', { name: 'Add a rule' }))
     const dialog = await screen.findByRole('dialog')
