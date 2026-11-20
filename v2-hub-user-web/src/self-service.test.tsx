@@ -216,24 +216,41 @@ describe('邀请、教程与共享账号', () => {
     expect(calls.find((c) => c.path === '/api/user/invite/reset')?.csrf).toBe(TEST_CSRF)
   })
 
-  it('教程按平台分段；不是 https 的下载链接不渲染', async () => {
+  it('教程按平台分段，列表只显示概要卡；点开进详情页，不是 https 的下载链接不渲染；返回时保持平台', async () => {
     const tutorials = [
       {
-        id: 1, platform: 'windows', clientName: 'Win 客户端', summary: '', sortOrder: 0, isPublished: true, content: '# 步骤',
+        id: 1, platform: 'windows', clientName: 'Win 客户端', summary: '电脑用', sortOrder: 0, isPublished: true, content: '# 安装步骤',
         links: [{ label: '官方下载', url: 'https://example.com/win.exe' }, { label: '镜像下载', url: 'http://example.com/win.exe' }],
       },
-      { id: 2, platform: 'ios', clientName: 'iOS 客户端', summary: '', sortOrder: 0, isPublished: true, content: '', links: [] },
+      { id: 2, platform: 'ios', clientName: 'iOS 客户端', summary: '', sortOrder: 0, isPublished: true, content: '# iOS 步骤', links: [] },
     ]
     mockServer({ ...signedIn, 'GET /api/user/site': () => ok(site), 'GET /api/user/tutorials': () => ok(tutorials) })
     renderApp('/tutorials')
     expect(await screen.findByText('Win 客户端')).toBeDefined()
-    expect(screen.getByText('官方下载').getAttribute('href')).toBe('https://example.com/win.exe')
-    expect(screen.queryByText('镜像下载')).toBeNull()
+    expect(screen.getByText('电脑用')).toBeDefined()
+    expect(screen.queryByText('官方下载')).toBeNull()
+    expect(screen.queryByText('安装步骤')).toBeNull()
     expect(screen.queryByRole('tab', { name: 'Android' })).toBeNull()
 
     fireEvent.click(screen.getByRole('tab', { name: 'iOS' }))
-    expect(screen.getByText('iOS 客户端')).toBeDefined()
     expect(screen.queryByText('Win 客户端')).toBeNull()
+    fireEvent.click(screen.getByRole('link', { name: /iOS 客户端/ }))
+    expect(await screen.findByText('iOS 步骤')).toBeDefined()
+    fireEvent.click(screen.getByRole('link', { name: '返回教程列表' }))
+    expect(await screen.findByRole('tab', { name: 'iOS', selected: true })).toBeDefined()
+    expect(screen.getByText('iOS 客户端')).toBeDefined()
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Windows' }))
+    fireEvent.click(screen.getByRole('link', { name: /Win 客户端/ }))
+    expect(await screen.findByText('安装步骤')).toBeDefined()
+    expect(screen.getByText('官方下载').getAttribute('href')).toBe('https://example.com/win.exe')
+    expect(screen.queryByText('镜像下载')).toBeNull()
+  })
+
+  it('不存在或未发布的教程详情显示 404', async () => {
+    mockServer({ ...signedIn, 'GET /api/user/site': () => ok(site), 'GET /api/user/tutorials': () => ok([]) })
+    renderApp('/tutorials/99')
+    expect(await screen.findByText('页面不存在')).toBeDefined()
   })
 
   it('共享账号的密码点“显示”才请求', async () => {

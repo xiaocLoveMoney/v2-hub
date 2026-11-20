@@ -18,6 +18,7 @@ export const ROUTES = {
   ACCOUNT: '/account',
   INVITE: '/invite',
   TUTORIALS: '/tutorials',
+  TUTORIAL_DETAIL: '/tutorials/:id',
   SUBSCRIBE_LOGS: '/subscribe-logs',
   SHARED_ACCOUNTS: '/shared-accounts',
   TICKETS: '/tickets',

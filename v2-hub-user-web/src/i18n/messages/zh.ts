@@ -417,6 +417,8 @@ export const zh = {
   'tutorials.importAfter': ' 一键导入订阅。',
   'tutorials.empty': '还没有教程',
   'tutorials.os': '操作系统',
+  'tutorials.view': '查看教程',
+  'tutorials.backToList': '返回教程列表',
   'ann.pinned': '置顶',
   'ann.empty': '还没有公告',
   'subLogs.generic': '通用',

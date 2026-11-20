@@ -1,60 +1,43 @@
-import { useState } from 'react'
-import { Link } from 'react-router'
-import { api, type Tutorial, type TutorialPlatform } from '../api/client'
-import { HTTPS_PREFIX } from '../app-config'
-import { Markdown } from '../components/Markdown'
+import { ChevronRight } from 'lucide-react'
+import { Link, useSearchParams } from 'react-router'
+import type { Tutorial, TutorialPlatform } from '../api/client'
 import { Alert, Card, Empty, PageHeader } from '../components/ui'
 import { useRemote } from '../hooks/use-remote'
-import { ROUTES } from '../menu'
-import { useI18n, type MessageKey } from '../i18n/i18n-context'
+import { useI18n } from '../i18n/i18n-context'
+import { loadTutorials, parsePlatform, PLATFORM_PARAM, PLATFORMS, tutorialDetailPath } from './tutorials'
 
-/** 平台的显示名与显示顺序；取值见 hub-api.yaml 的 TutorialPlatform。 */
-const PLATFORMS: { value: TutorialPlatform; labelKey: MessageKey }[] = [
-  { value: 'windows', labelKey: 'tutorials.windows' },
-  { value: 'macos', labelKey: 'tutorials.macos' },
-  { value: 'android', labelKey: 'tutorials.android' },
-  { value: 'ios', labelKey: 'tutorials.ios' },
-  { value: 'linux', labelKey: 'tutorials.linux' },
-  { value: 'router', labelKey: 'tutorials.router' },
-]
-// 后端已保证链接是 https；前端再判一次，不合规的不渲染成可点的链接
+const ARROW_SIZE = 16
 
-const loadTutorials = (signal: AbortSignal) => api.GET('/api/user/tutorials', { signal })
-
-function TutorialCard({ tutorial }: { tutorial: Tutorial }) {
+/** 一篇教程的概要卡（Ruling-90）：只有客户端名与简介，整张卡可点，进详情页看下载链接与正文。 */
+function TutorialSummaryCard({ tutorial }: { tutorial: Tutorial }) {
   const { t } = useI18n()
-  const links = tutorial.links.filter((l) => l.url.startsWith(HTTPS_PREFIX))
   return (
-    <Card title={tutorial.clientName}>
-      {tutorial.summary !== '' && <p className="hub-card-text">{tutorial.summary}</p>}
-      {links.length > 0 && (
-        <div className="hub-actions hub-row-gap">
-          {links.map((l) => (
-            <a key={`${l.label}-${l.url}`} className="hub-btn hub-btn-primary" href={l.url} target="_blank" rel="noopener noreferrer">
-              {l.label}
-            </a>
-          ))}
-        </div>
-      )}
-      {tutorial.content !== '' && <Markdown source={tutorial.content} />}
-      <p className="hub-field-hint">
-        {t('tutorials.importBefore')}
-        <Link to={ROUTES.DASHBOARD}>{t('menu.dashboard')}</Link>
-        {t('tutorials.importAfter')}
-      </p>
-    </Card>
+    <Link className="hub-tutorial-card" to={tutorialDetailPath(tutorial.id)}>
+      <h4>{tutorial.clientName}</h4>
+      {tutorial.summary !== '' && <p className="hub-tutorial-summary">{tutorial.summary}</p>}
+      <span className="hub-tutorial-more">
+        {t('tutorials.view')}
+        <ChevronRight size={ARROW_SIZE} aria-hidden />
+      </span>
+    </Link>
   )
 }
 
-/** 下载和使用（docs/03 §5.9）：按操作系统分段，每篇教程一张卡。只显示有教程的平台。 */
+/** 下载和使用（docs/03 §5.9）：按操作系统分段，每篇教程一张概要卡。只显示有教程的平台；选中的平台记在地址里。 */
 export function TutorialsPage() {
   const { t } = useI18n()
   const tutorials = useRemote<Tutorial[]>(loadTutorials)
-  const [picked, setPicked] = useState<TutorialPlatform | null>(null)
+  const [searchParams, setSearchParams] = useSearchParams()
+  const picked = parsePlatform(searchParams.get(PLATFORM_PARAM))
   const all = tutorials.data ?? []
   const platforms = PLATFORMS.filter((p) => all.some((item) => item.platform === p.value))
   // 没选过或选中的平台已没有教程时，落到第一个有教程的平台
   const current = platforms.some((p) => p.value === picked) ? picked : (platforms[0]?.value ?? null)
+
+  const handlePick = (platform: TutorialPlatform) => {
+    // 切平台不留历史记录，返回键直接回到上一页面
+    setSearchParams({ [PLATFORM_PARAM]: platform }, { replace: true })
+  }
 
   return (
     <>
@@ -74,18 +57,20 @@ export function TutorialsPage() {
               role="tab"
               aria-selected={p.value === current}
               className={`hub-pill${p.value === current ? ' is-active' : ''}`}
-              onClick={() => setPicked(p.value)}
+              onClick={() => handlePick(p.value)}
             >
               {t(p.labelKey)}
             </button>
           ))}
         </div>
       )}
-      {all
-        .filter((item) => item.platform === current)
-        .map((item) => (
-          <TutorialCard key={item.id} tutorial={item} />
-        ))}
+      <div className="hub-tutorial-grid">
+        {all
+          .filter((item) => item.platform === current)
+          .map((item) => (
+            <TutorialSummaryCard key={item.id} tutorial={item} />
+          ))}
+      </div>
     </>
   )
 }
