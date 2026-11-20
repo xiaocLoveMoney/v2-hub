@@ -8,7 +8,6 @@ import (
 	"math"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"v2-hub-server/internal/dao/sqlcgen"
@@ -59,7 +58,7 @@ func NewLatencyService(pool *pgxpool.Pool, settings *SettingsService, prober rea
 	if now == nil {
 		now = time.Now
 	}
-	shared := reachSvc.sharedBudget()
+	shared := &reachSvc.budget
 	return &LatencyService{
 		store: newStore(pool), settings: settings, prober: prober, now: now, shared: shared,
 		own: reachBudget{limit: shared.limit * latencyBudgetSharePercent / int(percentBase), now: now},
@@ -83,7 +82,7 @@ func (s *LatencyService) RunRound(ctx context.Context) (int, error) {
 	}
 	dueBefore := s.now().Add(-time.Duration(cur.Latency.IntervalMinutes) * time.Minute)
 	due, err := s.q.ListLatencyDueServers(ctx, sqlcgen.ListLatencyDueServersParams{
-		DueBefore: pgtype.Timestamptz{Time: dueBefore, Valid: true}, RowLimit: latencyRoundMax,
+		DueBefore: timestamptz(dueBefore), RowLimit: latencyRoundMax,
 	})
 	if err != nil {
 		return 0, fmt.Errorf("list latency due servers: %w", err)
@@ -123,7 +122,7 @@ func (s *LatencyService) RunRound(ctx context.Context) (int, error) {
 
 // save 落一次检测的结果并记下检测时间；结果为空也记时间。
 func (s *LatencyService) save(ctx context.Context, serverID int64, results []reach.LatencyResult) error {
-	at := pgtype.Timestamptz{Time: s.now(), Valid: true}
+	at := timestamptz(s.now())
 	return s.inTx(ctx, func(q *sqlcgen.Queries) error {
 		for _, r := range results {
 			isp, ok := ispOfASN(r.ASN)

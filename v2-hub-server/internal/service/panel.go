@@ -65,6 +65,8 @@ type PanelConfig struct {
 	Locator geoip.Locator
 	// SiteLocation 返回站点时区，流量周期与到期日按它取“今天”（Ruling-84）；nil 按 UTC。
 	SiteLocation func(ctx context.Context) *time.Location
+	// LatencyEnabled 报告三网延迟检测是否开着（Ruling-86）；关着时趋势不带延迟数据。nil 按关着。
+	LatencyEnabled func(ctx context.Context) (bool, error)
 }
 
 // PanelService 负责服务器接入、探测、入站同步与增删改、对外地址、节点与节点组（docs/03 §5.1）。
@@ -309,8 +311,24 @@ func (s *PanelService) ListServers(ctx context.Context) ([]Server, error) {
 	return out, nil
 }
 
-// GetServer 返回一台服务器。
+// GetServer 返回一台服务器，带本周期的流量用量；不存在返回 404。
 func (s *PanelService) GetServer(ctx context.Context, id int64) (*Server, error) {
+	srv, err := s.loadServer(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	today := s.today(ctx)
+	start, _ := trafficCycle(today, srv.Billing.TrafficResetDay)
+	sent, recv, err := s.nicTrafficSince(ctx, id, start)
+	if err != nil {
+		return nil, err
+	}
+	srv.Traffic = trafficOf(srv, today, sent, recv)
+	return srv, nil
+}
+
+// loadServer 读一台服务器，不算流量用量（Traffic 为零值）；不存在返回 404。
+func (s *PanelService) loadServer(ctx context.Context, id int64) (*Server, error) {
 	row, err := s.q.GetServer(ctx, id)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, newError(CodeNotFound, msgServerNotFound)
@@ -318,11 +336,8 @@ func (s *PanelService) GetServer(ctx context.Context, id int64) (*Server, error)
 	if err != nil {
 		return nil, fmt.Errorf("get server %d: %w", id, err)
 	}
-	one := []Server{serverFromRow(row)}
-	if err := s.attachTraffic(ctx, one); err != nil {
-		return nil, err
-	}
-	return &one[0], nil
+	srv := serverFromRow(row)
+	return &srv, nil
 }
 
 func serverFromRow(r sqlcgen.GetServerRow) Server {
@@ -435,7 +450,7 @@ func (s *PanelService) CreateServer(ctx context.Context, actor *AdminPrincipal, 
 		return nil, err
 	}
 	if in.Region == "" {
-		s.fillRegionFromIP(ctx, id, info.PublicIP)
+		s.fillRegionFromIP(ctx, id, info.PublicIP())
 	}
 	if !in.IsDisabled {
 		if _, err := s.SyncServer(ctx, nil, id, nil); err != nil {

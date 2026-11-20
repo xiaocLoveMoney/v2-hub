@@ -316,6 +316,15 @@ func (s *SettingsService) SiteLocation(ctx context.Context) *time.Location {
 	return cur.Location()
 }
 
+// LatencyEnabled 报告三网延迟检测是否开着（Ruling-86）。
+func (s *SettingsService) LatencyEnabled(ctx context.Context) (bool, error) {
+	cur, err := s.Current(ctx)
+	if err != nil {
+		return false, err
+	}
+	return cur.Latency.Enabled, nil
+}
+
 // loadSiteLocation 解析时区名，失败时退回 UTC（见 Location）。
 func loadSiteLocation(name string) *time.Location {
 	loc, err := time.LoadLocation(name)

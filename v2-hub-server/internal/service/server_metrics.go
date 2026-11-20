@@ -111,9 +111,17 @@ func loadPtr(v pgtype.Int4) *float64 {
 	return &out
 }
 
-// GetServerMetrics 返回一台服务器的资源趋势：24h 为 5 分钟原值，7d 按小时平均；withLatency 为真时带三网延迟
+// isLatencyEnabled 报告三网延迟检测是否开着（Ruling-86）；关着时趋势接口不带延迟数据。
+func (s *PanelService) isLatencyEnabled(ctx context.Context) (bool, error) {
+	if s.cfg.LatencyEnabled == nil {
+		return false, nil
+	}
+	return s.cfg.LatencyEnabled(ctx)
+}
+
+// GetServerMetrics 返回一台服务器的资源趋势：24h 为 5 分钟原值，7d 按小时平均；延迟检测开着时带三网延迟
 // （24h 为每次检测的原值，7d 按小时平均）。范围不合法返回 400，服务器不存在返回 404。
-func (s *PanelService) GetServerMetrics(ctx context.Context, id int64, rng string, withLatency bool) (*ServerMetrics, error) {
+func (s *PanelService) GetServerMetrics(ctx context.Context, id int64, rng string) (*ServerMetrics, error) {
 	if rng != MetricRange24h && rng != MetricRange7d {
 		return nil, newError(CodeInvalidArgument, msgBadMetricRange)
 	}
@@ -129,13 +137,17 @@ func (s *PanelService) GetServerMetrics(ctx context.Context, id int64, rng strin
 	if isHourly {
 		window = metricWindow7d
 	}
-	since := pgtype.Timestamptz{Time: s.now().Add(-window), Valid: true}
+	since := timestamptz(s.now().Add(-window))
 	var err error
 	if isHourly {
 		out.Points, err = s.listHourlyResourceMetrics(ctx, id, since)
 	} else {
 		out.Points, err = s.listResourceMetrics(ctx, id, since)
 	}
+	if err != nil {
+		return nil, err
+	}
+	withLatency, err := s.isLatencyEnabled(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -229,11 +241,15 @@ func (s *PanelService) listHourlyLatency(ctx context.Context, id int64, since pg
 	return out, nil
 }
 
-// ListServerTrends 返回各服务器最近 30 个 5 分钟时段的上下行速率；withLatency 为真时带三家运营商各自最近 30 次延迟检测。
+// ListServerTrends 返回各服务器最近 30 个 5 分钟时段的上下行速率；延迟检测开着时带三家运营商各自最近 30 次延迟检测。
 // 两样都没有数据的服务器不在结果里；结果按服务器 id 升序。
-func (s *PanelService) ListServerTrends(ctx context.Context, withLatency bool) ([]ServerTrend, error) {
+func (s *PanelService) ListServerTrends(ctx context.Context) ([]ServerTrend, error) {
+	withLatency, err := s.isLatencyEnabled(ctx)
+	if err != nil {
+		return nil, err
+	}
 	now := s.now()
-	nets, err := s.q.ListRecentServerNet(ctx, pgtype.Timestamptz{Time: now.Add(-trendNetWindow), Valid: true})
+	nets, err := s.q.ListRecentServerNet(ctx, timestamptz(now.Add(-trendNetWindow)))
 	if err != nil {
 		return nil, fmt.Errorf("list recent server net: %w", err)
 	}
@@ -260,7 +276,7 @@ func (s *PanelService) ListServerTrends(ctx context.Context, withLatency bool) (
 		return out, nil
 	}
 	rows, err := s.q.ListRecentServerLatency(ctx, sqlcgen.ListRecentServerLatencyParams{
-		Since: pgtype.Timestamptz{Time: now.Add(-metricRetention), Valid: true}, PerSeries: trendPoints,
+		Since: timestamptz(now.Add(-metricRetention)), PerSeries: trendPoints,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("list recent server latency: %w", err)

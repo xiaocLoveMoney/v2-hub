@@ -46,7 +46,7 @@ func New() *Fake {
 	return &Fake{
 		info: panel.PanelInfo{
 			Version: "fake-1.0", GUID: "fake-guid", Resources: &panel.Resources{CPU: &defaultCPU, CoreState: panel.CoreRunning},
-			PublicIP: FakePublicIP, PublicIPv4: FakePublicIP, CoreState: panel.CoreRunning,
+			PublicIPv4: FakePublicIP, CoreState: panel.CoreRunning,
 		},
 		inbounds: make(map[string]panel.Inbound, 8),
 		clients:  make(map[string]*panel.Client, 8),
@@ -131,7 +131,7 @@ func (f *Fake) SetCoreState(state, message string) {
 func (f *Fake) SetPublicIP(ip string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.info.PublicIP, f.info.PublicIPv4 = ip, ip
+	f.info.PublicIPv4 = ip
 }
 
 // SetCPU 改假面板快照里的 CPU 占用。

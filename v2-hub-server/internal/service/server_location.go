@@ -75,7 +75,7 @@ func (s *PanelService) LocateServer(ctx context.Context, id int64) (*ServerLocat
 	if err != nil {
 		return nil, panelError(err)
 	}
-	return s.locateIP(ctx, id, info.PublicIP)
+	return s.locateIP(ctx, id, info.PublicIP())
 }
 
 func (s *PanelService) locateIP(ctx context.Context, serverID int64, raw string) (*ServerLocation, error) {
@@ -140,7 +140,7 @@ func (s *PanelService) BackfillServerLocations(ctx context.Context) (int, error)
 
 // recordMetric 在一次成功的健康探测后记一条采样（Ruling-65、Ruling-85）；面板没给资源快照时只记在线数。
 func (s *PanelService) recordMetric(ctx context.Context, serverID int64, res *panel.Resources) error {
-	params := sqlcgen.RecordServerMetricParams{ServerID: serverID, SampledAt: pgtype.Timestamptz{Time: s.now(), Valid: true}}
+	params := sqlcgen.RecordServerMetricParams{ServerID: serverID, SampledAt: timestamptz(s.now())}
 	if res != nil {
 		if res.CPU != nil {
 			params.Cpu = pgtype.Float8{Float64: *res.CPU, Valid: true}
@@ -174,7 +174,7 @@ func int4Of(v int) pgtype.Int4 {
 
 // PurgeServerMetrics 删除过期的服务器历史：超过 7 天的采样与三网延迟、超过 62 天的按天流量；返回删除条数，由清理任务定时调用。
 func (s *PanelService) PurgeServerMetrics(ctx context.Context) (int64, error) {
-	before := pgtype.Timestamptz{Time: s.now().Add(-metricRetention), Valid: true}
+	before := timestamptz(s.now().Add(-metricRetention))
 	total, err := s.q.PurgeServerMetrics(ctx, before)
 	if err != nil {
 		return 0, fmt.Errorf("purge server metrics: %w", err)
@@ -207,7 +207,7 @@ func (s *UserService) ListNodeMetrics(ctx context.Context, p *UserPrincipal, nod
 	if rng == MetricRange7d {
 		return s.listHourlyMetrics(ctx, serverID)
 	}
-	since := pgtype.Timestamptz{Time: s.now().Add(-metricWindow24h), Valid: true}
+	since := timestamptz(s.now().Add(-metricWindow24h))
 	rows, err := s.q.ListServerMetrics(ctx, sqlcgen.ListServerMetricsParams{ServerID: serverID, BucketAt: since})
 	if err != nil {
 		return nil, fmt.Errorf("list metrics of server %d: %w", serverID, err)
@@ -225,7 +225,7 @@ func (s *UserService) ListNodeMetrics(ctx context.Context, p *UserPrincipal, nod
 }
 
 func (s *UserService) listHourlyMetrics(ctx context.Context, serverID int64) ([]MetricPoint, error) {
-	since := pgtype.Timestamptz{Time: s.now().Add(-metricWindow7d), Valid: true}
+	since := timestamptz(s.now().Add(-metricWindow7d))
 	rows, err := s.q.ListServerMetricsHourly(ctx, sqlcgen.ListServerMetricsHourlyParams{ServerID: serverID, BucketAt: since})
 	if err != nil {
 		return nil, fmt.Errorf("list hourly metrics of server %d: %w", serverID, err)
