@@ -43,6 +43,7 @@ export interface Recorded {
   /** 查询串（含开头的 ?，没有则为空串）。 */
   query: string
   csrf: string | null
+  /** JSON 请求体解析后的值；非 JSON（如 multipart）为原文。 */
   body: unknown
 }
 
@@ -58,7 +59,10 @@ export function mockServer(handlers: Record<string, () => Response>): Recorded[]
       const url = new URL(req.url)
       const path = url.pathname
       const text = await req.clone().text()
-      calls.push({ method: req.method, path, query: url.search, csrf: req.headers.get('X-CSRF-Token'), body: text === '' ? null : JSON.parse(text) })
+      // multipart（图片上传）不是 JSON，按原文记下
+      const isJson = (req.headers.get('Content-Type') ?? '').includes('json')
+      const body = text === '' ? null : isJson ? JSON.parse(text) : text
+      calls.push({ method: req.method, path, query: url.search, csrf: req.headers.get('X-CSRF-Token'), body })
       const handler = handlers[`${req.method} ${path}`]
       return handler === undefined ? Response.json({ code: 'not_found', message: '' }, { status: 404 }) : handler()
     }),

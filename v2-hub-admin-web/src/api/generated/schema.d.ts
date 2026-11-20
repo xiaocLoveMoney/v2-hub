@@ -1887,6 +1887,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/admin/uploads": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 上传一张公告 / 教程用的图片（content:write；docs/03 §5.9，Ruling-89，0.16.2）
+         * @description 只收 PNG / JPEG / GIF / WebP，按文件内容判断（不信扩展名与声明的类型，不收 SVG），单张 ≤ 5 MiB；每个管理员每小时最多 60 张。
+         *     返回的 url 是站内路径（/uploads/年月/32 位随机十六进制.扩展名），任何人凭地址可看，正文里写成 Markdown 图片引用。
+         *     未配置上传（hub-server 没有 MinIO 账号）返回 403 feature_disabled；权限不足同为 403 permission_denied。
+         */
+        post: operations["uploadImage"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/admin/shared-accounts": {
         parameters: {
             query?: never;
@@ -4905,6 +4927,17 @@ export interface components {
             content: components["schemas"]["Markdown"];
             sortOrder: number;
             isPublished: boolean;
+        };
+        UploadedImage: {
+            /** @description 站内路径，形如 /uploads/202611/0123456789abcdef0123456789abcdef.png */
+            url: string;
+            /** @enum {string} */
+            contentType: "image/png" | "image/jpeg" | "image/gif" | "image/webp";
+            /**
+             * Format: int64
+             * @description 字节数
+             */
+            size: number;
         };
         SharedAccountInput: {
             name: string;
@@ -10067,6 +10100,45 @@ export interface operations {
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["PermissionDenied"];
             404: components["responses"]["NotFound"];
+        };
+    };
+    uploadImage: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": {
+                    /**
+                     * Format: binary
+                     * @description 图片文件，表单里只认这一个字段
+                     */
+                    file: string;
+                };
+            };
+        };
+        responses: {
+            /** @description 上传成功 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["UploadedImage"];
+                    };
+                };
+            };
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["FeatureDisabled"];
+            429: components["responses"]["RateLimited"];
+            502: components["responses"]["UpstreamUnavailable"];
         };
     };
     listSharedAccounts: {

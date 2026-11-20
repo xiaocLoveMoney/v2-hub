@@ -9,6 +9,7 @@ import { useRowAction, useSubmit } from '../../hooks/use-submit'
 import { PERMISSIONS } from '../../menu'
 import { TABLE_SCROLL } from '../system/format'
 import { MARKDOWN_HINT, MAX_MARKDOWN_LEN } from './markdown'
+import { MarkdownEditor } from './MarkdownEditor'
 import { MAX_SORT_ORDER } from '../form-limits'
 import { PageHeader } from '../../components/PageHeader'
 import { FormModal } from '../../components/FormModal'
@@ -188,7 +189,7 @@ function TutorialForm({ tutorial, onSaved }: Pick<TutorialModalProps, 'tutorial'
           </Form.List>
         </Form.Item>
         <Form.Item name="content" label="使用说明" extra={MARKDOWN_HINT} rules={[{ max: MAX_MARKDOWN_LEN }]}>
-          <Input.TextArea rows={CONTENT_ROWS} className="mono" showCount maxLength={MAX_MARKDOWN_LEN} />
+          <MarkdownEditor rows={CONTENT_ROWS} />
         </Form.Item>
         <Form.Item name="sortOrder" label="排序" extra="小的在前">
           <InputNumber min={0} max={MAX_SORT_ORDER} precision={0} className="full-width" />

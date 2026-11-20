@@ -399,6 +399,11 @@ body {
   min-width: 320px;
 }
 
+/* 正文框下的“插入图片”（Ruling-89）；showCount 的计数在框下方，按钮与它错开 */
+.markdown-editor-toolbar {
+  margin-top: 24px;
+}
+
 .ticket-message {
   margin-bottom: 12px;
   padding: 12px 16px;
