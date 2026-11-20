@@ -80,7 +80,7 @@ describe('ServerStatusCard', () => {
     }
     renderWith([PERMISSIONS.SERVER_READ], (
       <MemoryRouter>
-        <ServerStatusCard server={busyServer()} trend={trend} hasLatency canEditBilling={false} onEditBilling={noop} />
+        <ServerStatusCard server={busyServer()} trend={trend} canEditBilling={false} onEditBilling={noop} />
       </MemoryRouter>
     ))
     expect(screen.getByText('dmit-us')).toBeDefined()
@@ -104,7 +104,7 @@ describe('ServerStatusCard', () => {
   it('没有资源快照、没填额度、延迟检测关着时给出说明，不出延迟区', () => {
     renderWith([PERMISSIONS.SERVER_READ], (
       <MemoryRouter>
-        <ServerStatusCard server={serverOf({ status: 'offline', lastSeenAt: '2026-11-20T00:00:00Z' })} hasLatency={false} canEditBilling={false} onEditBilling={noop} />
+        <ServerStatusCard server={serverOf({ status: 'offline', lastSeenAt: '2026-11-20T00:00:00Z' })} canEditBilling={false} onEditBilling={noop} />
       </MemoryRouter>
     ))
     expect(screen.getByText('面板还没有报过资源数据')).toBeDefined()

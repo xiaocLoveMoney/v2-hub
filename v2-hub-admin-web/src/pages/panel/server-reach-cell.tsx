@@ -1,7 +1,6 @@
 import { Space, Tag } from 'antd'
 import type { Server } from '../../api/client'
-
-const EMPTY = '—'
+import { EMPTY } from './host-labels'
 
 /** 一台服务器上大陆连通检测的概况：有被墙或部分不通的地址就标出个数；否则说明有几个地址测出来是正常的。 */
 export function ServerReachCell({ reach }: { reach: Server['reach'] }) {

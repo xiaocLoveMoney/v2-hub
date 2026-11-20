@@ -1,4 +1,7 @@
+import dayjs from 'dayjs'
 import type { LatencyPoint } from '../../../api/client'
+import { centsToAmount } from '../../../money'
+import { BYTES_PER_GB } from '../../users/quota'
 
 /** 服务器状态卡片的格式化与阈值（docs/05 服务器状态卡片，Ruling-83 – Ruling-86）。 */
 
@@ -7,8 +10,9 @@ const BYTE_UNITS = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'] as const
 const SECONDS_PER_DAY = 86400
 const SECONDS_PER_HOUR = 3600
 const MS_PER_DAY = 86400000
-const CENTS_PER_UNIT = 100
-const PERCENT_FULL = 100
+export const PERCENT_FULL = 100
+/** 接口里日期（到期日、周期起止）的格式。 */
+export const DATE_FORMAT = 'YYYY-MM-DD'
 /** 三位有效数字：小于 10 的保留两位小数，小于 100 的保留一位，其余取整。 */
 const DECIMALS_SMALL = 2
 const DECIMALS_MEDIUM = 1
@@ -16,13 +20,13 @@ const SMALL_LIMIT = 10
 const MEDIUM_LIMIT = 100
 
 /** 用量阈值（百分比）：到 WARN 变橙、到 DANGER 变红。 */
-export const USAGE_WARN_PERCENT = 70
-export const USAGE_DANGER_PERCENT = 90
+const USAGE_WARN_PERCENT = 70
+const USAGE_DANGER_PERCENT = 90
 /** 延迟阈值（毫秒）与丢包阈值（百分比）。 */
-export const LATENCY_WARN_MS = 200
-export const LATENCY_DANGER_MS = 300
-export const LOSS_WARN_PERCENT = 1
-export const LOSS_DANGER_PERCENT = 10
+const LATENCY_WARN_MS = 200
+const LATENCY_DANGER_MS = 300
+const LOSS_WARN_PERCENT = 1
+const LOSS_DANGER_PERCENT = 10
 
 /** 一格或一个数值的状态：正常、偏高、过高、没有数据。 */
 export type Level = 'ok' | 'warn' | 'danger' | 'empty'
@@ -111,10 +115,7 @@ export function daysBetween(today: string, date: string): number {
 
 /** 当前时刻在本地时区的日期（YYYY-MM-DD）。 */
 export function localToday(now: number): string {
-  const d = new Date(now)
-  const month = String(d.getMonth() + 1).padStart(2, '0')
-  const date = String(d.getDate()).padStart(2, '0')
-  return `${d.getFullYear()}-${month}-${date}`
+  return dayjs(now).format(DATE_FORMAT)
 }
 
 /** 计费周期的显示名。 */
@@ -135,7 +136,7 @@ export const TRAFFIC_MODE_LABELS: Record<string, string> = {
 
 /** 价格，如 $49.90/年；币种不被浏览器认识时按“49.90 XXX”。 */
 export function formatPrice(cents: number, currency: string, cycle: string): string {
-  const amount = cents / CENTS_PER_UNIT
+  const amount = centsToAmount(cents)
   let text: string
   try {
     text = new Intl.NumberFormat('zh-CN', { style: 'currency', currency }).format(amount)
@@ -149,20 +150,5 @@ export function formatPrice(cents: number, currency: string, cycle: string): str
 
 /** 字节换算成 GB（1024 进位），给表单用。 */
 export function bytesToGiB(bytes: number): number {
-  return bytes / BYTE_STEP ** 3
-}
-
-/** GB 换算成字节（取整）。 */
-export function gibToBytes(gib: number): number {
-  return Math.round(gib * BYTE_STEP ** 3)
-}
-
-/** 元换算成分（取整）。 */
-export function unitsToCents(units: number): number {
-  return Math.round(units * CENTS_PER_UNIT)
-}
-
-/** 分换算成元。 */
-export function centsToUnits(cents: number): number {
-  return cents / CENTS_PER_UNIT
+  return bytes / BYTES_PER_GB
 }

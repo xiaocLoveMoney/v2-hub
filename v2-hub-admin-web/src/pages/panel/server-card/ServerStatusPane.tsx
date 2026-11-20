@@ -30,7 +30,6 @@ export function ServerStatusPane({ server, onChanged }: ServerStatusPaneProps) {
         <ServerStatusCard
           server={server}
           trend={trend}
-          hasLatency={trend !== undefined && trend.latency !== null}
           canEditBilling={can(PERMISSIONS.SERVER_WRITE)}
           onEditBilling={() => setIsEditingBilling(true)}
           isDetail

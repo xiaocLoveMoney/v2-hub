@@ -10,15 +10,18 @@ import {
   UpOutlined,
 } from '@ant-design/icons'
 import { Button, Card, Tag, Tooltip } from 'antd'
-import { useState, type ReactNode } from 'react'
+import { memo, useState } from 'react'
 import { Link, useNavigate } from 'react-router'
 import type { LatencyPoint, LatencySeries, Server, ServerTrend } from '../../../api/client'
 import { formatTime } from '../../system/format'
 import { countryName } from '../countries'
-import { ServerStatusTag } from '../status'
+import { EMPTY } from '../host-labels'
+import { ServerReachCell } from '../server-reach-cell'
+import { PlainHttpTag, ServerStatusTag } from '../status'
 import { ServerCardDetails } from './ServerCardDetails'
 import { HistoryBar, SegmentBar, type HistoryCell } from './SegmentBar'
 import {
+  PERCENT_FULL,
   daysBetween,
   formatBytes,
   formatPercent,
@@ -34,7 +37,6 @@ import {
 
 /** 历史条与速率小图的格数，与接口给的点数一致（hub-api ServerTrend）。 */
 const HISTORY_SLOTS = 30
-const PERCENT_FULL = 100
 const SPARK_WIDTH = 120
 const SPARK_HEIGHT = 18
 const ISPS: readonly { key: keyof LatencySeries; label: string }[] = [
@@ -42,23 +44,18 @@ const ISPS: readonly { key: keyof LatencySeries; label: string }[] = [
   { key: 'unicom', label: '联通' },
   { key: 'mobile', label: '移动' },
 ]
-const EMPTY = '—'
 /** 离到期不足这么多天时到期天数标红。 */
 const EXPIRY_WARN_DAYS = 7
 
 interface ServerStatusCardProps {
   server: Server
-  /** 列表接口给的速率与延迟近况；没有为 undefined。 */
+  /** 列表接口给的速率与延迟近况；没有为 undefined。延迟检测开着时才带 latency（Ruling-86）。 */
   trend?: ServerTrend
-  /** 三网延迟检测开着（列表或详情的趋势里带了 latency）。 */
-  hasLatency: boolean
   /** 有 server:write，可以改账单。 */
   canEditBilling: boolean
   onEditBilling: (server: Server) => void
-  /** 详情页里用：不再显示跳转详情的按钮，细节默认展开。 */
+  /** 详情页里用：不再显示名称、明文 HTTP 警告、大陆连通概况与跳转详情的按钮（页头已有），细节默认展开。 */
   isDetail?: boolean
-  /** 标题旁的额外标签（如明文 HTTP 警告、大陆连通概况）。 */
-  badges?: ReactNode
 }
 
 /** 速率小图：最近若干个 5 分钟时段的上行或下行，按最大值归一画折线。 */
@@ -77,7 +74,6 @@ function Sparkline({ values, ariaLabel }: { values: number[]; ariaLabel: string 
 }
 
 interface MetricProps {
-  icon?: ReactNode
   label: string
   value: string
   unit?: string
@@ -87,14 +83,11 @@ interface MetricProps {
 }
 
 /** 四宫格里的一项：名称、读数、副标题与分段条。 */
-function Metric({ icon, label, value, unit, sub, percent, tone }: MetricProps) {
+function Metric({ label, value, unit, sub, percent, tone }: MetricProps) {
   return (
     <div className="server-card-metric">
       <div className="server-card-metric-head">
-        <span className="server-card-label">
-          {icon}
-          {label}
-        </span>
+        <span className="server-card-label">{label}</span>
         <span className={`server-card-value value-${usageLevel(percent)}`}>
           {value}
           {unit !== undefined && <small>{unit}</small>}
@@ -115,7 +108,7 @@ function latencyCells(points: LatencyPoint[], kind: 'latency' | 'loss'): History
 }
 
 /** 三网延迟：每家一行，左边延迟历史、右边丢包历史，读数取最近一次。 */
-function LatencyRows({ latency }: { latency: LatencySeries }) {
+const LatencyRows = memo(function LatencyRows({ latency }: { latency: LatencySeries }) {
   const hasAny = ISPS.some((isp) => latency[isp.key].length > 0)
   if (!hasAny) {
     return <div className="server-card-sub">三网延迟还没有检测结果</div>
@@ -156,7 +149,7 @@ function LatencyRows({ latency }: { latency: LatencySeries }) {
       })}
     </div>
   )
-}
+})
 
 /** 流量额度：有额度时显示剩余与进度条，没有时只显示本周期已用；都带“N 天后重置”。 */
 function TrafficQuota({ server, today }: { server: Server; today: string }) {
@@ -195,9 +188,9 @@ function TrafficQuota({ server, today }: { server: Server; today: string }) {
 
 /**
  * 服务器状态卡片（docs/05 服务器状态卡片，Ruling-83 – Ruling-86）：资源四宫格、实时速率、流量额度、三网延迟、在线与到期。
- * 服务器不在线时整卡置灰，读数是掉线前最后一份。
+ * 服务器不在线时整卡置灰，读数是掉线前最后一份。memo：轮询中途的重渲染（加载状态变化）数据没变就跳过。
  */
-export function ServerStatusCard({ server, trend, hasLatency, canEditBilling, onEditBilling, isDetail = false, badges }: ServerStatusCardProps) {
+export const ServerStatusCard = memo(function ServerStatusCard({ server, trend, canEditBilling, onEditBilling, isDetail = false }: ServerStatusCardProps) {
   const [isExpanded, setIsExpanded] = useState(isDetail)
   const navigate = useNavigate()
   const res = server.resources
@@ -236,7 +229,8 @@ export function ServerStatusCard({ server, trend, hasLatency, canEditBilling, on
           )}
           {!isDetail && <Link className="server-card-name" to={`/servers/${server.id}`}>{server.name}</Link>}
           {!isDetail && <ServerStatusTag status={server.status} lastError={server.lastError} isDisabled={server.isDisabled} />}
-          {badges}
+          {!isDetail && <PlainHttpTag baseUrl={server.baseUrl} />}
+          {!isDetail && server.reach !== null && server.reach.total > 0 && <ServerReachCell reach={server.reach} />}
           {/* 详情页：IP、系统等标签并进标题行 */}
           {isDetail && tags}
         </div>
@@ -294,7 +288,7 @@ export function ServerStatusCard({ server, trend, hasLatency, canEditBilling, on
 
       <TrafficQuota server={server} today={today} />
 
-      {hasLatency && latency !== null && (
+      {latency !== null && (
         <div className="server-card-section">
           <LatencyRows latency={latency} />
         </div>
@@ -331,4 +325,4 @@ export function ServerStatusCard({ server, trend, hasLatency, canEditBilling, on
       {isExpanded && <ServerCardDetails server={server} />}
     </Card>
   )
-}
+})

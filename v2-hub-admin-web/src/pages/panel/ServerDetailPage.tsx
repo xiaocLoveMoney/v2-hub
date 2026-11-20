@@ -1,10 +1,11 @@
 import { PlusOutlined } from '@ant-design/icons'
 import { Alert, App, Button, Descriptions, Popconfirm, Space, Switch, Table, Tabs, Tag, Tooltip, Typography, type TableProps } from 'antd'
 import { useCallback, useState } from 'react'
-import { Link, useParams, useSearchParams } from 'react-router'
+import { Link, useParams } from 'react-router'
 import { api, csrfHeader, type Endpoint, type HostTask, type Inbound, type Server } from '../../api/client'
 import { useSession } from '../../auth/session-context'
 import { mutate, useRemote } from '../../hooks/use-remote'
+import { useTabParam } from '../../hooks/use-tab-param'
 import { PERMISSIONS, ROUTES } from '../../menu'
 import { TABLE_SCROLL, formatTime } from '../system/format'
 import { ChainApplyCard } from './ChainApplyCard'
@@ -22,8 +23,7 @@ import { ServerStatusPane } from './server-card/ServerStatusPane'
 import { formatCountry } from './countries'
 import { ErrorAlert } from '../../components/ErrorAlert'
 
-/** 详情页的页签（Ruling-88），记在地址栏的 ?tab= 里；不认识的值按默认的“入站与节点”。 */
-const TAB_PARAM = 'tab'
+/** 详情页的页签（Ruling-88）；默认“入站与节点”。 */
 const TAB_INBOUNDS = 'inbounds'
 const TAB_STATUS = 'status'
 const TAB_SETTINGS = 'settings'
@@ -95,7 +95,6 @@ export function ServerDetailPage() {
   )
   const server = useRemote<Server>(loadServer)
   const inbounds = useRemote<Inbound[]>(loadInbounds)
-  const [searchParams, setSearchParams] = useSearchParams()
 
   const reloadAll = () => {
     server.reload()
@@ -274,8 +273,7 @@ export function ServerDetailPage() {
     { key: TAB_SETTINGS, label: '设置', children: settingsPane },
     ...(srv !== null && can(PERMISSIONS.HOST_READ) ? [{ key: TAB_SSH, label: 'SSH 运维', children: <HostOpsCard server={srv} onChanged={reloadAll} /> }] : []),
   ]
-  const requestedTab = searchParams.get(TAB_PARAM) ?? TAB_INBOUNDS
-  const activeTab = tabItems.some((t) => t.key === requestedTab) ? requestedTab : TAB_INBOUNDS
+  const [activeTab, setTab] = useTabParam(tabItems.map((t) => t.key), TAB_INBOUNDS)
   // 新建入站时预填 Host 与 SNI 用的域名：先看已有的对外地址，再看面板地址（docs/03 §5.2 入站预填）
   const serverDomain = serverDomainOf([...(inbounds.data ?? []).flatMap((i) => i.endpoints.map((e) => e.address)), srv?.baseUrl ?? ''])
   return (
@@ -300,7 +298,7 @@ export function ServerDetailPage() {
         <Tabs
           activeKey={activeTab}
           destroyOnHidden
-          onChange={(key) => setSearchParams(key === TAB_INBOUNDS ? {} : { [TAB_PARAM]: key }, { replace: true })}
+          onChange={setTab}
           items={tabItems}
         />
       )}

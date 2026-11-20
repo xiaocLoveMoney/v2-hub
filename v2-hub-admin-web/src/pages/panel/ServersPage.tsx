@@ -1,10 +1,12 @@
 import { PlusOutlined } from '@ant-design/icons'
 import { App, Button, Popconfirm, Space, Table, Tabs, type TableProps } from 'antd'
 import { useState } from 'react'
-import { Link, useSearchParams } from 'react-router'
+import { Link } from 'react-router'
 import { api, csrfHeader, toApiError, type Server } from '../../api/client'
 import { useSession } from '../../auth/session-context'
 import { mutate, useRemote } from '../../hooks/use-remote'
+import { useTabParam } from '../../hooks/use-tab-param'
+import { EMPTY } from './host-labels'
 import { ServerStatusBoard } from './server-card/ServerStatusBoard'
 import { formatPercent, percentOf } from './server-card/server-card-format'
 import { ServerReachCell } from './server-reach-cell'
@@ -17,13 +19,12 @@ import { ErrorAlert } from '../../components/ErrorAlert'
 import { PageHeader } from '../../components/PageHeader'
 
 const loadServers = (signal: AbortSignal) => api.GET('/api/admin/servers', { signal })
-/** 页签（Ruling-88）记在地址栏的 ?tab= 里：默认“管理”，“运行状态”是只读的卡片墙。 */
-const TAB_PARAM = 'tab'
+/** 页签（Ruling-88）：默认“管理”，“运行状态”是只读的卡片墙。 */
 const TAB_MANAGE = 'manage'
 const TAB_STATUS = 'status'
+const TAB_KEYS = [TAB_MANAGE, TAB_STATUS]
 /** “大陆连通”列插在“状态”列后面。 */
 const REACH_COLUMN_INDEX = 3
-const EMPTY = '—'
 
 /** 服务器（server:read 查看，server:write 接入 / 编辑 / 同步 / 移除）；“管理”页签是表格，“运行状态”页签是状态卡片（Ruling-88）。 */
 export function ServersPage() {
@@ -31,8 +32,7 @@ export function ServersPage() {
   const { message } = App.useApp()
   const canWrite = can(PERMISSIONS.SERVER_WRITE)
   const servers = useRemote<Server[]>(loadServers)
-  const [searchParams, setSearchParams] = useSearchParams()
-  const activeTab = searchParams.get(TAB_PARAM) === TAB_STATUS ? TAB_STATUS : TAB_MANAGE
+  const [activeTab, setTab] = useTabParam(TAB_KEYS, TAB_MANAGE)
   const [editing, setEditing] = useState<Server | null>(null)
   const [isCreating, setIsCreating] = useState(false)
   const [syncingId, setSyncingId] = useState<number | null>(null)
@@ -100,23 +100,26 @@ export function ServersPage() {
   if (hasReach) {
     columns.splice(REACH_COLUMN_INDEX, 0, { title: '大陆连通', key: 'reach', render: (_: unknown, s: Server) => <ServerReachCell reach={s.reach} /> })
   }
-  const renderActions = (s: Server) => (
-    <Space>
-      <Button size="small" loading={syncingId === s.id} disabled={s.isDisabled} onClick={() => void handleSync(s)}>
-        同步
-      </Button>
-      <Button size="small" onClick={() => setEditing(s)}>
-        编辑
-      </Button>
-      <Popconfirm title={`移除服务器 ${s.name}？`} description="只删除平台记录（入站缓存、节点），不改动面板" onConfirm={() => handleDelete(s)}>
-        <Button size="small" danger>
-          移除
-        </Button>
-      </Popconfirm>
-    </Space>
-  )
   if (canWrite) {
-    columns.push({ title: '操作', key: 'actions', render: (_: unknown, s: Server) => renderActions(s) })
+    columns.push({
+      title: '操作',
+      key: 'actions',
+      render: (_: unknown, s: Server) => (
+        <Space>
+          <Button size="small" loading={syncingId === s.id} disabled={s.isDisabled} onClick={() => void handleSync(s)}>
+            同步
+          </Button>
+          <Button size="small" onClick={() => setEditing(s)}>
+            编辑
+          </Button>
+          <Popconfirm title={`移除服务器 ${s.name}？`} description="只删除平台记录（入站缓存、节点），不改动面板" onConfirm={() => handleDelete(s)}>
+            <Button size="small" danger>
+              移除
+            </Button>
+          </Popconfirm>
+        </Space>
+      ),
+    })
   }
 
   return (
@@ -132,7 +135,7 @@ export function ServersPage() {
       <Tabs
         activeKey={activeTab}
         destroyOnHidden
-        onChange={(key) => setSearchParams(key === TAB_STATUS ? { [TAB_PARAM]: key } : {}, { replace: true })}
+        onChange={setTab}
         items={[
           {
             key: TAB_MANAGE,
@@ -144,7 +147,7 @@ export function ServersPage() {
               </>
             ),
           },
-          { key: TAB_STATUS, label: '运行状态', children: <ServerStatusBoard /> },
+          { key: TAB_STATUS, label: '运行状态', children: <ServerStatusBoard servers={servers} /> },
         ]}
       />
       <ServerFormModal
