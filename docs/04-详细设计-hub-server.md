@@ -139,6 +139,8 @@ IP 换国家在 `internal/manager/geoip`：`Locator` 接口 + HTTP 实现，查�
 手动检测按管理员频控（`ratelimit.FailureGuard`）。`job.RunReach` 按配置 `reach.checkInterval`（默认 1 分钟）驱动；功能开关、检测间隔与是否通知在系统设置的 `reach` 分组。
 节点列表与服务器列表的结论由 handler 调 `ReachService.NodeBriefs` / `ServerCounts` 拼上，`PanelService` 不依赖连通检测。
 
+图片上传（Ruling-89）：对象存储封装在 `internal/manager/objectstore`——`Store` 接口（只有 `Put`）+ S3 实现（标准库手写 SigV4、单次 PUT、path-style，对 MinIO 用），地址、桶、区域在配置 `upload` 段（环境变量 `HUB_UPLOAD_ENDPOINT` 可覆盖地址，本机开发指向 :19000），账号只走 `HUB_UPLOAD_USER` / `HUB_UPLOAD_PASSWORD`，缺任一即不注入、上传返回 `feature_disabled`。`service/upload.go` 的 `UploadService`：按内容判断类型（`http.DetectContentType`，白名单 PNG / JPEG / GIF / WebP）、限大小、按管理员频控（`ratelimit.FailureGuard`）、生成 `年月/随机名.扩展名`、写入后记审计。handler 用 `http.MaxBytesReader` 先卡住请求体，只读 multipart 的 `file` 一个字段。
+
 ## 7. 接口待补 / 契约缺口
 
 - 见《任务与边界》契约缺口节。
