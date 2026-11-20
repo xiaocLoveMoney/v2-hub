@@ -98,7 +98,7 @@ function ChainBody({ overview, onChanged }: { overview: ChainOverview; onChanged
         <ExitsCard overview={overview} onChanged={onChanged} />
         <NotesCard />
       </div>
-      <ChainFlowCard kind={kind} routes={kind === KIND_SERVER ? overview.serverRoutes : overview.clientRoutes} />
+      <ChainFlowCard overview={overview} kind={kind} onChanged={onChanged} />
     </>
   )
 }

@@ -609,85 +609,316 @@
   }
 }
 
-/* ---- 链路示意（链式代理页）：积木 + 平滑曲线 ---- */
-.hub-flow-scroll {
-  overflow-x: auto;
+/* ---- 链路示意（链式代理页，Ruling-91）：React Flow 画布，配色全部取设计变量 ---- */
+.hub-canvas {
+  position: relative;
+  height: clamp(380px, 64vh, 680px);
+  margin-top: 8px;
+  overflow: hidden;
+  background: var(--hub-surface-alt);
+  border: 1px solid var(--hub-border);
+  border-radius: var(--hub-radius);
 }
 
-.hub-flow {
-  display: block;
-  width: 100%;
-  min-width: 640px;
+/* 全屏：盖住外壳（侧栏 30），但在模态框（50）之下，编辑框照常弹在上面 */
+.hub-canvas.is-fullscreen {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
   height: auto;
-  margin-inline: auto;
+  margin: 0;
+  border: 0;
+  border-radius: 0;
 }
 
-.hub-flow-block-bg {
-  fill: var(--hub-surface);
-  stroke: var(--hub-border);
-  stroke-width: 1;
-  filter: drop-shadow(0 4px 8px rgb(52 57 94 / 8%));
+.hub-canvas .react-flow {
+  --xy-background-color: var(--hub-surface-alt);
+  --xy-background-pattern-color: var(--hub-border);
+  --xy-edge-stroke: var(--hub-border);
+  --xy-controls-button-background-color: var(--hub-surface);
+  --xy-controls-button-background-color-hover: var(--hub-primary-faint);
+  --xy-controls-button-color: var(--hub-body);
+  --xy-controls-button-border-color: var(--hub-border);
+  --xy-controls-box-shadow: var(--hub-card-shadow);
+  --xy-minimap-background-color: var(--hub-surface);
+  --xy-minimap-mask-background-color: rgb(240 241 254 / 70%);
+  --xy-minimap-node-background-color: var(--hub-primary-light);
+  --xy-attribution-background-color: transparent;
+
+  font-family: var(--hub-font);
 }
 
-.hub-flow-block.is-active .hub-flow-block-bg {
-  stroke: var(--hub-primary-glow);
+.hub-canvas .react-flow__node {
+  cursor: pointer;
 }
 
-.hub-flow-icon-bg {
-  fill: var(--flow-tone, var(--hub-primary));
+.hub-canvas .react-flow__node.dragging {
+  cursor: grabbing;
 }
 
-.hub-flow-device {
-  --flow-tone: var(--hub-primary);
+.hub-canvas .react-flow__handle {
+  width: 8px;
+  min-width: 0;
+  height: 8px;
+  min-height: 0;
+  background: var(--hub-surface);
+  border: 1.5px solid var(--hub-muted);
 }
 
-.hub-flow-entry {
-  --flow-tone: var(--hub-info);
+.hub-canvas .is-active > .react-flow__handle {
+  border-color: var(--hub-primary);
 }
 
-.hub-flow-exit {
-  --flow-tone: var(--hub-success);
+.hub-canvas-node {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  box-sizing: border-box;
+  width: 100%;
+  height: 100%;
+  padding: 0 12px;
+  background: var(--hub-surface);
+  border: 1px solid var(--hub-border);
+  border-radius: 8px;
+  box-shadow: 0 4px 8px rgb(52 57 94 / 8%);
+  transition: box-shadow 0.15s, border-color 0.15s;
 }
 
-.hub-flow-block:not(.is-active) .hub-flow-icon-bg {
-  fill: var(--hub-muted);
+.hub-canvas-node.is-active {
+  border-color: var(--hub-primary-glow);
 }
 
-.hub-flow-icon {
+.hub-canvas-node:not(.is-active) {
+  border-style: dashed;
+}
+
+.hub-canvas .react-flow__node:hover .hub-canvas-node,
+.hub-canvas .react-flow__node.selected .hub-canvas-node {
+  border-color: var(--hub-primary);
+  box-shadow: var(--hub-glow) var(--hub-primary-glow);
+}
+
+.hub-canvas-icon {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
   color: var(--hub-on-color);
+  background: var(--canvas-tone, var(--hub-primary));
+  border-radius: 6px;
 }
 
-.hub-flow-title {
+.hub-canvas-device {
+  --canvas-tone: var(--hub-primary);
+}
+
+.hub-canvas-entry {
+  --canvas-tone: var(--hub-info);
+}
+
+.hub-canvas-exit {
+  --canvas-tone: var(--hub-success);
+}
+
+.hub-canvas-node:not(.is-active) .hub-canvas-icon {
+  background: var(--hub-muted);
+}
+
+.hub-canvas-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.hub-canvas-title {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  min-width: 0;
+  overflow: hidden;
   font-size: 13px;
   font-weight: 700;
-  fill: var(--hub-heading);
+  color: var(--hub-heading);
+  white-space: nowrap;
 }
 
-.hub-flow-sub {
+.hub-canvas-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hub-canvas-sub {
+  overflow: hidden;
   font-size: 11px;
-  fill: var(--hub-muted);
+  color: var(--hub-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.hub-flow-handle {
-  fill: var(--hub-surface);
-  stroke: var(--hub-muted);
-  stroke-width: 1.5;
+.hub-canvas-sub.is-success {
+  color: var(--hub-success);
 }
 
-.hub-flow-block.is-active .hub-flow-handle {
-  stroke: var(--hub-primary);
+.hub-canvas-sub.is-info {
+  color: var(--hub-info);
 }
 
-.hub-flow-link {
-  fill: none;
+.hub-canvas-sub.is-danger {
+  color: var(--hub-danger);
+}
+
+.hub-canvas-sub.is-warning {
+  color: var(--hub-warning);
+}
+
+/* 一个落地的区域：浅底虚框，标题行可拖动整块 */
+.hub-canvas-group {
+  box-sizing: border-box;
+  width: 100%;
+  height: 100%;
+  background: rgb(240 241 254 / 55%);
+  border: 1.5px dashed var(--hub-border);
+  border-radius: 10px;
+}
+
+.hub-canvas-group.is-active {
+  border-color: var(--hub-primary-glow);
+}
+
+.hub-canvas .react-flow__node.selected > .hub-canvas-group,
+.hub-canvas .react-flow__node:hover > .hub-canvas-group {
+  border-color: var(--hub-primary);
+}
+
+.hub-canvas-group-head {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  height: 34px;
+  padding: 0 14px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--hub-heading);
+}
+
+.hub-canvas-group-head > svg {
+  flex: none;
+  color: var(--hub-success);
+}
+
+.hub-canvas-group-count {
+  flex: none;
+  margin-left: auto;
+  font-weight: 600;
+  color: var(--hub-muted);
+}
+
+.hub-canvas-link {
   stroke: var(--hub-border);
   stroke-width: 2;
   stroke-dasharray: 5 5;
 }
 
-.hub-flow-link.is-active {
+.hub-canvas-link.is-active {
   stroke: var(--hub-primary-glow);
   stroke-dasharray: none;
+}
+
+.hub-canvas .react-flow__edge:hover .hub-canvas-link {
+  stroke: var(--hub-primary);
+}
+
+.hub-canvas .hub-flow-pulse {
+  pointer-events: none;
+}
+
+.hub-canvas-toolbar {
+  display: flex;
+  gap: 8px;
+}
+
+.hub-canvas-toolbar .hub-btn {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+  background: var(--hub-surface);
+}
+
+.hub-canvas-pick {
+  width: min(340px, calc(100% - 30px));
+  max-height: calc(100% - 30px);
+  padding: 12px 14px;
+  overflow: auto;
+  background: var(--hub-surface);
+  border-radius: 8px;
+  box-shadow: var(--hub-float-shadow);
+}
+
+.hub-canvas-pick-head {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+  font-weight: 700;
+  color: var(--hub-heading);
+}
+
+.hub-canvas-pick-close {
+  display: inline-flex;
+  padding: 2px;
+  color: var(--hub-muted);
+  cursor: pointer;
+  background: none;
+  border: 0;
+}
+
+.hub-canvas-pick-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0;
+  margin: 8px 0 0;
+  list-style: none;
+}
+
+.hub-canvas-pick-list li {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.hub-canvas-pick-list .hub-canvas-name {
+  flex: 1;
+}
+
+@media (width < 640px) {
+  .hub-canvas-minimap {
+    display: none;
+  }
+
+  .hub-canvas-toolbar .hub-btn {
+    padding-inline: 10px;
+  }
+
+  /* 只藏起视觉文字，读屏仍读得到 */
+  .hub-canvas-btn-text {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  /* 给右上角的两个图标按钮留出位置 */
+  .hub-canvas-pick {
+    width: calc(100% - 130px);
+  }
 }
 
 /* 生效连线上沿流向移动的光点 */
