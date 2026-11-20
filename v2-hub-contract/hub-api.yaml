@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: v2-hub API
-  version: 0.14.1
+  version: 0.15.0
   description: |
     v2-hub 对外接口契约（hub-server 提供，v2-hub-admin-web / v2-hub-user-web 消费）。
     - 管理端接口前缀 /api/admin，客户端接口前缀 /api/user，订阅端点前缀 /sub。
@@ -30,6 +30,9 @@ info:
     0.12.0：SSH 托管与面板部署（docs/03 §5.22，Ruling-68 – Ruling-71）——新增 SSH 凭据、托管主机、主机任务与动作接口（权限码 host:read / host:write），
       给已接入的服务器绑定 SSH（PUT /api/admin/servers/{id}/host），服务器带 hostId。
     0.14.1：节点显示名的前缀 / 后缀（Ruling-80）——一键部署参数加 namePrefix / nameSuffix，新增 POST /api/admin/nodes/affix。
+    0.15.0：服务器状态卡片（Ruling-81 – Ruling-84）——服务器的 statusSnapshot 换成类型化的 resources，另带 publicIpv4 / publicIpv6、onlineClients、
+      billing、traffic、host；连接测试结果的 status 同样换成 resources；新增 PUT /api/admin/servers/{id}/billing、GET /api/admin/servers/{id}/metrics、
+      GET /api/admin/servers/trends；系统设置增加 latency 分组。
 servers:
   - url: http://127.0.0.1:8080
     description: 本地开发
@@ -634,6 +637,27 @@ paths:
         "403": { $ref: "#/components/responses/PermissionDenied" }
         "409": { $ref: "#/components/responses/Conflict" }
         "502": { $ref: "#/components/responses/UpstreamUnavailable" }
+  /api/admin/servers/trends:
+    get:
+      tags: [admin-panel]
+      operationId: listServerTrends
+      summary: 各服务器最近的速率与三网延迟（server:read；Ruling-83、Ruling-84，0.15.0），给服务器列表的卡片用
+      description: 每台服务器最近 30 个 5 分钟时段的上下行速率，与三家运营商各自最近 30 次延迟检测；没有数据的服务器不出现在结果里。
+      responses:
+        "200":
+          description: 按服务器的近况
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: "#/components/schemas/ServerTrend" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
   /api/admin/servers/test:
     post:
       tags: [admin-panel]
@@ -1383,6 +1407,58 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/ServerEnvelope" }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/admin/servers/{id}/billing:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    put:
+      tags: [admin-panel]
+      operationId: setServerBilling
+      summary: 保存服务器的账单与流量额度（server:write；Ruling-82，0.15.0）
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ServerBillingInput" }
+      responses:
+        "200":
+          description: 修改后的服务器
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ServerEnvelope" }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/admin/servers/{id}/metrics:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    get:
+      tags: [admin-panel]
+      operationId: getServerMetrics
+      summary: 一台服务器的资源趋势与三网延迟（server:read；Ruling-83、Ruling-84，0.15.0）
+      description: 近 24 小时为原值（资源 5 分钟一点，延迟每次检测一点），近 7 天按小时平均；服务器不在线的时段没有点。
+      parameters:
+        - name: range
+          in: query
+          required: false
+          schema: { $ref: "#/components/schemas/MetricRange" }
+      responses:
+        "200":
+          description: 趋势点，按时间升序
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/ServerMetrics" }
         "400": { $ref: "#/components/responses/InvalidArgument" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "403": { $ref: "#/components/responses/PermissionDenied" }
@@ -5368,13 +5444,15 @@ components:
       properties:
         version: { type: string }
         guid: { type: string }
-        status:
-          type: [object, "null"]
-          additionalProperties: true
-          description: 资源快照（cpu、mem、uptime、xray 运行状态等，原样透传，字段随面板而定）
+        resources:
+          oneOf:
+            - $ref: "#/components/schemas/ServerResources"
+            - type: "null"
+          description: 资源快照（0.15.0，Ruling-81）
     Server:
       type: object
-      required: [id, name, providerType, baseUrl, tlsMode, region, remark, isDisabled, status, lastError, panelVersion, inboundCount, createdAt, reach, hostId, clientFlow]
+      required: [id, name, providerType, baseUrl, tlsMode, region, remark, isDisabled, status, lastError, panelVersion, inboundCount, createdAt, reach, hostId, clientFlow,
+                 resources, publicIpv4, publicIpv6, onlineClients, billing, traffic, host]
       properties:
         id: { type: integer, format: int64 }
         name: { type: string }
@@ -5390,7 +5468,21 @@ components:
         lastSeenAt: { type: [string, "null"], format: date-time }
         lastSyncedAt: { type: [string, "null"], format: date-time }
         panelVersion: { type: string }
-        statusSnapshot: { type: [object, "null"], additionalProperties: true }
+        resources:
+          oneOf:
+            - $ref: "#/components/schemas/ServerResources"
+            - type: "null"
+          description: 最近一次探测成功的资源快照（0.15.0，Ruling-81）；还没探测成功过为 null。服务器不在线时是掉线前的最后一份
+        publicIpv4: { type: string, description: 面板自报的公网 IPv4，没报为空串（0.15.0） }
+        publicIpv6: { type: string, description: 面板自报的公网 IPv6，没报为空串（0.15.0） }
+        onlineClients: { type: integer, description: 面板在线 client 数（0.15.0） }
+        billing: { $ref: "#/components/schemas/ServerBilling" }
+        traffic: { $ref: "#/components/schemas/ServerTraffic" }
+        host:
+          oneOf:
+            - $ref: "#/components/schemas/ServerHostBrief"
+            - type: "null"
+          description: 关联的托管主机的系统信息（0.15.0）；没有关联为 null
         inboundCount: { type: integer }
         createdAt: { type: string, format: date-time }
         hostId: { type: [integer, "null"], format: int64, description: 关联的托管主机（0.12.0，docs/03 §5.22）；没有为 null }
@@ -5404,6 +5496,145 @@ components:
             ok: { type: integer, description: 其中结论为 ok 的；其余可能是还没测、未知或端口不通 }
             blocked: { type: integer }
             partial: { type: integer }
+    ServerResources:
+      type: object
+      description: 服务器资源快照，平台的中立模型（0.15.0，Ruling-81）；面板没报的数值为 0
+      required: [cpu, cpuCores, memUsed, memTotal, swapUsed, swapTotal, diskUsed, diskTotal, load1, load5, load15, uptimeSeconds,
+                 tcpCount, udpCount, netUpRate, netDownRate, netSent, netRecv, coreState, coreVersion]
+      properties:
+        cpu: { type: [number, "null"], description: CPU 占用百分比，面板没报为 null }
+        cpuCores: { type: integer }
+        memUsed: { type: integer, format: int64, description: 字节 }
+        memTotal: { type: integer, format: int64 }
+        swapUsed: { type: integer, format: int64 }
+        swapTotal: { type: integer, format: int64 }
+        diskUsed: { type: integer, format: int64 }
+        diskTotal: { type: integer, format: int64 }
+        load1: { type: number, description: 1 分钟平均负载 }
+        load5: { type: number }
+        load15: { type: number }
+        uptimeSeconds: { type: integer, format: int64, description: 开机时长 }
+        tcpCount: { type: integer }
+        udpCount: { type: integer }
+        netUpRate: { type: integer, format: int64, description: 上行速率，字节每秒 }
+        netDownRate: { type: integer, format: int64, description: 下行速率，字节每秒 }
+        netSent: { type: integer, format: int64, description: 开机以来网卡累计发送字节 }
+        netRecv: { type: integer, format: int64, description: 开机以来网卡累计接收字节 }
+        coreState: { type: string, description: "内核运行状态：running 为在运行，其它值为没在运行，空串为面板没报" }
+        coreVersion: { type: string, description: 内核版本，面板没报为空串 }
+    BillingCycle:
+      type: string
+      enum: [month, quarter, half_year, year, once]
+    TrafficMode:
+      type: string
+      description: 流量额度的计量方式：both 收发合计，out 只算出站，max 收发取大
+      enum: [both, out, max]
+    ServerBilling:
+      type: object
+      description: 服务器的账单与流量额度（0.15.0，docs/03 §5.1，Ruling-82）
+      required: [priceCents, priceCurrency, billingCycle, expiresOn, trafficQuotaBytes, trafficResetDay, trafficMode]
+      properties:
+        priceCents: { type: [integer, "null"], minimum: 0, maximum: 99999999, description: 价格，整数分；没填为 null }
+        priceCurrency: { type: string, pattern: "^[A-Z]{3}$", description: 币种，三位大写字母 }
+        billingCycle: { $ref: "#/components/schemas/BillingCycle" }
+        expiresOn: { type: [string, "null"], format: date, description: 到期日（站点时区）；没填为 null }
+        trafficQuotaBytes: { type: [integer, "null"], format: int64, minimum: 0, description: 每月流量额度；不限或没填为 null }
+        trafficResetDay: { type: integer, minimum: 1, maximum: 31, description: 每月几号重置，当月没有这一天取月末 }
+        trafficMode: { $ref: "#/components/schemas/TrafficMode" }
+    ServerBillingInput:
+      allOf:
+        - $ref: "#/components/schemas/ServerBilling"
+        - type: object
+          properties:
+            trafficUsedBytes:
+              type: [integer, "null"]
+              format: int64
+              minimum: 0
+              description: 校准：把本周期已用改成这个值；不带或 null 为不校准
+    ServerTraffic:
+      type: object
+      description: 当前流量周期的用量（0.15.0，Ruling-82）；只有接入之后的数据
+      required: [cycleStart, nextResetOn, sentBytes, recvBytes, usedBytes]
+      properties:
+        cycleStart: { type: string, format: date, description: 本周期起始日 }
+        nextResetOn: { type: string, format: date, description: 下一次重置的日期 }
+        sentBytes: { type: integer, format: int64, description: 本周期网卡发送（出站）字节 }
+        recvBytes: { type: integer, format: int64, description: 本周期网卡接收（入站）字节 }
+        usedBytes: { type: integer, format: int64, description: 按计量方式折算并加上校准值后的已用字节，不小于 0 }
+    ServerHostBrief:
+      type: object
+      required: [osId, arch, certNotAfter]
+      properties:
+        osId: { type: string, description: 系统标识（如 debian、ubuntu），没检测到为空串 }
+        arch: { type: string }
+        certNotAfter: { type: [string, "null"], format: date-time, description: 平台申请的面板证书的到期时间 }
+    LatencyIsp:
+      type: string
+      description: 运营商：telecom 电信，unicom 联通，mobile 移动
+      enum: [telecom, unicom, mobile]
+    LatencyPoint:
+      type: object
+      required: [at, avgMs, lossPercent]
+      properties:
+        at: { type: string, format: date-time }
+        avgMs: { type: [integer, "null"], description: 平均延迟（毫秒）；全丢为 null }
+        lossPercent: { type: integer, minimum: 0, maximum: 100 }
+    LatencySeries:
+      type: object
+      description: 三家运营商各自的延迟序列，按时间升序（Ruling-84）
+      required: [telecom, unicom, mobile]
+      properties:
+        telecom: { type: array, items: { $ref: "#/components/schemas/LatencyPoint" } }
+        unicom: { type: array, items: { $ref: "#/components/schemas/LatencyPoint" } }
+        mobile: { type: array, items: { $ref: "#/components/schemas/LatencyPoint" } }
+    ServerNetPoint:
+      type: object
+      required: [at, up, down]
+      properties:
+        at: { type: string, format: date-time }
+        up: { type: integer, format: int64, description: 上行速率，字节每秒 }
+        down: { type: integer, format: int64, description: 下行速率，字节每秒 }
+    ServerTrend:
+      type: object
+      required: [serverId, net, latency]
+      properties:
+        serverId: { type: integer, format: int64 }
+        net: { type: array, maxItems: 30, items: { $ref: "#/components/schemas/ServerNetPoint" } }
+        latency:
+          oneOf:
+            - $ref: "#/components/schemas/LatencySeries"
+            - type: "null"
+          description: 每家最多 30 个点；三网延迟检测没开为 null
+    ServerMetricPoint:
+      type: object
+      description: 一个时段的资源采样；Ruling-83 之前的采样只有 cpu 与 onlineClients，其余为 null
+      required: [at, cpu, onlineClients, memUsed, memTotal, diskUsed, diskTotal, load1, netUpRate, netDownRate, tcpCount, udpCount]
+      properties:
+        at: { type: string, format: date-time, description: 时段起点（5 分钟或 1 小时对齐） }
+        cpu: { type: [number, "null"] }
+        onlineClients: { type: integer }
+        memUsed: { type: [integer, "null"], format: int64 }
+        memTotal: { type: [integer, "null"], format: int64 }
+        diskUsed: { type: [integer, "null"], format: int64 }
+        diskTotal: { type: [integer, "null"], format: int64 }
+        load1: { type: [number, "null"] }
+        netUpRate: { type: [integer, "null"], format: int64 }
+        netDownRate: { type: [integer, "null"], format: int64 }
+        tcpCount: { type: [integer, "null"] }
+        udpCount: { type: [integer, "null"] }
+    ServerMetrics:
+      type: object
+      required: [range, points, latency]
+      properties:
+        range: { $ref: "#/components/schemas/MetricRange" }
+        points:
+          type: array
+          items: { $ref: "#/components/schemas/ServerMetricPoint" }
+        latency:
+          oneOf:
+            - $ref: "#/components/schemas/LatencySeries"
+            - type: "null"
+          description: 三网延迟检测没开为 null
     ServerEnvelope:
       allOf:
         - $ref: "#/components/schemas/Envelope"
@@ -6142,7 +6373,8 @@ components:
     Settings:
       type: object
       description: 全部系统设置（docs/03 §5.6 设置清单），键名去掉点号改驼峰分组
-      required: [site, register, invite, checkin, ticket, shared, mail, subscription, shop, rebate, notify, mailEnabled, alert, telegram, report, landing, support, routing, menu, telegramEnabled, reach]
+      required: [site, register, invite, checkin, ticket, shared, mail, subscription, shop, rebate, notify, mailEnabled, alert, telegram, report, landing, support, routing, menu, telegramEnabled, reach,
+                 latency]
       properties:
         mailEnabled: { type: boolean, readOnly: true, description: SMTP 环境变量是否已配置（Ruling-24），不可经接口修改 }
         telegramEnabled: { type: boolean, readOnly: true, description: 环境变量 HUB_TELEGRAM_BOT_TOKEN 是否已配置（0.4.3，Ruling-42） }
@@ -6199,6 +6431,13 @@ components:
             intervalMinutes: { type: integer, minimum: 10, maximum: 1440, description: 同一目标两次检测的最小间隔 }
             notify: { type: boolean, description: 被墙与恢复时是否发通知 }
             hasToken: { type: boolean, readOnly: true, description: 环境变量 HUB_GLOBALPING_TOKEN 是否已配置（决定每小时额度），不可经接口修改 }
+        latency:
+          type: object
+          description: 三网延迟检测（0.15.0，docs/03 §5.20，Ruling-84）
+          required: [enabled, intervalMinutes]
+          properties:
+            enabled: { type: boolean, description: 开启后服务器的公网 IP 会发给第三方探测服务，默认关 }
+            intervalMinutes: { type: integer, minimum: 15, maximum: 1440, description: 同一台服务器两次检测的最小间隔 }
         menu:
           type: object
           description: 侧栏菜单顺序（0.7.3，docs/03 §5.6 菜单顺序，Ruling-57）；空数组 = 默认顺序
@@ -6309,6 +6548,7 @@ components:
         support: { type: object, additionalProperties: true }
         routing: { type: object, additionalProperties: true }
         reach: { type: object, additionalProperties: true }
+        latency: { type: object, additionalProperties: true }
         menu: { type: object, additionalProperties: true }
     MenuOrder:
       type: array
