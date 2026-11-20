@@ -72,7 +72,7 @@ function Sparkline({ values, ariaLabel }: { values: number[]; ariaLabel: string 
   const step = SPARK_WIDTH / (values.length - 1)
   const points = values.map((v, i) => `${(i * step).toFixed(1)},${(SPARK_HEIGHT - 1 - (v / peak) * (SPARK_HEIGHT - 2)).toFixed(1)}`).join(' ')
   return (
-    <svg className="spark" width={SPARK_WIDTH} height={SPARK_HEIGHT} viewBox={`0 0 ${SPARK_WIDTH} ${SPARK_HEIGHT}`} role="img" aria-label={ariaLabel}>
+    <svg className="spark" width={SPARK_WIDTH} height={SPARK_HEIGHT} viewBox={`0 0 ${SPARK_WIDTH} ${SPARK_HEIGHT}`} preserveAspectRatio="none" role="img" aria-label={ariaLabel}>
       <polyline points={points} fill="none" />
     </svg>
   )

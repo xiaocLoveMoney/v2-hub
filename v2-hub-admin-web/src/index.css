@@ -1075,6 +1075,7 @@ body {
 .spark polyline {
   stroke: var(--hub-warning);
   stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
   stroke-linejoin: round;
 }
 
