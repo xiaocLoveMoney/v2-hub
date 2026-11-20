@@ -623,6 +623,21 @@ export const zh = {
   'chain.flowSummary': '链路示意：{entries} 个起飞节点、{exits} 个落地',
   'chain.flowLegendActive': '实线：生效的链路',
   'chain.flowLegendInactive': '虚线：未生效（阻断、停用、被覆盖等）',
+  'chain.flowHint': '拖动空白处平移，⌘ / Ctrl + 滚轮或双指缩放；节点和区域可以拖动换位置，点节点、区域或连线编辑相关规则。',
+  'chain.flowRelayout': '重新排列',
+  'chain.flowFullscreen': '全屏',
+  'chain.flowExitFullscreen': '退出全屏',
+  'chain.flowGroupCount': '{n} 个起飞节点',
+  'chain.flowPickTitle': '涉及 {n} 条规则，选一条编辑：',
+  'chain.flowPickReadonly': '涉及 {n} 条规则；套餐没开这类链式，只能查看。',
+  'chain.flowPickLink': '这条连线',
+  'chain.flowPickClose': '关闭',
+  'chain.flowLoadFailed': '画布加载失败，刷新页面再试。',
+  'chain.flowControls': '画布缩放',
+  'chain.flowZoomIn': '放大',
+  'chain.flowZoomOut': '缩小',
+  'chain.flowFitView': '适应画布',
+  'chain.flowMinimap': '缩略图',
 } as const
 
 /** 词条键。 */

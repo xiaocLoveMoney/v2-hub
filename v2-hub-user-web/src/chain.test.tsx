@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { visibleMenu } from './menu'
-import { buildChainFlow, curvePath, truncateByWidth } from './pages/chain/chain-flow'
+import { applySavedPositions, buildChainFlow, gridColumns, layoutChainFlow, loadPositions, positionKey, RelayoutGate, savePositions } from './pages/chain/chain-flow'
 import { entryState, isValidChainName, routeState } from './pages/chain/labels'
 import { TEST_CSRF, enT, mockServer, ok, renderApp, zhT } from './test/harness'
 
@@ -99,34 +99,124 @@ describe('链式代理文案与菜单', () => {
   })
 })
 
-describe('链路示意（docs/06 链路示意卡）', () => {
-  it('起飞节点与落地去重；规则通畅且起飞节点生效才算生效，被覆盖的连线为虚线', () => {
+/** React Flow 在 jsdom 里要用到的浏览器接口（照它的测试说明打桩）。 */
+class ResizeObserverStub {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}
+class DOMMatrixStub {
+  m22 = 1
+}
+
+// 链式代理页底部都有链路画布，整个文件都要打桩
+beforeEach(() => {
+  vi.stubGlobal('ResizeObserver', ResizeObserverStub)
+  vi.stubGlobal('DOMMatrixReadOnly', DOMMatrixStub)
+  window.localStorage.clear()
+})
+
+describe('链路示意（docs/06 链路示意卡，Ruling-91）', () => {
+  it('起飞节点与落地去重；规则通畅且起飞节点生效才算生效；连线记下节点状态与相关规则', () => {
     const flow = buildChainFlow([serverTop, serverWide] as never)
-    expect(flow.entries.map((e) => [e.name, e.isActive])).toEqual([['香港 A', true], ['新加坡 D', true]])
-    expect(flow.exits.map((e) => [e.name, e.isActive])).toEqual([['东京出口', true], ['自家 VPS', true]])
+    expect(flow.entries.map((e) => [e.name, e.isActive, e.routeIds])).toEqual([['香港 A', true, [21, 22]], ['新加坡 D', true, [22]]])
+    expect(flow.exits.map((e) => [e.name, e.isActive, e.routeIds])).toEqual([['东京出口', true, [21]], ['自家 VPS', true, [22]]])
     expect(flow.links).toEqual([
-      { from: 'entry:1', to: 'exit:platform:30', isActive: true },
-      { from: 'entry:1', to: 'exit:own:9', isActive: false },
-      { from: 'entry:4', to: 'exit:own:9', isActive: true },
+      { from: 'entry:1', to: 'exit:platform:30', isActive: true, entryState: { state: 'applied', coveredBy: 0 }, routeIds: [21] },
+      { from: 'entry:1', to: 'exit:own:9', isActive: false, entryState: { state: 'shadowed', coveredBy: 1 }, routeIds: [22] },
+      { from: 'entry:4', to: 'exit:own:9', isActive: true, entryState: { state: 'pending', coveredBy: 0 }, routeIds: [22] },
     ])
     // 阻断的规则整条不生效
     const blocked = buildChainFlow([clientRoute] as never)
     expect(blocked.entries[0]?.isActive).toBe(false)
     expect(blocked.links[0]?.isActive).toBe(false)
-    expect(curvePath(0, 10, 100, 50)).toBe('M 0 10 C 50 10, 50 50, 100 50')
-    expect(truncateByWidth('香港 A 节点很长很长', 10)).toBe('香港 A 节…')
-    expect(truncateByWidth('short', 10)).toBe('short')
   })
 
-  it('页面底部画出当前页签的链路，切页签跟着换', async () => {
+  it('按落地分组：节点放在第一条生效连线的区域，走别的落地另画单线；区域排成方阵、最多 4 列', () => {
+    const layout = layoutChainFlow(buildChainFlow([serverTop, serverWide] as never))
+    const parentOf = (id: string) => layout.nodes.find((n) => n.id === id)?.parentId
+    expect(parentOf('entry:1')).toBe('group:exit:platform:30')
+    expect(parentOf('entry:4')).toBe('group:exit:own:9')
+    expect(layout.edges.map((e) => [e.id, e.isActive])).toEqual([
+      ['device>group:exit:platform:30', true],
+      ['group:exit:platform:30>exit:platform:30', true],
+      ['device>group:exit:own:9', true],
+      ['group:exit:own:9>exit:own:9', true],
+      ['entry:1>exit:own:9', false],
+    ])
+    // 节点在区域里的状态取它归属的那条线
+    expect(layout.nodes.find((n) => n.id === 'entry:1')?.entryState).toEqual({ state: 'applied', coveredBy: 0 })
+    expect([1, 4, 5, 14, 30].map(gridColumns)).toEqual([1, 2, 3, 4, 4])
+    // 落地下没有归属节点时不画区域
+    const lonely = layoutChainFlow(buildChainFlow([serverTop, { ...serverWide, entries: [entry(1, '香港 A', 'shadowed', 1)] }] as never))
+    expect(lonely.nodes.some((n) => n.id === 'group:exit:own:9')).toBe(false)
+    expect(lonely.nodes.some((n) => n.id === 'exit:own:9')).toBe(true)
+  })
+
+  it('拖动的位置存在本浏览器；区域里的节点限制在区域内，换了区域不沿用；存储坏了按自动排版', () => {
+    const layout = layoutChainFlow(buildChainFlow([serverTop, serverWide] as never))
+    const child = layout.nodes.find((n) => n.id === 'entry:4')
+    const group = layout.nodes.find((n) => n.id === 'group:exit:own:9')
+    if (child === undefined || group === undefined) {
+      throw new Error('layout incomplete')
+    }
+    expect(positionKey(child)).toBe('group:exit:own:9/entry:4')
+    savePositions('server', { device: { x: -50, y: 7 }, [positionKey(child)]: { x: 9999, y: -9999 }, 'group:exit:platform:30/entry:4': { x: 1, y: 1 } })
+    const placed = applySavedPositions(layout.nodes, loadPositions('server'))
+    expect(placed.find((n) => n.id === 'device')).toMatchObject({ x: -50, y: 7 })
+    expect(placed.find((n) => n.id === 'entry:4')).toMatchObject({ x: group.width - child.width, y: 34 })
+    expect(loadPositions('client')).toEqual({})
+    window.localStorage.setItem('hub.chainFlow.positions.server', '{broken')
+    expect(loadPositions('server')).toEqual({})
+  })
+
+  it('拖动途中数据刷新不重排，松手存好位置后补一次；没在拖动时立即重排', () => {
+    const gate = new RelayoutGate()
+    const relayout = vi.fn()
+    gate.request(relayout)
+    expect(relayout).toHaveBeenCalledTimes(1)
+    gate.start()
+    gate.request(relayout)
+    gate.request(relayout)
+    expect(relayout).toHaveBeenCalledTimes(1)
+    gate.finish(relayout)
+    expect(relayout).toHaveBeenCalledTimes(2)
+    // 拖动期间没有刷新，松手不多排一次
+    gate.start()
+    gate.finish(relayout)
+    expect(relayout).toHaveBeenCalledTimes(2)
+  })
+
+  it('页面底部画出当前页签的链路画布，切页签跟着换', async () => {
     mockServer({ ...signedIn(overview), 'GET /api/user/dashboard': () => ok({ onlineDevices: 3 }) })
     renderApp('/chain')
-    expect(await screen.findByRole('img', { name: '链路示意：2 个起飞节点、2 个落地' })).toBeDefined()
+    const canvas = await screen.findByRole('group', { name: '链路示意：2 个起飞节点、2 个落地' })
     expect(screen.getByText('链路示意 · 服务端链式')).toBeDefined()
-    expect(await screen.findByText('在线 3 台')).toBeDefined()
+    expect(await within(canvas).findByText('在线 3 台')).toBeDefined()
+    expect(within(canvas).getAllByText('1 个起飞节点', { selector: '.hub-canvas-group-count' })).toHaveLength(2)
     fireEvent.click(screen.getByRole('tab', { name: '客户端链式（1 / 20）' }))
-    expect(await screen.findByRole('img', { name: '链路示意：1 个起飞节点、1 个落地' })).toBeDefined()
+    expect(await screen.findByRole('group', { name: '链路示意：1 个起飞节点、1 个落地' })).toBeDefined()
     expect(screen.getByText('链路示意 · 客户端链式')).toBeDefined()
+  })
+
+  it('点只属于一条规则的节点直接打开编辑框；属于多条的先列出来选', async () => {
+    mockServer({ ...signedIn(overview), 'GET /api/user/dashboard': () => ok({ onlineDevices: 3 }) })
+    renderApp('/chain')
+    const canvas = await screen.findByRole('group', { name: '链路示意：2 个起飞节点、2 个落地' })
+    fireEvent.click(within(canvas).getByText('新加坡 D'))
+    expect(await screen.findByText('编辑链式规则')).toBeDefined()
+    fireEvent.click(screen.getByRole('button', { name: '取消' }))
+    await waitFor(() => expect(screen.queryByText('编辑链式规则')).toBeNull())
+    fireEvent.click(within(canvas).getByText('香港 A'))
+    const pick = await within(canvas).findByText('涉及 2 条规则，选一条编辑：')
+    const panel = pick.closest('.hub-canvas-pick')
+    if (!(panel instanceof HTMLElement)) {
+      throw new Error('pick panel not rendered')
+    }
+    expect(within(panel).getByText('回家')).toBeDefined()
+    fireEvent.click(within(panel).getAllByRole('button', { name: '编辑' })[1] as HTMLElement)
+    expect(await screen.findByText('编辑链式规则')).toBeDefined()
+    expect(screen.getByDisplayValue('回家')).toBeDefined()
   })
 })
 
@@ -390,7 +480,8 @@ describe('链式代理页：客户端链式与我的出口', () => {
     renderApp('/chain', 'en')
     expect(await screen.findByRole('tab', { name: 'Server-side (2 / 10)' })).toBeDefined()
     expect(screen.getByText('Overridden by #1')).toBeDefined()
-    expect(screen.getByText('Applying')).toBeDefined()
+    // 规则列表与底部画布各一处
+    expect(screen.getAllByText('Applying')).toHaveLength(2)
     expect(screen.getByRole('button', { name: 'Move rule #2 up' })).toBeDefined()
     fireEvent.click(screen.getByRole('button', { name: 'Add a rule' }))
     const dialog = await screen.findByRole('dialog')
