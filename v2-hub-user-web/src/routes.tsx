@@ -18,6 +18,7 @@ import { WalletPage } from './pages/shop/WalletPage'
 import { SubscribeLogsPage } from './pages/SubscribeLogsPage'
 import { TicketDetailPage } from './pages/TicketDetailPage'
 import { TicketsPage } from './pages/TicketsPage'
+import { TutorialDetailPage } from './pages/TutorialDetailPage'
 import { TutorialsPage } from './pages/TutorialsPage'
 
 /** 路由表：登录、注册、找回密码独立，其余都在已登录的外壳里。 */
@@ -39,6 +40,7 @@ export const routes: RouteObject[] = [
       { path: ROUTES.ANNOUNCEMENTS, element: <AnnouncementsPage /> },
       { path: ROUTES.INVITE, element: <InvitePage /> },
       { path: ROUTES.TUTORIALS, element: <TutorialsPage /> },
+      { path: ROUTES.TUTORIAL_DETAIL, element: <TutorialDetailPage /> },
       { path: ROUTES.SHARED_ACCOUNTS, element: <SharedAccountsPage /> },
       { path: ROUTES.TICKETS, element: <TicketsPage /> },
       { path: ROUTES.TICKET_DETAIL, element: <TicketDetailPage /> },

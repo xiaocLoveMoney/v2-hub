@@ -397,6 +397,8 @@ export const en: Record<MessageKey, string> = {
   'tutorials.importAfter': ' to import your subscription in one click.',
   'tutorials.empty': 'No guides yet',
   'tutorials.os': 'Operating system',
+  'tutorials.view': 'View guide',
+  'tutorials.backToList': 'Back to guides',
   'ann.pinned': 'Pinned',
   'ann.empty': 'No announcements yet',
   'subLogs.generic': 'Generic',

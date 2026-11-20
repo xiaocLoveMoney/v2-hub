@@ -160,6 +160,74 @@ a.hub-btn {
   box-shadow: var(--hub-glow) var(--hub-primary-glow);
 }
 
+/* ---- 教程概要卡（Ruling-90）：整张卡是链接，点开进详情页 ---- */
+.hub-tutorial-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: var(--hub-gap);
+  margin-bottom: var(--hub-gap);
+}
+
+.hub-tutorial-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 22px 24px;
+  border-top: 3px solid transparent;
+  border-radius: var(--hub-radius);
+  background: var(--hub-surface);
+  color: var(--hub-body);
+  text-decoration: none;
+  box-shadow: var(--hub-card-shadow);
+  transition: border-color 0.15s, transform 0.15s;
+}
+
+.hub-tutorial-card:hover,
+.hub-tutorial-card:focus-visible {
+  border-top-color: var(--hub-primary);
+  color: var(--hub-body);
+  transform: translateY(-2px);
+}
+
+/* 系统要求减少动态效果时只留顶边变色，不上浮 */
+@media (prefers-reduced-motion: reduce) {
+  .hub-tutorial-card {
+    transition: none;
+  }
+
+  .hub-tutorial-card:hover,
+  .hub-tutorial-card:focus-visible {
+    transform: none;
+  }
+}
+
+.hub-tutorial-card h4 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--hub-heading);
+}
+
+/* 简介最多三行，卡片高度整齐，详细内容看详情页 */
+.hub-tutorial-summary {
+  display: -webkit-box;
+  margin: 0;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+}
+
+.hub-tutorial-more {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-top: auto;
+  color: var(--hub-primary);
+  font-weight: 600;
+  font-size: 13px;
+}
+
 /* ---- 共享账号条目 ---- */
 .hub-shared-item {
   padding: 14px 0;
