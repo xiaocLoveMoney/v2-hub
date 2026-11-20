@@ -3,7 +3,7 @@ import { MemoryRouter, Route, Routes } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { InboundPresetPreview } from '../../api/client'
 import { PERMISSIONS } from '../../menu'
-import { TEST_CSRF, mockServer, ok, renderWith } from '../../test/harness'
+import { TEST_CSRF, mockServer, ok, renderWith, openTab } from '../../test/harness'
 import { serverOf, taskOf } from '../../test/host-fixtures'
 import { InboundPresetsModal } from './InboundPresetsModal'
 import { ServerDetailPage } from './ServerDetailPage'
@@ -111,6 +111,7 @@ describe('服务器详情页：一键部署与 VLESS 流控', () => {
       'PUT /api/admin/servers/1/client-flow': () => ok(serverOf({ hostId: 5, clientFlow: 'xtls-rprx-vision' })),
     })
     renderWith([PERMISSIONS.NODE_READ, PERMISSIONS.SERVER_WRITE], page)
+    await openTab('设置')
     const toggle = await screen.findByRole('switch', { name: 'VLESS 流控' })
     fireEvent.click(toggle)
     await waitFor(() => expect(calls.find((c) => c.method === 'PUT')?.body).toEqual({ clientFlow: 'xtls-rprx-vision' }))

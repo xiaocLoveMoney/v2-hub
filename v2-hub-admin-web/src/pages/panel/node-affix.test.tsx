@@ -112,7 +112,7 @@ describe('服务器详情页：批量改节点名', () => {
     view.unmount()
 
     renderWith([PERMISSIONS.NODE_READ], page)
-    expect(await screen.findByText('入站')).toBeDefined()
+    expect(await screen.findByRole('tab', { name: '入站与节点' })).toBeDefined()
     expect(screen.queryByRole('button', { name: '批量改节点名' })).toBeNull()
   })
 })

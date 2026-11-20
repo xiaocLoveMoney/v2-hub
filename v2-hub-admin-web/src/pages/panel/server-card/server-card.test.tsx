@@ -3,7 +3,7 @@ import { MemoryRouter } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { LatencyPoint, Server, ServerTrend } from '../../../api/client'
 import { PERMISSIONS } from '../../../menu'
-import { TEST_CSRF, mockServer, ok, renderWith } from '../../../test/harness'
+import { TEST_CSRF, mockServer, ok, openTab, renderWith } from '../../../test/harness'
 import { serverOf } from '../../../test/host-fixtures'
 import { ServersPage } from '../ServersPage'
 import { ServerStatusCard } from './ServerStatusCard'
@@ -15,7 +15,6 @@ const noop = () => undefined
 afterEach(() => {
   cleanup()
   vi.unstubAllGlobals()
-  localStorage.clear()
 })
 
 /** 一台在线、资源与账单都齐全的服务器。 */
@@ -116,8 +115,8 @@ describe('ServerStatusCard', () => {
   })
 })
 
-describe('服务器列表的卡片视图', () => {
-  it('默认显示卡片；切到表格后记住选择；账单弹窗提交换算后的内容并带 CSRF 头', async () => {
+describe('服务器页的页签（Ruling-87）', () => {
+  it('默认是管理表格；运行状态页签是只读卡片，只能改账单，账单弹窗提交换算后的内容并带 CSRF 头', async () => {
     const srv = busyServer()
     const calls = mockServer({
       'GET /api/admin/servers': () => ok([srv]),
@@ -129,8 +128,14 @@ describe('服务器列表的卡片视图', () => {
         <ServersPage />
       </MemoryRouter>
     ))
+    expect(await screen.findByRole('columnheader', { name: 'CPU / 内存' })).toBeDefined()
+    expect(calls.some((c) => c.path === '/api/admin/servers/trends')).toBe(false)
+
+    await openTab('运行状态')
     const card = (await screen.findByText('dmit-us')).closest('.ant-card') as HTMLElement
-    expect(within(card).getByRole('button', { name: /编\s*辑/ })).toBeDefined()
+    expect(within(card).queryByRole('button', { name: /编\s*辑/ })).toBeNull()
+    expect(within(card).queryByRole('button', { name: /移\s*除/ })).toBeNull()
+    await waitFor(() => expect(calls.some((c) => c.path === '/api/admin/servers/trends')).toBe(true))
 
     fireEvent.click(within(card).getByRole('button', { name: '账单与流量额度' }))
     const dialog = await screen.findByRole('dialog')
@@ -144,9 +149,5 @@ describe('服务器列表的卡片视图', () => {
       priceCents: 5990, priceCurrency: 'USD', billingCycle: 'year', expiresOn: '2099-01-01',
       trafficQuotaBytes: 1024 * GIB, trafficResetDay: 1, trafficMode: 'both', trafficUsedBytes: 200 * GIB,
     })
-
-    fireEvent.click(screen.getByText('表格'))
-    expect(await screen.findByRole('columnheader', { name: 'CPU / 内存' })).toBeDefined()
-    expect(localStorage.getItem('v2hub.admin.servers.view')).toBe('table')
   })
 })
