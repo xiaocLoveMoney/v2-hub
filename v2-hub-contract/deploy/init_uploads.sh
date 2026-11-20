@@ -16,12 +16,13 @@ POLICY="hub-upload"
 cd "$DEPLOY_DIR"
 [ -f .env ] || { echo "init_uploads: 缺 $DEPLOY_DIR/.env"; exit 1; }
 if ! grep -q '^HUB_UPLOAD_PASSWORD=.' .env; then
-  # 先删掉可能存在的空项再追加；不用 sed -i（GNU 与 BSD 写法不同）
-  umask 077
-  grep -v -e '^HUB_UPLOAD_USER=' -e '^HUB_UPLOAD_PASSWORD=' .env > .env.tmp || true
-  printf 'HUB_UPLOAD_USER=hub-upload\nHUB_UPLOAD_PASSWORD=%s\n' "$(openssl rand -hex 16)" >> .env.tmp
-  cat .env.tmp > .env && rm -f .env.tmp
-  echo "init_uploads: 已在 .env 里生成上传账号"
+  # 只追加、不重写：.env 里有加密主密钥，重写中途失败会把它截掉。
+  # 已有的空 HUB_UPLOAD_* 行留着无妨，source 时后面的赋值生效
+  if [ -n "$(tail -c 1 .env)" ]; then
+    echo >> .env
+  fi
+  printf 'HUB_UPLOAD_USER=hub-upload\nHUB_UPLOAD_PASSWORD=%s\n' "$(openssl rand -hex 16)" >> .env
+  echo "init_uploads: 已在 .env 里追加上传账号"
 fi
 set -a && . ./.env && set +a
 : "${MINIO_ROOT_USER:?}" "${MINIO_ROOT_PASSWORD:?}"
@@ -45,7 +46,8 @@ JSON
 {\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Action\":[\"s3:PutObject\"],\"Resource\":[\"arn:aws:s3:::$BUCKET/*\"]}]}
 JSON
     mc admin policy create hub $POLICY /tmp/policy.json >/dev/null
-    mc admin user add hub \"\$HUB_UPLOAD_USER\" \"\$HUB_UPLOAD_PASSWORD\" >/dev/null
+    # 账号与密码从标准输入给 mc，不出现在进程参数里
+    printf '%s\\n%s\\n' \"\$HUB_UPLOAD_USER\" \"\$HUB_UPLOAD_PASSWORD\" | mc admin user add hub >/dev/null
     # 已挂过时 mc 报 already in effect，视为成功
     if ! out=\$(mc admin policy attach hub $POLICY --user \"\$HUB_UPLOAD_USER\" 2>&1); then
       echo \"\$out\" | grep -qi 'already' || { echo \"\$out\"; exit 1; }
