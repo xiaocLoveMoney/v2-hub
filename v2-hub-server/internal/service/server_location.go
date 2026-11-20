@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"net/netip"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 
 	"v2-hub-server/internal/dao/sqlcgen"
 	"v2-hub-server/internal/manager/geoip"
+	"v2-hub-server/internal/manager/panel"
 )
 
 // 服务器位置扫描与负载采样（docs/03 §5.1，Ruling-65）。
@@ -26,6 +28,8 @@ const (
 	metricWindow7d      = 7 * 24 * time.Hour
 	metricHourlyCap     = 7 * 24
 	metricFiveMinuteCap = 24 * 12
+	// loadScale：负载乘 100 存整数（Ruling-85）。
+	loadScale = 100
 
 	msgLocateDisabled    = "位置扫描已关闭"
 	msgLocateNoIP        = "面板没有报出服务器的公网 IP"
@@ -134,28 +138,57 @@ func (s *PanelService) BackfillServerLocations(ctx context.Context) (int, error)
 	return filled, nil
 }
 
-// recordMetric 在一次成功的健康探测后记负载采样。
-func (s *PanelService) recordMetric(ctx context.Context, serverID int64, snapshot []byte) error {
-	cpu := pgtype.Float8{}
-	if v := snapshotCPU(snapshot); v != nil {
-		cpu = pgtype.Float8{Float64: *v, Valid: true}
+// recordMetric 在一次成功的健康探测后记一条采样（Ruling-65、Ruling-85）；面板没给资源快照时只记在线数。
+func (s *PanelService) recordMetric(ctx context.Context, serverID int64, res *panel.Resources) error {
+	params := sqlcgen.RecordServerMetricParams{ServerID: serverID, SampledAt: pgtype.Timestamptz{Time: s.now(), Valid: true}}
+	if res != nil {
+		if res.CPU != nil {
+			params.Cpu = pgtype.Float8{Float64: *res.CPU, Valid: true}
+		}
+		params.MemUsed, params.MemTotal = int8Of(res.MemUsed), int8Of(res.MemTotal)
+		params.DiskUsed, params.DiskTotal = int8Of(res.DiskUsed), int8Of(res.DiskTotal)
+		params.Load1X100 = int4Of(int(math.Round(res.Load1 * loadScale)))
+		params.NetUpRate, params.NetDownRate = int8Of(res.NetUpRate), int8Of(res.NetDownRate)
+		params.TcpCount, params.UdpCount = int4Of(res.TCPCount), int4Of(res.UDPCount)
 	}
-	err := s.q.RecordServerMetric(ctx, sqlcgen.RecordServerMetricParams{
-		ServerID: serverID, Cpu: cpu, SampledAt: pgtype.Timestamptz{Time: s.now(), Valid: true},
-	})
-	if err != nil {
+	if err := s.q.RecordServerMetric(ctx, params); err != nil {
 		return fmt.Errorf("record metric of server %d: %w", serverID, err)
 	}
 	return nil
 }
 
-// PurgeServerMetrics 删除超过保留期（7 天）的负载采样，返回删除条数；由清理任务定时调用。
+func int8Of(v int64) pgtype.Int8 {
+	return pgtype.Int8{Int64: v, Valid: true}
+}
+
+// int4Of 把整数装成可空的 int4；超出 int32 范围的按上限记（采样值不该到这个量级，防面板报出异常值）。
+func int4Of(v int) pgtype.Int4 {
+	if v > math.MaxInt32 {
+		v = math.MaxInt32
+	}
+	if v < 0 {
+		v = 0
+	}
+	return pgtype.Int4{Int32: int32(v), Valid: true}
+}
+
+// PurgeServerMetrics 删除过期的服务器历史：超过 7 天的采样与三网延迟、超过 62 天的按天流量；返回删除条数，由清理任务定时调用。
 func (s *PanelService) PurgeServerMetrics(ctx context.Context) (int64, error) {
-	n, err := s.q.PurgeServerMetrics(ctx, pgtype.Timestamptz{Time: s.now().Add(-metricRetention), Valid: true})
+	before := pgtype.Timestamptz{Time: s.now().Add(-metricRetention), Valid: true}
+	total, err := s.q.PurgeServerMetrics(ctx, before)
 	if err != nil {
 		return 0, fmt.Errorf("purge server metrics: %w", err)
 	}
-	return n, nil
+	n, err := s.q.PurgeServerLatency(ctx, before)
+	if err != nil {
+		return total, fmt.Errorf("purge server latency: %w", err)
+	}
+	total += n
+	n, err = s.q.PurgeServerNicTraffic(ctx, dateOf(s.today(ctx).AddDate(0, 0, -nicTrafficRetentionDays)))
+	if err != nil {
+		return total, fmt.Errorf("purge server nic traffic: %w", err)
+	}
+	return total + n, nil
 }
 
 // ListNodeMetrics 返回本人某个节点所在服务器的趋势：24h 为 5 分钟原值，7d 按小时平均。

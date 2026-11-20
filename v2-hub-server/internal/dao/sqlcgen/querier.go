@@ -15,6 +15,7 @@ type Querier interface {
 	AddChainRouteEntries(ctx context.Context, arg AddChainRouteEntriesParams) error
 	AddExitNodeGroups(ctx context.Context, arg AddExitNodeGroupsParams) error
 	AddExitUsers(ctx context.Context, arg AddExitUsersParams) error
+	AddServerNicTraffic(ctx context.Context, arg AddServerNicTrafficParams) error
 	AddServerTraffic(ctx context.Context, arg AddServerTrafficParams) error
 	AddUserTraffic(ctx context.Context, arg AddUserTrafficParams) error
 	// 原子地推进已用步长；返回 0 行表示该步长已被用过（并发重放）
@@ -283,6 +284,8 @@ type Querier interface {
 	GetServerHost(ctx context.Context, id int64) (GetServerHostRow, error)
 	// 影响分享链接的入站与对外地址摘要；变了就要重新向面板取全部链接（docs/03 §5.4 节点来源）
 	GetServerLinkFingerprint(ctx context.Context, serverID int64) (string, error)
+	// 上次探测时的网卡累计计数；行锁让并发的探测不会把同一段增量记两次
+	GetServerNicCountersForUpdate(ctx context.Context, id int64) (GetServerNicCountersForUpdateRow, error)
 	GetSharedAccountCredential(ctx context.Context, id int64) ([]byte, error)
 	GetTicketForUpdate(ctx context.Context, id int64) (GetTicketForUpdateRow, error)
 	// 兑换时按 HMAC 查找并锁行，一码只能用一次（Ruling-31）
@@ -347,6 +350,7 @@ type Querier interface {
 	InsertReachTarget(ctx context.Context, arg InsertReachTargetParams) error
 	InsertRebate(ctx context.Context, arg InsertRebateParams) (int64, error)
 	InsertRolePermissions(ctx context.Context, arg InsertRolePermissionsParams) error
+	InsertServerLatency(ctx context.Context, arg InsertServerLatencyParams) error
 	InsertSharedAccountPlans(ctx context.Context, arg InsertSharedAccountPlansParams) error
 	InsertSubscribeLog(ctx context.Context, arg InsertSubscribeLogParams) error
 	// 运营：Telegram 发件箱、后台任务状态、掉线告警、仪表盘与公开套餐（docs/03 §5.20）-----------
@@ -405,6 +409,9 @@ type Querier interface {
 	ListInboundsByServer(ctx context.Context, serverID int64) ([]ListInboundsByServerRow, error)
 	ListInviteCodes(ctx context.Context, arg ListInviteCodesParams) ([]ListInviteCodesRow, error)
 	ListInvitees(ctx context.Context, arg ListInviteesParams) ([]ListInviteesRow, error)
+	// 三网延迟（docs/03 §5.20，Ruling-86）-----------------------------------------
+	// 到期该测延迟的服务器：启用、在线、有公网 IPv4；最久没测的在前
+	ListLatencyDueServers(ctx context.Context, arg ListLatencyDueServersParams) ([]ListLatencyDueServersRow, error)
 	// 每台主机最近的一条任务，供主机列表显示
 	ListLatestHostTasks(ctx context.Context) ([]ListLatestHostTasksRow, error)
 	ListLedger(ctx context.Context, arg ListLedgerParams) ([]ListLedgerRow, error)
@@ -435,6 +442,10 @@ type Querier interface {
 	ListRebates(ctx context.Context, arg ListRebatesParams) ([]ListRebatesRow, error)
 	// 本人最近的返利记录（docs/03 §5.16 返利去向）；被邀请人的用户名由调用方打码
 	ListRebatesByInviter(ctx context.Context, arg ListRebatesByInviterParams) ([]ListRebatesByInviterRow, error)
+	// 各服务器每家运营商最近的若干次检测（列表卡片用），按时间升序
+	ListRecentServerLatency(ctx context.Context, arg ListRecentServerLatencyParams) ([]ListRecentServerLatencyRow, error)
+	// 各服务器近一段时间的上下行速率（列表卡片的小图，Ruling-85）
+	ListRecentServerNet(ctx context.Context, bucketAt pgtype.Timestamptz) ([]ListRecentServerNetRow, error)
 	// 发过告警、现在已恢复在线或已被停用的服务器
 	ListRecoveredServers(ctx context.Context) ([]ListRecoveredServersRow, error)
 	ListRoleCodesByAdminIDs(ctx context.Context, adminIds []int64) ([]ListRoleCodesByAdminIDsRow, error)
@@ -446,14 +457,24 @@ type Querier interface {
 	// 这些服务器上全部对外地址（含未授权的），用来判断一条链接是不是某个对外地址的
 	ListServerEndpointAddrs(ctx context.Context, serverIds []int64) ([]ListServerEndpointAddrsRow, error)
 	ListServerHosts(ctx context.Context) ([]ListServerHostsRow, error)
+	ListServerLatency(ctx context.Context, arg ListServerLatencyParams) ([]ListServerLatencyRow, error)
+	// 按小时平均；ok_samples 为 0 表示该小时全丢（此时 avg_ms 无意义）
+	ListServerLatencyHourly(ctx context.Context, arg ListServerLatencyHourlyParams) ([]ListServerLatencyHourlyRow, error)
 	// 5 分钟采样原值（近 24 小时趋势）
 	ListServerMetrics(ctx context.Context, arg ListServerMetricsParams) ([]ListServerMetricsRow, error)
 	// 按小时平均（近 7 天趋势）；cpu_samples 为 0 表示该小时 CPU 全为空（此时 cpu 无意义）
 	ListServerMetricsHourly(ctx context.Context, arg ListServerMetricsHourlyParams) ([]ListServerMetricsHourlyRow, error)
+	// 全部服务器自某天起的按天流量（各台的周期起始日不同，由调用方按周期求和）
+	ListServerNicTraffic(ctx context.Context, day pgtype.Date) ([]ServerNicTrafficDaily, error)
+	ListServerNicTrafficOf(ctx context.Context, arg ListServerNicTrafficOfParams) ([]ServerNicTrafficDaily, error)
 	// 服务端链式的下发（docs/03 §5.19）-----------------------------------------------------------
 	// 各服务器的面板类型，用来判断能否改内核配置
 	ListServerProviderTypes(ctx context.Context) ([]ListServerProviderTypesRow, error)
 	ListServerProvisions(ctx context.Context, serverID int64) ([]ListServerProvisionsRow, error)
+	// 管理端资源趋势的 5 分钟原值（Ruling-85）；Ruling-85 之前的行除 cpu 与 online_clients 外为空
+	ListServerResourceMetrics(ctx context.Context, arg ListServerResourceMetricsParams) ([]ListServerResourceMetricsRow, error)
+	// 管理端资源趋势按小时平均；cpu_samples / resource_samples 为 0 表示该小时对应的列全为空（此时数值无意义）
+	ListServerResourceMetricsHourly(ctx context.Context, arg ListServerResourceMetricsHourlyParams) ([]ListServerResourceMetricsHourlyRow, error)
 	// 某用户服务端规则里用到的节点：is_entry 为真 = 作起飞，为假 = 作落地；防环校验用（Ruling-49）
 	ListServerRouteNodeRoles(ctx context.Context, userID int64) ([]ListServerRouteNodeRolesRow, error)
 	// 有服务端规则的起飞节点在这台服务器上的用户
@@ -533,9 +554,11 @@ type Querier interface {
 	PurgeDeletedUsers(ctx context.Context) (int64, error)
 	PurgeEmailCodes(ctx context.Context, createdAt pgtype.Timestamptz) (int64, error)
 	PurgeMailOutbox(ctx context.Context, createdAt pgtype.Timestamptz) (int64, error)
+	PurgeServerLatency(ctx context.Context, sampledAt pgtype.Timestamptz) (int64, error)
 	PurgeServerMetrics(ctx context.Context, bucketAt pgtype.Timestamptz) (int64, error)
+	PurgeServerNicTraffic(ctx context.Context, day pgtype.Date) (int64, error)
 	PurgeTelegramOutbox(ctx context.Context, createdAt pgtype.Timestamptz) (int64, error)
-	// 健康探测成功顺带记一条负载采样：对齐 5 分钟，同一时段覆盖为最新值，在线数取服务器缓存（Ruling-65）
+	// 健康探测成功顺带记一条采样：对齐 5 分钟，同一时段覆盖为最新值，在线数取服务器缓存（Ruling-65、Ruling-85）
 	RecordServerMetric(ctx context.Context, arg RecordServerMetricParams) error
 	RemoveChainRouteEntriesExcept(ctx context.Context, arg RemoveChainRouteEntriesExceptParams) error
 	RenameChainExit(ctx context.Context, arg RenameChainExitParams) (int64, error)
@@ -574,6 +597,8 @@ type Querier interface {
 	SetProvisionCounters(ctx context.Context, arg SetProvisionCountersParams) error
 	SetProvisionLinks(ctx context.Context, arg SetProvisionLinksParams) error
 	SetSSHCredentialSecret(ctx context.Context, arg SetSSHCredentialSecretParams) error
+	// 账单与流量额度（docs/03 §5.1，Ruling-84）-------------------------------------
+	SetServerBilling(ctx context.Context, arg SetServerBillingParams) (int64, error)
 	// 服务器的 VLESS 流控（Ruling-77）：下发对账据此给 client 带上或去掉 flow
 	SetServerClientFlow(ctx context.Context, arg SetServerClientFlowParams) (int64, error)
 	// 证书装好且平台按域名接入后记下到期时间与 acme.sh 给出的下次续期时间（Ruling-74）
@@ -581,8 +606,10 @@ type Querier interface {
 	SetServerHostDetection(ctx context.Context, arg SetServerHostDetectionParams) error
 	SetServerHostKey(ctx context.Context, arg SetServerHostKeyParams) error
 	SetServerHostServer(ctx context.Context, arg SetServerHostServerParams) error
+	SetServerLatencyChecked(ctx context.Context, arg SetServerLatencyCheckedParams) error
+	SetServerNicCounters(ctx context.Context, arg SetServerNicCountersParams) error
 	SetServerOnlineClients(ctx context.Context, arg SetServerOnlineClientsParams) error
-	// T1–T3 的落库：status、last_error 由调用方按转移表算好；is_online 时才刷新版本、GUID、快照与最近在线时间。
+	// T1–T3 的落库：status、last_error 由调用方按转移表算好；is_online 时才刷新版本、GUID、快照、公网 IP 与最近在线时间。
 	// 不在线起始时间（docs/03 §5.20 掉线告警）：回到 online 清空，离开 online 时记下第一次的时刻
 	SetServerProbeResult(ctx context.Context, arg SetServerProbeResultParams) error
 	SetServerProvisionsOnline(ctx context.Context, arg SetServerProvisionsOnlineParams) error

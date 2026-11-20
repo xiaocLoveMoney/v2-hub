@@ -5,6 +5,9 @@
 const TOKEN_FALLBACKS = {
   '--hub-primary': '#6777ef',
   '--hub-info': '#3abaf4',
+  '--hub-success': '#47c363',
+  '--hub-warning': '#ffa426',
+  '--hub-danger': '#fc544b',
   '--hub-body': '#6c757d',
   '--hub-chart-grid': '#e3eaef',
   '--hub-surface': '#fff',

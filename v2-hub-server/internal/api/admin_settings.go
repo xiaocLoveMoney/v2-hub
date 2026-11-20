@@ -145,6 +145,12 @@ type routingSettingsVO struct {
 	BlockRule bool `json:"blockRule"`
 }
 
+// latencySettingsVO 是三网延迟检测设置（Ruling-86）。
+type latencySettingsVO struct {
+	Enabled         bool `json:"enabled"`
+	IntervalMinutes int  `json:"intervalMinutes"`
+}
+
 // reachSettingsVO 是大陆连通检测设置；HasToken 只读，表示环境变量里配了探测服务的令牌。
 type reachSettingsVO struct {
 	Enabled         bool `json:"enabled"`
@@ -169,6 +175,7 @@ type settingsVO struct {
 	Support         supportSettingsVO      `json:"support"`
 	Routing         routingSettingsVO      `json:"routing"`
 	Reach           reachSettingsVO        `json:"reach"`
+	Latency         latencySettingsVO      `json:"latency"`
 	Menu            menuSettingsVO         `json:"menu"`
 	Site            siteSettingsVO         `json:"site"`
 	Register        registerSettingsVO     `json:"register"`
@@ -201,6 +208,7 @@ func toSettingsVO(s service.Settings, mailEnabled, telegramEnabled, hasReachToke
 		Support: supportSettingsVO{URL: s.Support.URL, Label: s.Support.Label},
 		Routing: routingSettingsVO{BlockRule: s.Routing.BlockRule},
 		Reach:   reachSettingsVO{Enabled: s.Reach.Enabled, IntervalMinutes: s.Reach.IntervalMinutes, Notify: s.Reach.Notify, HasToken: hasReachToken},
+		Latency: latencySettingsVO{Enabled: s.Latency.Enabled, IntervalMinutes: s.Latency.IntervalMinutes},
 		Menu:    menuSettingsVO{Admin: nonNil(s.Menu.Admin), User: nonNil(s.Menu.User)},
 		Site:    siteSettingsVO{Name: s.Site.Name, Timezone: s.Site.Timezone, PortalURL: s.Site.PortalURL},
 		Shop:    shopSettingsVO{Enabled: s.Shop.Enabled, Currency: s.Shop.Currency},

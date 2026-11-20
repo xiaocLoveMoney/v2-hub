@@ -103,6 +103,10 @@ GitHub 仓库设置见 `docs/github-仓库设置清单.md`。
   VLESS 流控按服务器开关（3x-ui 的 client flow 是全局的）；订阅支持 VLESS Encryption（mihomo / xray，sing-box 不输出）与 mihomo 的 XHTTP。
   实现在 `inboundtpl/presets.go`、`service/host_inbound_presets.go`；测试机上同机部署的平台给自己一键部署 7 项成功，7 个节点都实测出网（REALITY 两项在测试机上用 Xray 客户端测，本机网络按 SNI 干扰）。
   管理端一键部署弹窗登录后的浏览器实测、真实客户端导入待人工验证。
+- 补充（Ruling-83 – Ruling-86，hub-api 0.16.0，migrations 0023）：服务器状态卡片——资源快照改为中立模型（`panel.Resources`），管理端服务器页默认卡片视图（CPU / 内存 / 磁盘 / 负载、实时速率、
+  流量额度、三网延迟、在线与到期，可切表格），服务器可录入账单与流量额度（网卡计数按天累加、可校准）、详情页 24 小时 / 7 天趋势；三网延迟检测经 Globalping 按电信 / 联通 / 移动骨干网 AS 取点
+  （`latency.enabled` 默认关，与连通检测共用额度、最多用一半）；IT-16 通过。编号顺延是因为未合并的 IP 质量检测分支已占用 Ruling-81 / 82、0.15.0、0022、IT-15。
+  真实 Globalping 上三家探测点能否都取到、登录后的卡片页面浏览器实测待人工验证。
 - 路线图 M3–M8、M9（链式改造）、M10（出口补全与入站预填）与 M11（SSH 托管与面板部署）已完成；后续工作待定。
 - 路线（2026-11-13，Ruling-17 – Ruling-22）：参考 SSPanel-Uim Malio 的功能与界面，自行实现；里程碑为
   M3 订阅与用户端基础 → M4 自助运营 → M5 商店与钱包 → M6 / M7 两种链式 → M8 运营，见 docs/07。

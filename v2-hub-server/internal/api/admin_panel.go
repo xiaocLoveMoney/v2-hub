@@ -22,6 +22,9 @@ type PanelManager interface {
 	UpdateServer(ctx context.Context, actor *service.AdminPrincipal, id int64, in service.ServerInput, ip *netip.Addr) (*service.Server, error)
 	DeleteServer(ctx context.Context, actor *service.AdminPrincipal, id int64, ip *netip.Addr) error
 	SyncServer(ctx context.Context, actor *service.AdminPrincipal, id int64, ip *netip.Addr) (*service.SyncResult, error)
+	SetServerBilling(ctx context.Context, actor *service.AdminPrincipal, id int64, in service.ServerBillingInput, ip *netip.Addr) (*service.Server, error)
+	GetServerMetrics(ctx context.Context, id int64, rng string, withLatency bool) (*service.ServerMetrics, error)
+	ListServerTrends(ctx context.Context, withLatency bool) ([]service.ServerTrend, error)
 
 	ListServerInbounds(ctx context.Context, serverID int64) ([]service.Inbound, error)
 	GetInbound(ctx context.Context, id int64) (*service.Inbound, error)
@@ -51,35 +54,44 @@ type PanelManager interface {
 // ---- VO：与 hub-api.yaml 的 schema 一致 ----
 
 type panelInfoVO struct {
-	Version string          `json:"version"`
-	GUID    string          `json:"guid"`
-	Status  json.RawMessage `json:"status"`
+	Version string `json:"version"`
+	GUID    string `json:"guid"`
+	// Resources 是资源快照（Ruling-83），面板没给为 null。
+	Resources *panel.Resources `json:"resources"`
 }
 
 type serverVO struct {
-	ID             int64           `json:"id"`
-	Name           string          `json:"name"`
-	ProviderType   string          `json:"providerType"`
-	BaseURL        string          `json:"baseUrl"`
-	TLSMode        string          `json:"tlsMode"`
-	CertPinSHA256  *string         `json:"certPinSha256"`
-	Region         string          `json:"region"`
-	Remark         string          `json:"remark"`
-	IsDisabled     bool            `json:"isDisabled"`
-	Status         string          `json:"status"`
-	LastError      string          `json:"lastError"`
-	LastSeenAt     *time.Time      `json:"lastSeenAt"`
-	LastSyncedAt   *time.Time      `json:"lastSyncedAt"`
-	PanelVersion   string          `json:"panelVersion"`
-	StatusSnapshot json.RawMessage `json:"statusSnapshot"`
-	InboundCount   int             `json:"inboundCount"`
-	CreatedAt      time.Time       `json:"createdAt"`
+	ID            int64      `json:"id"`
+	Name          string     `json:"name"`
+	ProviderType  string     `json:"providerType"`
+	BaseURL       string     `json:"baseUrl"`
+	TLSMode       string     `json:"tlsMode"`
+	CertPinSHA256 *string    `json:"certPinSha256"`
+	Region        string     `json:"region"`
+	Remark        string     `json:"remark"`
+	IsDisabled    bool       `json:"isDisabled"`
+	Status        string     `json:"status"`
+	LastError     string     `json:"lastError"`
+	LastSeenAt    *time.Time `json:"lastSeenAt"`
+	LastSyncedAt  *time.Time `json:"lastSyncedAt"`
+	PanelVersion  string     `json:"panelVersion"`
+	InboundCount  int        `json:"inboundCount"`
+	CreatedAt     time.Time  `json:"createdAt"`
 	// HostID 是关联的托管主机（docs/03 §5.22）；没有为 null。
 	HostID *int64 `json:"hostId"`
 	// ClientFlow 是服务器的 VLESS 流控（Ruling-77），空串为不带。
 	ClientFlow string `json:"clientFlow"`
 	// Reach 是这台服务器上大陆连通检测的目标数（Ruling-67）；功能没开为 null。
 	Reach *serverReachVO `json:"reach"`
+	// Resources 是最近一次探测成功的资源快照（Ruling-83）；还没探测成功过为 null。
+	Resources     *panel.Resources `json:"resources"`
+	PublicIPv4    string           `json:"publicIpv4"`
+	PublicIPv6    string           `json:"publicIpv6"`
+	OnlineClients int              `json:"onlineClients"`
+	// Billing、Traffic 是账单、流量额度与本周期用量（Ruling-84）；Host 是托管主机的系统信息，没有关联为 null。
+	Billing serverBillingVO      `json:"billing"`
+	Traffic serverCycleTrafficVO `json:"traffic"`
+	Host    *serverHostBriefVO   `json:"host"`
 }
 
 // toServerVO 把服务器转成 VO；reach 为 nil 表示大陆连通检测没开。
@@ -89,10 +101,9 @@ func toServerVO(s service.Server, reach map[int64]service.ReachCount) serverVO {
 		CertPinSHA256: s.CertPinSHA256, Region: s.Region, Remark: s.Remark, IsDisabled: s.IsDisabled,
 		Status: s.Status, LastError: s.LastError, LastSeenAt: s.LastSeenAt, LastSyncedAt: s.LastSyncedAt,
 		PanelVersion: s.PanelVersion, InboundCount: s.InboundCount, CreatedAt: s.CreatedAt, HostID: s.HostID,
-		ClientFlow: s.ClientFlow,
-	}
-	if len(s.StatusSnapshot) > 0 {
-		vo.StatusSnapshot = s.StatusSnapshot
+		ClientFlow: s.ClientFlow, Resources: s.Resources, PublicIPv4: s.PublicIPv4, PublicIPv6: s.PublicIPv6,
+		OnlineClients: s.OnlineClients, Billing: toServerBillingVO(s.Billing), Traffic: toServerCycleTrafficVO(s.Traffic),
+		Host: toServerHostBriefVO(s.Host),
 	}
 	if reach != nil {
 		c := reach[s.ID]
@@ -289,7 +300,7 @@ func (h *handlers) testServer(w http.ResponseWriter, r *http.Request, _ *service
 		writeError(w, r, err)
 		return
 	}
-	writeOK(w, panelInfoVO{Version: info.Version, GUID: info.GUID, Status: info.Status})
+	writeOK(w, panelInfoVO{Version: info.Version, GUID: info.GUID, Resources: info.Resources})
 }
 
 func (h *handlers) certFingerprint(w http.ResponseWriter, r *http.Request, _ *service.AdminPrincipal) {

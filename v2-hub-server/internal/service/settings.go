@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/mail"
 	"net/netip"
 	"net/url"
@@ -72,6 +73,10 @@ const (
 	defaultReachIntervalMinutes = 30
 	minReachIntervalMinutes     = 10
 	maxReachIntervalMinutes     = 1440
+	// 三网延迟检测的间隔（Ruling-86）。
+	defaultLatencyIntervalMinutes = 30
+	minLatencyIntervalMinutes     = 15
+	maxLatencyIntervalMinutes     = 1440
 
 	// 运营设置（docs/03 §5.20）
 	maxAlertEmails          = 10
@@ -135,6 +140,7 @@ type Settings struct {
 	Support      SupportSettings
 	Routing      RoutingSettings
 	Reach        ReachSettings
+	Latency      LatencySettings
 	Menu         MenuSettings
 
 	// loc 是 Site.Timezone 解析出的时区，由 load / Update 填入，免得每次 Location 都查时区库；
@@ -152,6 +158,13 @@ type MenuSettings struct {
 // RoutingSettings 是服务器 Xray 模板里的平台条目（docs/03 §5.19）：BlockRule 为真时下发平台拦截规则（Ruling-55）。
 type RoutingSettings struct {
 	BlockRule bool
+}
+
+// LatencySettings 是三网延迟检测（docs/03 §5.20，Ruling-86）：开关（开启后服务器的公网 IP 会发给第三方探测服务）
+// 与同一台服务器两次检测的最小间隔。
+type LatencySettings struct {
+	Enabled         bool
+	IntervalMinutes int
 }
 
 // ReachSettings 是大陆连通检测（docs/03 §5.20，Ruling-67）：开关（开启后节点地址与端口会发给第三方探测服务）、
@@ -291,6 +304,16 @@ func (s Settings) Location() *time.Location {
 		return s.loc
 	}
 	return loadSiteLocation(s.Site.Timezone)
+}
+
+// SiteLocation 返回当前站点时区；读设置失败时记日志并退回 UTC（只影响“今天”是哪一天的边界）。
+func (s *SettingsService) SiteLocation(ctx context.Context) *time.Location {
+	cur, err := s.Current(ctx)
+	if err != nil {
+		slog.Warn("load site timezone", "err", err)
+		return time.UTC
+	}
+	return cur.Location()
 }
 
 // loadSiteLocation 解析时区名，失败时退回 UTC（见 Location）。
@@ -715,6 +738,18 @@ var settingDefs = map[string]settingDef{
 			return decodeSetting(raw, nil, func(v bool) { s.Reach.Notify = v })
 		},
 	},
+	"latency.enabled": {
+		get: func(s *Settings) any { return s.Latency.Enabled },
+		set: func(s *Settings, raw json.RawMessage) error {
+			return decodeSetting(raw, nil, func(v bool) { s.Latency.Enabled = v })
+		},
+	},
+	"latency.intervalMinutes": {
+		get: func(s *Settings) any { return s.Latency.IntervalMinutes },
+		set: func(s *Settings, raw json.RawMessage) error {
+			return decodeSetting(raw, intBetween(minLatencyIntervalMinutes, maxLatencyIntervalMinutes), func(v int) { s.Latency.IntervalMinutes = v })
+		},
+	},
 	"menu.admin": {
 		get: func(s *Settings) any { return s.Menu.Admin },
 		set: func(s *Settings, raw json.RawMessage) error {
@@ -807,6 +842,7 @@ func defaultSettings(sub SubscriptionConfig) Settings {
 		Support:  SupportSettings{Label: defaultSupportLabel},
 		Routing:  RoutingSettings{BlockRule: true},
 		Reach:    ReachSettings{IntervalMinutes: defaultReachIntervalMinutes, Notify: true},
+		Latency:  LatencySettings{IntervalMinutes: defaultLatencyIntervalMinutes},
 		Menu:     MenuSettings{Admin: []string{}, User: []string{}},
 		Subscription: SubscriptionSettings{
 			BaseURL: strings.TrimRight(sub.BaseURL, "/"), Title: title, UpdateIntervalHours: interval, InfoNodes: sub.InfoNodes, LogRetentionDays: retention,

@@ -33,7 +33,10 @@ const (
 	pollInterval     = time.Second
 	maxResponseBytes = 1 << 20
 	pingPackets      = 3
-	maxPort          = 65535
+	// latencyPackets 是线路质量测量每个探测点发的包数（Ruling-86）；多发几个包丢包率才有区分度。
+	latencyPackets = 8
+	percentBase    = 100
+	maxPort        = 65535
 
 	pathMeasurements = "/v1/measurements"
 	measurementPing  = "ping"
@@ -196,6 +199,7 @@ func (c *Client) Cost(req Request) int {
 
 type location struct {
 	Country string `json:"country"`
+	ASN     int    `json:"asn,omitempty"`
 	Limit   int    `json:"limit"`
 }
 
@@ -223,12 +227,14 @@ type measurement struct {
 			Country string `json:"country"`
 			City    string `json:"city"`
 			Network string `json:"network"`
+			ASN     int    `json:"asn"`
 		} `json:"probe"`
 		Result struct {
 			Status string `json:"status"`
 			Stats  struct {
-				Avg *float64 `json:"avg"`
-				Rcv int      `json:"rcv"`
+				Avg   *float64 `json:"avg"`
+				Rcv   int      `json:"rcv"`
+				Total int      `json:"total"`
 			} `json:"stats"`
 		} `json:"result"`
 	} `json:"results"`
@@ -268,32 +274,97 @@ func (c *Client) Probe(ctx context.Context, req Request) ([]ProbeResult, error) 
 	if err != nil {
 		return nil, err
 	}
+	m, err := c.measure(ctx, body)
+	if err != nil {
+		return nil, err
+	}
+	return toResults(m), nil
+}
+
+// measure 建一个测量并轮询到它结束。
+func (c *Client) measure(ctx context.Context, body measurementRequest) (measurement, error) {
 	ctx, cancel := context.WithTimeout(ctx, c.timeout)
 	defer cancel()
 	raw, err := json.Marshal(body)
 	if err != nil {
-		return nil, fmt.Errorf("reach: marshal request: %w", err)
+		return measurement{}, fmt.Errorf("reach: marshal request: %w", err)
 	}
 	var created measurementCreated
 	if err := c.do(ctx, http.MethodPost, pathMeasurements, raw, &created); err != nil {
-		return nil, err
+		return measurement{}, err
 	}
 	if created.ID == "" {
-		return nil, fmt.Errorf("%w: measurement id missing", ErrUnreachable)
+		return measurement{}, fmt.Errorf("%w: measurement id missing", ErrUnreachable)
 	}
 	path := pathMeasurements + "/" + url.PathEscape(created.ID)
 	for {
 		if err := c.sleep(ctx, pollInterval); err != nil {
-			return nil, fmt.Errorf("%w: measurement did not finish in time", ErrUnreachable)
+			return measurement{}, fmt.Errorf("%w: measurement did not finish in time", ErrUnreachable)
 		}
 		var m measurement
 		if err := c.do(ctx, http.MethodGet, path, nil, &m); err != nil {
-			return nil, err
+			return measurement{}, err
 		}
 		if m.Status != statusInProgress {
-			return toResults(m), nil
+			return m, nil
 		}
 	}
+}
+
+// LatencyRequest 是一次线路质量测量（Ruling-86）：从大陆按 AS 号各取一个探测点去 ping Address。
+type LatencyRequest struct {
+	Address string
+	ASNs    []int
+}
+
+// LatencyResult 是一个探测点的线路质量。AvgMs 是平均往返时间（毫秒），全丢为 nil；LossPercent 是丢包率（0–100）。
+type LatencyResult struct {
+	ASN         int
+	City        string
+	AvgMs       *float64
+	LossPercent float64
+}
+
+// LatencyProber 能从大陆指定网络的探测点测一个地址的延迟与丢包。
+type LatencyProber interface {
+	// Latency 发起一次测量并等到出结果；出错或离线的探测点、当时没有探测点的 AS 不在结果里。错误种类同 Prober.Probe。
+	Latency(ctx context.Context, req LatencyRequest) ([]LatencyResult, error)
+}
+
+// Latency 实现 LatencyProber。
+func (c *Client) Latency(ctx context.Context, req LatencyRequest) ([]LatencyResult, error) {
+	if !IsPublicTarget(req.Address) {
+		return nil, ErrNotPublic
+	}
+	if len(req.ASNs) == 0 {
+		return nil, fmt.Errorf("%w: no network given", ErrRejected)
+	}
+	body := measurementRequest{
+		Type: measurementPing, Target: req.Address,
+		Locations: make([]location, 0, len(req.ASNs)),
+		Options:   pingOptions{Packets: latencyPackets, Protocol: protocolICMP},
+	}
+	for _, asn := range req.ASNs {
+		body.Locations = append(body.Locations, location{Country: MainlandCountry, ASN: asn, Limit: 1})
+	}
+	m, err := c.measure(ctx, body)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]LatencyResult, 0, len(m.Results))
+	for _, r := range m.Results {
+		stats := r.Result.Stats
+		if r.Result.Status != statusFinished || stats.Total <= 0 {
+			continue
+		}
+		res := LatencyResult{ASN: r.Probe.ASN, City: r.Probe.City}
+		res.LossPercent = float64(stats.Total-stats.Rcv) * percentBase / float64(stats.Total)
+		if stats.Rcv > 0 {
+			res.AvgMs = stats.Avg
+		}
+		out = append(out, res)
+	}
+	return out, nil
 }
 
 func toResults(m measurement) []ProbeResult {

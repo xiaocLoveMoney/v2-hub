@@ -11,6 +11,30 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const addServerNicTraffic = `-- name: AddServerNicTraffic :exec
+INSERT INTO server_nic_traffic_daily (server_id, day, sent, recv)
+VALUES ($1, $2, $3, $4)
+ON CONFLICT (server_id, day) DO UPDATE SET
+    sent = server_nic_traffic_daily.sent + EXCLUDED.sent, recv = server_nic_traffic_daily.recv + EXCLUDED.recv
+`
+
+type AddServerNicTrafficParams struct {
+	ServerID int64
+	Day      pgtype.Date
+	Sent     int64
+	Recv     int64
+}
+
+func (q *Queries) AddServerNicTraffic(ctx context.Context, arg AddServerNicTrafficParams) error {
+	_, err := q.db.Exec(ctx, addServerNicTraffic,
+		arg.ServerID,
+		arg.Day,
+		arg.Sent,
+		arg.Recv,
+	)
+	return err
+}
+
 const createServer = `-- name: CreateServer :one
 INSERT INTO server (name, provider_type, base_url, api_token_enc, tls_mode, cert_pin_sha256, region, remark, is_disabled)
 VALUES ($1, $2, $3, '\x00', $4, $5, $6, $7, $8)
@@ -79,32 +103,52 @@ const getServer = `-- name: GetServer :one
 SELECT s.id, s.name, s.provider_type, s.base_url, s.tls_mode, s.cert_pin_sha256, s.region, s.remark,
        s.is_disabled, s.status, s.last_error, s.last_seen_at, s.panel_version, s.status_snapshot,
        s.last_synced_at, s.created_at, s.client_flow,
+       s.public_ipv4, s.public_ipv6, s.online_clients,
+       s.price_cents, s.price_currency, s.billing_cycle, s.expires_on,
+       s.traffic_quota_bytes, s.traffic_reset_day, s.traffic_mode, s.traffic_adjust_bytes, s.traffic_adjust_cycle,
        (SELECT COUNT(*) FROM inbound i WHERE i.server_id = s.id AND NOT i.is_missing)::int AS inbound_count,
-       coalesce((SELECT h.id FROM server_host h WHERE h.server_id = s.id), 0)::bigint AS host_id
+       coalesce(h.id, 0)::bigint AS host_id, coalesce(h.os_id, '')::varchar AS host_os_id,
+       coalesce(h.arch, '')::varchar AS host_arch, h.cert_not_after AS host_cert_not_after
 FROM server s
+LEFT JOIN server_host h ON h.server_id = s.id
 WHERE s.id = $1
 `
 
 type GetServerRow struct {
-	ID             int64
-	Name           string
-	ProviderType   string
-	BaseUrl        string
-	TlsMode        string
-	CertPinSha256  pgtype.Text
-	Region         string
-	Remark         string
-	IsDisabled     bool
-	Status         string
-	LastError      string
-	LastSeenAt     pgtype.Timestamptz
-	PanelVersion   string
-	StatusSnapshot []byte
-	LastSyncedAt   pgtype.Timestamptz
-	CreatedAt      pgtype.Timestamptz
-	ClientFlow     string
-	InboundCount   int32
-	HostID         int64
+	ID                 int64
+	Name               string
+	ProviderType       string
+	BaseUrl            string
+	TlsMode            string
+	CertPinSha256      pgtype.Text
+	Region             string
+	Remark             string
+	IsDisabled         bool
+	Status             string
+	LastError          string
+	LastSeenAt         pgtype.Timestamptz
+	PanelVersion       string
+	StatusSnapshot     []byte
+	LastSyncedAt       pgtype.Timestamptz
+	CreatedAt          pgtype.Timestamptz
+	ClientFlow         string
+	PublicIpv4         string
+	PublicIpv6         string
+	OnlineClients      int32
+	PriceCents         pgtype.Int4
+	PriceCurrency      string
+	BillingCycle       string
+	ExpiresOn          pgtype.Date
+	TrafficQuotaBytes  pgtype.Int8
+	TrafficResetDay    int16
+	TrafficMode        string
+	TrafficAdjustBytes int64
+	TrafficAdjustCycle pgtype.Date
+	InboundCount       int32
+	HostID             int64
+	HostOsID           string
+	HostArch           string
+	HostCertNotAfter   pgtype.Timestamptz
 }
 
 func (q *Queries) GetServer(ctx context.Context, id int64) (GetServerRow, error) {
@@ -128,8 +172,23 @@ func (q *Queries) GetServer(ctx context.Context, id int64) (GetServerRow, error)
 		&i.LastSyncedAt,
 		&i.CreatedAt,
 		&i.ClientFlow,
+		&i.PublicIpv4,
+		&i.PublicIpv6,
+		&i.OnlineClients,
+		&i.PriceCents,
+		&i.PriceCurrency,
+		&i.BillingCycle,
+		&i.ExpiresOn,
+		&i.TrafficQuotaBytes,
+		&i.TrafficResetDay,
+		&i.TrafficMode,
+		&i.TrafficAdjustBytes,
+		&i.TrafficAdjustCycle,
 		&i.InboundCount,
 		&i.HostID,
+		&i.HostOsID,
+		&i.HostArch,
+		&i.HostCertNotAfter,
 	)
 	return i, err
 }
@@ -169,6 +228,50 @@ func (q *Queries) GetServerConn(ctx context.Context, id int64) (GetServerConnRow
 	return i, err
 }
 
+const getServerNicCountersForUpdate = `-- name: GetServerNicCountersForUpdate :one
+SELECT nic_last_sent, nic_last_recv FROM server WHERE id = $1 FOR UPDATE
+`
+
+type GetServerNicCountersForUpdateRow struct {
+	NicLastSent pgtype.Int8
+	NicLastRecv pgtype.Int8
+}
+
+// 上次探测时的网卡累计计数；行锁让并发的探测不会把同一段增量记两次
+func (q *Queries) GetServerNicCountersForUpdate(ctx context.Context, id int64) (GetServerNicCountersForUpdateRow, error) {
+	row := q.db.QueryRow(ctx, getServerNicCountersForUpdate, id)
+	var i GetServerNicCountersForUpdateRow
+	err := row.Scan(&i.NicLastSent, &i.NicLastRecv)
+	return i, err
+}
+
+const insertServerLatency = `-- name: InsertServerLatency :exec
+INSERT INTO server_latency (server_id, isp, sampled_at, avg_ms, loss_percent, probe_city)
+VALUES ($1, $2, $3, $4, $5, $6)
+ON CONFLICT (server_id, isp, sampled_at) DO NOTHING
+`
+
+type InsertServerLatencyParams struct {
+	ServerID    int64
+	Isp         string
+	SampledAt   pgtype.Timestamptz
+	AvgMs       pgtype.Int4
+	LossPercent int16
+	ProbeCity   string
+}
+
+func (q *Queries) InsertServerLatency(ctx context.Context, arg InsertServerLatencyParams) error {
+	_, err := q.db.Exec(ctx, insertServerLatency,
+		arg.ServerID,
+		arg.Isp,
+		arg.SampledAt,
+		arg.AvgMs,
+		arg.LossPercent,
+		arg.ProbeCity,
+	)
+	return err
+}
+
 const listEnabledServerIDs = `-- name: ListEnabledServerIDs :many
 SELECT id FROM server WHERE NOT is_disabled ORDER BY id
 `
@@ -186,6 +289,228 @@ func (q *Queries) ListEnabledServerIDs(ctx context.Context) ([]int64, error) {
 			return nil, err
 		}
 		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listLatencyDueServers = `-- name: ListLatencyDueServers :many
+
+SELECT id, public_ipv4 FROM server
+WHERE NOT is_disabled AND status = 'online' AND public_ipv4 <> ''
+  AND (latency_checked_at IS NULL OR latency_checked_at < $1::timestamptz)
+ORDER BY latency_checked_at NULLS FIRST, id
+LIMIT $2
+`
+
+type ListLatencyDueServersParams struct {
+	DueBefore pgtype.Timestamptz
+	RowLimit  int32
+}
+
+type ListLatencyDueServersRow struct {
+	ID         int64
+	PublicIpv4 string
+}
+
+// 三网延迟（docs/03 §5.20，Ruling-86）-----------------------------------------
+// 到期该测延迟的服务器：启用、在线、有公网 IPv4；最久没测的在前
+func (q *Queries) ListLatencyDueServers(ctx context.Context, arg ListLatencyDueServersParams) ([]ListLatencyDueServersRow, error) {
+	rows, err := q.db.Query(ctx, listLatencyDueServers, arg.DueBefore, arg.RowLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListLatencyDueServersRow{}
+	for rows.Next() {
+		var i ListLatencyDueServersRow
+		if err := rows.Scan(&i.ID, &i.PublicIpv4); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRecentServerLatency = `-- name: ListRecentServerLatency :many
+SELECT t.server_id, t.isp, t.sampled_at, t.avg_ms, t.loss_percent
+FROM (SELECT l.server_id, l.isp, l.sampled_at, l.avg_ms, l.loss_percent,
+             row_number() OVER (PARTITION BY l.server_id, l.isp ORDER BY l.sampled_at DESC) AS recent_rank
+      FROM server_latency l
+      WHERE l.sampled_at >= $1::timestamptz) t
+WHERE t.recent_rank <= $2::int
+ORDER BY t.server_id, t.isp, t.sampled_at
+`
+
+type ListRecentServerLatencyParams struct {
+	Since     pgtype.Timestamptz
+	PerSeries int32
+}
+
+type ListRecentServerLatencyRow struct {
+	ServerID    int64
+	Isp         string
+	SampledAt   pgtype.Timestamptz
+	AvgMs       pgtype.Int4
+	LossPercent int16
+}
+
+// 各服务器每家运营商最近的若干次检测（列表卡片用），按时间升序
+func (q *Queries) ListRecentServerLatency(ctx context.Context, arg ListRecentServerLatencyParams) ([]ListRecentServerLatencyRow, error) {
+	rows, err := q.db.Query(ctx, listRecentServerLatency, arg.Since, arg.PerSeries)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListRecentServerLatencyRow{}
+	for rows.Next() {
+		var i ListRecentServerLatencyRow
+		if err := rows.Scan(
+			&i.ServerID,
+			&i.Isp,
+			&i.SampledAt,
+			&i.AvgMs,
+			&i.LossPercent,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRecentServerNet = `-- name: ListRecentServerNet :many
+SELECT server_id, bucket_at, net_up_rate, net_down_rate
+FROM server_metric
+WHERE bucket_at >= $1 AND net_up_rate IS NOT NULL AND net_down_rate IS NOT NULL
+ORDER BY server_id, bucket_at
+`
+
+type ListRecentServerNetRow struct {
+	ServerID    int64
+	BucketAt    pgtype.Timestamptz
+	NetUpRate   pgtype.Int8
+	NetDownRate pgtype.Int8
+}
+
+// 各服务器近一段时间的上下行速率（列表卡片的小图，Ruling-85）
+func (q *Queries) ListRecentServerNet(ctx context.Context, bucketAt pgtype.Timestamptz) ([]ListRecentServerNetRow, error) {
+	rows, err := q.db.Query(ctx, listRecentServerNet, bucketAt)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListRecentServerNetRow{}
+	for rows.Next() {
+		var i ListRecentServerNetRow
+		if err := rows.Scan(
+			&i.ServerID,
+			&i.BucketAt,
+			&i.NetUpRate,
+			&i.NetDownRate,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listServerLatency = `-- name: ListServerLatency :many
+SELECT isp, sampled_at, avg_ms, loss_percent FROM server_latency
+WHERE server_id = $1 AND sampled_at >= $2 ORDER BY sampled_at
+`
+
+type ListServerLatencyParams struct {
+	ServerID  int64
+	SampledAt pgtype.Timestamptz
+}
+
+type ListServerLatencyRow struct {
+	Isp         string
+	SampledAt   pgtype.Timestamptz
+	AvgMs       pgtype.Int4
+	LossPercent int16
+}
+
+func (q *Queries) ListServerLatency(ctx context.Context, arg ListServerLatencyParams) ([]ListServerLatencyRow, error) {
+	rows, err := q.db.Query(ctx, listServerLatency, arg.ServerID, arg.SampledAt)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListServerLatencyRow{}
+	for rows.Next() {
+		var i ListServerLatencyRow
+		if err := rows.Scan(
+			&i.Isp,
+			&i.SampledAt,
+			&i.AvgMs,
+			&i.LossPercent,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listServerLatencyHourly = `-- name: ListServerLatencyHourly :many
+SELECT isp, date_bin('1 hour', sampled_at, TIMESTAMPTZ '2000-01-01 00:00:00+00')::timestamptz AS sampled_at,
+       coalesce(round(avg(avg_ms)), 0)::integer AS avg_ms, count(avg_ms) AS ok_samples,
+       round(avg(loss_percent))::integer AS loss_percent
+FROM server_latency
+WHERE server_id = $1 AND sampled_at >= $2
+GROUP BY 1, 2 ORDER BY 2
+`
+
+type ListServerLatencyHourlyParams struct {
+	ServerID  int64
+	SampledAt pgtype.Timestamptz
+}
+
+type ListServerLatencyHourlyRow struct {
+	Isp         string
+	SampledAt   pgtype.Timestamptz
+	AvgMs       int32
+	OkSamples   int64
+	LossPercent int32
+}
+
+// 按小时平均；ok_samples 为 0 表示该小时全丢（此时 avg_ms 无意义）
+func (q *Queries) ListServerLatencyHourly(ctx context.Context, arg ListServerLatencyHourlyParams) ([]ListServerLatencyHourlyRow, error) {
+	rows, err := q.db.Query(ctx, listServerLatencyHourly, arg.ServerID, arg.SampledAt)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListServerLatencyHourlyRow{}
+	for rows.Next() {
+		var i ListServerLatencyHourlyRow
+		if err := rows.Scan(
+			&i.Isp,
+			&i.SampledAt,
+			&i.AvgMs,
+			&i.OkSamples,
+			&i.LossPercent,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -277,37 +602,255 @@ func (q *Queries) ListServerMetricsHourly(ctx context.Context, arg ListServerMet
 	return items, nil
 }
 
+const listServerNicTraffic = `-- name: ListServerNicTraffic :many
+SELECT server_id, day, sent, recv FROM server_nic_traffic_daily WHERE day >= $1 ORDER BY server_id, day
+`
+
+// 全部服务器自某天起的按天流量（各台的周期起始日不同，由调用方按周期求和）
+func (q *Queries) ListServerNicTraffic(ctx context.Context, day pgtype.Date) ([]ServerNicTrafficDaily, error) {
+	rows, err := q.db.Query(ctx, listServerNicTraffic, day)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ServerNicTrafficDaily{}
+	for rows.Next() {
+		var i ServerNicTrafficDaily
+		if err := rows.Scan(
+			&i.ServerID,
+			&i.Day,
+			&i.Sent,
+			&i.Recv,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listServerNicTrafficOf = `-- name: ListServerNicTrafficOf :many
+SELECT server_id, day, sent, recv FROM server_nic_traffic_daily WHERE server_id = $1 AND day >= $2 ORDER BY day
+`
+
+type ListServerNicTrafficOfParams struct {
+	ServerID int64
+	Day      pgtype.Date
+}
+
+func (q *Queries) ListServerNicTrafficOf(ctx context.Context, arg ListServerNicTrafficOfParams) ([]ServerNicTrafficDaily, error) {
+	rows, err := q.db.Query(ctx, listServerNicTrafficOf, arg.ServerID, arg.Day)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ServerNicTrafficDaily{}
+	for rows.Next() {
+		var i ServerNicTrafficDaily
+		if err := rows.Scan(
+			&i.ServerID,
+			&i.Day,
+			&i.Sent,
+			&i.Recv,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listServerResourceMetrics = `-- name: ListServerResourceMetrics :many
+SELECT bucket_at, cpu, online_clients, mem_used, mem_total, disk_used, disk_total, load1_x100,
+       net_up_rate, net_down_rate, tcp_count, udp_count
+FROM server_metric
+WHERE server_id = $1 AND bucket_at >= $2 ORDER BY bucket_at
+`
+
+type ListServerResourceMetricsParams struct {
+	ServerID int64
+	BucketAt pgtype.Timestamptz
+}
+
+type ListServerResourceMetricsRow struct {
+	BucketAt      pgtype.Timestamptz
+	Cpu           pgtype.Float8
+	OnlineClients int32
+	MemUsed       pgtype.Int8
+	MemTotal      pgtype.Int8
+	DiskUsed      pgtype.Int8
+	DiskTotal     pgtype.Int8
+	Load1X100     pgtype.Int4
+	NetUpRate     pgtype.Int8
+	NetDownRate   pgtype.Int8
+	TcpCount      pgtype.Int4
+	UdpCount      pgtype.Int4
+}
+
+// 管理端资源趋势的 5 分钟原值（Ruling-85）；Ruling-85 之前的行除 cpu 与 online_clients 外为空
+func (q *Queries) ListServerResourceMetrics(ctx context.Context, arg ListServerResourceMetricsParams) ([]ListServerResourceMetricsRow, error) {
+	rows, err := q.db.Query(ctx, listServerResourceMetrics, arg.ServerID, arg.BucketAt)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListServerResourceMetricsRow{}
+	for rows.Next() {
+		var i ListServerResourceMetricsRow
+		if err := rows.Scan(
+			&i.BucketAt,
+			&i.Cpu,
+			&i.OnlineClients,
+			&i.MemUsed,
+			&i.MemTotal,
+			&i.DiskUsed,
+			&i.DiskTotal,
+			&i.Load1X100,
+			&i.NetUpRate,
+			&i.NetDownRate,
+			&i.TcpCount,
+			&i.UdpCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listServerResourceMetricsHourly = `-- name: ListServerResourceMetricsHourly :many
+SELECT date_bin('1 hour', bucket_at, TIMESTAMPTZ '2000-01-01 00:00:00+00')::timestamptz AS bucket_at,
+       coalesce(avg(cpu), 0)::double precision AS cpu, count(cpu) AS cpu_samples,
+       round(avg(online_clients))::integer AS online_clients,
+       count(mem_total) AS resource_samples,
+       coalesce(round(avg(mem_used)), 0)::bigint AS mem_used, coalesce(round(avg(mem_total)), 0)::bigint AS mem_total,
+       coalesce(round(avg(disk_used)), 0)::bigint AS disk_used, coalesce(round(avg(disk_total)), 0)::bigint AS disk_total,
+       coalesce(round(avg(load1_x100)), 0)::integer AS load1_x100,
+       coalesce(round(avg(net_up_rate)), 0)::bigint AS net_up_rate, coalesce(round(avg(net_down_rate)), 0)::bigint AS net_down_rate,
+       coalesce(round(avg(tcp_count)), 0)::integer AS tcp_count, coalesce(round(avg(udp_count)), 0)::integer AS udp_count
+FROM server_metric
+WHERE server_id = $1 AND bucket_at >= $2
+GROUP BY 1 ORDER BY 1
+`
+
+type ListServerResourceMetricsHourlyParams struct {
+	ServerID int64
+	BucketAt pgtype.Timestamptz
+}
+
+type ListServerResourceMetricsHourlyRow struct {
+	BucketAt        pgtype.Timestamptz
+	Cpu             float64
+	CpuSamples      int64
+	OnlineClients   int32
+	ResourceSamples int64
+	MemUsed         int64
+	MemTotal        int64
+	DiskUsed        int64
+	DiskTotal       int64
+	Load1X100       int32
+	NetUpRate       int64
+	NetDownRate     int64
+	TcpCount        int32
+	UdpCount        int32
+}
+
+// 管理端资源趋势按小时平均；cpu_samples / resource_samples 为 0 表示该小时对应的列全为空（此时数值无意义）
+func (q *Queries) ListServerResourceMetricsHourly(ctx context.Context, arg ListServerResourceMetricsHourlyParams) ([]ListServerResourceMetricsHourlyRow, error) {
+	rows, err := q.db.Query(ctx, listServerResourceMetricsHourly, arg.ServerID, arg.BucketAt)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListServerResourceMetricsHourlyRow{}
+	for rows.Next() {
+		var i ListServerResourceMetricsHourlyRow
+		if err := rows.Scan(
+			&i.BucketAt,
+			&i.Cpu,
+			&i.CpuSamples,
+			&i.OnlineClients,
+			&i.ResourceSamples,
+			&i.MemUsed,
+			&i.MemTotal,
+			&i.DiskUsed,
+			&i.DiskTotal,
+			&i.Load1X100,
+			&i.NetUpRate,
+			&i.NetDownRate,
+			&i.TcpCount,
+			&i.UdpCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listServers = `-- name: ListServers :many
 
 SELECT s.id, s.name, s.provider_type, s.base_url, s.tls_mode, s.cert_pin_sha256, s.region, s.remark,
        s.is_disabled, s.status, s.last_error, s.last_seen_at, s.panel_version, s.status_snapshot,
        s.last_synced_at, s.created_at, s.client_flow,
+       s.public_ipv4, s.public_ipv6, s.online_clients,
+       s.price_cents, s.price_currency, s.billing_cycle, s.expires_on,
+       s.traffic_quota_bytes, s.traffic_reset_day, s.traffic_mode, s.traffic_adjust_bytes, s.traffic_adjust_cycle,
        (SELECT COUNT(*) FROM inbound i WHERE i.server_id = s.id AND NOT i.is_missing)::int AS inbound_count,
-       coalesce((SELECT h.id FROM server_host h WHERE h.server_id = s.id), 0)::bigint AS host_id
+       coalesce(h.id, 0)::bigint AS host_id, coalesce(h.os_id, '')::varchar AS host_os_id,
+       coalesce(h.arch, '')::varchar AS host_arch, h.cert_not_after AS host_cert_not_after
 FROM server s
+LEFT JOIN server_host h ON h.server_id = s.id
 ORDER BY s.id
 `
 
 type ListServersRow struct {
-	ID             int64
-	Name           string
-	ProviderType   string
-	BaseUrl        string
-	TlsMode        string
-	CertPinSha256  pgtype.Text
-	Region         string
-	Remark         string
-	IsDisabled     bool
-	Status         string
-	LastError      string
-	LastSeenAt     pgtype.Timestamptz
-	PanelVersion   string
-	StatusSnapshot []byte
-	LastSyncedAt   pgtype.Timestamptz
-	CreatedAt      pgtype.Timestamptz
-	ClientFlow     string
-	InboundCount   int32
-	HostID         int64
+	ID                 int64
+	Name               string
+	ProviderType       string
+	BaseUrl            string
+	TlsMode            string
+	CertPinSha256      pgtype.Text
+	Region             string
+	Remark             string
+	IsDisabled         bool
+	Status             string
+	LastError          string
+	LastSeenAt         pgtype.Timestamptz
+	PanelVersion       string
+	StatusSnapshot     []byte
+	LastSyncedAt       pgtype.Timestamptz
+	CreatedAt          pgtype.Timestamptz
+	ClientFlow         string
+	PublicIpv4         string
+	PublicIpv6         string
+	OnlineClients      int32
+	PriceCents         pgtype.Int4
+	PriceCurrency      string
+	BillingCycle       string
+	ExpiresOn          pgtype.Date
+	TrafficQuotaBytes  pgtype.Int8
+	TrafficResetDay    int16
+	TrafficMode        string
+	TrafficAdjustBytes int64
+	TrafficAdjustCycle pgtype.Date
+	InboundCount       int32
+	HostID             int64
+	HostOsID           string
+	HostArch           string
+	HostCertNotAfter   pgtype.Timestamptz
 }
 
 // 服务器（docs/03 §2、§3 T1–T4、§5.1）---------------------------------------
@@ -338,8 +881,23 @@ func (q *Queries) ListServers(ctx context.Context) ([]ListServersRow, error) {
 			&i.LastSyncedAt,
 			&i.CreatedAt,
 			&i.ClientFlow,
+			&i.PublicIpv4,
+			&i.PublicIpv6,
+			&i.OnlineClients,
+			&i.PriceCents,
+			&i.PriceCurrency,
+			&i.BillingCycle,
+			&i.ExpiresOn,
+			&i.TrafficQuotaBytes,
+			&i.TrafficResetDay,
+			&i.TrafficMode,
+			&i.TrafficAdjustBytes,
+			&i.TrafficAdjustCycle,
 			&i.InboundCount,
 			&i.HostID,
+			&i.HostOsID,
+			&i.HostArch,
+			&i.HostCertNotAfter,
 		); err != nil {
 			return nil, err
 		}
@@ -376,6 +934,18 @@ func (q *Queries) ListUnlocatedServerIDs(ctx context.Context) ([]int64, error) {
 	return items, nil
 }
 
+const purgeServerLatency = `-- name: PurgeServerLatency :execrows
+DELETE FROM server_latency WHERE sampled_at < $1
+`
+
+func (q *Queries) PurgeServerLatency(ctx context.Context, sampledAt pgtype.Timestamptz) (int64, error) {
+	result, err := q.db.Exec(ctx, purgeServerLatency, sampledAt)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const purgeServerMetrics = `-- name: PurgeServerMetrics :execrows
 DELETE FROM server_metric WHERE bucket_at < $1
 `
@@ -388,24 +958,111 @@ func (q *Queries) PurgeServerMetrics(ctx context.Context, bucketAt pgtype.Timest
 	return result.RowsAffected(), nil
 }
 
+const purgeServerNicTraffic = `-- name: PurgeServerNicTraffic :execrows
+DELETE FROM server_nic_traffic_daily WHERE day < $1
+`
+
+func (q *Queries) PurgeServerNicTraffic(ctx context.Context, day pgtype.Date) (int64, error) {
+	result, err := q.db.Exec(ctx, purgeServerNicTraffic, day)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const recordServerMetric = `-- name: RecordServerMetric :exec
-INSERT INTO server_metric (server_id, bucket_at, cpu, online_clients)
+INSERT INTO server_metric (server_id, bucket_at, cpu, online_clients, mem_used, mem_total, disk_used, disk_total,
+                           load1_x100, net_up_rate, net_down_rate, tcp_count, udp_count)
 SELECT s.id, date_bin('5 minutes', $1::timestamptz, TIMESTAMPTZ '2000-01-01 00:00:00+00'),
-       $2::double precision, s.online_clients
-FROM server s WHERE s.id = $3
-ON CONFLICT (server_id, bucket_at) DO UPDATE SET cpu = EXCLUDED.cpu, online_clients = EXCLUDED.online_clients
+       $2::double precision, s.online_clients,
+       $3::bigint, $4::bigint, $5::bigint, $6::bigint,
+       $7::int, $8::bigint, $9::bigint,
+       $10::int, $11::int
+FROM server s WHERE s.id = $12
+ON CONFLICT (server_id, bucket_at) DO UPDATE SET
+    cpu = EXCLUDED.cpu, online_clients = EXCLUDED.online_clients,
+    mem_used = EXCLUDED.mem_used, mem_total = EXCLUDED.mem_total, disk_used = EXCLUDED.disk_used, disk_total = EXCLUDED.disk_total,
+    load1_x100 = EXCLUDED.load1_x100, net_up_rate = EXCLUDED.net_up_rate, net_down_rate = EXCLUDED.net_down_rate,
+    tcp_count = EXCLUDED.tcp_count, udp_count = EXCLUDED.udp_count
 `
 
 type RecordServerMetricParams struct {
-	SampledAt pgtype.Timestamptz
-	Cpu       pgtype.Float8
-	ServerID  int64
+	SampledAt   pgtype.Timestamptz
+	Cpu         pgtype.Float8
+	MemUsed     pgtype.Int8
+	MemTotal    pgtype.Int8
+	DiskUsed    pgtype.Int8
+	DiskTotal   pgtype.Int8
+	Load1X100   pgtype.Int4
+	NetUpRate   pgtype.Int8
+	NetDownRate pgtype.Int8
+	TcpCount    pgtype.Int4
+	UdpCount    pgtype.Int4
+	ServerID    int64
 }
 
-// 健康探测成功顺带记一条负载采样：对齐 5 分钟，同一时段覆盖为最新值，在线数取服务器缓存（Ruling-65）
+// 健康探测成功顺带记一条采样：对齐 5 分钟，同一时段覆盖为最新值，在线数取服务器缓存（Ruling-65、Ruling-85）
 func (q *Queries) RecordServerMetric(ctx context.Context, arg RecordServerMetricParams) error {
-	_, err := q.db.Exec(ctx, recordServerMetric, arg.SampledAt, arg.Cpu, arg.ServerID)
+	_, err := q.db.Exec(ctx, recordServerMetric,
+		arg.SampledAt,
+		arg.Cpu,
+		arg.MemUsed,
+		arg.MemTotal,
+		arg.DiskUsed,
+		arg.DiskTotal,
+		arg.Load1X100,
+		arg.NetUpRate,
+		arg.NetDownRate,
+		arg.TcpCount,
+		arg.UdpCount,
+		arg.ServerID,
+	)
 	return err
+}
+
+const setServerBilling = `-- name: SetServerBilling :execrows
+
+UPDATE server
+SET price_cents = $1, price_currency = $2::varchar,
+    billing_cycle = $3::varchar, expires_on = $4,
+    traffic_quota_bytes = $5, traffic_reset_day = $6::smallint,
+    traffic_mode = $7::varchar,
+    traffic_adjust_bytes = $8::bigint, traffic_adjust_cycle = $9,
+    updated_at = now()
+WHERE id = $10
+`
+
+type SetServerBillingParams struct {
+	PriceCents         pgtype.Int4
+	PriceCurrency      string
+	BillingCycle       string
+	ExpiresOn          pgtype.Date
+	TrafficQuotaBytes  pgtype.Int8
+	TrafficResetDay    int16
+	TrafficMode        string
+	TrafficAdjustBytes int64
+	TrafficAdjustCycle pgtype.Date
+	ID                 int64
+}
+
+// 账单与流量额度（docs/03 §5.1，Ruling-84）-------------------------------------
+func (q *Queries) SetServerBilling(ctx context.Context, arg SetServerBillingParams) (int64, error) {
+	result, err := q.db.Exec(ctx, setServerBilling,
+		arg.PriceCents,
+		arg.PriceCurrency,
+		arg.BillingCycle,
+		arg.ExpiresOn,
+		arg.TrafficQuotaBytes,
+		arg.TrafficResetDay,
+		arg.TrafficMode,
+		arg.TrafficAdjustBytes,
+		arg.TrafficAdjustCycle,
+		arg.ID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const setServerClientFlow = `-- name: SetServerClientFlow :execrows
@@ -426,6 +1083,35 @@ func (q *Queries) SetServerClientFlow(ctx context.Context, arg SetServerClientFl
 	return result.RowsAffected(), nil
 }
 
+const setServerLatencyChecked = `-- name: SetServerLatencyChecked :exec
+UPDATE server SET latency_checked_at = $1::timestamptz WHERE id = $2
+`
+
+type SetServerLatencyCheckedParams struct {
+	CheckedAt pgtype.Timestamptz
+	ID        int64
+}
+
+func (q *Queries) SetServerLatencyChecked(ctx context.Context, arg SetServerLatencyCheckedParams) error {
+	_, err := q.db.Exec(ctx, setServerLatencyChecked, arg.CheckedAt, arg.ID)
+	return err
+}
+
+const setServerNicCounters = `-- name: SetServerNicCounters :exec
+UPDATE server SET nic_last_sent = $1::bigint, nic_last_recv = $2::bigint WHERE id = $3
+`
+
+type SetServerNicCountersParams struct {
+	Sent int64
+	Recv int64
+	ID   int64
+}
+
+func (q *Queries) SetServerNicCounters(ctx context.Context, arg SetServerNicCountersParams) error {
+	_, err := q.db.Exec(ctx, setServerNicCounters, arg.Sent, arg.Recv, arg.ID)
+	return err
+}
+
 const setServerProbeResult = `-- name: SetServerProbeResult :exec
 UPDATE server
 SET status = $1::varchar,
@@ -434,8 +1120,10 @@ SET status = $1::varchar,
     last_seen_at = CASE WHEN $2::bool THEN now() ELSE last_seen_at END,
     panel_version = CASE WHEN $2::bool THEN $5::varchar ELSE panel_version END,
     panel_guid = CASE WHEN $2::bool THEN $6::varchar ELSE panel_guid END,
-    status_snapshot = CASE WHEN $2::bool THEN $7::jsonb ELSE status_snapshot END
-WHERE id = $8
+    status_snapshot = CASE WHEN $2::bool THEN $7::jsonb ELSE status_snapshot END,
+    public_ipv4 = CASE WHEN $2::bool THEN $8::varchar ELSE public_ipv4 END,
+    public_ipv6 = CASE WHEN $2::bool THEN $9::varchar ELSE public_ipv6 END
+WHERE id = $10
 `
 
 type SetServerProbeResultParams struct {
@@ -446,10 +1134,12 @@ type SetServerProbeResultParams struct {
 	PanelVersion   string
 	PanelGuid      string
 	StatusSnapshot []byte
+	PublicIpv4     string
+	PublicIpv6     string
 	ID             int64
 }
 
-// T1–T3 的落库：status、last_error 由调用方按转移表算好；is_online 时才刷新版本、GUID、快照与最近在线时间。
+// T1–T3 的落库：status、last_error 由调用方按转移表算好；is_online 时才刷新版本、GUID、快照、公网 IP 与最近在线时间。
 // 不在线起始时间（docs/03 §5.20 掉线告警）：回到 online 清空，离开 online 时记下第一次的时刻
 func (q *Queries) SetServerProbeResult(ctx context.Context, arg SetServerProbeResultParams) error {
 	_, err := q.db.Exec(ctx, setServerProbeResult,
@@ -460,6 +1150,8 @@ func (q *Queries) SetServerProbeResult(ctx context.Context, arg SetServerProbeRe
 		arg.PanelVersion,
 		arg.PanelGuid,
 		arg.StatusSnapshot,
+		arg.PublicIpv4,
+		arg.PublicIpv6,
 		arg.ID,
 	)
 	return err

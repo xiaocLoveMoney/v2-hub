@@ -86,3 +86,26 @@ func RunReach(ctx context.Context, c ReachChecker, interval time.Duration) {
 		}
 	}
 }
+
+// LatencyChecker 能跑一轮三网延迟检测（由 service.LatencyService 实现，Ruling-86）。
+type LatencyChecker interface {
+	RunRound(ctx context.Context) (int, error)
+}
+
+// RunLatency 按 interval 周期跑三网延迟检测，阻塞到 ctx 取消（docs/03 §5.20 三网延迟检测）。
+// 功能开关与同一台服务器的检测间隔在系统设置里，由 RunRound 自己判断。
+func RunLatency(ctx context.Context, c LatencyChecker, interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			guarded("latency check", func() error {
+				_, err := c.RunRound(ctx)
+				return err
+			})
+		}
+	}
+}

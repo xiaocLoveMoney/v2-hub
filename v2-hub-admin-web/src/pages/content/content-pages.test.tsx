@@ -213,6 +213,7 @@ describe('SettingsPage', () => {
     support: { url: '', label: '在线客服' },
     routing: { blockRule: true },
     reach: { enabled: false, intervalMinutes: 30, notify: true, hasToken: false },
+    latency: { enabled: false, intervalMinutes: 30 },
     menu: { admin: ['users'], user: [] },
   }
 
@@ -256,6 +257,7 @@ describe('SettingsPage', () => {
       site: { ...settings.site, name: '新站名' },
       routing: { blockRule: false },
       reach: { enabled: false, intervalMinutes: 30, notify: true },
+      latency: { enabled: false, intervalMinutes: 30 },
       subscription,
     })
   })

@@ -153,7 +153,19 @@ func runServer(args []string) error {
 	if err != nil {
 		return err
 	}
-	panels := service.NewPanelService(pool, sealer, registry, service.PanelConfig{RequestTimeout: cfg.Panel.RequestTimeout, Locator: locator}, nil)
+	subCfg := service.SubscriptionConfig{
+		BaseURL: cfg.Subscription.BaseURL, Title: cfg.Subscription.Title, UpdateIntervalHours: cfg.Subscription.UpdateIntervalHours,
+		InfoNodes: cfg.Subscription.InfoNodes, LogRetention: cfg.Subscription.LogRetention,
+	}
+	settings := service.NewSettingsService(pool, subCfg, nil)
+	// 订阅路径前缀首次启动随机生成，老部署的 sub 进入过渡期（Ruling-59）
+	if err := settings.EnsureSubscriptionPath(ctx); err != nil {
+		return fmt.Errorf("ensure subscription path: %w", err)
+	}
+	// 流量周期与到期日按站点时区取“今天”（Ruling-84），所以面板服务要读系统设置
+	panels := service.NewPanelService(pool, sealer, registry, service.PanelConfig{
+		RequestTimeout: cfg.Panel.RequestTimeout, Locator: locator, SiteLocation: settings.SiteLocation,
+	}, nil)
 	go job.RunPanelPolling(ctx, panels, job.PanelPollConfig{
 		ProbeInterval: cfg.Panel.ProbeInterval, SyncInterval: cfg.Panel.SyncInterval, Concurrency: cfg.Panel.Concurrency,
 	})
@@ -161,21 +173,12 @@ func runServer(args []string) error {
 	if err != nil {
 		return err
 	}
-	subCfg := service.SubscriptionConfig{
-		BaseURL: cfg.Subscription.BaseURL, Title: cfg.Subscription.Title, UpdateIntervalHours: cfg.Subscription.UpdateIntervalHours,
-		InfoNodes: cfg.Subscription.InfoNodes, LogRetention: cfg.Subscription.LogRetention,
-	}
 	go job.RunSessionCleanup(ctx, job.PurgeFunc(panels.PurgeServerMetrics), cfg.Auth.SessionCleanupInterval)
 	// 位置为空的服务器在后台补扫：启动时一次、之后每小时一次，不阻塞启动（Ruling-65）
 	go job.RunServerLocate(ctx, panels, serverLocateInterval)
 	// 节点旧默认名去掉服务器名前缀（Ruling-63）
 	if _, err := panels.RenameLegacyNodes(ctx); err != nil {
 		return fmt.Errorf("rename legacy nodes: %w", err)
-	}
-	settings := service.NewSettingsService(pool, subCfg, nil)
-	// 订阅路径前缀首次启动随机生成，老部署的 sub 进入过渡期（Ruling-59）
-	if err := settings.EnsureSubscriptionPath(ctx); err != nil {
-		return fmt.Errorf("ensure subscription path: %w", err)
 	}
 	sender, err := smtpSenderFromEnv()
 	if err != nil {
@@ -201,6 +204,8 @@ func runServer(args []string) error {
 	}
 	reachSvc := service.NewReachService(pool, settings, ops, prober, service.ReachOptions{HasToken: reachToken != ""})
 	go job.RunReach(ctx, reachSvc, cfg.Reach.CheckInterval)
+	// 三网延迟检测（Ruling-86）：与连通检测同一个探测服务、共用小时额度；开关在系统设置里，默认关
+	go job.RunLatency(ctx, service.NewLatencyService(pool, settings, prober, reachSvc, nil), cfg.Reach.CheckInterval)
 	analytics := service.NewAnalyticsService(pool, settings, reachSvc, cfg.Analytics.CacheTTL, nil)
 	users := service.NewUserService(pool, sealer, panels, service.UserConfig{Location: quotaLoc, Subscription: subCfg, Settings: settings}, nil)
 	// 老用户补 SS2022 密钥（Ruling-60），对账随后写到面板
@@ -415,7 +420,7 @@ func telegramSenderFromEnv() (telegram.Sender, error) {
 }
 
 // reachProberFromConfig 按配置（环境变量可覆盖接口地址）创建大陆连通检测的探测客户端；token 可空。
-func reachProberFromConfig(cfg config.ReachConfig, token string) (reach.Prober, error) {
+func reachProberFromConfig(cfg config.ReachConfig, token string) (*reach.Client, error) {
 	apiURL := cfg.APIURL
 	if v := os.Getenv(envReachAPIURL); v != "" {
 		apiURL = v

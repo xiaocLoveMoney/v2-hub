@@ -143,12 +143,15 @@ func NewRouter(deps Deps) http.Handler {
 
 	mux.HandleFunc("GET /api/admin/servers", h.requireAdmin(service.PermServerRead, h.listServers))
 	mux.HandleFunc("POST /api/admin/servers", h.requireAdmin(service.PermServerWrite, h.createServer))
+	mux.HandleFunc("GET /api/admin/servers/trends", h.requireAdmin(service.PermServerRead, h.listServerTrends))
 	mux.HandleFunc("POST /api/admin/servers/test", h.requireAdmin(service.PermServerWrite, h.testServer))
 	mux.HandleFunc("POST /api/admin/servers/cert-fingerprint", h.requireAdmin(service.PermServerWrite, h.certFingerprint))
 	mux.HandleFunc("GET /api/admin/servers/{id}", h.requireAdmin(service.PermServerRead, h.getServer))
 	mux.HandleFunc("PUT /api/admin/servers/{id}", h.requireAdmin(service.PermServerWrite, h.updateServer))
 	mux.HandleFunc("DELETE /api/admin/servers/{id}", h.requireAdmin(service.PermServerWrite, h.deleteServer))
 	mux.HandleFunc("PUT /api/admin/servers/{id}/client-flow", h.requireAdmin(service.PermServerWrite, h.setServerClientFlow))
+	mux.HandleFunc("PUT /api/admin/servers/{id}/billing", h.requireAdmin(service.PermServerWrite, h.setServerBilling))
+	mux.HandleFunc("GET /api/admin/servers/{id}/metrics", h.requireAdmin(service.PermServerRead, h.getServerMetrics))
 	// 一键部署入站：node:write 由路由查，host:write 在 handler 里再查（Ruling-76）
 	mux.HandleFunc("POST /api/admin/servers/{id}/inbound-presets/preview", h.requireAdmin(service.PermNodeWrite, h.previewInboundPresets))
 	mux.HandleFunc("POST /api/admin/servers/{id}/inbound-presets", h.requireAdmin(service.PermNodeWrite, h.deployInboundPresets))

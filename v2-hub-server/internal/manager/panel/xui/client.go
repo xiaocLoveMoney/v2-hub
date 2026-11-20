@@ -165,76 +165,92 @@ func truncate(s string) string {
 	return string(r[:maxPanelMsgLen])
 }
 
-const (
-	statusPublicIP  = "publicIP"
-	publicIPUnknown = "N/A"
-	// statusXray 是状态里 Xray 运行状态的字段名。
-	statusXray = "xray"
-)
+// publicIPUnknown 是 3x-ui 取不到公网 IP 时填的占位。
+const publicIPUnknown = "N/A"
 
-// statusFields 是写进资源快照的字段白名单（不含公网 IP 等无关信息）。
-var statusFields = []string{"cpu", "cpuCores", "mem", "disk", "swap", "uptime", "loads", "xray", "tcpCount", "udpCount", "netTraffic"}
+// loadWindows 是 3x-ui 状态里 loads 数组的长度：1、5、15 分钟。
+const loadWindows = 3
+
+// usage 是 3x-ui 状态里“已用 / 总量”的一对（mem、swap、disk）。
+type usage struct {
+	Current int64 `json:"current"`
+	Total   int64 `json:"total"`
+}
+
+// serverStatus 是 GET /server/status 的 obj（3x-ui v3.11.0 实测）里平台用到的字段。
+// netIO 是每秒收发字节，netTraffic 是开机以来所有网卡累计收发字节。
+type serverStatus struct {
+	PanelVersion string    `json:"panelVersion"`
+	PanelGUID    string    `json:"panelGuid"`
+	CPU          *float64  `json:"cpu"`
+	CPUCores     int       `json:"cpuCores"`
+	Mem          usage     `json:"mem"`
+	Swap         usage     `json:"swap"`
+	Disk         usage     `json:"disk"`
+	Uptime       int64     `json:"uptime"`
+	Loads        []float64 `json:"loads"`
+	TCPCount     int       `json:"tcpCount"`
+	UDPCount     int       `json:"udpCount"`
+	NetIO        struct {
+		Up   int64 `json:"up"`
+		Down int64 `json:"down"`
+	} `json:"netIO"`
+	NetTraffic struct {
+		Sent int64 `json:"sent"`
+		Recv int64 `json:"recv"`
+	} `json:"netTraffic"`
+	Xray struct {
+		State    string `json:"state"`
+		ErrorMsg string `json:"errorMsg"`
+		Version  string `json:"version"`
+	} `json:"xray"`
+	PublicIP struct {
+		IPv4 string `json:"ipv4"`
+		IPv6 string `json:"ipv6"`
+	} `json:"publicIP"`
+}
 
 // Probe 实现 panel.Provider：读取服务器状态，得到面板版本、GUID 与资源快照。
 func (c *Client) Probe(ctx context.Context) (panel.PanelInfo, error) {
-	var status map[string]json.RawMessage
+	var status serverStatus
 	if err := c.call(ctx, http.MethodGet, "/server/status", nil, &status); err != nil {
 		return panel.PanelInfo{}, err
 	}
-	info := panel.PanelInfo{}
-	if v, ok := status["panelVersion"]; ok {
-		if err := json.Unmarshal(v, &info.Version); err != nil {
-			return panel.PanelInfo{}, &panel.Error{Kind: panel.KindUnreachable, Message: "面板版本字段格式异常", Err: err}
-		}
+	info := panel.PanelInfo{
+		Version: status.PanelVersion, GUID: status.PanelGUID, Resources: resourcesOf(status),
+		PublicIPv4: reportedIP(status.PublicIP.IPv4), PublicIPv6: reportedIP(status.PublicIP.IPv6),
+		CoreState: status.Xray.State, CoreError: status.Xray.ErrorMsg,
 	}
-	if v, ok := status["panelGuid"]; ok {
-		if err := json.Unmarshal(v, &info.GUID); err != nil {
-			return panel.PanelInfo{}, &panel.Error{Kind: panel.KindUnreachable, Message: "面板 GUID 字段格式异常", Err: err}
-		}
+	info.PublicIP = info.PublicIPv4
+	if info.PublicIP == "" {
+		info.PublicIP = info.PublicIPv6
 	}
-	snapshot := make(map[string]json.RawMessage, len(statusFields))
-	for _, k := range statusFields {
-		if v, ok := status[k]; ok {
-			snapshot[k] = v
-		}
-	}
-	raw, err := json.Marshal(snapshot)
-	if err != nil {
-		return panel.PanelInfo{}, fmt.Errorf("xui: marshal status snapshot: %w", err)
-	}
-	info.Status = raw
-	info.PublicIP = publicIPOf(status[statusPublicIP])
-	info.CoreState, info.CoreError = coreStateOf(status[statusXray])
 	return info, nil
 }
 
-// coreStateOf 取状态里的 Xray 运行状态（3x-ui 的 xray.state：running / stop / error，与 errorMsg）；格式异常按没报处理。
-func coreStateOf(raw json.RawMessage) (state, message string) {
-	var x struct {
-		State    string `json:"state"`
-		ErrorMsg string `json:"errorMsg"`
+// resourcesOf 把 3x-ui 的状态映射成中立模型（Ruling-83）；loads 不足三项时缺的按 0。
+func resourcesOf(status serverStatus) *panel.Resources {
+	loads := [loadWindows]float64{}
+	copy(loads[:], status.Loads)
+	return &panel.Resources{
+		CPU: status.CPU, CPUCores: status.CPUCores,
+		MemUsed: status.Mem.Current, MemTotal: status.Mem.Total,
+		SwapUsed: status.Swap.Current, SwapTotal: status.Swap.Total,
+		DiskUsed: status.Disk.Current, DiskTotal: status.Disk.Total,
+		Load1: loads[0], Load5: loads[1], Load15: loads[2],
+		UptimeSeconds: status.Uptime, TCPCount: status.TCPCount, UDPCount: status.UDPCount,
+		NetUpRate: status.NetIO.Up, NetDownRate: status.NetIO.Down,
+		NetSent: status.NetTraffic.Sent, NetRecv: status.NetTraffic.Recv,
+		CoreState: status.Xray.State, CoreVersion: status.Xray.Version,
 	}
-	if len(raw) == 0 || json.Unmarshal(raw, &x) != nil {
-		return "", ""
-	}
-	return x.State, x.ErrorMsg
 }
 
-// publicIPOf 取状态里的公网 IP：优先 IPv4，3x-ui 取不到时填的是 "N/A"。格式异常按没报处理（只影响位置扫描）。
-func publicIPOf(raw json.RawMessage) string {
-	var ips struct {
-		IPv4 string `json:"ipv4"`
-		IPv6 string `json:"ipv6"`
-	}
-	if len(raw) == 0 || json.Unmarshal(raw, &ips) != nil {
+// reportedIP 去掉 3x-ui 取不到公网 IP 时填的占位。
+func reportedIP(ip string) string {
+	if ip == publicIPUnknown {
 		return ""
 	}
-	for _, ip := range []string{ips.IPv4, ips.IPv6} {
-		if ip != "" && ip != publicIPUnknown {
-			return ip
-		}
-	}
-	return ""
+	return ip
 }
 
 var _ panel.Provider = (*Client)(nil)

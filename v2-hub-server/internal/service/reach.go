@@ -141,6 +141,11 @@ func (s *ReachService) HasToken() bool {
 	return s.hasToken
 }
 
+// sharedBudget 返回按小时的探测额度，三网延迟检测与它共用（Ruling-86）。
+func (s *ReachService) sharedBudget() *reachBudget {
+	return &s.budget
+}
+
 // reachBudget 按小时记已用的探测次数，并发安全。
 type reachBudget struct {
 	mu          sync.Mutex

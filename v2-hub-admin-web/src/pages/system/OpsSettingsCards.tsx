@@ -17,6 +17,9 @@ const INTRO_ROWS = 6
 // 大陆连通检测的间隔范围（分钟），与 hub-api.yaml 的 Settings.reach 一致
 const MIN_REACH_INTERVAL = 10
 const MAX_REACH_INTERVAL = 1440
+// 三网延迟检测的间隔范围（分钟），与 hub-api.yaml 的 Settings.latency 一致
+const MIN_LATENCY_INTERVAL = 15
+const MAX_LATENCY_INTERVAL = 1440
 /** Telegram 会话 id：数字（群组为负数）或 @频道用户名；与后端校验一致。 */
 const CHAT_ID_PATTERN = /^(-?[0-9]{1,20}|@[A-Za-z][A-Za-z0-9_]{4,31})?$/
 const HTTPS_PREFIX = 'https://'
@@ -51,7 +54,7 @@ interface OpsSettingsCardsProps {
   hasReachToken: boolean
 }
 
-/** 掉线告警、Telegram、日报、落地页、客服入口、服务器路由与大陆连通检测的设置卡片；放在系统设置的同一张表单里整体保存。 */
+/** 掉线告警、Telegram、日报、落地页、客服入口、服务器路由、大陆连通检测与三网延迟检测的设置卡片；放在系统设置的同一张表单里整体保存。 */
 export function OpsSettingsCards({ isTelegramEnabled, hasReachToken }: OpsSettingsCardsProps) {
   return (
     <>
@@ -160,6 +163,27 @@ export function OpsSettingsCards({ isTelegramEnabled, hasReachToken }: OpsSettin
         </Form.Item>
         <Form.Item name={['reach', 'notify']} label="被墙与恢复时发通知" extra="连续 2 轮判为被墙才告警；渠道同掉线告警（邮件与 Telegram）" valuePropName="checked">
           <Switch />
+        </Form.Item>
+      </Card>
+
+      <Card title="三网延迟检测" className="settings-card">
+        {/* docs/03 §5.20 三网延迟检测，Ruling-86 */}
+        <Alert
+          type="warning"
+          showIcon
+          className="page-alert"
+          title="开启后，服务器的公网 IP 会发给第三方探测服务 Globalping，由它在中国大陆电信、联通、移动的探测点去 ping；结果只在服务器卡片与详情页展示"
+        />
+        <Form.Item name={['latency', 'enabled']} label="开启检测" extra="只测启用、在线、有公网 IPv4 的服务器" valuePropName="checked">
+          <Switch />
+        </Form.Item>
+        <Form.Item
+          name={['latency', 'intervalMinutes']}
+          label="同一台服务器两次检测的间隔（分钟）"
+          extra="与大陆连通检测共用每小时额度，延迟检测最多用一半，每台服务器一次用 3 次；服务器多时周期会自动拉长"
+          rules={required}
+        >
+          <InputNumber min={MIN_LATENCY_INTERVAL} max={MAX_LATENCY_INTERVAL} precision={0} className="full-width" />
         </Form.Item>
       </Card>
     </>

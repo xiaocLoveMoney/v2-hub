@@ -11,10 +11,10 @@ const GRID_TOP_WITH_LEGEND = 36
 const GRID_TOP = 16
 const STACK_NAME = 'total'
 
-/** 一个数据系列；color 取设计变量。 */
+/** 一个数据系列；color 取设计变量。values 里的 null 表示这个点没有数据（折线在此断开）。 */
 export interface ChartSeries {
   name: string
-  values: number[]
+  values: (number | null)[]
   color: ColorToken
 }
 

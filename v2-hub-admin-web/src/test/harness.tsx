@@ -1,4 +1,4 @@
-import { render } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import { App as AntApp, ConfigProvider } from 'antd'
 import type { ReactNode } from 'react'
 import { vi } from 'vitest'
@@ -64,4 +64,9 @@ export function mockServer(handlers: Record<string, () => Response>): Recorded[]
     }),
   )
   return calls
+}
+
+/** 把服务器列表切到表格视图（默认是卡片，Ruling-83）；切换会写本机存储，各测试文件的 afterEach 负责清掉。 */
+export async function showServerTable(): Promise<void> {
+  fireEvent.click(await screen.findByText('表格'))
 }
