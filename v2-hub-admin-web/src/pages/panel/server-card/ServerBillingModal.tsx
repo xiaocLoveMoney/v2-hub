@@ -4,15 +4,14 @@ import { api, csrfHeader, type Server, type ServerBillingInput } from '../../../
 import { ErrorAlert } from '../../../components/ErrorAlert'
 import { FormModal } from '../../../components/FormModal'
 import { useSubmit } from '../../../hooks/use-submit'
-import { BILLING_CYCLE_LABELS, TRAFFIC_MODE_LABELS, bytesToGiB, centsToUnits, formatBytes, gibToBytes, unitsToCents } from './server-card-format'
+import { MAX_MONEY_AMOUNT, MONEY_PRECISION, amountToCents, centsToAmount } from '../../../money'
+import { gbToBytes } from '../../users/quota'
+import { BILLING_CYCLE_LABELS, DATE_FORMAT, TRAFFIC_MODE_LABELS, bytesToGiB, formatBytes } from './server-card-format'
 
 // 取值范围与 hub-api.yaml 的 ServerBilling 一致（Ruling-84）
-const MAX_PRICE_UNITS = 999999.99
-const PRICE_PRECISION = 2
 const GIB_PRECISION = 2
 const MIN_RESET_DAY = 1
 const MAX_RESET_DAY = 31
-const DATE_FORMAT = 'YYYY-MM-DD'
 const CURRENCY_PATTERN = /^[A-Z]{3}$/
 const CURRENCIES = ['USD', 'CNY', 'EUR', 'HKD', 'JPY', 'GBP', 'SGD', 'CAD', 'AUD'] as const
 const MODAL_WIDTH = 560
@@ -52,7 +51,7 @@ export function ServerBillingModal({ server, onClose, onSaved }: ServerBillingMo
 function initialValues(server: Server): BillingForm {
   const b = server.billing
   return {
-    price: b.priceCents === null ? null : centsToUnits(b.priceCents),
+    price: b.priceCents === null ? null : centsToAmount(b.priceCents),
     priceCurrency: b.priceCurrency,
     billingCycle: b.billingCycle,
     expiresOn: b.expiresOn === null ? null : dayjs(b.expiresOn, DATE_FORMAT),
@@ -66,14 +65,14 @@ function initialValues(server: Server): BillingForm {
 function toInput(v: BillingForm): ServerBillingInput {
   const hasValue = (n: number | null | undefined): n is number => n !== null && n !== undefined
   return {
-    priceCents: hasValue(v.price) ? unitsToCents(v.price) : null,
+    priceCents: hasValue(v.price) ? amountToCents(v.price) : null,
     priceCurrency: v.priceCurrency,
     billingCycle: v.billingCycle,
     expiresOn: v.expiresOn === null || v.expiresOn === undefined ? null : v.expiresOn.format(DATE_FORMAT),
-    trafficQuotaBytes: hasValue(v.quotaGiB) ? gibToBytes(v.quotaGiB) : null,
+    trafficQuotaBytes: hasValue(v.quotaGiB) ? gbToBytes(v.quotaGiB) : null,
     trafficResetDay: v.trafficResetDay,
     trafficMode: v.trafficMode,
-    trafficUsedBytes: hasValue(v.usedGiB) ? gibToBytes(v.usedGiB) : null,
+    trafficUsedBytes: hasValue(v.usedGiB) ? gbToBytes(v.usedGiB) : null,
   }
 }
 
@@ -88,7 +87,7 @@ function ServerBillingBody({ server, onSaved }: { server: Server; onSaved: () =>
       <Alert type="info" showIcon className="page-alert" title="只用于在卡片上展示：到期不提醒，超额不停用。日期按站点时区" />
       <div className="form-row">
         <Form.Item name="price" label="价格" extra="留空表示不填">
-          <InputNumber min={0} max={MAX_PRICE_UNITS} precision={PRICE_PRECISION} className="full-width" />
+          <InputNumber min={0} max={MAX_MONEY_AMOUNT} precision={MONEY_PRECISION} className="full-width" />
         </Form.Item>
         <Form.Item name="priceCurrency" label="币种" rules={currencyRules}>
           <Select options={currencyOptions} showSearch />

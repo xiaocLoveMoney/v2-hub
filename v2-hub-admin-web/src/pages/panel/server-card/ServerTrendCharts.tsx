@@ -1,12 +1,12 @@
 import { Card, Segmented } from 'antd'
 import dayjs from 'dayjs'
-import { useCallback, useState } from 'react'
+import { memo, useCallback, useState } from 'react'
 import { api, type LatencyPoint, type MetricRange, type ServerMetrics } from '../../../api/client'
 import { EChart } from '../../../components/EChart'
 import { ErrorAlert } from '../../../components/ErrorAlert'
 import { useRemote } from '../../../hooks/use-remote'
 import { lineOption } from '../../dashboard/chart-options'
-import { formatPercent, formatRate } from './server-card-format'
+import { PERCENT_FULL, formatPercent, formatRate } from './server-card-format'
 
 const RANGE_24H: MetricRange = '24h'
 const RANGE_7D: MetricRange = '7d'
@@ -15,7 +15,6 @@ const RANGE_OPTIONS = [
   { value: RANGE_7D, label: '近 7 天' },
 ]
 const CHART_HEIGHT = 220
-const PERCENT_FULL = 100
 const LABEL_FORMAT_24H = 'HH:mm'
 const LABEL_FORMAT_7D = 'MM-DD HH:00'
 
@@ -41,7 +40,8 @@ function alignLatency(series: Record<'telecom' | 'unicom' | 'mobile', LatencyPoi
   return { labels: times.map((t) => axisLabel(t, range)), telecom: valueOf(series.telecom), unicom: valueOf(series.unicom), mobile: valueOf(series.mobile) }
 }
 
-function Charts({ data }: { data: ServerMetrics }) {
+/** 四张趋势图；memo：父组件重渲染（近况到达、开关账单弹窗）时数据没变就不重建图表。 */
+const Charts = memo(function Charts({ data }: { data: ServerMetrics }) {
   const labels = data.points.map((p) => axisLabel(p.at, data.range))
   const usage = lineOption({
     labels,
@@ -103,7 +103,7 @@ function Charts({ data }: { data: ServerMetrics }) {
       )}
     </div>
   )
-}
+})
 
 /** 服务器详情页的趋势（Ruling-85、Ruling-86）：近 24 小时为 5 分钟原值，近 7 天按小时平均；三网延迟检测没开时不出延迟图。 */
 export function ServerTrendCharts({ serverId }: { serverId: number }) {

@@ -1,32 +1,28 @@
-import type { Level } from './server-card-format'
-import { usageLevel } from './server-card-format'
+import { PERCENT_FULL, usageLevel, type Level } from './server-card-format'
 
-/** 默认格数，与参考设计一致。 */
-const DEFAULT_SEGMENTS = 20
-const PERCENT_FULL = 100
+/** 格数，与参考设计一致。 */
+const SEGMENTS = 20
 
 interface SegmentBarProps {
   /** 0–100 的百分比。 */
   percent: number
-  /** 格数，默认 20。 */
-  segments?: number
-  /** 点亮的格子的颜色；不传按百分比阈值取（正常 / 偏高 / 过高）。 */
-  tone?: 'cpu' | 'mem' | 'disk' | 'quota'
+  /** 点亮的格子在正常范围内的颜色。 */
+  tone: 'cpu' | 'mem' | 'disk' | 'quota'
   ariaLabel: string
 }
 
 /**
  * 分段进度条：按百分比点亮前若干格（不足一格但大于 0 的点亮一格）。
- * 有 tone 时点亮的格子用这一项的颜色，超过阈值仍按阈值变色。
+ * 点亮的格子用 tone 这一项的颜色，超过阈值按阈值变色。
  */
-export function SegmentBar({ percent, segments = DEFAULT_SEGMENTS, tone, ariaLabel }: SegmentBarProps) {
+export function SegmentBar({ percent, tone, ariaLabel }: SegmentBarProps) {
   const clamped = Math.min(Math.max(percent, 0), PERCENT_FULL)
-  const lit = clamped > 0 ? Math.max(1, Math.round((clamped / PERCENT_FULL) * segments)) : 0
+  const lit = clamped > 0 ? Math.max(1, Math.round((clamped / PERCENT_FULL) * SEGMENTS)) : 0
   const level = usageLevel(clamped)
-  const litClass = level === 'ok' && tone !== undefined ? `segment-${tone}` : `segment-${level}`
+  const litClass = level === 'ok' ? `segment-${tone}` : `segment-${level}`
   return (
     <div className="segment-bar" role="meter" aria-label={ariaLabel} aria-valuemin={0} aria-valuemax={PERCENT_FULL} aria-valuenow={Math.round(clamped)}>
-      {Array.from({ length: segments }, (_, i) => (
+      {Array.from({ length: SEGMENTS }, (_, i) => (
         <span key={i} className={i < lit ? `segment ${litClass}` : 'segment'} />
       ))}
     </div>

@@ -1,9 +1,9 @@
 import { Descriptions } from 'antd'
 import type { Server } from '../../../api/client'
 import { formatTime } from '../../system/format'
+import { EMPTY } from '../host-labels'
 import { formatBytes, formatPercent, percentOf } from './server-card-format'
 
-const EMPTY = '—'
 /** 内核状态的显示名；其它取值原样显示。 */
 const CORE_STATE_LABELS: Record<string, string> = { running: '运行中', stop: '已停止', error: '出错' }
 

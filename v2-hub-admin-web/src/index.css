@@ -1128,10 +1128,6 @@ body {
   background: var(--hub-primary);
 }
 
-.segment-empty {
-  background: var(--hub-chart-grid);
-}
-
 .server-card-latency {
   display: flex;
   flex-direction: column;

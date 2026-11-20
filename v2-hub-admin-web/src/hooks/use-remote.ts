@@ -7,7 +7,8 @@ interface FetchResult<T> {
   error?: unknown
 }
 
-interface RemoteState<T> {
+/** useRemote 的结果：数据、错误、是否在加载与重新拉取。 */
+export interface RemoteState<T> {
   data: T | null
   error: ApiError | null
   isLoading: boolean
