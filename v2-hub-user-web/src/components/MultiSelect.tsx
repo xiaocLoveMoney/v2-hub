@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react'
+import { useI18n } from '../i18n/i18n-context'
 
 const KEY_ESCAPE = 'Escape'
 /** 按钮上已选项名称之间的分隔；中英文界面通用。 */
@@ -20,16 +21,18 @@ interface MultiSelectProps {
   options: MultiSelectOption[]
   value: number[]
   onChange: (value: number[]) => void
-  /** 最多选几个；达到后其余选项置灰。 */
-  max: number
+  /** 最多选几个；达到后其余选项置灰。省略 = 不限。 */
+  max?: number
   hint?: string
 }
 
 /**
  * 下拉多选（docs/06 §5 M9）：按钮展开一组复选框，点外面或按 Esc 收起。
  * 选项是原生复选框，键盘可达；按钮上显示已选项的名称，放不下时由样式截断。
+ * 面板顶部有“全选 / 取消全选”（Ruling-87）：全选只加可选的项，取消全选清空。
  */
 export function MultiSelect({ label, placeholder, options, value, onChange, max, hint }: MultiSelectProps) {
+  const { t } = useI18n()
   const [isOpen, setIsOpen] = useState(false)
   const rootRef = useRef<HTMLDivElement>(null)
   const buttonRef = useRef<HTMLButtonElement>(null)
@@ -51,7 +54,9 @@ export function MultiSelect({ label, placeholder, options, value, onChange, max,
   }, [isOpen])
 
   const selected = new Set(value)
-  const isFull = value.length >= max
+  const isFull = max !== undefined && value.length >= max
+  const selectable = options.filter((o) => o.isDisabled !== true)
+  const isAllSelected = selectable.length > 0 && selectable.every((o) => selected.has(o.value))
   const summary = options
     .filter((o) => selected.has(o.value))
     .map((o) => o.label)
@@ -61,6 +66,16 @@ export function MultiSelect({ label, placeholder, options, value, onChange, max,
     // 保持选项原有的顺序，不按点击先后
     const next = options.filter((o) => (o.value === option.value ? !selected.has(o.value) : selected.has(o.value))).map((o) => o.value)
     onChange(next)
+  }
+
+  const toggleAll = () => {
+    if (isAllSelected) {
+      onChange([])
+      return
+    }
+    // 已选的项（哪怕现在置灰）保留，再补上所有可选的；按选项原有顺序，超过上限的截掉
+    const next = options.filter((o) => selected.has(o.value) || o.isDisabled !== true).map((o) => o.value)
+    onChange(max === undefined ? next : next.slice(0, max))
   }
 
   const handleKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
@@ -93,6 +108,12 @@ export function MultiSelect({ label, placeholder, options, value, onChange, max,
       </button>
       {isOpen && (
         <div className="hub-multi-panel" id={panelId} role="group" aria-labelledby={labelId}>
+          <div className="hub-multi-toolbar">
+            <span className="hub-field-hint">{t('common.selectedCount', { count: value.length, total: options.length })}</span>
+            <button type="button" className="hub-multi-all" disabled={selectable.length === 0} onClick={toggleAll}>
+              {isAllSelected ? t('common.deselectAll') : t('common.selectAll')}
+            </button>
+          </div>
           {options.map((o) => {
             const isChecked = selected.has(o.value)
             const isLocked = o.isDisabled === true || (isFull && !isChecked)
