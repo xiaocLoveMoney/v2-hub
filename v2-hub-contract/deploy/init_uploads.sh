@@ -3,7 +3,7 @@
 #   init_uploads.sh [compose 文件，默认 docker-compose.yml]
 # 读同目录 .env 的 MINIO_ROOT_USER / MINIO_ROOT_PASSWORD 与 HUB_UPLOAD_USER / HUB_UPLOAD_PASSWORD；
 # .env 里还没有上传账号的密码时（老环境），先补上 HUB_UPLOAD_USER=hub-upload 与随机密码（不打印）。然后：
-#   - 桶 uploads：不存在则创建，设为匿名只读（download 只含 GetObject，不能列目录）
+#   - 桶 uploads：不存在则创建，匿名只许 GetObject（不用 mc 的 download 预设，它还放开了 ListBucket，能列出全部对象名）
 #   - 策略 hub-upload：只许往 uploads 写入对象
 #   - 账号 HUB_UPLOAD_USER：建好（已存在则更新密码）并挂上该策略，hub-server 用它上传
 set -euo pipefail
@@ -37,7 +37,10 @@ docker run --rm --network "container:$minio_container" -e MC_HOST_hub -e HUB_UPL
   --entrypoint sh "$MC_IMAGE" -c "
     set -e
     mc mb --ignore-existing hub/$BUCKET
-    mc anonymous set download hub/$BUCKET
+    cat > /tmp/anonymous.json <<'JSON'
+{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Principal\":{\"AWS\":[\"*\"]},\"Action\":[\"s3:GetObject\"],\"Resource\":[\"arn:aws:s3:::$BUCKET/*\"]}]}
+JSON
+    mc anonymous set-json /tmp/anonymous.json hub/$BUCKET
     cat > /tmp/policy.json <<'JSON'
 {\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Action\":[\"s3:PutObject\"],\"Resource\":[\"arn:aws:s3:::$BUCKET/*\"]}]}
 JSON

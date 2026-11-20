@@ -51,6 +51,8 @@
 		path_regexp ^/uploads/[0-9]{6}/[0-9a-f]{32}\.(png|jpg|gif|webp)$
 	}
 	handle @upload {
+		# 丢掉查询串，不让 ?acl、?tagging 之类的子资源请求到达 MinIO
+		rewrite * {path}?
 		reverse_proxy minio:9000 {
 			header_down X-Content-Type-Options nosniff
 			header_down -Server
