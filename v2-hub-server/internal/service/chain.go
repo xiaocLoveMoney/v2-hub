@@ -36,8 +36,9 @@ const (
 	// 每个用户的数量上限（docs/03 §5.18、§5.19、§5.21）。
 	MaxClientRoutes = 20
 	MaxServerRoutes = 10
-	MaxRouteEntries = 20
 	MaxChainExits   = 10
+	// 起飞节点不设业务上限（Ruling-87）：都须是本人可用的节点且不重复，个数自然不超过可用节点数；这里只防超大请求。
+	MaxRouteEntries = 1000
 
 	maxChainNameLen = 64
 	maxExitLinkLen  = 2048
@@ -60,7 +61,7 @@ const (
 	msgChainRouteNotFound    = "链式规则不存在"
 	msgChainBadKind          = "规则类型须为 client 或 server"
 	msgChainBadName          = "名称不能超过 64 个字符，且不能含换行等控制字符"
-	msgChainBadEntries       = "起飞节点须选 1–20 个，且不能重复"
+	msgChainBadEntries       = "起飞节点至少选 1 个，且不能重复"
 	msgChainBadExit          = "落地须在平台节点、平台出口与我的出口里选一个"
 	msgChainEntryGone        = "有起飞节点不存在或当前不可用"
 	msgChainExitGone         = "落地不存在或当前不可用"
