@@ -17,7 +17,7 @@ import { ErrorAlert } from '../../components/ErrorAlert'
 import { PageHeader } from '../../components/PageHeader'
 
 const loadServers = (signal: AbortSignal) => api.GET('/api/admin/servers', { signal })
-/** 页签（Ruling-87）记在地址栏的 ?tab= 里：默认“管理”，“运行状态”是只读的卡片墙。 */
+/** 页签（Ruling-88）记在地址栏的 ?tab= 里：默认“管理”，“运行状态”是只读的卡片墙。 */
 const TAB_PARAM = 'tab'
 const TAB_MANAGE = 'manage'
 const TAB_STATUS = 'status'
@@ -25,7 +25,7 @@ const TAB_STATUS = 'status'
 const REACH_COLUMN_INDEX = 3
 const EMPTY = '—'
 
-/** 服务器（server:read 查看，server:write 接入 / 编辑 / 同步 / 移除）；“管理”页签是表格，“运行状态”页签是状态卡片（Ruling-87）。 */
+/** 服务器（server:read 查看，server:write 接入 / 编辑 / 同步 / 移除）；“管理”页签是表格，“运行状态”页签是状态卡片（Ruling-88）。 */
 export function ServersPage() {
   const { can } = useSession()
   const { message } = App.useApp()

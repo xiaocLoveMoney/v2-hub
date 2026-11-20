@@ -115,7 +115,7 @@ describe('ServerStatusCard', () => {
   })
 })
 
-describe('服务器页的页签（Ruling-87）', () => {
+describe('服务器页的页签（Ruling-88）', () => {
   it('默认是管理表格；运行状态页签是只读卡片，只能改账单，账单弹窗提交换算后的内容并带 CSRF 头', async () => {
     const srv = busyServer()
     const calls = mockServer({

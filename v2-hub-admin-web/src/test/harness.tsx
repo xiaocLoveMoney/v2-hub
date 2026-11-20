@@ -66,7 +66,7 @@ export function mockServer(handlers: Record<string, () => Response>): Recorded[]
   return calls
 }
 
-/** 点开页面上名为 name 的页签（服务器列表与详情页按页签分栏，Ruling-87）。 */
+/** 点开页面上名为 name 的页签（服务器列表与详情页按页签分栏，Ruling-88）。 */
 export async function openTab(name: string): Promise<void> {
   fireEvent.click(await screen.findByRole('tab', { name }))
 }

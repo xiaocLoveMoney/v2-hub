@@ -16,7 +16,7 @@ interface ServerStatusPaneProps {
 }
 
 /**
- * 服务器详情页的“运行状态”页签（Ruling-87）：状态卡片（细节展开）、账单与流量额度、24 小时 / 7 天趋势。
+ * 服务器详情页的“运行状态”页签（Ruling-88）：状态卡片（细节展开）、账单与流量额度、24 小时 / 7 天趋势。
  * 只在打开这个页签时挂载，卡片上的速率小图与三网延迟取自列表的近况接口（Ruling-85、Ruling-86）。
  */
 export function ServerStatusPane({ server, onChanged }: ServerStatusPaneProps) {

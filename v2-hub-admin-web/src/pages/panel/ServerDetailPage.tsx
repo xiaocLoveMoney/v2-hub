@@ -22,7 +22,7 @@ import { ServerStatusPane } from './server-card/ServerStatusPane'
 import { formatCountry } from './countries'
 import { ErrorAlert } from '../../components/ErrorAlert'
 
-/** 详情页的页签（Ruling-87），记在地址栏的 ?tab= 里；不认识的值按默认的“入站与节点”。 */
+/** 详情页的页签（Ruling-88），记在地址栏的 ?tab= 里；不认识的值按默认的“入站与节点”。 */
 const TAB_PARAM = 'tab'
 const TAB_INBOUNDS = 'inbounds'
 const TAB_STATUS = 'status'

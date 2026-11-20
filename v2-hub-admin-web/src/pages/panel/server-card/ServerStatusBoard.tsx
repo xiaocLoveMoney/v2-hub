@@ -15,7 +15,7 @@ const loadServers = (signal: AbortSignal) => api.GET('/api/admin/servers', { sig
 const loadTrends = (signal: AbortSignal) => api.GET('/api/admin/servers/trends', { signal })
 
 /**
- * 服务器页的“运行状态”页签（Ruling-87）：每台服务器一张状态卡片，只看不管——接入、同步、编辑、移除在“管理”页签；
+ * 服务器页的“运行状态”页签（Ruling-88）：每台服务器一张状态卡片，只看不管——接入、同步、编辑、移除在“管理”页签；
  * 卡片上只保留账单与流量额度（server:write）。只在打开这个页签时挂载，页面在前台时每 30 秒刷新。
  */
 export function ServerStatusBoard() {
