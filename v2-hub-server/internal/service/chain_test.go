@@ -174,7 +174,7 @@ func TestChainRoutesAndExits(t *testing.T) {
 		"name with newline":  {Kind: ChainKindClient, EntryNodeIDs: []int64{first.ID}, ExitKind: ChainExitNode, ExitID: second.ID, Name: "a\nb"},
 		"name too long":      {Kind: ChainKindClient, EntryNodeIDs: []int64{first.ID}, ExitKind: ChainExitNode, ExitID: second.ID, Name: strings.Repeat("长", maxChainNameLen+1)},
 		"unknown route kind": {Kind: "relay", EntryNodeIDs: []int64{first.ID}, ExitKind: ChainExitNode, ExitID: second.ID},
-		"too many entries":   clientIn(ChainExitNode, second.ID, make([]int64, MaxRouteEntries+1)...),
+		"too many entries":   clientIn(ChainExitNode, second.ID, sequentialIDs(MaxRouteEntries+1)...),
 	} {
 		_, err := f.chain.CreateRoute(ctx, f.principal, in)
 		wantErr(t, what, err, ErrInvalidArgument)
@@ -587,5 +587,29 @@ func TestChainNodeDeletion(t *testing.T) {
 	left := f.overview(t).ClientRoutes
 	if len(left) != 1 || left[0].ID != both.ID || len(left[0].Entries) != 1 || left[0].Entries[0].NodeID != f.nodes[1].ID {
 		t.Fatalf("routes after deleting a node = %+v (dropped %d and %d expected)", left, onlyFirst.ID, exitIsFirst.ID)
+	}
+}
+
+// sequentialIDs 返回 1..n，作互不重复的节点 ID。
+func sequentialIDs(n int) []int64 {
+	ids := make([]int64, 0, n)
+	for i := 1; i <= n; i++ {
+		ids = append(ids, int64(i))
+	}
+	return ids
+}
+
+// 起飞节点不设业务上限（Ruling-87）：超过原来的 20 个照样通过请求校验，只有超过防御性上限才拒绝。
+func TestNormalizeRouteInputEntryCount(t *testing.T) {
+	const formerLimit = 20
+	ok, err := normalizeRouteInput(clientIn(ChainExitNode, 1, sequentialIDs(formerLimit+1)...))
+	if err != nil || len(ok.EntryNodeIDs) != formerLimit+1 {
+		t.Fatalf("21 entries: got %v, %v", ok.EntryNodeIDs, err)
+	}
+	if _, err := normalizeRouteInput(clientIn(ChainExitNode, 1, sequentialIDs(MaxRouteEntries)...)); err != nil {
+		t.Fatalf("defensive limit itself must pass: %v", err)
+	}
+	if _, err := normalizeRouteInput(clientIn(ChainExitNode, 1, sequentialIDs(MaxRouteEntries+1)...)); !errors.Is(err, ErrInvalidArgument) {
+		t.Fatalf("over defensive limit: want invalid argument, got %v", err)
 	}
 }

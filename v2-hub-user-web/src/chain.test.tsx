@@ -41,7 +41,7 @@ const clientRoute = {
   isEnabled: true, status: 'blocked', blockedReason: 'exit', createdAt: NOW,
 }
 const overview = {
-  allowed: true, exitAllowed: true, serverAllowed: true, maxClientRoutes: 20, maxServerRoutes: 10, maxRouteEntries: 20, maxExits: 10,
+  allowed: true, exitAllowed: true, serverAllowed: true, maxClientRoutes: 20, maxServerRoutes: 10, maxRouteEntries: 1000, maxExits: 10,
   clientRoutes: [clientRoute], serverRoutes: [serverTop, serverWide], exits: [ownExit], platformExits, nodes,
 }
 
@@ -216,6 +216,34 @@ describe('链式代理页：服务端链式', () => {
     expect(post?.csrf).toBe(TEST_CSRF)
     expect(post?.body).toEqual({ kind: 'server', entryNodeIds: [2, 4], exitKind: 'own', exitId: 9, name: '回家', isEnabled: true })
     await waitFor(() => expect(loads).toBe(2))
+  })
+
+  it('起飞节点可全选（只选可选的项）与取消全选；超过 20 个也能提交（Ruling-87）', async () => {
+    const many = Array.from({ length: 25 }, (_, i) => ({ id: 100 + i, name: `节点 ${i + 1}`, region: 'HK', protocol: 'vless', canBeExit: true, canBeServerEntry: true }))
+    const base = { ...overview, serverRoutes: [serverTop], nodes: [...nodes, ...many] }
+    const calls = mockServer({ ...signedIn(base), [`POST ${ROUTES_PATH}`]: () => ok({ ...serverWide, id: 23 }) })
+    renderApp('/chain')
+    await screen.findByText('第 1 条')
+    fireEvent.click(screen.getByRole('button', { name: '添加一条' }))
+    const dialog = await screen.findByRole('dialog')
+    fireEvent.click(within(dialog).getByRole('button', { name: '起飞节点' }))
+    expect(within(dialog).getByText('已选 0 / 29')).toBeDefined()
+
+    fireEvent.click(within(dialog).getByRole('button', { name: '全选' }))
+    expect(within(dialog).getByText('已选 28 / 29')).toBeDefined()
+    expect(within(dialog).getByRole('checkbox', { name: /日本 Hy2/ })).toHaveProperty('checked', false)
+    expect(within(dialog).getByRole('checkbox', { name: /节点 25/ })).toHaveProperty('checked', true)
+
+    fireEvent.click(within(dialog).getByRole('button', { name: '取消全选' }))
+    expect(within(dialog).getByText('已选 0 / 29')).toBeDefined()
+    expect(within(dialog).getByRole('checkbox', { name: /香港 A/ })).toHaveProperty('checked', false)
+
+    fireEvent.click(within(dialog).getByRole('button', { name: '全选' }))
+    fireEvent.change(within(dialog).getByLabelText('落地出口'), { target: { value: 'own:9' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: '添加' }))
+    await waitFor(() => expect(calls.some((c) => c.method === 'POST' && c.path === ROUTES_PATH)).toBe(true))
+    const body = calls.find((c) => c.method === 'POST')?.body as { entryNodeIds: number[] }
+    expect(body.entryNodeIds).toEqual([1, 2, 4, ...many.map((n) => n.id)])
   })
 
   it('编辑带出原来的起飞节点与落地；删除前确认并写明后果', async () => {

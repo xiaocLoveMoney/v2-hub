@@ -5963,6 +5963,7 @@ export interface components {
         };
         ChainRouteInput: {
             kind: components["schemas"]["ChainKind"];
+            /** @description 起飞节点不限个数（Ruling-87），1000 只是防超大请求的防御性上限 */
             entryNodeIds: number[];
             exitKind: components["schemas"]["ChainExitKind"];
             /** Format: int64 */
@@ -5973,6 +5974,7 @@ export interface components {
             isEnabled: boolean;
         };
         ChainRouteUpdateInput: {
+            /** @description 起飞节点不限个数（Ruling-87），1000 只是防超大请求的防御性上限 */
             entryNodeIds: number[];
             exitKind: components["schemas"]["ChainExitKind"];
             /** Format: int64 */
@@ -6114,7 +6116,7 @@ export interface components {
             serverAllowed: boolean;
             maxClientRoutes: number;
             maxServerRoutes: number;
-            /** @description 一条规则最多几个起飞节点 */
+            /** @description 一条规则起飞节点个数的防御性上限（Ruling-87，不是业务上限，实际不会超过本人可用节点数） */
             maxRouteEntries: number;
             maxExits: number;
             /** @description 按顺序 */

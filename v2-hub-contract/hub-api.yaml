@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: v2-hub API
-  version: 0.16.0
+  version: 0.16.1
   description: |
     v2-hub 对外接口契约（hub-server 提供，v2-hub-admin-web / v2-hub-user-web 消费）。
     - 管理端接口前缀 /api/admin，客户端接口前缀 /api/user，订阅端点前缀 /sub。
@@ -7764,8 +7764,9 @@ components:
         kind: { $ref: "#/components/schemas/ChainKind" }
         entryNodeIds:
           type: array
+          description: 起飞节点不限个数（Ruling-87），1000 只是防超大请求的防御性上限
           minItems: 1
-          maxItems: 20
+          maxItems: 1000
           uniqueItems: true
           items: { type: integer, format: int64, minimum: 1 }
         exitKind: { $ref: "#/components/schemas/ChainExitKind" }
@@ -7778,8 +7779,9 @@ components:
       properties:
         entryNodeIds:
           type: array
+          description: 起飞节点不限个数（Ruling-87），1000 只是防超大请求的防御性上限
           minItems: 1
-          maxItems: 20
+          maxItems: 1000
           uniqueItems: true
           items: { type: integer, format: int64, minimum: 1 }
         exitKind: { $ref: "#/components/schemas/ChainExitKind" }
@@ -7911,7 +7913,7 @@ components:
         serverAllowed: { type: boolean, description: 套餐是否允许服务端链式 }
         maxClientRoutes: { type: integer }
         maxServerRoutes: { type: integer }
-        maxRouteEntries: { type: integer, description: 一条规则最多几个起飞节点 }
+        maxRouteEntries: { type: integer, description: 一条规则起飞节点个数的防御性上限（Ruling-87，不是业务上限，实际不会超过本人可用节点数） }
         maxExits: { type: integer }
         clientRoutes: { type: array, items: { $ref: "#/components/schemas/ChainRoute" }, description: 按顺序 }
         serverRoutes: { type: array, items: { $ref: "#/components/schemas/ChainRoute" }, description: 按顺序 }

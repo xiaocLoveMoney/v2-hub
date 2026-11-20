@@ -621,6 +621,44 @@ a.hub-btn {
   cursor: not-allowed;
 }
 
+/* 全选工具条：选项多时随面板滚动仍停在顶部（Ruling-87） */
+.hub-multi-toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: -6px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--hub-divider);
+  background: var(--hub-surface);
+}
+
+.hub-multi-toolbar .hub-field-hint {
+  margin: 0;
+}
+
+.hub-multi-all {
+  flex: none;
+  padding: 2px 4px;
+  border: 0;
+  background: none;
+  color: var(--hub-primary);
+  font: inherit;
+  cursor: pointer;
+}
+
+.hub-multi-all:hover {
+  color: var(--hub-primary-hover);
+}
+
+.hub-multi-all:disabled {
+  color: var(--hub-muted);
+  cursor: not-allowed;
+}
+
 /* ---- 出口弹窗（M9）：表单 / 分享链接两种填法 ---- */
 .hub-exit-seg {
   display: flex;

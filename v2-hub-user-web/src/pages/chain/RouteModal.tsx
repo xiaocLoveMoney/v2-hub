@@ -131,8 +131,9 @@ export function RouteModal({ overview, kind, route, onClose, onSaved }: RouteMod
           options={entryOptions(context, exit)}
           value={entryIds}
           onChange={setEntryIds}
+          // 防御性上限，不是业务上限（Ruling-87）
           max={overview.maxRouteEntries}
-          hint={t(isServer ? 'chain.entriesHintServer' : 'chain.entriesHintClient', { max: overview.maxRouteEntries })}
+          hint={t(isServer ? 'chain.entriesHintServer' : 'chain.entriesHintClient')}
         />
         <SelectField label={t('chain.exit')} value={exitRaw} onChange={(e) => setExitRaw(e.target.value)} hint={t(isServer ? 'chain.exitHintServer' : 'chain.exitHintClient')}>
           <option value="">{t('chain.pick')}</option>
