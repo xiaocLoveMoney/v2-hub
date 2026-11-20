@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -155,5 +156,32 @@ func TestPutReportsHTTPFailure(t *testing.T) {
 	err = c.Put(context.Background(), Object{Key: "k.png", Body: []byte("x")})
 	if !errors.Is(err, ErrUnavailable) || strings.Contains(err.Error(), "AccessDenied") {
 		t.Fatalf("err = %v, want ErrUnavailable without body", err)
+	}
+}
+
+// 真实 S3 兼容存储上的写入（默认跳过）：设好 HUB_TEST_S3_ENDPOINT、HUB_TEST_S3_USER、HUB_TEST_S3_PASSWORD
+// 后对桶 uploads 写一个对象，用于验证 init_uploads.sh 建的账号与策略（Ruling-89）。
+func TestPutAgainstRealStore(t *testing.T) {
+	endpoint := os.Getenv("HUB_TEST_S3_ENDPOINT")
+	if endpoint == "" {
+		t.Skip("HUB_TEST_S3_ENDPOINT not set")
+	}
+	c, err := New(Config{Endpoint: endpoint, Bucket: "uploads", AccessKey: os.Getenv("HUB_TEST_S3_USER"), SecretKey: os.Getenv("HUB_TEST_S3_PASSWORD")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := os.Getenv("HUB_TEST_S3_KEY")
+	if key == "" {
+		key = "000000/00000000000000000000000000000000.png"
+	}
+	if err := c.Put(context.Background(), Object{Key: key, Body: []byte("\x89PNG\r\n\x1a\n"), ContentType: "image/png", CacheControl: "public, max-age=60"}); err != nil {
+		t.Fatalf("Put: %v", err)
+	}
+	other, err := New(Config{Endpoint: endpoint, Bucket: "web-user", AccessKey: os.Getenv("HUB_TEST_S3_USER"), SecretKey: os.Getenv("HUB_TEST_S3_PASSWORD")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := other.Put(context.Background(), Object{Key: "index.html", Body: []byte("x")}); !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("upload account must not write other buckets: %v", err)
 	}
 }
