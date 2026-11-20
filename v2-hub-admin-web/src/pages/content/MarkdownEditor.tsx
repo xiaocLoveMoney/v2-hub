@@ -10,6 +10,7 @@ import { altFromFileName, insertImage, MAX_MARKDOWN_LEN } from './markdown'
 const ACCEPTED_IMAGE_TYPES = 'image/png,image/jpeg,image/gif,image/webp'
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024
 const MAX_IMAGE_MIB = MAX_IMAGE_BYTES / 1024 / 1024
+const MSG_UPLOAD_NO_URL = '上传失败：服务端没有返回图片地址'
 
 interface MarkdownEditorProps {
   /** Form.Item 注入的 id（让标签指向文本框）、值与回调。 */
@@ -34,7 +35,7 @@ export function MarkdownEditor({ id, value = '', onChange, rows }: MarkdownEdito
       void message.error(`图片不能超过 ${MAX_IMAGE_MIB} MiB`)
       return
     }
-    // 上传期间文本可能变，先记下光标
+    // 上传期间文本框只读（见下方 readOnly），所以这里的 value 与光标到上传完成时仍然有效，插图不会覆盖新敲的字
     const cursor = textAreaRef.current?.resizableTextArea?.textArea.selectionStart ?? value.length
     setIsUploading(true)
     let url = ''
@@ -54,6 +55,10 @@ export function MarkdownEditor({ id, value = '', onChange, rows }: MarkdownEdito
     setIsUploading(false)
     if (err !== null) {
       void message.error(err.message)
+      return
+    }
+    if (url === '') {
+      void message.error(MSG_UPLOAD_NO_URL)
       return
     }
     onChange?.(insertImage(value, cursor, altFromFileName(file.name), url))
@@ -78,6 +83,7 @@ export function MarkdownEditor({ id, value = '', onChange, rows }: MarkdownEdito
         className="mono"
         showCount
         maxLength={MAX_MARKDOWN_LEN}
+        readOnly={isUploading}
         value={value}
         onChange={(e) => onChange?.(e.target.value)}
       />

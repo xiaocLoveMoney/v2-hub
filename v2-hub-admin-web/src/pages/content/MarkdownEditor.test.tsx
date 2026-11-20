@@ -54,6 +54,24 @@ describe('MarkdownEditor 插入图片', () => {
     expect(created.content).toContain(`![截图](${IMAGE_URL})`)
   })
 
+  it('上传期间正文只读；服务端没给地址时当作失败、不插入', async () => {
+    mockServer({
+      'GET /api/admin/announcements': () => ok({ items: [], total: 0 }),
+      'POST /api/admin/uploads': () => ok({ url: '', contentType: 'image/png', size: 4 }),
+    })
+    renderWith([PERMISSIONS.CONTENT_READ, PERMISSIONS.CONTENT_WRITE], <AnnouncementsPage />)
+    fireEvent.click(await screen.findByRole('button', { name: /新建公告/ }))
+    const dialog = await screen.findByRole('dialog')
+    const content = within(dialog).getByLabelText('正文') as HTMLTextAreaElement
+    fireEvent.change(content, { target: { value: '原文' } })
+
+    fireEvent.change(within(dialog).getByLabelText('选择图片'), { target: { files: [new File(['\x89PNG'], 'a.png', { type: 'image/png' })] } })
+    expect(content.readOnly).toBe(true)
+    expect(await screen.findByText('上传失败：服务端没有返回图片地址')).toBeDefined()
+    expect(content.readOnly).toBe(false)
+    expect(content.value).toBe('原文')
+  })
+
   it('超过 5 MiB 的图片不上传', async () => {
     const calls = mockServer({ 'GET /api/admin/announcements': () => ok({ items: [], total: 0 }) })
     renderWith([PERMISSIONS.CONTENT_READ, PERMISSIONS.CONTENT_WRITE], <AnnouncementsPage />)
