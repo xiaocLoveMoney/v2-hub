@@ -3,7 +3,8 @@ import { MemoryRouter } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { PanelNode } from '../../api/client'
 import { PERMISSIONS } from '../../menu'
-import { mockServer, ok, renderWith, TEST_CSRF } from '../../test/harness'
+import { mockServer, ok, renderWith, showServerTable, TEST_CSRF } from '../../test/harness'
+import { SERVER_STATUS_FIELDS } from '../../test/host-fixtures'
 import { DashboardPage } from '../DashboardPage'
 import { NodeReachButton } from '../panel/reach'
 import { ServersPage } from '../panel/ServersPage'
@@ -92,6 +93,7 @@ const withRouter = (node: React.ReactNode) => <MemoryRouter>{node}</MemoryRouter
 afterEach(() => {
   cleanup()
   vi.unstubAllGlobals()
+  localStorage.clear()
 })
 
 describe('总览分区（docs/03 §5.20 总览分析，Ruling-66）', () => {
@@ -233,8 +235,8 @@ describe('大陆连通检测（Ruling-67）', () => {
   it('服务器列表：检测开着才出“大陆连通”列，没测出结论的不写成正常', async () => {
     const base = {
       providerType: 'xui', baseUrl: 'https://p.example.com', tlsMode: 'verify', certPinSha256: null, region: 'JP', remark: '', isDisabled: false,
-      status: 'online', lastError: '', lastSeenAt: null, lastSyncedAt: null, panelVersion: '3.11.0', statusSnapshot: null, inboundCount: 1,
-      createdAt: '2026-11-12T00:00:00Z',
+      status: 'online', lastError: '', lastSeenAt: null, lastSyncedAt: null, panelVersion: '3.11.0', inboundCount: 1,
+      createdAt: '2026-11-12T00:00:00Z', ...SERVER_STATUS_FIELDS,
     }
     const list = [
       { ...base, id: 1, name: 'jp-1', reach: { total: 3, ok: 1, blocked: 1, partial: 1 } },
@@ -244,6 +246,7 @@ describe('大陆连通检测（Ruling-67）', () => {
     ]
     mockServer({ 'GET /api/admin/servers': () => ok(list) })
     renderWith([PERMISSIONS.SERVER_READ], withRouter(<ServersPage />))
+    await showServerTable()
     expect(await screen.findByText('被墙 1')).toBeDefined()
     expect(screen.getByText('部分不通 1')).toBeDefined()
     expect(screen.getByText('正常')).toBeDefined()

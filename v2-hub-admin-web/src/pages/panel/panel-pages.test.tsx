@@ -13,6 +13,8 @@ import { ChainRoutesPage } from './ChainRoutesPage'
 import { ServerDetailPage } from './ServerDetailPage'
 import { ServersPage } from './ServersPage'
 import { countryName } from './countries'
+import { SERVER_STATUS_FIELDS } from '../../test/host-fixtures'
+import { showServerTable } from '../../test/harness'
 
 const CSRF = 'csrf-test-token'
 const ALL = [PERMISSIONS.SERVER_READ, PERMISSIONS.SERVER_WRITE, PERMISSIONS.NODE_READ, PERMISSIONS.NODE_WRITE]
@@ -21,7 +23,8 @@ const ok = (data: unknown) => Response.json({ code: '0', message: 'ok', data })
 const server = {
   id: 1, name: 'hk-1', providerType: 'xui', baseUrl: 'https://panel.example.com:2053/p', tlsMode: 'verify', certPinSha256: null,
   region: 'HK', remark: '', isDisabled: false, status: 'auth_failed', lastError: '面板拒绝了 API token', lastSeenAt: null,
-  lastSyncedAt: null, panelVersion: '3.11.0', statusSnapshot: null, inboundCount: 1, createdAt: '2026-11-12T00:00:00Z', reach: null,
+  lastSyncedAt: null, panelVersion: '3.11.0', inboundCount: 1, createdAt: '2026-11-12T00:00:00Z', reach: null,
+  ...SERVER_STATUS_FIELDS,
 }
 
 interface Recorded {
@@ -72,6 +75,7 @@ function renderWith(node: ReactNode, path = '/', routePath = '/', permissions: s
 afterEach(() => {
   cleanup()
   vi.unstubAllGlobals()
+  localStorage.clear()
 })
 
 describe('ServersPage', () => {
@@ -136,6 +140,7 @@ describe('服务器位置（Ruling-65）', () => {
       'PUT /api/admin/servers/1': () => ok({ ...server, region: 'JP' }),
     })
     renderWith(<ServersPage />)
+    await showServerTable()
     expect(await screen.findByText(countryName('HK'))).toBeDefined()
 
     fireEvent.click(screen.getByRole('button', { name: /编\s*辑/ }))

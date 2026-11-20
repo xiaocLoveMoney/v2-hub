@@ -2,7 +2,7 @@ import { PlusOutlined } from '@ant-design/icons'
 import { Alert, App, Button, Descriptions, Popconfirm, Space, Switch, Table, Tag, Tooltip, Typography, type TableProps } from 'antd'
 import { useCallback, useState } from 'react'
 import { Link, useParams } from 'react-router'
-import { api, csrfHeader, type Endpoint, type HostTask, type Inbound, type Server } from '../../api/client'
+import { api, csrfHeader, type Endpoint, type HostTask, type Inbound, type Server, type ServerTrend } from '../../api/client'
 import { useSession } from '../../auth/session-context'
 import { mutate, useRemote } from '../../hooks/use-remote'
 import { PERMISSIONS, ROUTES } from '../../menu'
@@ -18,9 +18,14 @@ import { ServerNodeAffixModal } from './NodeAffixModal'
 import { InboundFormModal } from './inbound-form/InboundFormModal'
 import { serverDomainOf } from './inbound-form/model'
 import { ServerStatusTag } from './status'
+import { ServerBillingModal } from './server-card/ServerBillingModal'
+import { ServerStatusCard } from './server-card/ServerStatusCard'
+import { ServerTrendCharts } from './server-card/ServerTrendCharts'
 import { formatCountry } from './countries'
 import { ErrorAlert } from '../../components/ErrorAlert'
 import { PageHeader } from '../../components/PageHeader'
+
+const loadTrends = (signal: AbortSignal) => api.GET('/api/admin/servers/trends', { signal })
 
 /** VLESS Vision 流控（Ruling-77）。 */
 const VISION_FLOW = 'xtls-rprx-vision'
@@ -88,6 +93,11 @@ export function ServerDetailPage() {
   )
   const server = useRemote<Server>(loadServer)
   const inbounds = useRemote<Inbound[]>(loadInbounds)
+  const canReadServer = can(PERMISSIONS.SERVER_READ)
+  // 卡片上的速率小图与三网延迟取自列表的近况接口（Ruling-83、Ruling-84）
+  const trends = useRemote<ServerTrend[]>(loadTrends, canReadServer)
+  const trend = trends.data?.find((t) => t.serverId === serverId)
+  const [isEditingBilling, setIsEditingBilling] = useState(false)
 
   const reloadAll = () => {
     server.reload()
@@ -215,6 +225,29 @@ export function ServerDetailPage() {
         <Link to={ROUTES.SERVERS}>← 服务器</Link>
       </Typography.Paragraph>
       <ErrorAlert error={server.error} />
+      {srv !== null && canReadServer && (
+        <div className="page-alert">
+          <ServerStatusCard
+            server={srv}
+            trend={trend}
+            hasLatency={trend?.latency !== null && trend !== undefined}
+            canEditBilling={can(PERMISSIONS.SERVER_WRITE)}
+            onEditBilling={() => setIsEditingBilling(true)}
+            isDetail
+          />
+        </div>
+      )}
+      {srv !== null && canReadServer && <ServerTrendCharts serverId={serverId} />}
+      {srv !== null && (
+        <ServerBillingModal
+          server={isEditingBilling ? srv : null}
+          onClose={() => setIsEditingBilling(false)}
+          onSaved={() => {
+            setIsEditingBilling(false)
+            server.reload()
+          }}
+        />
+      )}
       {srv !== null && (
         <Descriptions title={srv.name} size="small" column={{ xs: 1, md: 3 }} className="page-alert">
           <Descriptions.Item label="状态">

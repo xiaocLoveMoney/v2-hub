@@ -4,7 +4,7 @@ import { MemoryRouter, Route, Routes } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { Pollable } from '../../hooks/use-polling'
 import { PERMISSIONS } from '../../menu'
-import { TEST_CSRF, mockServer, ok, renderWith } from '../../test/harness'
+import { TEST_CSRF, mockServer, ok, renderWith, showServerTable } from '../../test/harness'
 import { CREDENTIAL, CREDENTIAL_OPTION, hostOf, serverOf, taskOf } from '../../test/host-fixtures'
 import { HostOpsCard } from './HostOpsCard'
 import { ServerDetailPage } from './ServerDetailPage'
@@ -33,6 +33,7 @@ function renderCard(permissions: string[], node: ReactNode) {
 afterEach(() => {
   cleanup()
   vi.unstubAllGlobals()
+  localStorage.clear()
 })
 
 describe('HostOpsCard：没绑定主机', () => {
@@ -198,6 +199,16 @@ describe('明文 HTTP 面板的警告', () => {
   it('服务器列表给 http:// 的面板打“明文 HTTP”标签，https 的没有', async () => {
     mockServer({ 'GET /api/admin/servers': () => ok([serverOf({ id: 1, name: 'plain-1', baseUrl: HTTP_URL }), serverOf({ id: 2, name: 'tls-1' })]) })
     renderCard([PERMISSIONS.SERVER_READ], <ServersPage />)
+    // 卡片视图：标签在卡片标题旁
+    const plainCard = (await screen.findByText('plain-1')).closest('.ant-card')
+    const tlsCard = screen.getByText('tls-1').closest('.ant-card')
+    if (plainCard === null || tlsCard === null) {
+      throw new Error('card not rendered')
+    }
+    expect(within(plainCard as HTMLElement).getByText('明文 HTTP')).toBeDefined()
+    expect(within(tlsCard as HTMLElement).queryByText('明文 HTTP')).toBeNull()
+
+    await showServerTable()
     const plainRow = (await screen.findByText('plain-1')).closest('tr')
     const tlsRow = screen.getByText('tls-1').closest('tr')
     if (plainRow === null || tlsRow === null) {

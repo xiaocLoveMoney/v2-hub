@@ -80,6 +80,17 @@ export const DNS_ACCOUNT_OPTION = 'cf-main（Cloudflare，example.com）'
 /** 凭据下拉框里这份凭据的选项文字。 */
 export const CREDENTIAL_OPTION = 'root-key（root，私钥）'
 
+/** 服务器的状态卡片字段（Ruling-81、Ruling-82）：还没探测到资源、没填账单、本周期没有流量。 */
+export const SERVER_STATUS_FIELDS: Pick<Server, 'resources' | 'publicIpv4' | 'publicIpv6' | 'onlineClients' | 'billing' | 'traffic' | 'host'> = {
+  resources: null,
+  publicIpv4: '',
+  publicIpv6: '',
+  onlineClients: 0,
+  billing: { priceCents: null, priceCurrency: 'USD', billingCycle: 'month', expiresOn: null, trafficQuotaBytes: null, trafficResetDay: 1, trafficMode: 'both' },
+  traffic: { cycleStart: '2026-11-01', nextResetOn: '2026-12-01', sentBytes: 0, recvBytes: 0, usedBytes: 0 },
+  host: null,
+}
+
 /** 一台服务器，默认 HTTPS 面板、没绑定主机。 */
 export function serverOf(over: Partial<Server> = {}): Server {
   return {
@@ -97,7 +108,7 @@ export function serverOf(over: Partial<Server> = {}): Server {
     lastSeenAt: null,
     lastSyncedAt: null,
     panelVersion: '3.11.0',
-    statusSnapshot: null,
+    ...SERVER_STATUS_FIELDS,
     inboundCount: 0,
     createdAt: NOW,
     reach: null,

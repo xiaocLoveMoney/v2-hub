@@ -419,6 +419,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/admin/servers/trends": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 各服务器最近的速率与三网延迟（server:read；Ruling-83、Ruling-84，0.15.0），给服务器列表的卡片用
+         * @description 每台服务器最近 30 个 5 分钟时段的上下行速率，与三家运营商各自最近 30 次延迟检测；没有数据的服务器不出现在结果里。
+         */
+        get: operations["listServerTrends"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/admin/servers/test": {
         parameters: {
             query?: never;
@@ -899,6 +919,47 @@ export interface paths {
         get?: never;
         /** 开关服务器的 VLESS 流控（server:write；Ruling-77，0.14.0）；平台下发的 client 带上或去掉 flow，由下发对账写到面板 */
         put: operations["setServerClientFlow"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/servers/{id}/billing": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /** 保存服务器的账单与流量额度（server:write；Ruling-82，0.15.0） */
+        put: operations["setServerBilling"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/servers/{id}/metrics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        /**
+         * 一台服务器的资源趋势与三网延迟（server:read；Ruling-83、Ruling-84，0.15.0）
+         * @description 近 24 小时为原值（资源 5 分钟一点，延迟每次检测一点），近 7 天按小时平均；服务器不在线的时段没有点。
+         */
+        get: operations["getServerMetrics"];
+        put?: never;
         post?: never;
         delete?: never;
         options?: never;
@@ -3443,10 +3504,8 @@ export interface components {
         PanelInfo: {
             version: string;
             guid: string;
-            /** @description 资源快照（cpu、mem、uptime、xray 运行状态等，原样透传，字段随面板而定） */
-            status?: {
-                [key: string]: unknown;
-            } | null;
+            /** @description 资源快照（0.15.0，Ruling-81） */
+            resources?: components["schemas"]["ServerResources"] | null;
         };
         Server: {
             /** Format: int64 */
@@ -3468,9 +3527,18 @@ export interface components {
             /** Format: date-time */
             lastSyncedAt?: string | null;
             panelVersion: string;
-            statusSnapshot?: {
-                [key: string]: unknown;
-            } | null;
+            /** @description 最近一次探测成功的资源快照（0.15.0，Ruling-81）；还没探测成功过为 null。服务器不在线时是掉线前的最后一份 */
+            resources: components["schemas"]["ServerResources"] | null;
+            /** @description 面板自报的公网 IPv4，没报为空串（0.15.0） */
+            publicIpv4: string;
+            /** @description 面板自报的公网 IPv6，没报为空串（0.15.0） */
+            publicIpv6: string;
+            /** @description 面板在线 client 数（0.15.0） */
+            onlineClients: number;
+            billing: components["schemas"]["ServerBilling"];
+            traffic: components["schemas"]["ServerTraffic"];
+            /** @description 关联的托管主机的系统信息（0.15.0）；没有关联为 null */
+            host: components["schemas"]["ServerHostBrief"] | null;
             inboundCount: number;
             /** Format: date-time */
             createdAt: string;
@@ -3489,6 +3557,205 @@ export interface components {
                 blocked: number;
                 partial: number;
             } | null;
+        };
+        /** @description 服务器资源快照，平台的中立模型（0.15.0，Ruling-81）；面板没报的数值为 0 */
+        ServerResources: {
+            /** @description CPU 占用百分比，面板没报为 null */
+            cpu: number | null;
+            cpuCores: number;
+            /**
+             * Format: int64
+             * @description 字节
+             */
+            memUsed: number;
+            /** Format: int64 */
+            memTotal: number;
+            /** Format: int64 */
+            swapUsed: number;
+            /** Format: int64 */
+            swapTotal: number;
+            /** Format: int64 */
+            diskUsed: number;
+            /** Format: int64 */
+            diskTotal: number;
+            /** @description 1 分钟平均负载 */
+            load1: number;
+            load5: number;
+            load15: number;
+            /**
+             * Format: int64
+             * @description 开机时长
+             */
+            uptimeSeconds: number;
+            tcpCount: number;
+            udpCount: number;
+            /**
+             * Format: int64
+             * @description 上行速率，字节每秒
+             */
+            netUpRate: number;
+            /**
+             * Format: int64
+             * @description 下行速率，字节每秒
+             */
+            netDownRate: number;
+            /**
+             * Format: int64
+             * @description 开机以来网卡累计发送字节
+             */
+            netSent: number;
+            /**
+             * Format: int64
+             * @description 开机以来网卡累计接收字节
+             */
+            netRecv: number;
+            /** @description 内核运行状态：running 为在运行，其它值为没在运行，空串为面板没报 */
+            coreState: string;
+            /** @description 内核版本，面板没报为空串 */
+            coreVersion: string;
+        };
+        /** @enum {string} */
+        BillingCycle: "month" | "quarter" | "half_year" | "year" | "once";
+        /**
+         * @description 流量额度的计量方式：both 收发合计，out 只算出站，max 收发取大
+         * @enum {string}
+         */
+        TrafficMode: "both" | "out" | "max";
+        /** @description 服务器的账单与流量额度（0.15.0，docs/03 §5.1，Ruling-82） */
+        ServerBilling: {
+            /** @description 价格，整数分；没填为 null */
+            priceCents: number | null;
+            /** @description 币种，三位大写字母 */
+            priceCurrency: string;
+            billingCycle: components["schemas"]["BillingCycle"];
+            /**
+             * Format: date
+             * @description 到期日（站点时区）；没填为 null
+             */
+            expiresOn: string | null;
+            /**
+             * Format: int64
+             * @description 每月流量额度；不限或没填为 null
+             */
+            trafficQuotaBytes: number | null;
+            /** @description 每月几号重置，当月没有这一天取月末 */
+            trafficResetDay: number;
+            trafficMode: components["schemas"]["TrafficMode"];
+        };
+        ServerBillingInput: components["schemas"]["ServerBilling"] & {
+            /**
+             * Format: int64
+             * @description 校准：把本周期已用改成这个值；不带或 null 为不校准
+             */
+            trafficUsedBytes?: number | null;
+        };
+        /** @description 当前流量周期的用量（0.15.0，Ruling-82）；只有接入之后的数据 */
+        ServerTraffic: {
+            /**
+             * Format: date
+             * @description 本周期起始日
+             */
+            cycleStart: string;
+            /**
+             * Format: date
+             * @description 下一次重置的日期
+             */
+            nextResetOn: string;
+            /**
+             * Format: int64
+             * @description 本周期网卡发送（出站）字节
+             */
+            sentBytes: number;
+            /**
+             * Format: int64
+             * @description 本周期网卡接收（入站）字节
+             */
+            recvBytes: number;
+            /**
+             * Format: int64
+             * @description 按计量方式折算并加上校准值后的已用字节，不小于 0
+             */
+            usedBytes: number;
+        };
+        ServerHostBrief: {
+            /** @description 系统标识（如 debian、ubuntu），没检测到为空串 */
+            osId: string;
+            arch: string;
+            /**
+             * Format: date-time
+             * @description 平台申请的面板证书的到期时间
+             */
+            certNotAfter: string | null;
+        };
+        /**
+         * @description 运营商：telecom 电信，unicom 联通，mobile 移动
+         * @enum {string}
+         */
+        LatencyIsp: "telecom" | "unicom" | "mobile";
+        LatencyPoint: {
+            /** Format: date-time */
+            at: string;
+            /** @description 平均延迟（毫秒）；全丢为 null */
+            avgMs: number | null;
+            lossPercent: number;
+        };
+        /** @description 三家运营商各自的延迟序列，按时间升序（Ruling-84） */
+        LatencySeries: {
+            telecom: components["schemas"]["LatencyPoint"][];
+            unicom: components["schemas"]["LatencyPoint"][];
+            mobile: components["schemas"]["LatencyPoint"][];
+        };
+        ServerNetPoint: {
+            /** Format: date-time */
+            at: string;
+            /**
+             * Format: int64
+             * @description 上行速率，字节每秒
+             */
+            up: number;
+            /**
+             * Format: int64
+             * @description 下行速率，字节每秒
+             */
+            down: number;
+        };
+        ServerTrend: {
+            /** Format: int64 */
+            serverId: number;
+            net: components["schemas"]["ServerNetPoint"][];
+            /** @description 每家最多 30 个点；三网延迟检测没开为 null */
+            latency: components["schemas"]["LatencySeries"] | null;
+        };
+        /** @description 一个时段的资源采样；Ruling-83 之前的采样只有 cpu 与 onlineClients，其余为 null */
+        ServerMetricPoint: {
+            /**
+             * Format: date-time
+             * @description 时段起点（5 分钟或 1 小时对齐）
+             */
+            at: string;
+            cpu: number | null;
+            onlineClients: number;
+            /** Format: int64 */
+            memUsed: number | null;
+            /** Format: int64 */
+            memTotal: number | null;
+            /** Format: int64 */
+            diskUsed: number | null;
+            /** Format: int64 */
+            diskTotal: number | null;
+            load1: number | null;
+            /** Format: int64 */
+            netUpRate: number | null;
+            /** Format: int64 */
+            netDownRate: number | null;
+            tcpCount: number | null;
+            udpCount: number | null;
+        };
+        ServerMetrics: {
+            range: components["schemas"]["MetricRange"];
+            points: components["schemas"]["ServerMetricPoint"][];
+            /** @description 三网延迟检测没开为 null */
+            latency: components["schemas"]["LatencySeries"] | null;
         };
         ServerEnvelope: components["schemas"]["Envelope"] & {
             data?: components["schemas"]["Server"];
@@ -4297,6 +4564,13 @@ export interface components {
                 /** @description 环境变量 HUB_GLOBALPING_TOKEN 是否已配置（决定每小时额度），不可经接口修改 */
                 readonly hasToken: boolean;
             };
+            /** @description 三网延迟检测（0.15.0，docs/03 §5.20，Ruling-84） */
+            latency: {
+                /** @description 开启后服务器的公网 IP 会发给第三方探测服务，默认关 */
+                enabled: boolean;
+                /** @description 同一台服务器两次检测的最小间隔 */
+                intervalMinutes: number;
+            };
             /** @description 侧栏菜单顺序（0.7.3，docs/03 §5.6 菜单顺序，Ruling-57）；空数组 = 默认顺序 */
             menu: {
                 admin: components["schemas"]["MenuOrder"];
@@ -4437,6 +4711,9 @@ export interface components {
                 [key: string]: unknown;
             };
             reach?: {
+                [key: string]: unknown;
+            };
+            latency?: {
                 [key: string]: unknown;
             };
             menu?: {
@@ -6859,6 +7136,30 @@ export interface operations {
             502: components["responses"]["UpstreamUnavailable"];
         };
     };
+    listServerTrends: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 按服务器的近况 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["ServerTrend"][];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+        };
+    };
     testServer: {
         parameters: {
             query?: never;
@@ -7789,6 +8090,68 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ServerEnvelope"];
+                };
+            };
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    setServerBilling: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ServerBillingInput"];
+            };
+        };
+        responses: {
+            /** @description 修改后的服务器 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ServerEnvelope"];
+                };
+            };
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    getServerMetrics: {
+        parameters: {
+            query?: {
+                range?: components["schemas"]["MetricRange"];
+            };
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 趋势点，按时间升序 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["ServerMetrics"];
+                    };
                 };
             };
             400: components["responses"]["InvalidArgument"];
