@@ -1,8 +1,8 @@
 import { PlusOutlined } from '@ant-design/icons'
-import { Alert, App, Button, Descriptions, Popconfirm, Space, Switch, Table, Tag, Tooltip, Typography, type TableProps } from 'antd'
+import { Alert, App, Button, Descriptions, Popconfirm, Space, Switch, Table, Tabs, Tag, Tooltip, Typography, type TableProps } from 'antd'
 import { useCallback, useState } from 'react'
-import { Link, useParams } from 'react-router'
-import { api, csrfHeader, type Endpoint, type HostTask, type Inbound, type Server, type ServerTrend } from '../../api/client'
+import { Link, useParams, useSearchParams } from 'react-router'
+import { api, csrfHeader, type Endpoint, type HostTask, type Inbound, type Server } from '../../api/client'
 import { useSession } from '../../auth/session-context'
 import { mutate, useRemote } from '../../hooks/use-remote'
 import { PERMISSIONS, ROUTES } from '../../menu'
@@ -18,14 +18,16 @@ import { ServerNodeAffixModal } from './NodeAffixModal'
 import { InboundFormModal } from './inbound-form/InboundFormModal'
 import { serverDomainOf } from './inbound-form/model'
 import { ServerStatusTag } from './status'
-import { ServerBillingModal } from './server-card/ServerBillingModal'
-import { ServerStatusCard } from './server-card/ServerStatusCard'
-import { ServerTrendCharts } from './server-card/ServerTrendCharts'
+import { ServerStatusPane } from './server-card/ServerStatusPane'
 import { formatCountry } from './countries'
 import { ErrorAlert } from '../../components/ErrorAlert'
-import { PageHeader } from '../../components/PageHeader'
 
-const loadTrends = (signal: AbortSignal) => api.GET('/api/admin/servers/trends', { signal })
+/** 详情页的页签（Ruling-88），记在地址栏的 ?tab= 里；不认识的值按默认的“入站与节点”。 */
+const TAB_PARAM = 'tab'
+const TAB_INBOUNDS = 'inbounds'
+const TAB_STATUS = 'status'
+const TAB_SETTINGS = 'settings'
+const TAB_SSH = 'ssh'
 
 /** VLESS Vision 流控（Ruling-77）。 */
 const VISION_FLOW = 'xtls-rprx-vision'
@@ -93,11 +95,7 @@ export function ServerDetailPage() {
   )
   const server = useRemote<Server>(loadServer)
   const inbounds = useRemote<Inbound[]>(loadInbounds)
-  const canReadServer = can(PERMISSIONS.SERVER_READ)
-  // 卡片上的速率小图与三网延迟取自列表的近况接口（Ruling-85、Ruling-86）
-  const trends = useRemote<ServerTrend[]>(loadTrends, canReadServer)
-  const trend = trends.data?.find((t) => t.serverId === serverId)
-  const [isEditingBilling, setIsEditingBilling] = useState(false)
+  const [searchParams, setSearchParams] = useSearchParams()
 
   const reloadAll = () => {
     server.reload()
@@ -217,69 +215,11 @@ export function ServerDetailPage() {
   }
 
   const srv = server.data
-  // 新建入站时预填 Host 与 SNI 用的域名：先看已有的对外地址，再看面板地址（docs/03 §5.2 入站预填）
-  const serverDomain = serverDomainOf([...(inbounds.data ?? []).flatMap((i) => i.endpoints.map((e) => e.address)), srv?.baseUrl ?? ''])
-  return (
+  const inboundsPane = (
     <>
-      <Typography.Paragraph>
-        <Link to={ROUTES.SERVERS}>← 服务器</Link>
-      </Typography.Paragraph>
-      <ErrorAlert error={server.error} />
-      {srv !== null && canReadServer && (
-        <div className="page-alert">
-          <ServerStatusCard
-            server={srv}
-            trend={trend}
-            hasLatency={trend?.latency !== null && trend !== undefined}
-            canEditBilling={can(PERMISSIONS.SERVER_WRITE)}
-            onEditBilling={() => setIsEditingBilling(true)}
-            isDetail
-          />
-        </div>
-      )}
-      {srv !== null && canReadServer && <ServerTrendCharts serverId={serverId} />}
-      {srv !== null && (
-        <ServerBillingModal
-          server={isEditingBilling ? srv : null}
-          onClose={() => setIsEditingBilling(false)}
-          onSaved={() => {
-            setIsEditingBilling(false)
-            server.reload()
-          }}
-        />
-      )}
-      {srv !== null && (
-        <Descriptions title={srv.name} size="small" column={{ xs: 1, md: 3 }} className="page-alert">
-          <Descriptions.Item label="状态">
-            <ServerStatusTag status={srv.status} lastError={srv.lastError} isDisabled={srv.isDisabled} />
-          </Descriptions.Item>
-          <Descriptions.Item label="面板">{srv.providerType} {srv.panelVersion}</Descriptions.Item>
-          <Descriptions.Item label="位置">{formatCountry(srv.region)}</Descriptions.Item>
-          <Descriptions.Item label="地址">{srv.baseUrl}</Descriptions.Item>
-          <Descriptions.Item label="最近同步">{formatTime(srv.lastSyncedAt)}</Descriptions.Item>
-          <Descriptions.Item label="备注">{srv.remark || '—'}</Descriptions.Item>
-          <Descriptions.Item label="VLESS 流控">
-            <Tooltip title="打开后平台下发的用户带 xtls-rprx-vision，只在 TCP + REALITY / TLS 的 VLESS 入站上生效">
-              <Switch
-                size="small"
-                aria-label="VLESS 流控"
-                checked={srv.clientFlow === VISION_FLOW}
-                loading={isFlowBusy}
-                disabled={!can(PERMISSIONS.SERVER_WRITE)}
-                onChange={(isOn) => void setClientFlow(isOn)}
-              />
-            </Tooltip>
-          </Descriptions.Item>
-        </Descriptions>
-      )}
-      {srv !== null && isPlainHttpUrl(srv.baseUrl) && <Alert type="warning" showIcon className="page-alert" title={`${PLAIN_HTTP_TAG}：${PLAIN_HTTP_WARNING}`} />}
-      {srv !== null && can(PERMISSIONS.SERVER_READ) && <ChainApplyCard serverId={serverId} />}
-      {srv !== null && can(PERMISSIONS.HOST_READ) && <HostOpsCard server={srv} onChanged={reloadAll} />}
-      <PageHeader
-        title="入站"
-        level={4}
-        action={canWrite && (
-          <Space>
+      {canWrite && (
+        <div className="tab-toolbar">
+          <Space wrap>
             <Button onClick={() => setIsAddingEndpoint(true)} disabled={(inbounds.data ?? []).length === 0}>
               添加对外地址
             </Button>
@@ -287,7 +227,7 @@ export function ServerDetailPage() {
               批量改节点名
             </Button>
             {canDeployPresets && (
-              <Tooltip title={srv?.hostId === null ? '先在下方 SSH 运维里绑定 SSH' : undefined}>
+              <Tooltip title={srv?.hostId === null ? '先在“SSH 运维”页签里绑定 SSH' : undefined}>
                 <Button onClick={() => setIsDeployingPresets(true)} disabled={(srv?.isDisabled ?? true) || srv?.hostId === null}>
                   一键部署入站
                 </Button>
@@ -297,10 +237,73 @@ export function ServerDetailPage() {
               新建入站
             </Button>
           </Space>
-        )}
-      />
+        </div>
+      )}
       <ErrorAlert error={inbounds.error} />
       <Table<Inbound> rowKey="id" scroll={TABLE_SCROLL} loading={inbounds.isLoading} columns={columns} dataSource={inbounds.data ?? []} pagination={false} />
+    </>
+  )
+  const settingsPane = srv !== null && (
+    <>
+      <Descriptions size="small" column={{ xs: 1, md: 3 }} className="page-alert">
+        <Descriptions.Item label="面板">{srv.providerType} {srv.panelVersion}</Descriptions.Item>
+        <Descriptions.Item label="位置">{formatCountry(srv.region)}</Descriptions.Item>
+        <Descriptions.Item label="地址">{srv.baseUrl}</Descriptions.Item>
+        <Descriptions.Item label="最近同步">{formatTime(srv.lastSyncedAt)}</Descriptions.Item>
+        <Descriptions.Item label="备注">{srv.remark || '—'}</Descriptions.Item>
+        <Descriptions.Item label="VLESS 流控">
+          <Tooltip title="打开后平台下发的用户带 xtls-rprx-vision，只在 TCP + REALITY / TLS 的 VLESS 入站上生效">
+            <Switch
+              size="small"
+              aria-label="VLESS 流控"
+              checked={srv.clientFlow === VISION_FLOW}
+              loading={isFlowBusy}
+              disabled={!can(PERMISSIONS.SERVER_WRITE)}
+              onChange={(isOn) => void setClientFlow(isOn)}
+            />
+          </Tooltip>
+        </Descriptions.Item>
+      </Descriptions>
+      {can(PERMISSIONS.SERVER_READ) && <ChainApplyCard serverId={serverId} />}
+    </>
+  )
+  // 运行状态要 server:read，SSH 运维要 host:read；没有权限的页签不出现
+  const tabItems = [
+    { key: TAB_INBOUNDS, label: '入站与节点', children: inboundsPane },
+    ...(srv !== null && can(PERMISSIONS.SERVER_READ) ? [{ key: TAB_STATUS, label: '运行状态', children: <ServerStatusPane server={srv} onChanged={server.reload} /> }] : []),
+    { key: TAB_SETTINGS, label: '设置', children: settingsPane },
+    ...(srv !== null && can(PERMISSIONS.HOST_READ) ? [{ key: TAB_SSH, label: 'SSH 运维', children: <HostOpsCard server={srv} onChanged={reloadAll} /> }] : []),
+  ]
+  const requestedTab = searchParams.get(TAB_PARAM) ?? TAB_INBOUNDS
+  const activeTab = tabItems.some((t) => t.key === requestedTab) ? requestedTab : TAB_INBOUNDS
+  // 新建入站时预填 Host 与 SNI 用的域名：先看已有的对外地址，再看面板地址（docs/03 §5.2 入站预填）
+  const serverDomain = serverDomainOf([...(inbounds.data ?? []).flatMap((i) => i.endpoints.map((e) => e.address)), srv?.baseUrl ?? ''])
+  return (
+    <>
+      <Typography.Paragraph>
+        <Link to={ROUTES.SERVERS}>← 服务器</Link>
+      </Typography.Paragraph>
+      <ErrorAlert error={server.error} />
+      {srv !== null && (
+        <div className="server-detail-head">
+          <Typography.Title level={4} className="server-detail-title">
+            {srv.name}
+          </Typography.Title>
+          <ServerStatusTag status={srv.status} lastError={srv.lastError} isDisabled={srv.isDisabled} />
+          <span className="server-card-sub">
+            {formatCountry(srv.region)} · {srv.providerType} {srv.panelVersion}
+          </span>
+        </div>
+      )}
+      {srv !== null && isPlainHttpUrl(srv.baseUrl) && <Alert type="warning" showIcon className="page-alert" title={`${PLAIN_HTTP_TAG}：${PLAIN_HTTP_WARNING}`} />}
+      {srv !== null && (
+        <Tabs
+          activeKey={activeTab}
+          destroyOnHidden
+          onChange={(key) => setSearchParams(key === TAB_INBOUNDS ? {} : { [TAB_PARAM]: key }, { replace: true })}
+          items={tabItems}
+        />
+      )}
 
       <InboundFormModal
         serverId={serverId}

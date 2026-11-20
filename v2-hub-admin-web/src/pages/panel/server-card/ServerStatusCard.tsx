@@ -59,8 +59,6 @@ interface ServerStatusCardProps {
   isDetail?: boolean
   /** 标题旁的额外标签（如明文 HTTP 警告、大陆连通概况）。 */
   badges?: ReactNode
-  /** 卡片底部的操作按钮（如同步、编辑、移除）。 */
-  actions?: ReactNode
 }
 
 /** 速率小图：最近若干个 5 分钟时段的上行或下行，按最大值归一画折线。 */
@@ -199,7 +197,7 @@ function TrafficQuota({ server, today }: { server: Server; today: string }) {
  * 服务器状态卡片（docs/05 服务器状态卡片，Ruling-83 – Ruling-86）：资源四宫格、实时速率、流量额度、三网延迟、在线与到期。
  * 服务器不在线时整卡置灰，读数是掉线前最后一份。
  */
-export function ServerStatusCard({ server, trend, hasLatency, canEditBilling, onEditBilling, isDetail = false, badges, actions }: ServerStatusCardProps) {
+export function ServerStatusCard({ server, trend, hasLatency, canEditBilling, onEditBilling, isDetail = false, badges }: ServerStatusCardProps) {
   const [isExpanded, setIsExpanded] = useState(isDetail)
   const navigate = useNavigate()
   const res = server.resources
@@ -217,18 +215,30 @@ export function ServerStatusCard({ server, trend, hasLatency, canEditBilling, on
   const latency = trend?.latency ?? null
   const region = server.region === '' ? null : server.region
 
+  const tags = (
+    <>
+      {server.publicIpv4 !== '' && <Tag className="server-card-ip" color="green">V4</Tag>}
+      {server.publicIpv6 !== '' && <Tag className="server-card-ip" color="green">V6</Tag>}
+      {server.host !== null && server.host.osId !== '' && <Tag>{`${server.host.osId}${server.host.arch === '' ? '' : ` · ${server.host.arch}`}`}</Tag>}
+      {res !== null && res.coreState !== '' && res.coreState !== 'running' && <Tag color="red">Xray 未运行</Tag>}
+      {!isOnline && <span className="server-card-sub">最近在线 {formatTime(server.lastSeenAt)}</span>}
+    </>
+  )
   return (
     <Card className={isOnline ? 'server-card' : 'server-card server-card-offline'}>
       <div className="server-card-header">
+        {/* 详情页的页头已有名称、状态与位置，卡片不再重复 */}
         <div className="server-card-title">
-          {region !== null && (
+          {!isDetail && region !== null && (
             <Tooltip title={countryName(region)}>
               <span className="server-card-region">{region}</span>
             </Tooltip>
           )}
-          {isDetail ? <span className="server-card-name">{server.name}</span> : <Link className="server-card-name" to={`/servers/${server.id}`}>{server.name}</Link>}
-          <ServerStatusTag status={server.status} lastError={server.lastError} isDisabled={server.isDisabled} />
+          {!isDetail && <Link className="server-card-name" to={`/servers/${server.id}`}>{server.name}</Link>}
+          {!isDetail && <ServerStatusTag status={server.status} lastError={server.lastError} isDisabled={server.isDisabled} />}
           {badges}
+          {/* 详情页：IP、系统等标签并进标题行 */}
+          {isDetail && tags}
         </div>
         <div className="server-card-actions">
           {canEditBilling && (
@@ -238,18 +248,12 @@ export function ServerStatusCard({ server, trend, hasLatency, canEditBilling, on
           )}
           {!isDetail && (
             <Tooltip title="详情与趋势">
-              <Button type="text" size="small" icon={<LineChartOutlined />} aria-label="详情与趋势" onClick={() => void navigate(`/servers/${server.id}`)} />
+              <Button type="text" size="small" icon={<LineChartOutlined />} aria-label="详情与趋势" onClick={() => void navigate(`/servers/${server.id}?tab=status`)} />
             </Tooltip>
           )}
         </div>
       </div>
-      <div className="server-card-tags">
-        {server.publicIpv4 !== '' && <Tag className="server-card-ip" color="green">V4</Tag>}
-        {server.publicIpv6 !== '' && <Tag className="server-card-ip" color="green">V6</Tag>}
-        {server.host !== null && server.host.osId !== '' && <Tag>{`${server.host.osId}${server.host.arch === '' ? '' : ` · ${server.host.arch}`}`}</Tag>}
-        {res !== null && res.coreState !== '' && res.coreState !== 'running' && <Tag color="red">Xray 未运行</Tag>}
-        {!isOnline && <span className="server-card-sub">最近在线 {formatTime(server.lastSeenAt)}</span>}
-      </div>
+      {!isDetail && <div className="server-card-tags">{tags}</div>}
 
       {res === null ? (
         <div className="server-card-sub server-card-section">面板还没有报过资源数据</div>
@@ -319,15 +323,10 @@ export function ServerStatusCard({ server, trend, hasLatency, canEditBilling, on
         <span className="server-card-sub">在线用户 {server.onlineClients}</span>
       </div>
 
-      {(!isDetail || actions !== undefined) && (
-        <div className="server-card-bottom">
-          {!isDetail && (
-            <Button type="link" size="small" className="server-card-toggle" onClick={() => setIsExpanded((v) => !v)} icon={isExpanded ? <UpOutlined /> : <DownOutlined />}>
-              {isExpanded ? '收起' : '更多'}
-            </Button>
-          )}
-          {actions}
-        </div>
+      {!isDetail && (
+        <Button type="link" size="small" className="server-card-toggle" onClick={() => setIsExpanded((v) => !v)} icon={isExpanded ? <UpOutlined /> : <DownOutlined />}>
+          {isExpanded ? '收起' : '更多'}
+        </Button>
       )}
       {isExpanded && <ServerCardDetails server={server} />}
     </Card>

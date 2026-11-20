@@ -14,7 +14,7 @@ import { ServerDetailPage } from './ServerDetailPage'
 import { ServersPage } from './ServersPage'
 import { countryName } from './countries'
 import { SERVER_STATUS_FIELDS } from '../../test/host-fixtures'
-import { showServerTable } from '../../test/harness'
+import { openTab } from '../../test/harness'
 
 const CSRF = 'csrf-test-token'
 const ALL = [PERMISSIONS.SERVER_READ, PERMISSIONS.SERVER_WRITE, PERMISSIONS.NODE_READ, PERMISSIONS.NODE_WRITE]
@@ -75,7 +75,6 @@ function renderWith(node: ReactNode, path = '/', routePath = '/', permissions: s
 afterEach(() => {
   cleanup()
   vi.unstubAllGlobals()
-  localStorage.clear()
 })
 
 describe('ServersPage', () => {
@@ -140,7 +139,6 @@ describe('服务器位置（Ruling-65）', () => {
       'PUT /api/admin/servers/1': () => ok({ ...server, region: 'JP' }),
     })
     renderWith(<ServersPage />)
-    await showServerTable()
     expect(await screen.findByText(countryName('HK'))).toBeDefined()
 
     fireEvent.click(screen.getByRole('button', { name: /编\s*辑/ }))
@@ -474,6 +472,7 @@ describe('服务端链式（docs/03 §5.19）', () => {
       },
     })
     renderWith(<ServerDetailPage />, '/servers/1', '/servers/:id')
+    await openTab('设置')
     expect(await screen.findByText('服务端链式下发')).toBeDefined()
     expect(screen.getByText('下发失败')).toBeDefined()
     expect(screen.getByText('1 / 2')).toBeDefined()
@@ -493,6 +492,7 @@ describe('服务端链式（docs/03 §5.19）', () => {
       'GET /api/admin/servers/1/chain-apply': () => ok({ ...applyFailed, isSupported: false, status: 'none' }),
     })
     renderWith(<ServerDetailPage />, '/servers/1', '/servers/:id')
+    await openTab('设置')
     expect(await screen.findByText(/不支持改内核配置/)).toBeDefined()
     expect(screen.queryByText('服务端链式下发')).toBeNull()
   })

@@ -3,7 +3,7 @@ import { MemoryRouter } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { PanelNode } from '../../api/client'
 import { PERMISSIONS } from '../../menu'
-import { mockServer, ok, renderWith, showServerTable, TEST_CSRF } from '../../test/harness'
+import { mockServer, ok, renderWith, TEST_CSRF } from '../../test/harness'
 import { SERVER_STATUS_FIELDS } from '../../test/host-fixtures'
 import { DashboardPage } from '../DashboardPage'
 import { NodeReachButton } from '../panel/reach'
@@ -93,7 +93,6 @@ const withRouter = (node: React.ReactNode) => <MemoryRouter>{node}</MemoryRouter
 afterEach(() => {
   cleanup()
   vi.unstubAllGlobals()
-  localStorage.clear()
 })
 
 describe('总览分区（docs/03 §5.20 总览分析，Ruling-66）', () => {
@@ -246,7 +245,6 @@ describe('大陆连通检测（Ruling-67）', () => {
     ]
     mockServer({ 'GET /api/admin/servers': () => ok(list) })
     renderWith([PERMISSIONS.SERVER_READ], withRouter(<ServersPage />))
-    await showServerTable()
     expect(await screen.findByText('被墙 1')).toBeDefined()
     expect(screen.getByText('部分不通 1')).toBeDefined()
     expect(screen.getByText('正常')).toBeDefined()

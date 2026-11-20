@@ -1,14 +1,13 @@
 import { PlusOutlined } from '@ant-design/icons'
-import { App, Button, Empty, Popconfirm, Segmented, Space, Table, Tag, type TableProps } from 'antd'
-import { useMemo, useState } from 'react'
-import { Link } from 'react-router'
-import { api, csrfHeader, toApiError, type Server, type ServerTrend } from '../../api/client'
+import { App, Button, Popconfirm, Space, Table, Tabs, type TableProps } from 'antd'
+import { useState } from 'react'
+import { Link, useSearchParams } from 'react-router'
+import { api, csrfHeader, toApiError, type Server } from '../../api/client'
 import { useSession } from '../../auth/session-context'
 import { mutate, useRemote } from '../../hooks/use-remote'
-import { SERVER_STATUS_POLL_INTERVAL_MS, usePageVisible, usePollRemote } from '../../hooks/use-polling'
-import { ServerBillingModal } from './server-card/ServerBillingModal'
-import { ServerStatusCard } from './server-card/ServerStatusCard'
+import { ServerStatusBoard } from './server-card/ServerStatusBoard'
 import { formatPercent, percentOf } from './server-card/server-card-format'
+import { ServerReachCell } from './server-reach-cell'
 import { PERMISSIONS } from '../../menu'
 import { TABLE_SCROLL, formatTime } from '../system/format'
 import { ServerFormModal } from './ServerFormModal'
@@ -18,71 +17,22 @@ import { ErrorAlert } from '../../components/ErrorAlert'
 import { PageHeader } from '../../components/PageHeader'
 
 const loadServers = (signal: AbortSignal) => api.GET('/api/admin/servers', { signal })
-const loadTrends = (signal: AbortSignal) => api.GET('/api/admin/servers/trends', { signal })
-/** 列表的显示方式记在本机浏览器里（只是个人偏好，读写失败按默认的卡片）。 */
-const VIEW_STORAGE_KEY = 'v2hub.admin.servers.view'
-const VIEW_CARDS = 'cards'
-const VIEW_TABLE = 'table'
-type ViewMode = typeof VIEW_CARDS | typeof VIEW_TABLE
-const VIEW_OPTIONS: { value: ViewMode; label: string }[] = [
-  { value: VIEW_CARDS, label: '卡片' },
-  { value: VIEW_TABLE, label: '表格' },
-]
-
-function readViewMode(): ViewMode {
-  try {
-    return localStorage.getItem(VIEW_STORAGE_KEY) === VIEW_TABLE ? VIEW_TABLE : VIEW_CARDS
-  } catch (err) {
-    reportError(err)
-    return VIEW_CARDS
-  }
-}
-
-function saveViewMode(mode: ViewMode) {
-  try {
-    localStorage.setItem(VIEW_STORAGE_KEY, mode)
-  } catch (err) {
-    reportError(err)
-  }
-}
+/** 页签（Ruling-88）记在地址栏的 ?tab= 里：默认“管理”，“运行状态”是只读的卡片墙。 */
+const TAB_PARAM = 'tab'
+const TAB_MANAGE = 'manage'
+const TAB_STATUS = 'status'
 /** “大陆连通”列插在“状态”列后面。 */
 const REACH_COLUMN_INDEX = 3
 const EMPTY = '—'
 
-/** 一台服务器上大陆连通检测的概况：有被墙或部分不通的地址就标出个数；否则说明有几个地址测出来是正常的。 */
-function ServerReachCell({ reach }: { reach: Server['reach'] }) {
-  if (reach === null || reach.total === 0) {
-    return <>{EMPTY}</>
-  }
-  if (reach.blocked === 0 && reach.partial === 0) {
-    if (reach.ok === 0) {
-      // 没有一个地址测出正常：还没测、未知或端口不通，细节在节点页
-      return <Tag>暂无结论</Tag>
-    }
-    return <Tag color="green">{reach.ok === reach.total ? '正常' : `正常 ${reach.ok}/${reach.total}`}</Tag>
-  }
-  return (
-    <Space size={4}>
-      {reach.blocked > 0 && <Tag color="red">被墙 {reach.blocked}</Tag>}
-      {reach.partial > 0 && <Tag color="orange">部分不通 {reach.partial}</Tag>}
-    </Space>
-  )
-}
-
-/** 服务器管理（server:read 查看，server:write 接入 / 编辑 / 同步 / 移除 / 账单）；默认以状态卡片显示，可切到表格（Ruling-83）。 */
+/** 服务器（server:read 查看，server:write 接入 / 编辑 / 同步 / 移除）；“管理”页签是表格，“运行状态”页签是状态卡片（Ruling-88）。 */
 export function ServersPage() {
   const { can } = useSession()
   const { message } = App.useApp()
   const canWrite = can(PERMISSIONS.SERVER_WRITE)
   const servers = useRemote<Server[]>(loadServers)
-  const trends = useRemote<ServerTrend[]>(loadTrends)
-  const [viewMode, setViewMode] = useState<ViewMode>(readViewMode)
-  const [billing, setBilling] = useState<Server | null>(null)
-  const trendById = useMemo(() => new Map((trends.data ?? []).map((t) => [t.serverId, t])), [trends.data])
-  // 延迟检测开着时接口里每台都带 latency（Ruling-86）；拿不到趋势时不出延迟区
-  const hasLatency = (trends.data ?? []).some((t) => t.latency !== null)
-  // 页面在前台时定时刷新状态（切到后台不刷）
-  usePollRemote([servers, trends], usePageVisible(), SERVER_STATUS_POLL_INTERVAL_MS)
+  const [searchParams, setSearchParams] = useSearchParams()
+  const activeTab = searchParams.get(TAB_PARAM) === TAB_STATUS ? TAB_STATUS : TAB_MANAGE
   const [editing, setEditing] = useState<Server | null>(null)
   const [isCreating, setIsCreating] = useState(false)
   const [syncingId, setSyncingId] = useState<number | null>(null)
@@ -179,49 +129,23 @@ export function ServersPage() {
           </Button>
         )}
       />
-      <ErrorAlert error={servers.error} />
-      <div className="server-view-switch">
-        <Segmented<ViewMode>
-          aria-label="显示方式"
-          options={VIEW_OPTIONS}
-          value={viewMode}
-          onChange={(mode) => {
-            setViewMode(mode)
-            saveViewMode(mode)
-          }}
-        />
-      </div>
-      {viewMode === VIEW_TABLE ? (
-        <Table<Server> rowKey="id" scroll={TABLE_SCROLL} loading={servers.isLoading && servers.data === null} columns={columns} dataSource={servers.data ?? []} pagination={false} />
-      ) : (
-        <div className="server-card-grid-list">
-          {(servers.data ?? []).map((s) => (
-            <ServerStatusCard
-              key={s.id}
-              server={s}
-              trend={trendById.get(s.id)}
-              hasLatency={hasLatency}
-              canEditBilling={canWrite}
-              onEditBilling={setBilling}
-              badges={
-                <>
-                  <PlainHttpTag baseUrl={s.baseUrl} />
-                  {s.reach !== null && s.reach.total > 0 && <ServerReachCell reach={s.reach} />}
-                </>
-              }
-              actions={canWrite ? renderActions(s) : undefined}
-            />
-          ))}
-          {servers.data !== null && servers.data.length === 0 && <Empty description="还没有接入服务器" />}
-        </div>
-      )}
-      <ServerBillingModal
-        server={billing}
-        onClose={() => setBilling(null)}
-        onSaved={() => {
-          setBilling(null)
-          servers.reload()
-        }}
+      <Tabs
+        activeKey={activeTab}
+        destroyOnHidden
+        onChange={(key) => setSearchParams(key === TAB_STATUS ? { [TAB_PARAM]: key } : {}, { replace: true })}
+        items={[
+          {
+            key: TAB_MANAGE,
+            label: '管理',
+            children: (
+              <>
+                <ErrorAlert error={servers.error} />
+                <Table<Server> rowKey="id" scroll={TABLE_SCROLL} loading={servers.isLoading} columns={columns} dataSource={servers.data ?? []} pagination={false} />
+              </>
+            ),
+          },
+          { key: TAB_STATUS, label: '运行状态', children: <ServerStatusBoard /> },
+        ]}
       />
       <ServerFormModal
         server={editing}
