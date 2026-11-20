@@ -17,7 +17,7 @@
 
 ```bash
 # 中间件（PostgreSQL :15432、MinIO :19000/:19001；加 --profile xui 另起两台 3x-ui）
-cd v2-hub-contract/deploy && bash init_env.sh && docker compose -f docker-compose.yml up -d --wait && bash reset_db.sh
+cd v2-hub-contract/deploy && bash init_env.sh && docker compose -f docker-compose.yml up -d --wait && bash reset_db.sh && bash init_uploads.sh
 # 每个模块统一四个目标
 cd v2-hub-<module> && make run | make test | make build | make lint
 # 联调回归（脚本自起自停各模块进程，会重置数据库）

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # 生产部署（Ruling-62，docs/02 §6）：由生产机上的自托管 Runner 在仓库检出目录里执行，也可在生产机上手动执行。
 #   bash v2-hub-contract/deploy/deploy_prod.sh
-# 步骤：同步编排文件到 DEPLOY_ROOT → 本地构建 hub-server 镜像与两个前端 → 起数据库与 MinIO → 迁移
+# 步骤：同步编排文件到 DEPLOY_ROOT → 本地构建 hub-server 镜像与两个前端 → 起数据库与 MinIO → 上传用的桶与账号 → 迁移
 #       → compose 更新 → 发布前端 → 健康检查 → 清理旧镜像。
 # 凭据只在 DEPLOY_ROOT/.env（首次装机时生成，不入库）；本脚本不打印任何凭据。
 set -euo pipefail
@@ -36,7 +36,8 @@ compose() { docker compose -f "$DEPLOY_ROOT/compose.deploy.yml" --env-file "$DEP
 log "同步编排文件到 $DEPLOY_ROOT（提交 $IMAGE_TAG）"
 mkdir -p "$DEPLOY_ROOT/caddy" "$DEPLOY_ROOT/migrations"
 # publish_web.sh 读它所在目录的 .env，所以也放到 DEPLOY_ROOT
-cp "$CONTRACT_DEPLOY/compose.deploy.yml" "$CONTRACT_DEPLOY/publish_web.sh" "$CONTRACT_DEPLOY/init.sql" "$DEPLOY_ROOT/"
+cp "$CONTRACT_DEPLOY/compose.deploy.yml" "$CONTRACT_DEPLOY/publish_web.sh" "$CONTRACT_DEPLOY/init_uploads.sh" \
+  "$CONTRACT_DEPLOY/init.sql" "$DEPLOY_ROOT/"
 cp "$CONTRACT_DEPLOY/caddy/Caddyfile" "$DEPLOY_ROOT/caddy/Caddyfile"
 rm -f "$DEPLOY_ROOT"/migrations/*.sql
 cp "$CONTRACT_DEPLOY"/migrations/*.sql "$DEPLOY_ROOT/migrations/"
@@ -55,6 +56,9 @@ done
 # 3. 数据库与 MinIO 先起，迁移要用
 log "启动 postgres / minio"
 compose up -d --wait postgres minio
+
+# 图片上传用的 MinIO 桶与只写账号（Ruling-89）；老环境的 .env 缺账号时由脚本补上
+bash "$DEPLOY_ROOT/init_uploads.sh" "$DEPLOY_ROOT/compose.deploy.yml"
 
 # 单引号里的变量由 postgres 容器内的 shell 展开（容器环境里有 POSTGRES_USER / POSTGRES_DB）
 # shellcheck disable=SC2016
