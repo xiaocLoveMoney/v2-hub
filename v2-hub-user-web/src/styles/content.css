@@ -189,6 +189,18 @@ a.hub-btn {
   transform: translateY(-2px);
 }
 
+/* 系统要求减少动态效果时只留顶边变色，不上浮 */
+@media (prefers-reduced-motion: reduce) {
+  .hub-tutorial-card {
+    transition: none;
+  }
+
+  .hub-tutorial-card:hover,
+  .hub-tutorial-card:focus-visible {
+    transform: none;
+  }
+}
+
 .hub-tutorial-card h4 {
   margin: 0;
   font-size: 16px;
