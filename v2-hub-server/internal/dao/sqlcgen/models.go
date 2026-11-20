@@ -476,29 +476,43 @@ type RolePermission struct {
 }
 
 type Server struct {
-	ID             int64
-	Name           string
-	ProviderType   string
-	BaseUrl        string
-	ApiTokenEnc    []byte
-	TlsMode        string
-	CertPinSha256  pgtype.Text
-	Region         string
-	Remark         string
-	IsDisabled     bool
-	Status         string
-	LastError      string
-	LastSeenAt     pgtype.Timestamptz
-	PanelVersion   string
-	PanelGuid      string
-	StatusSnapshot []byte
-	OnlineClients  int32
-	LastSyncedAt   pgtype.Timestamptz
-	OfflineSince   pgtype.Timestamptz
-	AlertSentAt    pgtype.Timestamptz
-	ClientFlow     string
-	CreatedAt      pgtype.Timestamptz
-	UpdatedAt      pgtype.Timestamptz
+	ID                 int64
+	Name               string
+	ProviderType       string
+	BaseUrl            string
+	ApiTokenEnc        []byte
+	TlsMode            string
+	CertPinSha256      pgtype.Text
+	Region             string
+	Remark             string
+	IsDisabled         bool
+	Status             string
+	LastError          string
+	LastSeenAt         pgtype.Timestamptz
+	PanelVersion       string
+	PanelGuid          string
+	StatusSnapshot     []byte
+	OnlineClients      int32
+	LastSyncedAt       pgtype.Timestamptz
+	OfflineSince       pgtype.Timestamptz
+	AlertSentAt        pgtype.Timestamptz
+	ClientFlow         string
+	PublicIpv4         string
+	PublicIpv6         string
+	PriceCents         pgtype.Int4
+	PriceCurrency      string
+	BillingCycle       string
+	ExpiresOn          pgtype.Date
+	TrafficQuotaBytes  pgtype.Int8
+	TrafficResetDay    int16
+	TrafficMode        string
+	TrafficAdjustBytes int64
+	TrafficAdjustCycle pgtype.Date
+	NicLastSent        pgtype.Int8
+	NicLastRecv        pgtype.Int8
+	LatencyCheckedAt   pgtype.Timestamptz
+	CreatedAt          pgtype.Timestamptz
+	UpdatedAt          pgtype.Timestamptz
 }
 
 type ServerHost struct {
@@ -522,11 +536,36 @@ type ServerHost struct {
 	UpdatedAt     pgtype.Timestamptz
 }
 
+type ServerLatency struct {
+	ServerID    int64
+	Isp         string
+	SampledAt   pgtype.Timestamptz
+	AvgMs       pgtype.Int4
+	LossPercent int16
+	ProbeCity   string
+}
+
 type ServerMetric struct {
 	ServerID      int64
 	BucketAt      pgtype.Timestamptz
 	Cpu           pgtype.Float8
 	OnlineClients int32
+	MemUsed       pgtype.Int8
+	MemTotal      pgtype.Int8
+	DiskUsed      pgtype.Int8
+	DiskTotal     pgtype.Int8
+	Load1X100     pgtype.Int4
+	NetUpRate     pgtype.Int8
+	NetDownRate   pgtype.Int8
+	TcpCount      pgtype.Int4
+	UdpCount      pgtype.Int4
+}
+
+type ServerNicTrafficDaily struct {
+	ServerID int64
+	Day      pgtype.Date
+	Sent     int64
+	Recv     int64
 }
 
 type ServerTrafficHourly struct {

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -62,6 +63,8 @@ type PanelConfig struct {
 	RequestTimeout time.Duration
 	// Locator 把服务器公网 IP 换成国家码（Ruling-65）；nil 表示位置扫描已关闭。
 	Locator geoip.Locator
+	// SiteLocation 返回站点时区，流量周期与到期日按它取“今天”（Ruling-82）；nil 按 UTC。
+	SiteLocation func(ctx context.Context) *time.Location
 }
 
 // PanelService 负责服务器接入、探测、入站同步与增删改、对外地址、节点与节点组（docs/03 §5.1）。
@@ -102,27 +105,48 @@ type ServerInput struct {
 
 // Server 是服务器视图（不含 token）。
 type Server struct {
-	ID             int64
-	Name           string
-	ProviderType   string
-	BaseURL        string
-	TLSMode        string
-	CertPinSHA256  *string
-	Region         string
-	Remark         string
-	IsDisabled     bool
-	Status         string
-	LastError      string
-	LastSeenAt     *time.Time
-	LastSyncedAt   *time.Time
-	PanelVersion   string
-	StatusSnapshot []byte
-	InboundCount   int
-	CreatedAt      time.Time
+	ID            int64
+	Name          string
+	ProviderType  string
+	BaseURL       string
+	TLSMode       string
+	CertPinSHA256 *string
+	Region        string
+	Remark        string
+	IsDisabled    bool
+	Status        string
+	LastError     string
+	LastSeenAt    *time.Time
+	LastSyncedAt  *time.Time
+	PanelVersion  string
+	InboundCount  int
+	CreatedAt     time.Time
 	// HostID 是关联的托管主机（docs/03 §5.22）；nil 表示没有绑定 SSH。
 	HostID *int64
 	// ClientFlow 是 VLESS 流控（Ruling-77），空串为不带。
 	ClientFlow string
+	// Resources 是最近一次探测成功的资源快照（Ruling-81）；nil 表示还没探测成功过。
+	Resources *panel.Resources
+	// PublicIPv4 / PublicIPv6 是面板自报的公网地址，没报为空串。
+	PublicIPv4    string
+	PublicIPv6    string
+	OnlineClients int
+	// Billing 与 Traffic 是账单、流量额度与本周期用量（Ruling-82）。
+	Billing ServerBilling
+	Traffic ServerCycleTraffic
+	// Host 是关联的托管主机的系统信息；nil 表示没有关联。
+	Host *ServerHostBrief
+
+	// trafficAdjust 是“本周期已用”的校准值，只在 trafficAdjustCycle 等于当前周期起始日时有效。
+	trafficAdjust      int64
+	trafficAdjustCycle *time.Time
+}
+
+// ServerHostBrief 是服务器所在托管主机的系统信息（docs/03 §5.22）。CertNotAfter 是平台申请的面板证书的到期时间，没有为 nil。
+type ServerHostBrief struct {
+	OSID         string
+	Arch         string
+	CertNotAfter *time.Time
 }
 
 func (s *PanelService) validateConn(in ServerConnInput, requireToken bool) (ServerConnInput, error) {
@@ -279,6 +303,9 @@ func (s *PanelService) ListServers(ctx context.Context) ([]Server, error) {
 	for _, r := range rows {
 		out = append(out, serverFromRow(sqlcgen.GetServerRow(r)))
 	}
+	if err := s.attachTraffic(ctx, out); err != nil {
+		return nil, err
+	}
 	return out, nil
 }
 
@@ -291,17 +318,22 @@ func (s *PanelService) GetServer(ctx context.Context, id int64) (*Server, error)
 	if err != nil {
 		return nil, fmt.Errorf("get server %d: %w", id, err)
 	}
-	srv := serverFromRow(row)
-	return &srv, nil
+	one := []Server{serverFromRow(row)}
+	if err := s.attachTraffic(ctx, one); err != nil {
+		return nil, err
+	}
+	return &one[0], nil
 }
 
 func serverFromRow(r sqlcgen.GetServerRow) Server {
 	srv := Server{
 		ID: r.ID, Name: r.Name, ProviderType: r.ProviderType, BaseURL: r.BaseUrl, TLSMode: r.TlsMode,
 		Region: r.Region, Remark: r.Remark, IsDisabled: r.IsDisabled, Status: r.Status, LastError: r.LastError,
-		PanelVersion: r.PanelVersion, StatusSnapshot: r.StatusSnapshot, InboundCount: int(r.InboundCount),
+		PanelVersion: r.PanelVersion, InboundCount: int(r.InboundCount),
 		CreatedAt: r.CreatedAt.Time, LastSeenAt: timePtr(r.LastSeenAt), LastSyncedAt: timePtr(r.LastSyncedAt),
-		ClientFlow: r.ClientFlow,
+		ClientFlow: r.ClientFlow, Resources: resourcesFromSnapshot(r.ID, r.StatusSnapshot),
+		PublicIPv4: r.PublicIpv4, PublicIPv6: r.PublicIpv6, OnlineClients: int(r.OnlineClients),
+		Billing: billingFromRow(r), trafficAdjust: r.TrafficAdjustBytes, trafficAdjustCycle: datePtr(r.TrafficAdjustCycle),
 	}
 	if r.CertPinSha256.Valid {
 		v := r.CertPinSha256.String
@@ -310,8 +342,35 @@ func serverFromRow(r sqlcgen.GetServerRow) Server {
 	if r.HostID != 0 {
 		hostID := r.HostID
 		srv.HostID = &hostID
+		srv.Host = &ServerHostBrief{OSID: r.HostOsID, Arch: r.HostArch, CertNotAfter: timePtr(r.HostCertNotAfter)}
 	}
 	return srv
+}
+
+// resourcesFromSnapshot 解出快照里的资源（Ruling-81）；没有快照返回 nil，解不出来记日志后同样返回 nil（下一次探测会写回）。
+func resourcesFromSnapshot(serverID int64, raw []byte) *panel.Resources {
+	if len(raw) == 0 {
+		return nil
+	}
+	var res panel.Resources
+	if err := json.Unmarshal(raw, &res); err != nil {
+		slog.Warn("decode server status snapshot", "server_id", serverID, "err", err)
+		return nil
+	}
+	return &res
+}
+
+// snapshotOf 把资源编码成落库的快照；nil 资源或编码失败返回 nil（快照列置空）。
+func snapshotOf(serverID int64, res *panel.Resources) []byte {
+	if res == nil {
+		return nil
+	}
+	raw, err := json.Marshal(res)
+	if err != nil {
+		slog.Warn("encode server status snapshot", "server_id", serverID, "err", err)
+		return nil
+	}
+	return raw
 }
 
 // SupportsCoreConfig 报告某类面板能否改内核配置（服务端链式的入口，docs/03 §5.19）。
@@ -398,7 +457,8 @@ func redactURL(raw string) string {
 func probeParams(id int64, info *panel.PanelInfo, probeErr error, probedAt time.Time) sqlcgen.SetServerProbeResultParams {
 	if probeErr == nil && info != nil {
 		return sqlcgen.SetServerProbeResultParams{
-			ID: id, Status: ServerStatusOnline, IsOnline: true, PanelVersion: info.Version, PanelGuid: info.GUID, StatusSnapshot: info.Status,
+			ID: id, Status: ServerStatusOnline, IsOnline: true, PanelVersion: info.Version, PanelGuid: info.GUID,
+			StatusSnapshot: snapshotOf(id, info.Resources), PublicIpv4: info.PublicIPv4, PublicIpv6: info.PublicIPv6,
 			ProbedAt: pgtype.Timestamptz{Time: probedAt, Valid: true},
 		}
 	}
@@ -518,7 +578,10 @@ func (s *PanelService) ProbeServer(ctx context.Context, id int64) error {
 	if probeErr != nil {
 		return probeErr
 	}
-	return s.recordMetric(ctx, id, info.Status)
+	if err := s.recordMetric(ctx, id, info.Resources); err != nil {
+		return err
+	}
+	return s.recordNicTraffic(ctx, id, info.Resources)
 }
 
 // ListEnabledServerIDs 返回需要探测与同步的服务器（T4：停用的跳过）。

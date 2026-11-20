@@ -24,13 +24,14 @@ const (
 	]}`
 )
 
-// fakeAPI 模拟探测服务：记下建测量的请求，前 pending 次轮询返回进行中。
+// fakeAPI 模拟探测服务：记下建测量的请求，前 pending 次轮询返回进行中；finished 非空时替换默认的结果。
 type fakeAPI struct {
 	mu       sync.Mutex
 	created  []measurementRequest
 	auth     []string
 	pending  int
 	createAs int
+	finished string
 }
 
 func (f *fakeAPI) handler(w http.ResponseWriter, r *http.Request) {
@@ -59,7 +60,11 @@ func (f *fakeAPI) handler(w http.ResponseWriter, r *http.Request) {
 			_, _ = w.Write([]byte(`{"status":"in-progress","results":[]}`))
 			return
 		}
-		_, _ = w.Write([]byte(finishedBody))
+		body := finishedBody
+		if f.finished != "" {
+			body = f.finished
+		}
+		_, _ = w.Write([]byte(body))
 		return
 	}
 	w.WriteHeader(http.StatusNotFound)
@@ -201,5 +206,61 @@ func TestIsPublicTarget(t *testing.T) {
 		if got := IsPublicTarget(address); got != want {
 			t.Errorf("IsPublicTarget(%q) = %v, want %v", address, got, want)
 		}
+	}
+}
+
+const (
+	asnTelecom  = 4134
+	asnUnicom   = 4837
+	asnMobile   = 9808
+	latencyBody = `{"status":"finished","results":[
+		{"probe":{"country":"CN","city":"Shanghai","asn":4134},"result":{"status":"finished","stats":{"avg":130.4,"rcv":8,"total":8}}},
+		{"probe":{"country":"CN","city":"Wuhan","asn":4837},"result":{"status":"finished","stats":{"avg":null,"rcv":0,"total":8}}},
+		{"probe":{"country":"CN","city":"Beijing","asn":9808},"result":{"status":"offline"}}
+	]}`
+)
+
+func TestLatency(t *testing.T) {
+	api := &fakeAPI{finished: latencyBody}
+	c := newTestClient(t, api, testToken)
+	got, err := c.Latency(context.Background(), LatencyRequest{Address: "8.8.8.8", ASNs: []int{asnTelecom, asnUnicom, asnMobile}})
+	if err != nil {
+		t.Fatalf("Latency: %v", err)
+	}
+	if len(api.created) != 1 {
+		t.Fatalf("created = %d measurements", len(api.created))
+	}
+	req := api.created[0]
+	if req.Options.Packets != latencyPackets || req.Options.Protocol != protocolICMP || len(req.Locations) != 3 {
+		t.Fatalf("request = %+v", req)
+	}
+	for i, asn := range []int{asnTelecom, asnUnicom, asnMobile} {
+		if loc := req.Locations[i]; loc.Country != MainlandCountry || loc.ASN != asn || loc.Limit != 1 {
+			t.Fatalf("location[%d] = %+v", i, loc)
+		}
+	}
+	// 离线的探测点不在结果里；全丢的没有延迟、丢包 100
+	if len(got) != 2 {
+		t.Fatalf("results = %+v", got)
+	}
+	if got[0].ASN != asnTelecom || got[0].City != "Shanghai" || got[0].AvgMs == nil || got[0].LossPercent != 0 {
+		t.Fatalf("telecom = %+v", got[0])
+	}
+	if got[1].ASN != asnUnicom || got[1].AvgMs != nil || got[1].LossPercent != percentBase {
+		t.Fatalf("unicom = %+v", got[1])
+	}
+}
+
+func TestLatencyRejectsBadInput(t *testing.T) {
+	api := &fakeAPI{}
+	c := newTestClient(t, api, "")
+	if _, err := c.Latency(context.Background(), LatencyRequest{Address: "10.0.0.1", ASNs: []int{asnTelecom}}); !errors.Is(err, ErrNotPublic) {
+		t.Fatalf("private target err = %v", err)
+	}
+	if _, err := c.Latency(context.Background(), LatencyRequest{Address: "8.8.8.8"}); !errors.Is(err, ErrRejected) {
+		t.Fatalf("no network err = %v", err)
+	}
+	if len(api.created) != 0 {
+		t.Fatalf("should not reach the api, created = %d", len(api.created))
 	}
 }

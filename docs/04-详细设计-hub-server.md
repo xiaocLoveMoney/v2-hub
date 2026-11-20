@@ -56,6 +56,8 @@ type CoreConfigurator interface { GetCoreTemplate / SetCoreTemplate / RestartCor
 
 中立模型只收敛公共字段；面板专有配置以“原始 JSON + provider/内核类型标记”携带。
 
+`Probe` 返回的 `PanelInfo.Resources` 是资源快照的中立模型（Ruling-81）：各实现把自己的状态字段映射成它，`server.status_snapshot` 存的就是它的 JSON，前端与业务层都不认面板字段名。
+
 ## 3. 关键不变式（违背即返工）
 
 1. 面板调用一律经 Provider，并发按服务器限流（每台同时最多 N 个请求，N 在配置里）。

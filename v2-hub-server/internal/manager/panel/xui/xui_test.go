@@ -68,8 +68,13 @@ func (f *fakePanel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	switch {
 	case path == "/server/status":
-		f.reply(w, true, "", map[string]any{"panelVersion": "3.11.0", "panelGuid": "guid-1", "cpu": 3.2, "publicIP": map[string]any{"ipv4": "203.0.113.1"},
-			"xray": map[string]any{"state": "error", "errorMsg": "listen tcp :443: bind: address already in use"}})
+		f.reply(w, true, "", map[string]any{"panelVersion": "3.11.0", "panelGuid": "guid-1", "cpu": 3.2, "cpuCores": 2,
+			"mem": map[string]any{"current": 300, "total": 1000}, "swap": map[string]any{"current": 1, "total": 2},
+			"disk": map[string]any{"current": 30, "total": 200}, "uptime": 86400, "loads": []float64{0.5, 0.3},
+			"tcpCount": 42, "udpCount": 7, "netIO": map[string]any{"up": 2900, "down": 2950},
+			"netTraffic": map[string]any{"sent": 833, "recv": 895},
+			"publicIP":   map[string]any{"ipv4": "203.0.113.1", "ipv6": "N/A"},
+			"xray":       map[string]any{"state": "error", "errorMsg": "listen tcp :443: bind: address already in use", "version": "26.10.21"}})
 	case path == "/clients/list":
 		rows := make([]map[string]any, 0, len(f.clients))
 		for _, c := range f.clients {
@@ -255,28 +260,31 @@ func TestProbe(t *testing.T) {
 	if info.Version != "3.11.0" || info.GUID != "guid-1" {
 		t.Fatalf("info = %+v", info)
 	}
-	if strings.Contains(string(info.Status), "publicIP") || !strings.Contains(string(info.Status), "cpu") {
-		t.Fatalf("snapshot should keep whitelisted fields only: %s", info.Status)
-	}
 	if info.CoreState != "error" || !strings.Contains(info.CoreError, "address already in use") {
 		t.Fatalf("core state = %q, %q", info.CoreState, info.CoreError)
 	}
-	if info.PublicIP != "203.0.113.1" {
-		t.Fatalf("PublicIP = %q", info.PublicIP)
+	if info.PublicIP != "203.0.113.1" || info.PublicIPv4 != "203.0.113.1" || info.PublicIPv6 != "" {
+		t.Fatalf("public ip = %q / %q / %q", info.PublicIP, info.PublicIPv4, info.PublicIPv6)
+	}
+	res := info.Resources
+	if res == nil || res.CPU == nil {
+		t.Fatalf("resources = %+v", res)
+	}
+	want := panel.Resources{
+		CPU: res.CPU, CPUCores: 2, MemUsed: 300, MemTotal: 1000, SwapUsed: 1, SwapTotal: 2, DiskUsed: 30, DiskTotal: 200,
+		Load1: 0.5, Load5: 0.3, UptimeSeconds: 86400, TCPCount: 42, UDPCount: 7, NetUpRate: 2900, NetDownRate: 2950,
+		NetSent: 833, NetRecv: 895, CoreState: "error", CoreVersion: "26.10.21",
+	}
+	if *res != want {
+		t.Fatalf("resources = %+v, want %+v", *res, want)
 	}
 }
 
-func TestPublicIPOf(t *testing.T) {
-	cases := map[string]string{
-		`{"ipv4":"203.0.113.1","ipv6":"2001:db8::1"}`: "203.0.113.1",
-		`{"ipv4":"N/A","ipv6":"2001:db8::1"}`:         "2001:db8::1",
-		`{"ipv4":"N/A","ipv6":"N/A"}`:                 "",
-		`"bad"`:                                       "",
-		``:                                            "",
-	}
+func TestReportedIP(t *testing.T) {
+	cases := map[string]string{"203.0.113.1": "203.0.113.1", "N/A": "", "": ""}
 	for raw, want := range cases {
-		if got := publicIPOf([]byte(raw)); got != want {
-			t.Errorf("publicIPOf(%s) = %q, want %q", raw, got, want)
+		if got := reportedIP(raw); got != want {
+			t.Errorf("reportedIP(%q) = %q, want %q", raw, got, want)
 		}
 	}
 }

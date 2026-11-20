@@ -42,9 +42,11 @@ type Fake struct {
 
 // New 创建一台空面板。
 func New() *Fake {
+	defaultCPU := fakeDefaultCPU
 	return &Fake{
 		info: panel.PanelInfo{
-			Version: "fake-1.0", GUID: "fake-guid", Status: json.RawMessage(`{"cpu":1.5}`), PublicIP: FakePublicIP, CoreState: panel.CoreRunning,
+			Version: "fake-1.0", GUID: "fake-guid", Resources: &panel.Resources{CPU: &defaultCPU, CoreState: panel.CoreRunning},
+			PublicIP: FakePublicIP, PublicIPv4: FakePublicIP, CoreState: panel.CoreRunning,
 		},
 		inbounds: make(map[string]panel.Inbound, 8),
 		clients:  make(map[string]*panel.Client, 8),
@@ -112,6 +114,9 @@ const FakeVLESSEnc = `{"auths":[` +
 	`{"id":"x25519","label":"X25519, not Post-Quantum","decryption":"mlkem768x25519plus.native.600s.fake-x","encryption":"mlkem768x25519plus.native.0rtt.fake-x"},` +
 	`{"id":"mlkem768","label":"ML-KEM-768, Post-Quantum","decryption":"mlkem768x25519plus.native.600s.fake-pq","encryption":"mlkem768x25519plus.native.0rtt.fake-pq"}]}`
 
+// fakeDefaultCPU 是假面板默认快照里的 CPU 占用。
+const fakeDefaultCPU = 1.5
+
 // FakePublicIP 是假面板默认自报的公网 IP（文档地址段之外的公网地址，位置扫描测试用）。
 const FakePublicIP = "8.8.8.8"
 
@@ -126,14 +131,26 @@ func (f *Fake) SetCoreState(state, message string) {
 func (f *Fake) SetPublicIP(ip string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.info.PublicIP = ip
+	f.info.PublicIP, f.info.PublicIPv4 = ip, ip
 }
 
 // SetCPU 改假面板快照里的 CPU 占用。
 func (f *Fake) SetCPU(cpu float64) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.info.Status = json.RawMessage(fmt.Sprintf(`{"cpu":%g}`, cpu))
+	res := panel.Resources{}
+	if f.info.Resources != nil {
+		res = *f.info.Resources
+	}
+	res.CPU = &cpu
+	f.info.Resources = &res
+}
+
+// SetResources 改假面板的资源快照（整份替换）。
+func (f *Fake) SetResources(res panel.Resources) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.info.Resources = &res
 }
 
 // Probe 实现 panel.Provider。

@@ -32,14 +32,45 @@ type ConnConfig struct {
 	Timeout       time.Duration
 }
 
+// Resources 是服务器资源快照的中立模型（Ruling-81）：各面板实现把自己的状态映射成它，业务层与前端不认面板字段。
+// 面板没报的数值为 0；CPU 为 nil 表示面板没报。字节数与速率都是 int64，速率的单位是字节每秒。
+// JSON 形状即 server.status_snapshot 的存储形状，也是接口输出的形状。
+type Resources struct {
+	CPU           *float64 `json:"cpu"`
+	CPUCores      int      `json:"cpuCores"`
+	MemUsed       int64    `json:"memUsed"`
+	MemTotal      int64    `json:"memTotal"`
+	SwapUsed      int64    `json:"swapUsed"`
+	SwapTotal     int64    `json:"swapTotal"`
+	DiskUsed      int64    `json:"diskUsed"`
+	DiskTotal     int64    `json:"diskTotal"`
+	Load1         float64  `json:"load1"`
+	Load5         float64  `json:"load5"`
+	Load15        float64  `json:"load15"`
+	UptimeSeconds int64    `json:"uptimeSeconds"`
+	TCPCount      int      `json:"tcpCount"`
+	UDPCount      int      `json:"udpCount"`
+	NetUpRate     int64    `json:"netUpRate"`
+	NetDownRate   int64    `json:"netDownRate"`
+	// NetSent / NetRecv 是开机以来网卡累计收发字节，机器重启后从 0 重新计。
+	NetSent int64 `json:"netSent"`
+	NetRecv int64 `json:"netRecv"`
+	// CoreState 是内核运行状态（CoreRunning 为在运行，空串为面板没报），CoreVersion 是内核版本。
+	CoreState   string `json:"coreState"`
+	CoreVersion string `json:"coreVersion"`
+}
+
 // PanelInfo 是探测结果。
 type PanelInfo struct {
 	Version string
 	GUID    string
-	// Status 是资源快照（CPU、内存、在线时长等），形状随面板而定，原样透传给前端展示。
-	Status json.RawMessage
-	// PublicIP 是面板自报的服务器公网 IP（优先 IPv4）；面板没报为空。只用于扫描位置（Ruling-65），不落库。
+	// Resources 是资源快照（Ruling-81）；面板实现总是填上，测试替身可以为 nil。
+	Resources *Resources
+	// PublicIP 是面板自报的服务器公网 IP（优先 IPv4）；面板没报为空。用于扫描位置（Ruling-65）。
 	PublicIP string
+	// PublicIPv4 / PublicIPv6 是面板自报的两个公网地址，没报为空串（Ruling-81）。
+	PublicIPv4 string
+	PublicIPv6 string
 	// CoreState 是内核（如 Xray）的运行状态：CoreRunning 为在运行，其它值为没在运行，空为面板没报；CoreError 是面板给的错误说明。
 	CoreState string
 	CoreError string
