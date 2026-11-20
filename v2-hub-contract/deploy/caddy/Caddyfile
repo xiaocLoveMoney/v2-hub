@@ -44,6 +44,23 @@
 	handle /sub/* {
 		import to_hub
 	}
+	# 公告 / 教程里的图片（Ruling-89）：只认 hub-server 生成的对象名形状、只许 GET / HEAD，转给 MinIO 的匿名只读桶 uploads；
+	# 其余 /uploads/ 下的请求一律 404，不让外部碰到 MinIO 的其它接口（列目录、写入等）
+	@upload {
+		method GET HEAD
+		path_regexp ^/uploads/[0-9]{6}/[0-9a-f]{32}\.(png|jpg|gif|webp)$
+	}
+	handle @upload {
+		# 丢掉查询串，不让 ?acl、?tagging 之类的子资源请求到达 MinIO
+		rewrite * {path}?
+		reverse_proxy minio:9000 {
+			header_down X-Content-Type-Options nosniff
+			header_down -Server
+		}
+	}
+	handle /uploads/* {
+		respond 404
+	}
 	redir /admin /admin/ 308
 	handle_path /admin/* {
 		import spa_from_minio web-admin

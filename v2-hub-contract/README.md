@@ -12,6 +12,7 @@
 | `deploy/docker-compose.yml` | 开发 | PostgreSQL、MinIO；`--profile xui` 另起两台 3x-ui |
 | `deploy/compose.deploy.yml` + `deploy/caddy/Caddyfile` | 生产 | hub-server + Caddy + PostgreSQL + MinIO |
 | `deploy/publish_web.sh` | 前端 → MinIO | 发布前端构建产物到 `web-admin` / `web-user` 桶 |
+| `deploy/init_uploads.sh` | hub-server → MinIO | 建图片上传桶 `uploads`（匿名只读）与 hub-server 的只写账号，`.env` 缺账号时补上（Ruling-89） |
 | `deploy/deploy_prod.sh` | 生产部署 | 自托管 Runner 在 `main` 检查全绿后执行：本地构建、迁移、compose 更新、发布前端、健康检查（Ruling-62） |
 | `deploy/it/` | 黑盒联调 | `run_all.sh` 汇总 IT-N 用例 |
 
@@ -20,6 +21,7 @@ cd deploy
 bash init_env.sh                                   # 生成 .env（随机密码）
 docker compose -f docker-compose.yml up -d --wait  # PostgreSQL :15432、MinIO :19000/:19001
 bash reset_db.sh                                   # 重置库到 init.sql
+bash init_uploads.sh                               # 图片上传用的桶与账号（可重复执行）
 cd it && bash run_all.sh                           # 联调回归（会重置库）
 ```
 

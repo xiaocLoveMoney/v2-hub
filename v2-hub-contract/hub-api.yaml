@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: v2-hub API
-  version: 0.16.1
+  version: 0.16.2
   description: |
     v2-hub 对外接口契约（hub-server 提供，v2-hub-admin-web / v2-hub-user-web 消费）。
     - 管理端接口前缀 /api/admin，客户端接口前缀 /api/user，订阅端点前缀 /sub。
@@ -33,6 +33,7 @@ info:
     0.16.0：服务器状态卡片（Ruling-83 – Ruling-86）——服务器的 statusSnapshot 换成类型化的 resources，另带 publicIpv4 / publicIpv6、onlineClients、
       billing、traffic、host；连接测试结果的 status 同样换成 resources；新增 PUT /api/admin/servers/{id}/billing、GET /api/admin/servers/{id}/metrics、
       GET /api/admin/servers/trends；系统设置增加 latency 分组。
+    0.16.2：公告与教程的图片上传（Ruling-89）——新增 POST /api/admin/uploads（multipart，content:write），返回站内路径 /uploads/…。
 servers:
   - url: http://127.0.0.1:8080
     description: 本地开发
@@ -3000,6 +3001,42 @@ paths:
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "403": { $ref: "#/components/responses/PermissionDenied" }
         "404": { $ref: "#/components/responses/NotFound" }
+  /api/admin/uploads:
+    post:
+      tags: [admin-content]
+      operationId: uploadImage
+      summary: 上传一张公告 / 教程用的图片（content:write；docs/03 §5.9，Ruling-89，0.16.2）
+      description: |
+        只收 PNG / JPEG / GIF / WebP，按文件内容判断（不信扩展名与声明的类型，不收 SVG），单张 ≤ 5 MiB；每个管理员每小时最多 60 张。
+        返回的 url 是站内路径（/uploads/年月/32 位随机十六进制.扩展名），任何人凭地址可看，正文里写成 Markdown 图片引用。
+        未配置上传（hub-server 没有 MinIO 账号）返回 403 feature_disabled；权限不足同为 403 permission_denied。
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file: { type: string, format: binary, description: 图片文件，表单里只认这一个字段 }
+      responses:
+        "200":
+          description: 上传成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/UploadedImage" }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/FeatureDisabled" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "502": { $ref: "#/components/responses/UpstreamUnavailable" }
   /api/admin/shared-accounts:
     get:
       tags: [admin-content]
@@ -6744,6 +6781,13 @@ components:
         content: { $ref: "#/components/schemas/Markdown" }
         sortOrder: { type: integer }
         isPublished: { type: boolean }
+    UploadedImage:
+      type: object
+      required: [url, contentType, size]
+      properties:
+        url: { type: string, description: 站内路径，形如 /uploads/202611/0123456789abcdef0123456789abcdef.png }
+        contentType: { type: string, enum: [image/png, image/jpeg, image/gif, image/webp] }
+        size: { type: integer, format: int64, description: 字节数 }
     SharedAccountInput:
       type: object
       required: [name, category, account, isPublished]

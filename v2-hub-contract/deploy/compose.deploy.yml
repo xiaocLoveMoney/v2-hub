@@ -24,8 +24,12 @@ services:
       HUB_SMTP_TLS: ${HUB_SMTP_TLS:-starttls}
       HUB_TELEGRAM_BOT_TOKEN: ${HUB_TELEGRAM_BOT_TOKEN:-}
       HUB_GLOBALPING_TOKEN: ${HUB_GLOBALPING_TOKEN:-}
+      # 公告 / 教程图片上传用的 MinIO 只写账号（Ruling-89）；deploy_prod.sh 在 .env 缺这两项时生成，留空 = 上传不可用
+      HUB_UPLOAD_USER: ${HUB_UPLOAD_USER:-}
+      HUB_UPLOAD_PASSWORD: ${HUB_UPLOAD_PASSWORD:-}
     depends_on:
       postgres: { condition: service_healthy }
+      minio: { condition: service_started }
 
   caddy:
     image: caddy:2.10-alpine

@@ -10,6 +10,7 @@ import { useRowAction, useSubmit } from '../../hooks/use-submit'
 import { PERMISSIONS } from '../../menu'
 import { formatTime } from '../system/format'
 import { MARKDOWN_HINT, MAX_MARKDOWN_LEN } from './markdown'
+import { MarkdownEditor } from './MarkdownEditor'
 import { PageHeader } from '../../components/PageHeader'
 import { FormModal } from '../../components/FormModal'
 
@@ -173,7 +174,7 @@ function AnnouncementForm({ announcement, onSaved }: Pick<AnnouncementModalProps
           <Input autoComplete="off" />
         </Form.Item>
         <Form.Item name="content" label="正文" extra={MARKDOWN_HINT} rules={[{ max: MAX_MARKDOWN_LEN }]}>
-          <Input.TextArea rows={CONTENT_ROWS} className="mono" showCount maxLength={MAX_MARKDOWN_LEN} />
+          <MarkdownEditor rows={CONTENT_ROWS} />
         </Form.Item>
         <Form.Item name="isPublished" label="发布" extra="关闭即存为草稿，用户看不到" valuePropName="checked">
           <Switch />
