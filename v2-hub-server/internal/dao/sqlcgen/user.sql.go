@@ -492,7 +492,7 @@ func (q *Queries) ListPlans(ctx context.Context) ([]ListPlansRow, error) {
 
 const listServerProvisions = `-- name: ListServerProvisions :many
 SELECT id, user_id, email, status, retry_count, last_up, last_down, cred_version,
-       (links_enc IS NOT NULL)::boolean AS has_links
+       (links_enc IS NOT NULL)::boolean AS has_links, links_stamp
 FROM provision WHERE server_id = $1
 `
 
@@ -506,6 +506,7 @@ type ListServerProvisionsRow struct {
 	LastDown    int64
 	CredVersion int32
 	HasLinks    bool
+	LinksStamp  string
 }
 
 func (q *Queries) ListServerProvisions(ctx context.Context, serverID int64) ([]ListServerProvisionsRow, error) {
@@ -527,6 +528,7 @@ func (q *Queries) ListServerProvisions(ctx context.Context, serverID int64) ([]L
 			&i.LastDown,
 			&i.CredVersion,
 			&i.HasLinks,
+			&i.LinksStamp,
 		); err != nil {
 			return nil, err
 		}
@@ -954,17 +956,24 @@ func (q *Queries) SetProvisionCounters(ctx context.Context, arg SetProvisionCoun
 }
 
 const setProvisionLinks = `-- name: SetProvisionLinks :exec
-UPDATE provision SET links_enc = $2, links_synced_at = $3 WHERE id = $1
+UPDATE provision SET links_enc = $2, links_synced_at = $3, links_stamp = $4 WHERE id = $1
 `
 
 type SetProvisionLinksParams struct {
 	ID            int64
 	LinksEnc      []byte
 	LinksSyncedAt pgtype.Timestamptz
+	LinksStamp    string
 }
 
+// links_stamp 是取链接时该面板的入站 / 对外地址摘要（Ruling-92）
 func (q *Queries) SetProvisionLinks(ctx context.Context, arg SetProvisionLinksParams) error {
-	_, err := q.db.Exec(ctx, setProvisionLinks, arg.ID, arg.LinksEnc, arg.LinksSyncedAt)
+	_, err := q.db.Exec(ctx, setProvisionLinks,
+		arg.ID,
+		arg.LinksEnc,
+		arg.LinksSyncedAt,
+		arg.LinksStamp,
+	)
 	return err
 }
 

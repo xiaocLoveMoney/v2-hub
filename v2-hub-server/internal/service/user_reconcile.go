@@ -14,6 +14,7 @@ import (
 
 	"v2-hub-server/internal/dao/sqlcgen"
 	"v2-hub-server/internal/manager/panel"
+	"v2-hub-server/internal/manager/render"
 )
 
 // 下发状态（docs/03 §2）。
@@ -85,6 +86,8 @@ type desiredClient struct {
 	credVersion   int32
 	syncedVersion int32
 	hasLinks      bool
+	// linksStamp 是上次取链接时这台面板的入站 / 对外地址摘要，与当前不同即重取（Ruling-92）
+	linksStamp string
 	// retryCount 是这台面板上下发记录已失败的次数（没有记录为 0），本轮失败时 +1 写回
 	retryCount int32
 	// flow 是服务器的 VLESS 流控（Ruling-77），对这台面板上的全部 client 相同
@@ -152,8 +155,6 @@ func (s *UserService) ReconcileServer(ctx context.Context, serverID int64) error
 	if err != nil {
 		return fmt.Errorf("link fingerprint of server %d: %w", serverID, err)
 	}
-	prevStamp, _ := s.linkStamps.Load(serverID)
-	refreshAll := prevStamp != stamp
 	failures := make(map[int64]error, len(desired))
 	needLinks := make(map[int64]bool, len(desired))
 	var toEnable, toDisable []string
@@ -210,25 +211,31 @@ func (s *UserService) ReconcileServer(ctx context.Context, serverID int64) error
 			slog.Warn("delete orphan client", "server_id", serverID, "email", email, "err", err)
 		}
 	}
-	links := s.fetchLinks(ctx, p, desired, failures, needLinks, refreshAll)
-	if err := s.saveResults(ctx, serverID, desired, failures, links); err != nil {
+	reality, err := s.realityChoices(ctx, serverID)
+	if err != nil {
 		return err
 	}
-	if len(failures) == 0 {
-		s.linkStamps.Store(serverID, stamp)
-	}
-	return nil
+	links := fetchLinks(ctx, p, desired, failures, needLinks, linkFetch{stamp: stamp, reality: reality})
+	return s.saveResults(ctx, serverID, desired, failures, links, stamp)
+}
+
+// linkFetch 是一轮取链接共用的东西：这台面板当前的入站 / 对外地址摘要，以及它的 REALITY 入站可选值。
+type linkFetch struct {
+	stamp   string
+	reality []render.RealityChoices
 }
 
 // fetchLinks 向面板取分享链接（docs/03 §5.4 节点来源）：新建、换凭据、挂载变了、还没有链接的用户，
-// 以及入站 / 对外地址变化后的全部用户。取失败记为该用户本轮失败，下轮重试。
-func (s *UserService) fetchLinks(ctx context.Context, p panel.Provider, desired []desiredClient, failures map[int64]error, need map[int64]bool, refreshAll bool) map[int64][]string {
+// 以及上次取链接后入站 / 对外地址摘要变了的用户（按用户记摘要，Ruling-92）。REALITY 链接的 sid / sni 按用户固定选取。
+// 取失败记为该用户本轮失败，下轮重试。
+func fetchLinks(ctx context.Context, p panel.Provider, desired []desiredClient, failures map[int64]error, need map[int64]bool, lf linkFetch) map[int64][]string {
 	out := make(map[int64][]string, len(desired))
 	for _, d := range desired {
 		if !d.present || failures[d.userID] != nil {
 			continue
 		}
-		if !refreshAll && d.hasLinks && !need[d.userID] {
+		isCurrent := d.hasLinks && d.linksStamp == lf.stamp
+		if isCurrent && !need[d.userID] {
 			continue
 		}
 		links, err := p.ClientLinks(ctx, d.email)
@@ -236,12 +243,31 @@ func (s *UserService) fetchLinks(ctx context.Context, p panel.Provider, desired 
 			failures[d.userID] = err
 			continue
 		}
-		if links == nil {
-			links = []string{}
+		pinned := make([]string, 0, len(links))
+		for _, l := range links {
+			pinned = append(pinned, render.PinReality(l, d.email, lf.reality))
 		}
-		out[d.userID] = links
+		out[d.userID] = pinned
 	}
 	return out
+}
+
+// realityChoices 取这台服务器上 REALITY 入站的可选值（平台缓存的入站配置，保留了 short id、serverNames 与公钥）。
+func (s *UserService) realityChoices(ctx context.Context, serverID int64) ([]render.RealityChoices, error) {
+	rows, err := s.q.ListInboundsByServer(ctx, serverID)
+	if err != nil {
+		return nil, fmt.Errorf("list inbounds of server %d: %w", serverID, err)
+	}
+	out := make([]render.RealityChoices, 0, len(rows))
+	for _, r := range rows {
+		if r.IsMissing {
+			continue
+		}
+		if c, ok := render.RealityChoicesOf(r.Config); ok {
+			out = append(out, c)
+		}
+	}
+	return out, nil
 }
 
 // needsClientUpdate 报告 IP 限制或流控与面板上不同，要整体改一次（连同启停，UpdateClient）。
@@ -376,7 +402,7 @@ func (s *UserService) loadDesired(ctx context.Context, serverID int64, refLen ma
 		d := desiredClient{
 			userID: u.ID, email: clientEmail(u.ID, u.EmailCode), refs: refs[u.ID], enabled: u.Status == UserStatusActive,
 			limitIP: int(u.LimitIp), present: !u.IsDeleted && len(refs[u.ID]) > 0,
-			credVersion: u.CredVersion, hasLinks: synced[u.ID].HasLinks, retryCount: synced[u.ID].RetryCount,
+			credVersion: u.CredVersion, hasLinks: synced[u.ID].HasLinks, linksStamp: synced[u.ID].LinksStamp, retryCount: synced[u.ID].RetryCount,
 			// 0 是 M3 之前写入的下发记录，面板上是初始凭据，按版本 1 处理
 			syncedVersion: max(synced[u.ID].CredVersion, initialCredVersion),
 		}
@@ -413,8 +439,9 @@ func provisionError(err error) string {
 	return truncate(msg, maxProvisionErr)
 }
 
-// saveResults 写回 provision：应删除且已删掉的移除记录；其余记 synced 或 failed（重试次数 +1）。最后清理已删完的待删除用户。
-func (s *UserService) saveResults(ctx context.Context, serverID int64, desired []desiredClient, failures map[int64]error, links map[int64][]string) error {
+// saveResults 写回 provision：应删除且已删掉的移除记录；其余记 synced 或 failed（重试次数 +1），本轮取到的链接连同摘要 stamp 一起存。
+// 最后清理已删完的待删除用户。
+func (s *UserService) saveResults(ctx context.Context, serverID int64, desired []desiredClient, failures map[int64]error, links map[int64][]string, stamp string) error {
 	now := pgtype.Timestamptz{Time: s.now(), Valid: true}
 	return s.inTx(ctx, func(q *sqlcgen.Queries) error {
 		for _, d := range desired {
@@ -436,7 +463,7 @@ func (s *UserService) saveResults(ctx context.Context, serverID int64, desired [
 				return fmt.Errorf("save provision %d/%d: %w", d.userID, serverID, err)
 			}
 			if l, ok := links[d.userID]; ok && opErr == nil {
-				if err := s.saveLinks(ctx, q, provisionID, l, now); err != nil {
+				if err := s.saveLinks(ctx, q, provisionID, l, linkStamp{at: now, stamp: stamp}); err != nil {
 					return err
 				}
 			}
@@ -452,8 +479,14 @@ func linksAAD(provisionID int64) []byte {
 	return fmt.Appendf(nil, "provision:%d:links", provisionID)
 }
 
-// saveLinks 把分享链接加密存入下发记录；链接含凭据，不得写日志。
-func (s *UserService) saveLinks(ctx context.Context, q *sqlcgen.Queries, provisionID int64, links []string, at pgtype.Timestamptz) error {
+// linkStamp 是一次取链接的时间与当时该面板的入站 / 对外地址摘要。
+type linkStamp struct {
+	at    pgtype.Timestamptz
+	stamp string
+}
+
+// saveLinks 把分享链接加密存入下发记录，连同取链接时的摘要（Ruling-92）；链接含凭据，不得写日志。
+func (s *UserService) saveLinks(ctx context.Context, q *sqlcgen.Queries, provisionID int64, links []string, ls linkStamp) error {
 	plain, err := json.Marshal(links)
 	if err != nil {
 		return fmt.Errorf("encode links of provision %d: %w", provisionID, err)
@@ -462,7 +495,8 @@ func (s *UserService) saveLinks(ctx context.Context, q *sqlcgen.Queries, provisi
 	if err != nil {
 		return fmt.Errorf("seal links of provision %d: %w", provisionID, err)
 	}
-	if err := q.SetProvisionLinks(ctx, sqlcgen.SetProvisionLinksParams{ID: provisionID, LinksEnc: sealed, LinksSyncedAt: at}); err != nil {
+	err = q.SetProvisionLinks(ctx, sqlcgen.SetProvisionLinksParams{ID: provisionID, LinksEnc: sealed, LinksSyncedAt: ls.at, LinksStamp: ls.stamp})
+	if err != nil {
 		return fmt.Errorf("save links of provision %d: %w", provisionID, err)
 	}
 	return nil

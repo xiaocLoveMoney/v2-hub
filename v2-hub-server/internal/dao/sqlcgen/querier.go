@@ -595,6 +595,7 @@ type Querier interface {
 	SetInviteCodeDisabled(ctx context.Context, arg SetInviteCodeDisabledParams) error
 	SetMailRetry(ctx context.Context, arg SetMailRetryParams) error
 	SetProvisionCounters(ctx context.Context, arg SetProvisionCountersParams) error
+	// links_stamp 是取链接时该面板的入站 / 对外地址摘要（Ruling-92）
 	SetProvisionLinks(ctx context.Context, arg SetProvisionLinksParams) error
 	SetSSHCredentialSecret(ctx context.Context, arg SetSSHCredentialSecretParams) error
 	// 账单与流量额度（docs/03 §5.1，Ruling-84）-------------------------------------

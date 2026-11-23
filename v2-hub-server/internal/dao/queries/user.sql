@@ -140,7 +140,7 @@ WHERE u.id = ANY(sqlc.arg(ids)::bigint[]);
 
 -- name: ListServerProvisions :many
 SELECT id, user_id, email, status, retry_count, last_up, last_down, cred_version,
-       (links_enc IS NOT NULL)::boolean AS has_links
+       (links_enc IS NOT NULL)::boolean AS has_links, links_stamp
 FROM provision WHERE server_id = $1;
 
 -- name: UpsertProvision :one
@@ -155,7 +155,8 @@ SET email = EXCLUDED.email, status = EXCLUDED.status, last_error = EXCLUDED.last
 RETURNING id;
 
 -- name: SetProvisionLinks :exec
-UPDATE provision SET links_enc = $2, links_synced_at = $3 WHERE id = $1;
+-- links_stamp 是取链接时该面板的入站 / 对外地址摘要（Ruling-92）
+UPDATE provision SET links_enc = $2, links_synced_at = $3, links_stamp = $4 WHERE id = $1;
 
 -- name: GetServerLinkFingerprint :one
 -- 影响分享链接的入站与对外地址摘要；变了就要重新向面板取全部链接（docs/03 §5.4 节点来源）
