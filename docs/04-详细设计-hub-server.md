@@ -52,6 +52,8 @@ type Provider interface {
 }
 // 可选能力，服务端链式需要（Capabilities.CoreConfig 为真时可断言出来，docs/03 §5.19）
 type CoreConfigurator interface { GetCoreTemplate / SetCoreTemplate / RestartCore / CoreState }
+// 可选能力：写入模板后面板自己把改动应用到运行中的内核，平台不必再重启（Ruling-93）
+type CoreLiveApplier interface { AppliesCoreTemplateLive(ctx) (bool, error) }
 ```
 
 中立模型只收敛公共字段；面板专有配置以“原始 JSON + provider/内核类型标记”携带。
