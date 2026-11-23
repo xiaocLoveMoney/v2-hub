@@ -26,7 +26,9 @@ type Fake struct {
 	nextID    int
 	nextGroup int
 	failWith  error
-	core      fakeCore
+	// failOn 只让指定方法失败（方法名 → 错误），优先于 failWith
+	failOn map[string]error
+	core   fakeCore
 	// 出站测试：预设的结果与收到的请求；网页证书路径
 	testResult panel.OutboundTestResult
 	// testResultByMode 优先于 testResult：按方式给不同的结果。
@@ -71,6 +73,20 @@ func (f *Fake) FailWith(err error) {
 	f.failWith = err
 }
 
+// FailOn 只让名为 method 的调用返回 err，其它调用不受影响；传 nil 恢复。
+func (f *Fake) FailOn(method string, err error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err == nil {
+		delete(f.failOn, method)
+		return
+	}
+	if f.failOn == nil {
+		f.failOn = make(map[string]error, 1)
+	}
+	f.failOn[method] = err
+}
+
 // PutInbound 直接在“面板侧”写入一个入站（模拟有人绕过平台改面板）。
 func (f *Fake) PutInbound(in panel.Inbound) {
 	f.mu.Lock()
@@ -101,6 +117,9 @@ func hashOf(in panel.Inbound) string {
 
 func (f *Fake) enter(method string) error {
 	f.Calls = append(f.Calls, method)
+	if err, ok := f.failOn[method]; ok {
+		return err
+	}
 	return f.failWith
 }
 

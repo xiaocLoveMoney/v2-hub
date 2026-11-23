@@ -123,3 +123,16 @@ func TestUnwrapJSONString(t *testing.T) {
 		t.Fatal("字符串里不是 JSON 应报错")
 	}
 }
+
+// 保存模板即生效的版本门槛是 3.3.1（Ruling-93）；认不出来的版本串按不支持处理，由调用方退回重启。
+func TestSupportsLiveApply(t *testing.T) {
+	cases := map[string]bool{
+		"3.11.0": true, "v3.11.0": true, "3.3.1": true, "3.4.0": true, "4.0.0": true, " 3.10.2 ": true,
+		"3.3.0": false, "3.2.8": false, "2.9.4": false, "": false, "dev-latest": false, "3.11": false, "3.x.1": false, "3.-1.5": false,
+	}
+	for version, want := range cases {
+		if got := supportsLiveApply(version); got != want {
+			t.Errorf("supportsLiveApply(%q) = %v, want %v", version, got, want)
+		}
+	}
+}

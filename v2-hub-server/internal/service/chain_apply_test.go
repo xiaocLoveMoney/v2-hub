@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"v2-hub-server/internal/manager/chain"
+	"v2-hub-server/internal/manager/panel"
 	"v2-hub-server/internal/manager/panel/paneltest"
 )
 
@@ -585,6 +586,104 @@ func TestChainApplyRejectedOnSave(t *testing.T) {
 	}
 	if st.Status != chainApplyFailed || st.FailCount != 1 || !strings.Contains(st.LastError, "xray core rejects") {
 		t.Fatalf("status after rejection = %+v", st)
+	}
+}
+
+// 面板保存模板即生效时（3x-ui ≥ 3.3.1，Ruling-93）：下发、改动、撤掉都不重启内核。
+func TestChainApplyLiveNoRestart(t *testing.T) {
+	f := newChainApplyFixture(t)
+	ctx := context.Background()
+	f.fake.SetCoreLiveApply(true)
+	exit := f.platformExit(t, chainPlatformName, true, true)
+	route := f.mustRoute(t, serverIn(ChainExitPlatform, exit.ID, f.nodes[0].ID, f.nodes[1].ID))
+	tag := chain.Tag(route.ID)
+
+	f.apply(t)
+	if _, _, running, restarts := f.fake.CoreSnapshot(); !running || restarts != 0 || f.hubRules(t)[tag] != tagFirst+","+tagSecond {
+		t.Fatalf("live apply must not restart: running=%v restarts=%d rules=%v", running, restarts, f.hubRules(t))
+	}
+	if st := f.status(t); st.Status != chainApplyApplied || st.AppliedRuleCount != 1 {
+		t.Fatalf("status after live apply = %+v", st)
+	}
+
+	if _, err := f.chain.UpdateRoute(ctx, f.principal, route.ID, serverIn(ChainExitPlatform, exit.ID, f.nodes[1].ID)); err != nil {
+		t.Fatal(err)
+	}
+	f.applyLater(t)
+	if err := f.chain.DeleteRoute(ctx, f.principal, route.ID); err != nil {
+		t.Fatal(err)
+	}
+	f.applyLater(t)
+	if _, _, running, restarts := f.fake.CoreSnapshot(); !running || restarts != 0 || len(f.hubRules(t)) != 0 {
+		t.Fatalf("changing and removing a route must not restart: running=%v restarts=%d rules=%v", running, restarts, f.hubRules(t))
+	}
+}
+
+// 保存即生效的面板上新模板让内核起不来：写回备份即恢复，同样不重启。
+func TestChainApplyLiveRollback(t *testing.T) {
+	f := newChainApplyFixture(t)
+	f.fake.SetCoreLiveApply(true)
+	before, _, _, _ := f.fake.CoreSnapshot()
+	route := f.mustRoute(t, serverIn(ChainExitNode, f.nodes[1].ID, f.nodes[0].ID))
+	f.fake.BreakCoreOn(chain.TagPrefix)
+
+	f.apply(t)
+	after, _, running, restarts := f.fake.CoreSnapshot()
+	if string(after) != string(before) || !running || restarts != 0 {
+		t.Fatalf("live rollback: running=%v restarts=%d template changed=%v", running, restarts, string(after) != string(before))
+	}
+	st := f.status(t)
+	if st.Status != chainApplyFailed || st.FailCount != 1 || !strings.Contains(st.LastError, "回滚") {
+		t.Fatalf("status after live failure = %+v", st)
+	}
+	if r := f.serverRoute(t, route.ID); r.Entries[0].State != EntryFailed {
+		t.Fatalf("route should show failed: %+v", r)
+	}
+}
+
+// 面板先保存、再应用，应用出错时保存接口报错但模板已经变了：读回核对后照样回滚（不能当成“被拒绝、模板没变”）。
+func TestChainApplySavedButApplyFailed(t *testing.T) {
+	for name, isLive := range map[string]bool{"live": true, "restart": false} {
+		t.Run(name, func(t *testing.T) {
+			f := newChainApplyFixture(t)
+			f.fake.SetCoreLiveApply(isLive)
+			before, _, _, _ := f.fake.CoreSnapshot()
+			f.mustRoute(t, serverIn(ChainExitNode, f.nodes[1].ID, f.nodes[0].ID))
+			f.fake.FailApplyOn(chain.TagPrefix)
+
+			f.apply(t)
+			after, _, running, restarts := f.fake.CoreSnapshot()
+			wantRestarts := 1
+			if isLive {
+				wantRestarts = 0
+			}
+			if string(after) != string(before) || !running || restarts != wantRestarts {
+				t.Fatalf("saved-but-failed must roll back: running=%v restarts=%d template changed=%v", running, restarts, string(after) != string(before))
+			}
+			if st := f.status(t); st.Status != chainApplyFailed || st.FailCount != 1 || !strings.Contains(st.LastError, "xray apply failed") {
+				t.Fatalf("status = %+v", st)
+			}
+		})
+	}
+}
+
+// 问不到面板会不会自己应用改动时不下发也不重启，记待下发、下一轮再来（重启会断开全部连接，不能当兜底）。
+func TestChainApplyLiveUnknownStaysPending(t *testing.T) {
+	f := newChainApplyFixture(t)
+	f.mustRoute(t, serverIn(ChainExitNode, f.nodes[1].ID, f.nodes[0].ID))
+	f.fake.FailOn("AppliesCoreTemplateLive", &panel.Error{Kind: panel.KindUnreachable, Message: "面板不可达"})
+
+	f.apply(t)
+	if _, _, _, restarts := f.fake.CoreSnapshot(); restarts != 0 || len(f.hubRules(t)) != 0 {
+		t.Fatalf("unknown live-apply support must not write or restart: restarts=%d rules=%v", restarts, f.hubRules(t))
+	}
+	if st := f.status(t); st.Status != chainApplyPending || st.FailCount != 0 {
+		t.Fatalf("status = %+v", st)
+	}
+	f.fake.FailOn("AppliesCoreTemplateLive", nil)
+	f.apply(t)
+	if st := f.status(t); st.Status != chainApplyApplied {
+		t.Fatalf("status after recovery = %+v", st)
 	}
 }
 

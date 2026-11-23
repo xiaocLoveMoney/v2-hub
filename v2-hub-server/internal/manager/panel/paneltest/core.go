@@ -25,7 +25,11 @@ type fakeCore struct {
 	breakOn string
 	// rejectOn 非空时，含这个片段的模板在保存时就被拒绝（模拟 3x-ui 保存前的校验）
 	rejectOn string
-	restarts int
+	// applyErrOn 非空时，含这个片段的模板会被存下来、但保存接口报错（模拟 3x-ui 先保存、再应用时出错）
+	applyErrOn string
+	// liveApply 为真时保存模板即生效（模拟 3x-ui ≥ 3.3.1），运行状态在保存时就按 breakOn 更新
+	liveApply bool
+	restarts  int
 }
 
 func newFakeCore() fakeCore {
@@ -48,6 +52,35 @@ func (f *Fake) RejectTemplateOn(fragment string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.core.rejectOn = fragment
+}
+
+// FailApplyOn 让含 fragment 的模板被存下来、但保存接口报错（面板先保存再应用，应用出错）；传空串恢复。
+func (f *Fake) FailApplyOn(fragment string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.core.applyErrOn = fragment
+}
+
+// SetCoreLiveApply 设置假面板保存模板后是否自己应用到运行中的内核（默认否，即要重启才生效）。
+func (f *Fake) SetCoreLiveApply(on bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.core.liveApply = on
+}
+
+// AppliesCoreTemplateLive 实现 panel.CoreLiveApplier。
+func (f *Fake) AppliesCoreTemplateLive(context.Context) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.enter("AppliesCoreTemplateLive"); err != nil {
+		return false, err
+	}
+	return f.core.liveApply, nil
+}
+
+// isCoreHealthy 报告当前模板能否让内核跑起来（不含 breakOn 的片段）。调用方持锁。
+func (f *Fake) isCoreHealthy() bool {
+	return f.core.breakOn == "" || !strings.Contains(string(f.core.template), f.core.breakOn)
 }
 
 // CoreSnapshot 返回当前模板、附带设置里的出站测试地址、是否运行与重启次数。
@@ -94,6 +127,13 @@ func (f *Fake) SetCoreTemplate(_ context.Context, tpl panel.CoreTemplate) error 
 	}
 	f.core.template = append(json.RawMessage(nil), tpl.Config...)
 	f.core.extra = map[string]string{"outboundTestUrl": tpl.Extra["outboundTestUrl"]}
+	if f.core.liveApply {
+		f.core.running = f.isCoreHealthy()
+	}
+	if f.core.applyErrOn != "" && strings.Contains(string(tpl.Config), f.core.applyErrOn) {
+		f.core.running = false
+		return &panel.Error{Kind: panel.KindRejected, Message: "面板拒绝了请求：xray apply failed"}
+	}
 	return nil
 }
 
@@ -105,7 +145,7 @@ func (f *Fake) RestartCore(context.Context) error {
 		return err
 	}
 	f.core.restarts++
-	f.core.running = f.core.breakOn == "" || !strings.Contains(string(f.core.template), f.core.breakOn)
+	f.core.running = f.isCoreHealthy()
 	return nil
 }
 

@@ -329,10 +329,18 @@ type CoreState struct {
 // 查内核运行状态。服务端链式据此在模板里增删平台条目并在失败时回滚（docs/03 §5.19，Ruling-40）。
 type CoreConfigurator interface {
 	GetCoreTemplate(ctx context.Context) (CoreTemplate, error)
-	// SetCoreTemplate 整份写回模板；写入不等于生效，需再 RestartCore。
+	// SetCoreTemplate 整份写回模板；写入后是否已经生效看 CoreLiveApplier，不会自己生效的面板需再 RestartCore。
 	SetCoreTemplate(ctx context.Context, tpl CoreTemplate) error
+	// RestartCore 重启内核，会断开这台服务器上的全部连接。
 	RestartCore(ctx context.Context) error
 	CoreState(ctx context.Context) (CoreState, error)
+}
+
+// CoreLiveApplier 是 CoreConfigurator 的可选补充（Ruling-93）：面板在 SetCoreTemplate 时自己把模板改动应用到运行中的内核，
+// 调用方不必再 RestartCore。没实现这个接口的面板一律按“写入后要重启才生效”处理。
+type CoreLiveApplier interface {
+	// AppliesCoreTemplateLive 报告这台面板写入模板后是否自己应用改动；可能要问面板（如按版本判断），问不到返回错误。
+	AppliesCoreTemplateLive(ctx context.Context) (bool, error)
 }
 
 // OutboundTestMode 是出站测试的方式（docs/03 §5.21 延迟测试，Ruling-52）。

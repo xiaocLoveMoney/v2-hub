@@ -14,7 +14,7 @@ type ChainApplyRunner interface {
 }
 
 // RunChainApply 定时（以及规则变化触发时）逐台检查服务端链式的下发（docs/03 §5.19），阻塞到 ctx 取消。
-// 逐台串行：一次下发可能要等十几秒确认内核运行，串行避免同时重启多台面板。
+// 逐台串行：一次下发可能要等十几秒确认内核运行，串行避免同时改动多台面板。
 func RunChainApply(ctx context.Context, r ChainApplyRunner, interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
