@@ -246,7 +246,7 @@ type Provider interface {
 	UpdateClient(ctx context.Context, spec ClientSpec) error
 	AttachClient(ctx context.Context, email string, inboundRefs []string) error
 	DetachClient(ctx context.Context, email string, inboundRefs []string) error
-	// SetClientsEnabled 批量启停（3x-ui 禁用 client 会重启 Xray，调用方应合并成一批）。
+	// SetClientsEnabled 批量启停，调用方应合并成一批（3x-ui 默认禁用 client 会重启 Xray，平台经 CoreKeeper 把它关掉，Ruling-94）。
 	SetClientsEnabled(ctx context.Context, emails []string, enabled bool) error
 	DeleteClient(ctx context.Context, email string) error
 	// SetClientCredential 把 client 的连接凭据换成 spec 里的 UUID 与 Auth（重置订阅，docs/03 §5.4）；
@@ -329,10 +329,26 @@ type CoreState struct {
 // 查内核运行状态。服务端链式据此在模板里增删平台条目并在失败时回滚（docs/03 §5.19，Ruling-40）。
 type CoreConfigurator interface {
 	GetCoreTemplate(ctx context.Context) (CoreTemplate, error)
-	// SetCoreTemplate 整份写回模板；写入不等于生效，需再 RestartCore。
+	// SetCoreTemplate 整份写回模板；写入后是否已经生效看 CoreLiveApplier，不会自己生效的面板需再 RestartCore。
 	SetCoreTemplate(ctx context.Context, tpl CoreTemplate) error
+	// RestartCore 重启内核，会断开这台服务器上的全部连接。
 	RestartCore(ctx context.Context) error
 	CoreState(ctx context.Context) (CoreState, error)
+}
+
+// CoreLiveApplier 是 CoreConfigurator 的可选补充（Ruling-93）：面板在 SetCoreTemplate 时自己把模板改动应用到运行中的内核，
+// 调用方不必再 RestartCore。没实现这个接口的面板一律按“写入后要重启才生效”处理。
+type CoreLiveApplier interface {
+	// AppliesCoreTemplateLive 报告这台面板写入模板后是否自己应用改动；可能要问面板（如按版本判断），问不到返回错误。
+	AppliesCoreTemplateLive(ctx context.Context) (bool, error)
+}
+
+// CoreKeeper 是可选能力（Ruling-94）：有的面板在 client 被停用或删除时默认重启内核来断开它的在线连接，
+// 同一台服务器上所有人会一起断线；实现了本接口的面板可以关掉这个行为。
+type CoreKeeper interface {
+	// KeepCoreOnClientDrop 让面板在 client 被停用 / 删除时不重启内核。返回是否改了面板的设置：
+	// 本来就不重启、或面板没有这项设置时为 false。
+	KeepCoreOnClientDrop(ctx context.Context) (bool, error)
 }
 
 // OutboundTestMode 是出站测试的方式（docs/03 §5.21 延迟测试，Ruling-52）。

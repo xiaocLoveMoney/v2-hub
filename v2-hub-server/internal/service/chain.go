@@ -48,7 +48,7 @@ const (
 	// 出口链接密文的关联数据；沿用 M6 自有落地节点的写法，已有密文不用重加密（docs/03 §5.21 存储）。
 	exitLinkAADFormat = "custom_node:%d:link"
 
-	// 每个用户对服务端规则的写操作频率（docs/03 §5.19 频控，Ruling-49）；每次改动都会让起飞服务器重启内核。
+	// 每个用户对服务端规则的写操作频率（docs/03 §5.19 频控，Ruling-49）；每次改动都会让起飞服务器下发一次（不会热应用的面板还要重启内核）。
 	defaultServerWriteLimit  = 10
 	defaultServerWriteWindow = time.Hour
 	chainGuardMaxKeys        = 10000

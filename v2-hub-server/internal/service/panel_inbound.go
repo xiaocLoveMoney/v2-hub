@@ -281,6 +281,7 @@ func (s *PanelService) SyncServer(ctx context.Context, actor *AdminPrincipal, id
 	if err != nil {
 		return nil, err
 	}
+	s.keepCoreOnClientDrop(ctx, id, p)
 	return result, nil
 }
 

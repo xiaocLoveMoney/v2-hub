@@ -810,3 +810,50 @@ func TestPanelRealityScan(t *testing.T) {
 		t.Errorf("unreachable panel: err = %v, want ErrUpstream", err)
 	}
 }
+
+// 同步成功后把面板“client 停用即重启内核”的设置关掉并记审计（Ruling-94）：已经关着不再写，被人在面板上改回去下一轮再关；
+// 面板调用失败不影响同步结果。
+func TestSyncKeepsCoreOnClientDrop(t *testing.T) {
+	f := newPanelFixture(t)
+	ctx := context.Background()
+	fake := f.fleet.get(fakeBase)
+	srv, err := f.panels.CreateServer(ctx, f.actor, serverInput("hk-1"), nil)
+	if err != nil {
+		t.Fatalf("CreateServer: %v", err)
+	}
+	sync := func() {
+		t.Helper()
+		if _, err := f.panels.SyncServer(ctx, nil, srv.ID, nil); err != nil {
+			t.Fatalf("SyncServer: %v", err)
+		}
+	}
+	audits := func() int {
+		t.Helper()
+		var n int
+		if err := f.pool.QueryRow(ctx, sqlCountAudit, ActionServerKeepCore).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+
+	sync()
+	if on, writes := fake.ClientDropPolicy(); on || writes != 1 || audits() != 1 {
+		t.Fatalf("first sync should turn it off once: on=%v writes=%d audits=%d", on, writes, audits())
+	}
+	sync()
+	if on, writes := fake.ClientDropPolicy(); on || writes != 1 || audits() != 1 {
+		t.Fatalf("already off must not write again: on=%v writes=%d audits=%d", on, writes, audits())
+	}
+	fake.SetRestartOnClientDrop(true)
+	sync()
+	if on, writes := fake.ClientDropPolicy(); on || writes != 2 || audits() != 2 {
+		t.Fatalf("turned back on at the panel should be turned off again: on=%v writes=%d audits=%d", on, writes, audits())
+	}
+
+	fake.SetRestartOnClientDrop(true)
+	fake.FailOn("KeepCoreOnClientDrop", &panel.Error{Kind: panel.KindUnreachable, Message: "面板不可达"})
+	sync()
+	if on, writes := fake.ClientDropPolicy(); !on || writes != 2 || audits() != 2 {
+		t.Fatalf("a failed call must leave the sync successful and unaudited: on=%v writes=%d audits=%d", on, writes, audits())
+	}
+}

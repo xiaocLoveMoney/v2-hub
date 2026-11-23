@@ -21,7 +21,8 @@ import (
 )
 
 // 服务端链式下发（docs/03 §5.19、§3 C1–C5，Ruling-40）：以起飞服务器为单位，把面板内核模板里的平台条目整体对齐到期望；
-// 写入前加密备份整份模板，重启后内核未运行即写回备份并记失败。期望条目由生效计算（chain_resolve.go）的结果生成，
+// 写入前加密备份整份模板，写入后内核未运行即写回备份并记失败；面板自己会把模板改动应用到运行中的内核时不重启（Ruling-93）。
+// 期望条目由生效计算（chain_resolve.go）的结果生成，
 // 设置 routing.blockRule 开着时最前面再加平台拦截条目（Ruling-55）。
 
 // 下发状态（chain_apply.status，与 hub-api.yaml 的 ChainApplyStatus 对应；none 表示没有记录）。
@@ -40,16 +41,16 @@ const (
 	ActionChainApplyFailed = "chain.apply_failed"
 	ActionChainApplyRetry  = "chain.apply_retry"
 
-	msgChainCoreNotRunning = "重启后 Xray 未能运行，已回滚"
+	msgChainCoreNotRunning = "下发后 Xray 未能运行，已回滚"
 	msgChainBadTemplate    = "面板上的内核模板不是预期的 JSON"
 	msgChainInternal       = "下发时发生内部错误，详见服务端日志"
 )
 
 // ChainApplyConfig 是下发的节奏；零值字段取默认值（docs/03 §5.19 下发与回滚）。
 type ChainApplyConfig struct {
-	// MinInterval 是同一台服务器两次下发的最小间隔（重启会断开全部连接）。
+	// MinInterval 是同一台服务器两次下发的最小间隔：把短时间内的多次改动合并成一次；不会热应用的面板每次下发还要重启内核。
 	MinInterval time.Duration
-	// ConfirmDelay 是重启后第一次查内核状态前的等待（面板的状态有几秒缓存）。
+	// ConfirmDelay 是写入（或重启）后第一次查内核状态前的等待（面板的状态有几秒缓存）。
 	ConfirmDelay time.Duration
 	// ConfirmTimeout 是确认内核运行的总时限；StablePause 是两次“运行中”之间的间隔，用来排除启动后立刻崩溃。
 	ConfirmTimeout time.Duration
@@ -64,8 +65,8 @@ type ChainApplyConfig struct {
 	Settings *SettingsService
 }
 
-// errChainCoreDown 表示写入新模板并重启后内核没能运行（配置有问题的信号，用于失败隔离）。
-var errChainCoreDown = errors.New("core not running after restart")
+// errChainCoreDown 表示写入新模板后内核没能运行（配置有问题的信号，用于失败隔离）。
+var errChainCoreDown = errors.New("core not running after apply")
 
 var defaultChainBackoff = []time.Duration{time.Minute, 5 * time.Minute, 15 * time.Minute}
 
@@ -536,6 +537,7 @@ func (a *ChainApplier) markConsistent(ctx context.Context, run applyRun, rec app
 }
 
 // applyChange 面板现状与期望不同：在间隔、退避与失败上限允许时写入并确认，失败则回滚（C1–C4）。
+// 面板会不会自己应用模板改动问不到时记待下发、下一轮再来，不退回重启——重启会断开这台服务器上的全部连接。
 func (a *ChainApplier) applyChange(ctx context.Context, run applyRun, rec applyRecord, cc panel.CoreConfigurator, tpl panel.CoreTemplate) error {
 	serverID, hash, included := run.serverID, run.hash, run.set.included
 	now := a.now()
@@ -557,6 +559,10 @@ func (a *ChainApplier) applyChange(ctx context.Context, run applyRun, rec applyR
 		return a.saveRecord(ctx, serverID, rec)
 	}
 
+	isLive, err := appliesTemplateLive(ctx, cc)
+	if err != nil {
+		return a.markPending(ctx, run, rec, errorMessage(serverID, err))
+	}
 	backup, err := a.sealer.Seal(tpl.Config, chainBackupAAD(serverID))
 	if err != nil {
 		return fmt.Errorf("seal core template backup of server %d: %w", serverID, err)
@@ -570,9 +576,11 @@ func (a *ChainApplier) applyChange(ctx context.Context, run applyRun, rec applyR
 		return err
 	}
 
-	written, writeErr := a.writeAndConfirm(ctx, cc, panel.CoreTemplate{Config: merged, Extra: tpl.Extra})
+	attempt := applyAttempt{cc: cc, original: tpl, isLive: isLive}
+	var writeErr error
+	attempt.written, writeErr = a.writeAndConfirm(ctx, attempt, panel.CoreTemplate{Config: merged, Extra: tpl.Extra}, hash)
 	if writeErr != nil {
-		return a.recordFailure(ctx, run, rec, cc, tpl, written, writeErr)
+		return a.recordFailure(ctx, run, rec, attempt, writeErr)
 	}
 	rec.status, rec.applied, rec.appliedAt = chainApplyApplied, included, run.checkedAt
 	rec.failCount, rec.lastError, rec.nextAttemptAt = 0, "", pgtype.Timestamptz{}
@@ -583,13 +591,29 @@ func (a *ChainApplier) applyChange(ctx context.Context, run applyRun, rec applyR
 		TargetID: fmt.Sprint(serverID), Detail: map[string]any{"ruleCount": len(included)}})
 }
 
+// applyAttempt 是一次写入尝试里不变的东西：面板、写入前的模板、面板是否自己应用改动，以及模板有没有写进面板。
+type applyAttempt struct {
+	cc       panel.CoreConfigurator
+	original panel.CoreTemplate
+	isLive   bool
+	written  bool
+}
+
+// appliesTemplateLive 报告面板写入模板后是否自己把改动应用到运行中的内核（Ruling-93）；没有这项能力的面板为否。
+func appliesTemplateLive(ctx context.Context, cc panel.CoreConfigurator) (bool, error) {
+	applier, ok := cc.(panel.CoreLiveApplier)
+	if !ok {
+		return false, nil
+	}
+	return applier.AppliesCoreTemplateLive(ctx)
+}
+
 // recordFailure 处理一次下发失败（C3）：必要时回滚，记失败与退避；配置被面板拒绝或内核起不来时做失败隔离。
-func (a *ChainApplier) recordFailure(ctx context.Context, run applyRun, rec applyRecord, cc panel.CoreConfigurator,
-	original panel.CoreTemplate, written bool, writeErr error) error {
+func (a *ChainApplier) recordFailure(ctx context.Context, run applyRun, rec applyRecord, attempt applyAttempt, writeErr error) error {
 	serverID := run.serverID
-	// 写入被面板拒绝时模板没变（3x-ui 保存前会校验），不必回滚，也不该为此再重启一次
-	if written {
-		a.rollback(ctx, serverID, cc, original)
+	// 写入被面板拒绝且模板没变（3x-ui 保存前会校验）时不必回滚
+	if attempt.written {
+		a.rollback(ctx, serverID, attempt)
 	}
 	quarantined := 0
 	isConfigFault := errors.Is(writeErr, panel.ErrRejected) || errors.Is(writeErr, errChainCoreDown)
@@ -614,15 +638,43 @@ func (a *ChainApplier) recordFailure(ctx context.Context, run applyRun, rec appl
 			"ruleCount": len(run.set.included), "failCount": rec.failCount, "error": rec.lastError, "quarantined": quarantined}})
 }
 
-// writeAndConfirm 写入模板、重启内核，并确认内核稳定运行；written 表示模板已写进面板（失败时需要回滚）。
-func (a *ChainApplier) writeAndConfirm(ctx context.Context, cc panel.CoreConfigurator, tpl panel.CoreTemplate) (bool, error) {
+// writeAndConfirm 写入模板并确认内核稳定运行；面板不会自己应用改动时写入后再重启内核（Ruling-93）。
+// 返回值表示模板是否已写进面板（失败时需要回滚）；wantHash 是期望的平台条目哈希，保存报错时用它核对模板有没有变。
+func (a *ChainApplier) writeAndConfirm(ctx context.Context, attempt applyAttempt, tpl panel.CoreTemplate, wantHash string) (bool, error) {
+	cc := attempt.cc
 	if err := cc.SetCoreTemplate(ctx, tpl); err != nil {
-		return false, err
+		return isTemplateWritten(ctx, cc, wantHash), err
 	}
-	if err := cc.RestartCore(ctx); err != nil {
-		return true, err
+	if !attempt.isLive {
+		if err := cc.RestartCore(ctx); err != nil {
+			return true, err
+		}
 	}
 	return true, a.confirmRunning(ctx, cc)
+}
+
+// isTemplateWritten 在保存报错后读回模板，看平台条目是否已是期望的样子：3x-ui 先保存、再把改动应用到内核，
+// 应用出错时接口报错但模板已经变了，这种情况要回滚。读不回来按没写入处理并留痕，下一轮对账会再比较。
+func isTemplateWritten(ctx context.Context, cc panel.CoreConfigurator, wantHash string) bool {
+	hash, err := templateSectionHash(ctx, cc)
+	if err != nil {
+		slog.Warn("chain apply: read back core template after failed save", "err", err)
+		return false
+	}
+	return hash == wantHash
+}
+
+// templateSectionHash 读面板当前的模板，返回其中平台条目的哈希。
+func templateSectionHash(ctx context.Context, cc panel.CoreConfigurator) (string, error) {
+	tpl, err := cc.GetCoreTemplate(ctx)
+	if err != nil {
+		return "", fmt.Errorf("get core template: %w", err)
+	}
+	current, err := chain.Extract(tpl.Config)
+	if err != nil {
+		return "", fmt.Errorf("extract platform entries: %w", err)
+	}
+	return current.Hash()
 }
 
 // confirmRunning 在时限内等内核进入运行状态，再隔一段时间确认仍在运行（排除启动后立刻崩溃）。
@@ -665,13 +717,16 @@ func (a *ChainApplier) confirmRunning(ctx context.Context, cc panel.CoreConfigur
 	return fmt.Errorf("%w: %w", errChainCoreDown, newError(CodeUpstream, msg))
 }
 
-// rollback 写回写入前的模板并重启；失败只能记日志，下发记录里已标为失败，下一轮会重新对账。
-func (a *ChainApplier) rollback(ctx context.Context, serverID int64, cc panel.CoreConfigurator, original panel.CoreTemplate) {
-	if err := cc.SetCoreTemplate(ctx, original); err != nil {
+// rollback 写回写入前的模板，面板不会自己应用改动时再重启；失败只能记日志，下发记录里已标为失败，下一轮会重新对账。
+func (a *ChainApplier) rollback(ctx context.Context, serverID int64, attempt applyAttempt) {
+	if err := attempt.cc.SetCoreTemplate(ctx, attempt.original); err != nil {
 		slog.Error("chain apply rollback: restore template", "server_id", serverID, "err", err)
 		return
 	}
-	if err := cc.RestartCore(ctx); err != nil {
+	if attempt.isLive {
+		return
+	}
+	if err := attempt.cc.RestartCore(ctx); err != nil {
 		slog.Error("chain apply rollback: restart core", "server_id", serverID, "err", err)
 	}
 }

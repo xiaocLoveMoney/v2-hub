@@ -136,7 +136,7 @@ type UploadConfig struct {
 }
 
 // ChainConfig 是服务端链式下发的节奏（docs/03 §5.19）：ApplyInterval 是后台检查间隔，
-// MinApplyInterval 是同一台服务器两次下发的最小间隔（每次下发都会重启该服务器的内核）；
+// MinApplyInterval 是同一台服务器两次下发的最小间隔（合并短时间内的多次改动；不会热应用的面板每次下发还要重启内核，Ruling-93）；
 // UserWriteLimit / UserWriteWindow 是每个用户对服务端规则的写操作频率（Ruling-49）；
 // UserTestLimit / UserTestWindow 是每个用户发起出口延迟测试的频率（Ruling-52）。
 type ChainConfig struct {

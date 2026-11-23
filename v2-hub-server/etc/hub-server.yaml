@@ -32,7 +32,7 @@ user:
   trafficInterval: 1m
   reconcileInterval: 5m
   timeZone: Local
-# 服务端链式下发，语义见 docs/03 §5.19：后台检查间隔；同一台服务器两次下发的最小间隔（每次下发都会重启该服务器的 Xray）
+# 服务端链式下发，语义见 docs/03 §5.19：后台检查间隔；同一台服务器两次下发的最小间隔（合并多次改动；3x-ui 低于 3.3.1 时每次下发还会重启该服务器的 Xray，Ruling-93）
 # userWriteLimit / userWriteWindow：每个用户在一个时间窗内最多改几次服务端规则（新建、修改、删除、调顺序）
 chain:
   applyInterval: 30s
