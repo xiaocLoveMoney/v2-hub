@@ -64,7 +64,7 @@ type CoreLiveApplier interface { AppliesCoreTemplateLive(ctx) (bool, error) }
 
 1. 面板调用一律经 Provider，并发按服务器限流（每台同时最多 N 个请求，N 在配置里）。
 2. 面板 token、用户凭据入库前 AES-GCM 加密，密钥来自环境变量；日志不打印分享链接与 token。
-3. 批量禁用 / 删除 client 合并成一次调用：3x-ui 默认禁用 client 会重启 Xray。
+3. 批量禁用 / 删除 client 合并成一次调用；3x-ui 默认禁用 client 会重启 Xray，平台同步服务器时把面板的这项设置关掉（Ruling-94）。
 4. 所有写面板的操作写审计日志。
 5. 经 SSH 执行的命令只能来自 `manager/deploy` 里的固定模板，参数先过白名单再做 shell 转义；`service` 与 `api` 不拼命令行。SSH 凭据、令牌、面板口令不进日志与任务日志（Ruling-68）。
 
