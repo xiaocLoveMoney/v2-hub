@@ -30,6 +30,9 @@ type fakeCore struct {
 	// liveApply 为真时保存模板即生效（模拟 3x-ui ≥ 3.3.1），运行状态在保存时就按 breakOn 更新
 	liveApply bool
 	restarts  int
+	// restartOnClientDrop 模拟 3x-ui 的“client 停用后重启内核”设置（默认开）；dropPolicyWrites 是它被平台改写的次数
+	restartOnClientDrop bool
+	dropPolicyWrites    int
 }
 
 func newFakeCore() fakeCore {
@@ -37,6 +40,8 @@ func newFakeCore() fakeCore {
 		template: json.RawMessage(DefaultCoreTemplate),
 		extra:    map[string]string{"outboundTestUrl": fakeTestURL},
 		running:  true,
+
+		restartOnClientDrop: true,
 	}
 }
 
@@ -76,6 +81,35 @@ func (f *Fake) AppliesCoreTemplateLive(context.Context) (bool, error) {
 		return false, err
 	}
 	return f.core.liveApply, nil
+}
+
+// KeepCoreOnClientDrop 实现 panel.CoreKeeper：设置开着就关掉并计一次改写。
+func (f *Fake) KeepCoreOnClientDrop(context.Context) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.enter("KeepCoreOnClientDrop"); err != nil {
+		return false, err
+	}
+	if !f.core.restartOnClientDrop {
+		return false, nil
+	}
+	f.core.restartOnClientDrop = false
+	f.core.dropPolicyWrites++
+	return true, nil
+}
+
+// SetRestartOnClientDrop 直接在“面板侧”改“client 停用后重启内核”的设置（模拟有人在面板上改回去）。
+func (f *Fake) SetRestartOnClientDrop(on bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.core.restartOnClientDrop = on
+}
+
+// ClientDropPolicy 返回“client 停用后重启内核”是否还开着，以及平台改写它的次数。
+func (f *Fake) ClientDropPolicy() (bool, int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.core.restartOnClientDrop, f.core.dropPolicyWrites
 }
 
 // isCoreHealthy 报告当前模板能否让内核跑起来（不含 breakOn 的片段）。调用方持锁。
