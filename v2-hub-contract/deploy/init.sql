@@ -341,6 +341,7 @@ CREATE TABLE provision (
     cred_version    INTEGER    NOT NULL DEFAULT 0,           -- 已写到面板的凭据版本；小于用户的即待更新
     links_enc       BYTEA,                                   -- 面板生成的分享链接（JSON 数组），AES-GCM，关联数据 provision:<id>:links
     links_synced_at TIMESTAMPTZ,
+    links_stamp     VARCHAR(32) NOT NULL DEFAULT '',          -- 取链接时该面板的入站 / 对外地址摘要，与当前不同即重取（Ruling-92）
     is_online       BOOLEAN    NOT NULL DEFAULT FALSE,       -- 该 client 在面板上是否在线（流量任务顺带采集）
     updated_at    TIMESTAMPTZ  NOT NULL DEFAULT now(),
     CONSTRAINT uk_provision_user_server UNIQUE (user_id, server_id)
