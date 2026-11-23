@@ -9,7 +9,6 @@ import (
 	"net/netip"
 	"regexp"
 	"strings"
-	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -74,14 +73,12 @@ type UserConfig struct {
 // UserService 负责套餐、用户、配额、下发对账与用量（docs/03 §5.2）。面板操作经 PanelService 打开的 Provider（Ruling-8）。
 type UserService struct {
 	store
-	sealer  *crypto.Sealer
-	panels  *PanelService
-	cfg     UserConfig
-	now     func() time.Time
-	trigger chan struct{}
-	// linkStamps 记每台服务器上次取链接时的入站 / 对外地址摘要（serverID → string）；进程重启后为空，会全量重取一次。
-	linkStamps sync.Map
-	subGuards  subGuards
+	sealer    *crypto.Sealer
+	panels    *PanelService
+	cfg       UserConfig
+	now       func() time.Time
+	trigger   chan struct{}
+	subGuards subGuards
 	// connPasswordGuard 限制每用户改连接密码的次数（docs/03 §5.4 连接密码）。
 	connPasswordGuard *ratelimit.FailureGuard
 }

@@ -444,6 +444,7 @@ type Provision struct {
 	CredVersion   int32
 	LinksEnc      []byte
 	LinksSyncedAt pgtype.Timestamptz
+	LinksStamp    string
 	IsOnline      bool
 	UpdatedAt     pgtype.Timestamptz
 }
