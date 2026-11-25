@@ -13,7 +13,7 @@ const SELF_ID = 1
 export const ok = (data: unknown) => Response.json({ code: '0', message: 'ok', data })
 
 /**
- * 以给定权限码构造会话上下文；over 覆盖会话里的其它字段（如超管、所有者、强制绑定两步验证）。
+ * 以给定权限码构造会话上下文（默认员工账号）；over 覆盖会话里的其它字段（如超管、所有者、强制绑定两步验证、代理账号 kind）。
  * @param permissions 权限码
  * @param over 覆盖的会话字段
  */
@@ -23,6 +23,7 @@ export function sessionWith(permissions: string[], over: Partial<Session> = {}):
     status: 'authenticated',
     session: {
       admin: { id: SELF_ID, username: 'root' },
+      kind: 'staff',
       permissions,
       csrfToken: TEST_CSRF,
       totpEnabled: false,

@@ -168,7 +168,7 @@ describe('TicketsPage', () => {
 })
 
 describe('InviteCodesPage', () => {
-  const adminCode = { id: 1, code: 'ABCDEFGH23', kind: 'admin', ownerUserId: null, ownerUsername: '', maxUses: 0, usedCount: 2, expiresAt: null, isDisabled: false, remark: '', createdAt: NOW }
+  const adminCode = { id: 1, code: 'ABCDEFGH23', kind: 'admin', ownerUserId: null, ownerUsername: '', agentId: null, agentUsername: '', maxUses: 0, usedCount: 2, expiresAt: null, isDisabled: false, remark: '', createdAt: NOW }
   const userCode = { ...adminCode, id: 2, code: 'JKMNPQRS45', kind: 'user', ownerUserId: 9, ownerUsername: 'alice', maxUses: 5 }
 
   it('个人码不能删除；新建管理员码提交次数、到期与停用', async () => {

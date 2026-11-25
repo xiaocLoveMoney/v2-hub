@@ -72,6 +72,17 @@ export type ReachProblem = components['schemas']['ReachProblem']
 export type ReachProbe = components['schemas']['ReachProbe']
 export type NodeReach = components['schemas']['NodeReach']
 export type NodeReachDetail = components['schemas']['NodeReachDetail']
+export type AdminKind = components['schemas']['AdminKind']
+export type Agent = components['schemas']['Agent']
+export type AgentCreateInput = components['schemas']['AgentCreateInput']
+export type AgentUpdateInput = components['schemas']['AgentUpdateInput']
+export type AgentBrief = components['schemas']['AgentBrief']
+export type AgentAllocation = components['schemas']['AgentAllocation']
+export type AgentAllocationKind = components['schemas']['AgentAllocationKind']
+export type AgentSummary = components['schemas']['AgentSummary']
+export type AgentPlan = components['schemas']['AgentPlan']
+export type AgentUser = components['schemas']['AgentUser']
+export type AgentUserQuotaInput = components['schemas']['AgentUserQuotaInput']
 
 /** 分页结果（hub-api.yaml 各分页接口的 data 形状）。 */
 export interface PageData<T> {
@@ -96,6 +107,10 @@ export const CODE_REAUTH_REQUIRED = 'reauth_required'
 export const CODE_TOTP_SETUP_REQUIRED = 'totp_setup_required'
 /** 频控触发（docs/03 §5）。 */
 export const CODE_RATE_LIMITED = 'rate_limited'
+/** 代理的流量池不够本次开通，信封 data 带 poolCost / poolRemaining（docs/03 §5.23）。 */
+export const CODE_AGENT_POOL_INSUFFICIENT = 'agent_pool_insufficient'
+/** 代理名下用户数已达上限（docs/03 §5.23）。 */
+export const CODE_AGENT_USER_LIMIT = 'agent_user_limit'
 const HTTP_FORBIDDEN = 403
 /** 会话与验证类接口：本身不会要求二次验证，也不能被拦截（否则验证请求会递归弹框）。 */
 const AUTH_PATH_PREFIX = '/api/admin/auth/'

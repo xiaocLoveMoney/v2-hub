@@ -1,12 +1,12 @@
 import { CheckOutlined, LockOutlined, SafetyOutlined, UserOutlined } from '@ant-design/icons'
 import { Alert, Button, Card, Form, Input, Typography } from 'antd'
 import { useState } from 'react'
-import { Navigate, useLocation, useNavigate } from 'react-router'
+import { Navigate, useLocation } from 'react-router'
+import { landingPath } from '../agent-menu'
 import { CODE_TOTP_REQUIRED } from '../api/client'
 import authBackground from '../assets/auth-bg.webp'
 import { useSession } from '../auth/session-context'
 import { revealChildren } from '../components/motion'
-import { ROUTES } from '../menu'
 import { BrandMark } from '../components/BrandMark'
 
 interface LoginForm {
@@ -29,16 +29,16 @@ const TOTP_PATTERN = /^\d{6}$/
 
 /** 管理员登录页（管理门户入口）。账号开启两步验证时，密码通过后再显示验证码输入框。 */
 export function LoginPage() {
-  const { status, login } = useSession()
-  const navigate = useNavigate()
+  const { status, session, login } = useSession()
   const location = useLocation()
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [needsTotp, setNeedsTotp] = useState(false)
-  const target = (location.state as LocationState | null)?.from ?? ROUTES.DASHBOARD
+  const from = (location.state as LocationState | null)?.from
 
-  if (status === 'authenticated') {
-    return <Navigate to={target} replace />
+  // 登录成功后会话一更新就在这里跳走；落地页按账号类型区分（Ruling-101）
+  if (status === 'authenticated' && session !== null) {
+    return <Navigate to={landingPath(session.kind, from)} replace />
   }
 
   const handleFinish = async (values: LoginForm) => {
@@ -47,7 +47,6 @@ export function LoginPage() {
     const err = await login(values.username, values.credential, needsTotp ? values.totpCode : undefined)
     setIsSubmitting(false)
     if (err === null) {
-      void navigate(target, { replace: true })
       return
     }
     if (err.code === CODE_TOTP_REQUIRED) {

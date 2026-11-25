@@ -8,11 +8,12 @@ import {
   WifiOutlined,
 } from '@ant-design/icons'
 import { Alert, Card, Spin, Tabs, Tag, Typography, type TabsProps } from 'antd'
-import { lazy, Suspense, type ComponentType, type CSSProperties, type ReactNode } from 'react'
+import { lazy, Suspense, type ComponentType, type CSSProperties } from 'react'
 import { Link } from 'react-router'
 import { api, type AdminDashboard } from '../api/client'
 import { useSession } from '../auth/session-context'
 import { CardPage } from '../components/CardPage'
+import { StatTile } from '../components/StatTile'
 import { ErrorAlert } from '../components/ErrorAlert'
 import { useCurrency } from '../hooks/use-currency'
 import { useRemote } from '../hooks/use-remote'
@@ -53,32 +54,6 @@ const sectionFallback = (
     <Spin />
   </div>
 )
-
-/** 统计卡左侧色块的配色，对应 index.css 的 .stat-tile-*。 */
-type StatTone = 'primary' | 'success' | 'warning' | 'info' | 'danger'
-
-interface StatTileProps {
-  tone: StatTone
-  icon: ReactNode
-  label: string
-  value: ReactNode
-  /** 卡片底部一行补充信息。 */
-  foot: ReactNode
-}
-
-/** 一张统计卡（照客户后台仪表盘）：色块图标 + 标题 + 大号数值 + 底部补充。 */
-function StatTile({ tone, icon, label, value, foot }: StatTileProps) {
-  return (
-    <div className={`stat-tile stat-tile-${tone}`}>
-      <span className="stat-tile-icon" aria-hidden="true">
-        {icon}
-      </span>
-      <span className="stat-tile-label">{label}</span>
-      <span className="stat-tile-value">{value}</span>
-      <div className="stat-tile-foot">{foot}</div>
-    </div>
-  )
-}
 
 /** 近 7 日流量的柱状条：纯 CSS，按当周最大值折算高度。 */
 function TrafficBars({ days }: { days: TrafficDay[] }) {

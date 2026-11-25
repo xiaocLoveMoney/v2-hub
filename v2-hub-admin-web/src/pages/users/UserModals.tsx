@@ -8,22 +8,12 @@ import { useSubmit } from '../../hooks/use-submit'
 import { TABLE_SCROLL, formatTime } from '../system/format'
 import { RenewResetFields, type RenewResetForm } from './quota-fields'
 import { bytesToGb, describeRenew, describeReset, formatBytes, gbToBytes, renewFieldsOf, renewModeOf, renewValueOf } from './quota'
-import { MAX_EMAIL_LEN, MAX_LIMIT_IP, MAX_REMARK_LEN } from '../form-limits'
+import { MAX_LIMIT_IP, MAX_REMARK_LEN } from '../form-limits'
+import { USERNAME_PATTERN, credentialRules, emailRules } from './user-form-rules'
 import { PageHeader } from '../../components/PageHeader'
 import { FormModal } from '../../components/FormModal'
 
-// 终端用户密码 8–128 位（docs/03 §5.3；管理员密码是 12 位起）
-const MIN_CREDENTIAL_LEN = 8
-const MAX_CREDENTIAL_LEN = 128
 const MAX_PENDING_DAYS = 36500
-// 新用户名不含 @，好与邮箱登录区分（docs/03 §5.8）
-const USERNAME_PATTERN = /^[A-Za-z0-9_.-]{3,64}$/
-const emailRules = [{ type: 'email' as const, max: MAX_EMAIL_LEN, message: '邮箱格式不对' }]
-
-const credentialRules = [
-  { required: true, message: '请输入密码' },
-  { min: MIN_CREDENTIAL_LEN, max: MAX_CREDENTIAL_LEN, message: `密码长度须为 ${MIN_CREDENTIAL_LEN}–${MAX_CREDENTIAL_LEN} 个字符` },
-]
 
 // ---- 新建 -------------------------------------------------------------------------
 
