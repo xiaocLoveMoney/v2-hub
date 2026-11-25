@@ -358,7 +358,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** 分页列出管理员（admin:read） */
+        /** 分页列出管理员（admin:read）；只含员工，不含代理（代理见 /api/admin/agents，Ruling-101） */
         get: operations["listAdmins"];
         put?: never;
         /** 新建管理员（admin:write，超管专属，Ruling-95） */
@@ -379,7 +379,10 @@ export interface paths {
             cookie?: never;
         };
         get?: never;
-        /** 修改管理员角色与禁用状态（admin:write；R4、R5、R7；目标是所有者时 403，Ruling-99） */
+        /**
+         * 修改管理员角色与禁用状态（admin:write；R4、R5、R7；目标是所有者时 403，Ruling-99）
+         * @description 目标是代理账号时 409 conflict，改用 `PUT /api/admin/agents/{id}`（代理不能持有角色，Ruling-101）。
+         */
         put: operations["updateAdmin"];
         post?: never;
         delete?: never;
@@ -401,6 +404,7 @@ export interface paths {
         /**
          * 重置管理员密码（admin:write；对方全部会话失效，R7）
          * @description 对自己 409，改自己的密码用 `PUT /api/admin/auth/password`（Ruling-96）；目标是所有者时 403（Ruling-99）。
+         *     目标是代理账号时照常可用（docs/03 §5.23）。
          */
         put: operations["resetAdminPassword"];
         post?: never;
@@ -422,8 +426,433 @@ export interface paths {
         get?: never;
         put?: never;
         post?: never;
-        /** 清除他人的两步验证（遗失设备时；admin:write，R4；对方全部会话失效；目标是所有者时 403，Ruling-99） */
+        /**
+         * 清除他人的两步验证（遗失设备时；admin:write，R4；对方全部会话失效；目标是所有者时 403，Ruling-99）
+         * @description 目标是代理账号时照常可用（docs/03 §5.23）。
+         */
         delete: operations["resetAdminTotp"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/agents": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 代理分页，按创建时间倒序（admin:read，docs/03 §5.23） */
+        get: operations["listAgents"];
+        put?: never;
+        /**
+         * 新建代理账号与其配额（admin:write，Ruling-103、Ruling-104）
+         * @description 账号与配额同一事务建出；用户名与管理员共用一个命名空间，重名 409。
+         *     planIds 里有不存在的套餐、或流量 / 时长任一为“不限”的套餐，400 invalid_argument。
+         */
+        post: operations["createAgent"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/agents/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        /** 代理详情（admin:read）；id 不是代理账号时 404 */
+        get: operations["getAgent"];
+        /**
+         * 修改代理的备注、配额、白名单与停用状态（整体替换；admin:write，Ruling-103、Ruling-104）
+         * @description trafficPoolTotal 低于当前已用量 409 conflict；planIds 含不存在或流量 / 时长任一为“不限”的套餐 400 invalid_argument。
+         *     maxUsers 可以调到低于当前名下用户数：已有用户不受影响，只是不能再新增（docs/03 §5.23 用户数上限）。
+         *     停用时其全部会话立即失效、邀请码不可用，名下用户不受影响。id 不是代理账号时 404。
+         */
+        put: operations["updateAgent"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/agents/{id}/allocations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        /** 该代理的开通记录，按时间倒序（admin:read，线下结算的依据，Ruling-103） */
+        get: operations["listAgentAllocations"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/agent/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 我的配额与用量（仅代理会话） */
+        get: operations["agentGetSummary"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/agent/plans": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 我可以分配的套餐（白名单），按套餐排序字段升序
+         * @description 只返回额度字段与本次开通将扣减的流量，不带全站人数、价格、节点组等平台数据。
+         */
+        get: operations["agentListPlans"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/agent/users": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 名下用户分页（不含待删除的），按创建时间倒序 */
+        get: operations["agentListUsers"];
+        put?: never;
+        /**
+         * 新建名下用户，同时分配一个白名单套餐（扣流量池，写开通记录 kind = create）
+         * @description planId 不在白名单 400 invalid_argument；名下未删除用户数已达上限 409 agent_user_limit；
+         *     流量池不够这次扣减 409 agent_pool_insufficient（不建用户、不部分开通）；用户名或邮箱重复 409 conflict。
+         */
+        post: operations["agentCreateUser"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/agent/users/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        /** 名下用户详情；不在名下或待删除一律 404 */
+        get: operations["agentGetUser"];
+        /** 修改名下用户的备注与启用 / 停用 */
+        put: operations["agentUpdateUser"];
+        post?: never;
+        /**
+         * 删除名下用户（高危，须二次验证；流量池不退回）
+         * @description 流程同管理端删除用户（面板不可达时记为待删除）；删除后其订单与余额流水不再对代理可见，开通记录保留（docs/03 §5.23）。
+         */
+        delete: operations["agentDeleteUser"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/agent/users/{id}/plan": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 给名下用户分配或续期白名单套餐（扣流量池，写开通记录 kind = assign）
+         * @description 规则同管理端分配套餐：未到期的顺延、已到期的从当时起算、已用流量清零。
+         *     planId 不在白名单 400 invalid_argument；流量池不够 409 agent_pool_insufficient（不部分开通）。
+         */
+        post: operations["agentAssignUserPlan"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/agent/users/{id}/quota": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * 调低名下用户的流量额度、把到期时间提前（只能收紧，Ruling-103）
+         * @description 两个字段都可省略（省略 = 不改），但至少给一个。trafficLimit 必须大于 0 且不超过当前额度（当前为不限时任意正数都算调低）；
+         *     expiresAt 不能为 null、不能晚于当前到期时间（当前不过期时任意时间都算提前；用户还在等首次使用、尚未开始计时时不能改，400）。
+         *     违反任一条 400 invalid_argument。不改流量池、不写开通记录。
+         */
+        put: operations["agentUpdateUserQuota"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/agent/users/{id}/password": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /** 重置名下用户的客户后台登录密码（高危，须二次验证） */
+        put: operations["agentResetUserPassword"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/agent/users/{id}/totp": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** 清除名下用户的两步验证（高危，须二次验证），其全部会话失效 */
+        delete: operations["agentClearUserTotp"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/agent/users/{id}/subscription/reset": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 重置名下用户的订阅地址并轮换连接凭据；旧地址与旧凭据立即失效并触发对账 */
+        post: operations["agentResetUserSubscription"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/agent/invite-codes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 我的邀请码分页（kind 恒为 agent） */
+        get: operations["agentListInviteCodes"];
+        put?: never;
+        /** 新建我的邀请码，码由服务端生成；经它注册的用户归我名下（Ruling-102） */
+        post: operations["agentCreateInviteCode"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/agent/invite-codes/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /** 修改我的邀请码的次数、到期、备注与停用；不是我的码 404 */
+        put: operations["agentUpdateInviteCode"];
+        post?: never;
+        /** 删除我的邀请码（已注册用户的归属不变）；不是我的码 404 */
+        delete: operations["agentDeleteInviteCode"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/agent/tickets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 名下用户的工单分页，按最近回复倒序 */
+        get: operations["agentListTickets"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/agent/tickets/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        /**
+         * 工单与全部消息；不是名下用户的工单 404
+         * @description 消息的 authorName：代理本人的回复为代理用户名，平台员工的回复为空串（不向代理暴露员工账号）。
+         */
+        get: operations["agentGetTicket"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/agent/tickets/{id}/messages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 代理回复，状态变为 answered；用户侧与员工回复一样显示为“客服” */
+        post: operations["agentReplyTicket"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/agent/tickets/{id}/close": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 关闭名下用户的工单 */
+        post: operations["agentCloseTicket"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/agent/orders": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 名下（未删除）用户的订单分页，按时间倒序，只读 */
+        get: operations["agentListOrders"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/agent/wallet-ledger": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 名下（未删除）用户的余额流水分页，按时间倒序，只读
+         * @description adminUsername 恒为空串（不向代理暴露员工账号）。
+         */
+        get: operations["agentListWalletLedger"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/agent/allocations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 我的开通记录，按时间倒序（含已删除用户的记录） */
+        get: operations["agentListAllocations"];
+        put?: never;
+        post?: never;
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -1704,6 +2133,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/admin/users/{id}/agent": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * 把用户划给某个代理或收回为平台用户（admin:write，docs/03 §5.23 名下 ④，Ruling-102）
+         * @description agentId 为 null = 收回；不受代理的用户数上限限制。agentId 不存在或不是代理账号 400 invalid_argument；用户不存在或待删除 404。
+         *     只改归属，不动额度、邀请关系与流量池；写审计 user.agent_transfer。
+         */
+        put: operations["transferUserAgent"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/admin/subscribe-logs": {
         parameters: {
             query?: never;
@@ -1824,10 +2276,10 @@ export interface paths {
             cookie?: never;
         };
         get?: never;
-        /** 修改邀请码的次数、到期、备注与停用（个人码只能停用 / 启用；user:write） */
+        /** 修改邀请码的次数、到期、备注与停用（个人码只能停用 / 启用；代理码同管理员码；user:write） */
         put: operations["updateInviteCode"];
         post?: never;
-        /** 删除管理员邀请码（个人码不可删，返回 409；user:write） */
+        /** 删除管理员邀请码或代理码（个人码不可删，返回 409；user:write） */
         delete: operations["deleteInviteCode"];
         options?: never;
         head?: never;
@@ -3421,7 +3873,7 @@ export interface components {
         };
         /** @description 业务接口统一响应信封（/healthz、/readyz 与 /sub 除外） */
         Envelope: {
-            /** @description "0" 表示成功，其余取值见 docs/03 §5；管理端 403 另有 reauth_required（Ruling-100）、totp_setup_required（Ruling-98） */
+            /** @description "0" 表示成功，其余取值见 docs/03 §5；管理端 403 另有 reauth_required（Ruling-100）、totp_setup_required（Ruling-98）；代理接口 409 另有 agent_pool_insufficient、agent_user_limit（Ruling-103） */
             code: string;
             message: string;
             data?: unknown;
@@ -3466,6 +3918,11 @@ export interface components {
         };
         Session: {
             admin: components["schemas"]["AdminBrief"];
+            /**
+             * @description 账号类型（0.18.0，Ruling-101）。agent 时 permissions 为空数组、isSuperAdmin / isOwner / totpSetupRequired 恒为 false，
+             *     menuOrder 为空数组（代理菜单固定，docs/03 §5.6）；前端据此渲染代理布局。
+             */
+            kind: components["schemas"]["AdminKind"];
             totpEnabled: boolean;
             /** @description 管理端侧栏菜单顺序（系统设置 menu.admin，0.7.3，Ruling-57）；空数组 = 默认顺序 */
             menuOrder: components["schemas"]["MenuOrder"];
@@ -3531,6 +3988,224 @@ export interface components {
         };
         AdminEnvelope: components["schemas"]["Envelope"] & {
             data?: components["schemas"]["Admin"];
+        };
+        /**
+         * @description 管理端账号类型（Ruling-101）：staff 员工 / agent 代理，创建后不可改
+         * @enum {string}
+         */
+        AdminKind: "staff" | "agent";
+        /** @description 代理的配额（Ruling-103） */
+        AgentBase: {
+            remark: string;
+            /** @description 名下未删除用户数上限 */
+            maxUsers: number;
+            /**
+             * Format: int64
+             * @description 流量池总量（字节），累计制，不能低于已用量
+             */
+            trafficPoolTotal: number;
+            /** @description 可分配的套餐白名单，整体替换；只收流量与时长都有限的套餐 */
+            planIds: number[];
+        };
+        AgentCreateInput: components["schemas"]["AgentBase"] & {
+            username: components["schemas"]["Username"];
+            password: components["schemas"]["Password"];
+        };
+        AgentUpdateInput: components["schemas"]["AgentBase"] & {
+            /** @description 停用时其全部会话失效、邀请码不可用，名下用户不受影响 */
+            isDisabled: boolean;
+        };
+        Agent: components["schemas"]["AgentBase"] & {
+            /** Format: int64 */
+            id: number;
+            username: string;
+            isDisabled: boolean;
+            totpEnabled: boolean;
+            /** Format: date-time */
+            lastLoginAt: string | null;
+            /** Format: date-time */
+            createdAt: string;
+            /** @description 名下未删除用户数；超管划转后可能超过 maxUsers */
+            userCount: number;
+            /**
+             * Format: int64
+             * @description 流量池已用（字节），只增不减
+             */
+            trafficPoolUsed: number;
+        };
+        AgentEnvelope: components["schemas"]["Envelope"] & {
+            data?: components["schemas"]["Agent"];
+        };
+        AgentPage: {
+            items: components["schemas"]["Agent"][];
+            /** Format: int64 */
+            total: number;
+        };
+        AgentBrief: {
+            /** Format: int64 */
+            id: number;
+            username: string;
+        };
+        UserAgentInput: {
+            /**
+             * Format: int64
+             * @description 目标代理的管理员 id；null = 收回为平台用户
+             */
+            agentId: number | null;
+        };
+        /**
+         * @description create = 新建用户时选的套餐；assign = 给已有用户分配或续期
+         * @enum {string}
+         */
+        AgentAllocationKind: "create" | "assign";
+        AgentAllocation: {
+            /** Format: int64 */
+            id: number;
+            /** Format: int64 */
+            agentId: number;
+            /**
+             * Format: int64
+             * @description 用户已删除为 null
+             */
+            userId: number | null;
+            /** @description 开通时的用户名 */
+            username: string;
+            /**
+             * Format: int64
+             * @description 套餐已删除为 null
+             */
+            planId: number | null;
+            /** @description 开通时的套餐名 */
+            planName: string;
+            /**
+             * Format: int64
+             * @description 本次从流量池扣减的字节数
+             */
+            trafficBytes: number;
+            /** @description 套餐时长（天） */
+            durationDays: number;
+            kind: components["schemas"]["AgentAllocationKind"];
+            /** Format: date-time */
+            createdAt: string;
+        };
+        AgentAllocationPage: {
+            items: components["schemas"]["AgentAllocation"][];
+            /** Format: int64 */
+            total: number;
+        };
+        AgentSummary: {
+            maxUsers: number;
+            /** @description 名下未删除用户数 */
+            userCount: number;
+            /** Format: int64 */
+            trafficPoolTotal: number;
+            /** Format: int64 */
+            trafficPoolUsed: number;
+        };
+        AgentPlan: {
+            /** Format: int64 */
+            id: number;
+            name: string;
+            /**
+             * Format: int64
+             * @description 流量额度（字节），白名单里恒大于 0
+             */
+            trafficLimit: number;
+            /** @description 时长（天），白名单里恒大于 0 */
+            durationDays: number;
+            trafficReset: components["schemas"]["TrafficReset"];
+            /** @description 同时在线 IP 数，0 不限 */
+            limitIp: number;
+            /**
+             * Format: int64
+             * @description 开通或续期一次从流量池扣减的字节数 = 流量 × 时长内的重置周期数（never 按 1 期；周按 7 天、月按 30 天，向上取整）
+             */
+            poolCost: number;
+        };
+        AgentPlanAssignInput: {
+            /**
+             * Format: int64
+             * @description 必须在白名单内
+             */
+            planId: number;
+        };
+        /** @description 代理看到的名下用户（Ruling-104）：不含下发状态、订阅凭据、邀请关系、免费续期等字段 */
+        AgentUser: {
+            /** Format: int64 */
+            id: number;
+            username: string;
+            /** @description 未绑定为 null */
+            email: string | null;
+            remark: string;
+            status: components["schemas"]["UserStatus"];
+            isDisabled: boolean;
+            /** Format: int64 */
+            planId: number | null;
+            /** @description 没有套餐为空串 */
+            planName: string;
+            /**
+             * Format: int64
+             * @description 流量额度（字节），0 不限
+             */
+            trafficLimit: number;
+            /** Format: int64 */
+            trafficUsed: number;
+            /**
+             * Format: date-time
+             * @description null 表示不过期或等待首次使用
+             */
+            expiresAt: string | null;
+            /** @description >0 且 expiresAt 为 null：首次使用后起算的天数 */
+            pendingDays: number;
+            /**
+             * Format: int64
+             * @description 余额（分），只读
+             */
+            balance: number;
+            totpEnabled: boolean;
+            /** Format: date-time */
+            createdAt: string;
+            /**
+             * Format: date-time
+             * @description 最近一次产生流量的时间
+             */
+            lastUsedAt: string | null;
+        };
+        AgentUserEnvelope: components["schemas"]["Envelope"] & {
+            data?: components["schemas"]["AgentUser"];
+        };
+        AgentUserPage: {
+            items: components["schemas"]["AgentUser"][];
+            /** Format: int64 */
+            total: number;
+        };
+        AgentUserCreateInput: {
+            username: components["schemas"]["Username"];
+            password: components["schemas"]["UserPassword"];
+            email?: components["schemas"]["Email"];
+            remark?: string;
+            /**
+             * Format: int64
+             * @description 必须在白名单内
+             */
+            planId: number;
+        };
+        AgentUserUpdateInput: {
+            remark: string;
+            isDisabled: boolean;
+        };
+        /** @description 只能收紧（Ruling-103）；省略的字段不改，至少给一个 */
+        AgentUserQuotaInput: {
+            /**
+             * Format: int64
+             * @description 大于 0 且不超过当前额度
+             */
+            trafficLimit?: number;
+            /**
+             * Format: date-time
+             * @description 不能为 null、不能晚于当前到期时间
+             */
+            expiresAt?: string;
         };
         AuditLog: {
             /** Format: int64 */
@@ -4410,6 +5085,8 @@ export interface components {
             balance?: number;
             /** @description 是否开了扣余额自动续费（0.4.0） */
             autoRenew?: boolean;
+            /** @description 所属代理；null = 平台用户（0.18.0，Ruling-102） */
+            agent: components["schemas"]["AgentBrief"] | null;
             /** Format: date-time */
             createdAt: string;
         };
@@ -4867,12 +5544,22 @@ export interface components {
             /** Format: int64 */
             id: number;
             code: string;
-            /** @enum {string} */
-            kind: "admin" | "user";
+            /**
+             * @description agent = 代理的码，经它注册的用户归该代理（0.18.0，Ruling-102）
+             * @enum {string}
+             */
+            kind: "admin" | "user" | "agent";
             /** Format: int64 */
             ownerUserId?: number | null;
-            /** @description 管理员码为空串 */
+            /** @description 管理员码与代理码为空串 */
             ownerUsername: string;
+            /**
+             * Format: int64
+             * @description 代理码的代理 id，其余为 null（0.18.0）
+             */
+            agentId?: number | null;
+            /** @description 代理码的代理用户名，其余为空串（0.18.0） */
+            agentUsername?: string;
             /** @description 个人码为设置 invite.userMaxUses 的当前值 */
             maxUses: number;
             usedCount: number;
@@ -6443,7 +7130,7 @@ export interface components {
                 "application/json": components["schemas"]["Envelope"];
             };
         };
-        /** @description permission_denied（缺权限码或 CSRF 校验失败）；管理端接口另可能返回 totp_setup_required（超管未开启两步验证，查看会话、登出、生成与确认 TOTP、改自己密码除外，Ruling-98） */
+        /** @description permission_denied（缺权限码、CSRF 校验失败、代理账号调用非代理接口或员工调用 /api/admin/agent/*，Ruling-101）；管理端接口另可能返回 totp_setup_required（超管未开启两步验证，查看会话、登出、生成与确认 TOTP、改自己密码除外，Ruling-98） */
         PermissionDenied: {
             headers: {
                 [name: string]: unknown;
@@ -6540,6 +7227,31 @@ export interface components {
             };
             content: {
                 "application/json": components["schemas"]["Envelope"];
+            };
+        };
+        /**
+         * @description 代理配额不足（docs/03 §5.23，Ruling-103）：agent_pool_insufficient（流量池不够本次扣减，data 带 poolCost 与 poolRemaining，单位字节）、
+         *     agent_user_limit（名下未删除用户数已达上限，只在新建用户时出现）或 conflict（用户名 / 邮箱重复等）。
+         */
+        AgentQuotaConflict: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Envelope"] & {
+                    data?: {
+                        /**
+                         * Format: int64
+                         * @description 本次需要扣减的字节数
+                         */
+                        poolCost?: number;
+                        /**
+                         * Format: int64
+                         * @description 流量池剩余字节数
+                         */
+                        poolRemaining?: number;
+                    };
+                };
             };
         };
     };
@@ -7236,6 +7948,818 @@ export interface operations {
             403: components["responses"]["ReauthRequired"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
+        };
+    };
+    listAgents: {
+        parameters: {
+            query?: {
+                page?: components["parameters"]["Page"];
+                pageSize?: components["parameters"]["PageSize"];
+                /** @description 按用户名模糊匹配 */
+                keyword?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 代理分页 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["AgentPage"];
+                    };
+                };
+            };
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+        };
+    };
+    createAgent: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgentCreateInput"];
+            };
+        };
+        responses: {
+            /** @description 新建的代理 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentEnvelope"];
+                };
+            };
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["ReauthRequired"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    getAgent: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 代理 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentEnvelope"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    updateAgent: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgentUpdateInput"];
+            };
+        };
+        responses: {
+            /** @description 修改后的代理 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentEnvelope"];
+                };
+            };
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["ReauthRequired"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    listAgentAllocations: {
+        parameters: {
+            query?: {
+                page?: components["parameters"]["Page"];
+                pageSize?: components["parameters"]["PageSize"];
+                /** @description 创建时间下限（含） */
+                from?: string;
+                /** @description 创建时间上限（不含） */
+                to?: string;
+            };
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 开通记录分页 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["AgentAllocationPage"];
+                    };
+                };
+            };
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    agentGetSummary: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 配额与用量 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["AgentSummary"];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+        };
+    };
+    agentListPlans: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 白名单套餐 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["AgentPlan"][];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+        };
+    };
+    agentListUsers: {
+        parameters: {
+            query?: {
+                page?: components["parameters"]["Page"];
+                pageSize?: components["parameters"]["PageSize"];
+                /** @description 按用户名、邮箱或备注模糊匹配 */
+                keyword?: string;
+                status?: components["schemas"]["UserStatus"];
+                planId?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 名下用户分页 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["AgentUserPage"];
+                    };
+                };
+            };
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+        };
+    };
+    agentCreateUser: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgentUserCreateInput"];
+            };
+        };
+        responses: {
+            /** @description 新建的用户 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentUserEnvelope"];
+                };
+            };
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            409: components["responses"]["AgentQuotaConflict"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    agentGetUser: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 用户 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentUserEnvelope"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    agentUpdateUser: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgentUserUpdateInput"];
+            };
+        };
+        responses: {
+            /** @description 修改后的用户 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentUserEnvelope"];
+                };
+            };
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    agentDeleteUser: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["Ok"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["ReauthRequired"];
+            404: components["responses"]["NotFound"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    agentAssignUserPlan: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgentPlanAssignInput"];
+            };
+        };
+        responses: {
+            /** @description 分配后的用户 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentUserEnvelope"];
+                };
+            };
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["AgentQuotaConflict"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    agentUpdateUserQuota: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgentUserQuotaInput"];
+            };
+        };
+        responses: {
+            /** @description 修改后的用户 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentUserEnvelope"];
+                };
+            };
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    agentResetUserPassword: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    password: components["schemas"]["UserPassword"];
+                };
+            };
+        };
+        responses: {
+            200: components["responses"]["Ok"];
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["ReauthRequired"];
+            404: components["responses"]["NotFound"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    agentClearUserTotp: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["Ok"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["ReauthRequired"];
+            404: components["responses"]["NotFound"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    agentResetUserSubscription: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["Ok"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    agentListInviteCodes: {
+        parameters: {
+            query?: {
+                page?: components["parameters"]["Page"];
+                pageSize?: components["parameters"]["PageSize"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 邀请码分页 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["InviteCodePage"];
+                    };
+                };
+            };
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+        };
+    };
+    agentCreateInviteCode: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InviteCodeInput"];
+            };
+        };
+        responses: {
+            /** @description 新建的邀请码 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["InviteCode"];
+                    };
+                };
+            };
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    agentUpdateInviteCode: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InviteCodeInput"];
+            };
+        };
+        responses: {
+            /** @description 修改后的邀请码 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["InviteCode"];
+                    };
+                };
+            };
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    agentDeleteInviteCode: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["Ok"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    agentListTickets: {
+        parameters: {
+            query?: {
+                page?: components["parameters"]["Page"];
+                pageSize?: components["parameters"]["PageSize"];
+                status?: components["schemas"]["TicketStatus"];
+                /** @description 不在名下的 id 返回空列表 */
+                userId?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 工单分页 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["TicketPage"];
+                    };
+                };
+            };
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+        };
+    };
+    agentGetTicket: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 工单与全部消息 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["TicketDetail"];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    agentReplyTicket: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TicketMessageInput"];
+            };
+        };
+        responses: {
+            /** @description 回复后的工单 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["TicketDetail"];
+                    };
+                };
+            };
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    agentCloseTicket: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 关闭后的工单 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["TicketDetail"];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    agentListOrders: {
+        parameters: {
+            query?: {
+                page?: components["parameters"]["Page"];
+                pageSize?: components["parameters"]["PageSize"];
+                /** @description 不在名下的 id 返回空列表 */
+                userId?: number;
+                kind?: components["schemas"]["OrderKind"];
+                /** @description 创建时间下限（含） */
+                from?: string;
+                /** @description 创建时间上限（不含） */
+                to?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 订单分页 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["OrderPage"];
+                    };
+                };
+            };
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+        };
+    };
+    agentListWalletLedger: {
+        parameters: {
+            query?: {
+                page?: components["parameters"]["Page"];
+                pageSize?: components["parameters"]["PageSize"];
+                /** @description 不在名下的 id 返回空列表 */
+                userId?: number;
+                kind?: components["schemas"]["LedgerKind"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 余额流水分页 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["LedgerPage"];
+                    };
+                };
+            };
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+        };
+    };
+    agentListAllocations: {
+        parameters: {
+            query?: {
+                page?: components["parameters"]["Page"];
+                pageSize?: components["parameters"]["PageSize"];
+                /** @description 创建时间下限（含） */
+                from?: string;
+                /** @description 创建时间上限（不含） */
+                to?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 开通记录分页 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["AgentAllocationPage"];
+                    };
+                };
+            };
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
         };
     };
     listAuditLogs: {
@@ -9424,6 +10948,8 @@ export interface operations {
                 keyword?: string;
                 status?: components["schemas"]["UserStatus"];
                 planId?: number;
+                /** @description 只看该代理名下的用户（0.18.0，Ruling-102） */
+                agentId?: number;
             };
             header?: never;
             path?: never;
@@ -9746,6 +11272,40 @@ export interface operations {
             404: components["responses"]["NotFound"];
         };
     };
+    transferUserAgent: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UserAgentInput"];
+            };
+        };
+        responses: {
+            /** @description 划转后的用户 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["User"];
+                    };
+                };
+            };
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["ReauthRequired"];
+            404: components["responses"]["NotFound"];
+        };
+    };
     listSubscribeLogs: {
         parameters: {
             query?: {
@@ -9906,7 +11466,9 @@ export interface operations {
                 page?: components["parameters"]["Page"];
                 pageSize?: components["parameters"]["PageSize"];
                 /** @description 省略为全部 */
-                kind?: "admin" | "user";
+                kind?: "admin" | "user" | "agent";
+                /** @description 只看该代理的码（0.18.0） */
+                agentId?: number;
             };
             header?: never;
             path?: never;
