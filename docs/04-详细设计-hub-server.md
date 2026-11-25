@@ -28,7 +28,7 @@ v2-hub-server/
 └── Makefile / Dockerfile
 ```
 
-目前已有：`cmd/hub`（服务 + `admin-create` 子命令）、`internal/api`（探活、管理员认证与 RBAC 接口、会话 / CSRF / 权限中间件）、
+目前已有：`cmd/hub`（服务 + `admin-create` / `admin-owner-set` / `admin-totp-reset` / `admin-password-reset` 子命令，按子命令名分发）、`internal/api`（探活、管理员认证与 RBAC 接口、会话 / CSRF / 权限中间件）、
 `internal/service`（AuthService、RBACService）、`internal/manager/{crypto,ratelimit}`、`internal/dao`（连接池、sqlc 生成物、daotest）、
 `internal/job`（过期会话清理、面板探测与同步）、`internal/manager/{panel,panel/xui,panel/paneltest,inboundtpl}`、`internal/config`。其余目录在对应任务里创建，不预建空目录。
 
@@ -68,6 +68,19 @@ type CoreLiveApplier interface { AppliesCoreTemplateLive(ctx) (bool, error) }
 4. 所有写面板的操作写审计日志。
 5. 经 SSH 执行的命令只能来自 `manager/deploy` 里的固定模板，参数先过白名单再做 shell 转义；`service` 与 `api` 不拼命令行。SSH 凭据、令牌、面板口令不进日志与任务日志（Ruling-68）。
 
+管理员分级加固（docs/03 §4 – §4.4，Ruling-95 – Ruling-100）的分工：
+- 权限：`service/permission.go` 定义 `SuperOnlyPermissions`（`admin:*`、`host:*`）与内置角色（`super_admin` + 四个预设），`builtinRolePermissions` 给出代码定义的权限（`partner` = 全集减超管专属）；
+  `loadPrincipal` 只对 `is_builtin` 为真的角色行按编码取代码定义（`super_admin` 同样要求 `is_builtin`），自定义角色读 `role_permission`（查询里排除内置角色的行），取并集后非超管再剔除超管专属码。
+  建 / 改角色含超管专属码 400，编码与内置角色相同 409；原“只能授予自己拥有的权限”的子集判断已删除，只保留“非超管不能分配或收回 `super_admin`”作纵深防御。
+- 中间件：`api/admin_auth.go` 的 `requireAdmin(perm, next, opts...)`，选项 `withSetupExempt()`（R10 豁免）、`withFresh()`（R12 高危接口）、`withPerm(code)`（追加权限码，一键部署入站用它要求 `host:write`）。
+  判定顺序：认证 → CSRF → 超管未开启两步验证（`totp_setup_required`）→ 权限码 → 二次验证（`reauth_required`），两个新错误码都是 403。`AdminPrincipal.ReauthFresh` 由 `Authenticate` 按会话的 `reauth_until` 与服务的时钟算好，Web 层不碰时钟。
+  `api/router_policy_test.go` 从 `router.go` 源码取出全部管理端路由，核对“只需登录 / 权限码 / 权限码 + 二次验证 / R10 豁免”的归类，并与 `hub-api.yaml`（全部管理端路径、403 引用 `ReauthRequired` 的 38 个接口）逐条比对；运行时再确认未登录一律 401、过期的超管调高危接口一律 `reauth_required`、无权限者只得到 `permission_denied`。
+- 二次验证：`AuthService.Reauth`（已开两步验证的只认验证码、走 `consumeTOTP` 防重放，否则验密码；失败 400、计入频控 key `reauth:<id>`、审计 `admin.reauth_failed`），登录与 `EnableTOTP` 成功都把当前会话的 `reauth_until` 设为 now + `auth.reauthWindow`（默认 5m）。
+- 本人改密码：`AuthService.ChangeOwnPassword`（频控 key `admin-password:<id>`，成功后 `DeleteOtherAdminSessions` 保留当前会话）；`ResetAdminPassword` 对自己 409。
+- 所有者：`admin.is_owner`；`UpdateAdmin` / `ResetAdminPassword` / `ResetAdminTOTP` 遇所有者 403；`BootstrapSuperAdmin` 在没有所有者时设所有者；命令行的三件事在 `service/admin_cli.go`，转移所有者与 `BootstrapSuperAdmin` 都先锁 `super_admin` 角色行。
+- 已存密钥不外借：`PanelService.UpdateServer` 在解密已存 token 之前比较面板类型与规范化后的面板地址（与保存时同一个 `panel.ParseBaseURL`），变了而没带新 token 即 400，与是否停用无关；主机任务内部的 `ReplaceServerConn` 不受影响。
+  `service/host_secret_confirm.go` 做密码凭据的确认：凭据是 `password` 类型且（凭据，地址，端口）在 `server_host` 里没有时（修改主机为“三元组与本行原值不同”，重置主机密钥为“一律”）须带 `credentialSecret`，解密后 `subtle.ConstantTimeCompare`，输错按管理员计入频控（参数同登录频控），审计只记 `secretConfirmed`。
+
 M9 链式改造（docs/03 §5.18、§5.19、§5.21）在 `internal/service` 里的分工：`chain.go` 管规则与用户出口的增删改与调顺序，
 `chain_resolve.go` 是生效计算的纯函数（哪条规则在哪个起飞入站上生效），`chain_guard.go` 管用户出口用于服务端链式的防护
 （公网地址判定、域名解析与固定 IP、字段白名单、防环；DNS 解析走可注入的接口，单测不发真实查询），
@@ -103,12 +116,15 @@ M11 SSH 托管（docs/03 §5.22）的分工：`manager/remote` 只管“连上�
 - 环境变量：`HUB_DATABASE_URL`；`HUB_INSECURE_DEV_COOKIE=1` 仅本机 HTTP 开发（`make run` 自动设置）；`HUB_ENCRYPTION_KEY`（Base64 的 32 字节，AES-256-GCM 主密钥，加密 TOTP 密钥，M1 起也加密面板 token；缺失则拒绝启动）。
 - M11 配置段 `deploy`：同时执行的任务数、SSH 连接与命令超时、安装超时、连接测试与动作的频控、批量上限、`allowLoopback`（只给联调用）。不新增环境变量。
 - `deploy.acme`：签发方目录地址（传给主机上的 acme.sh）、整条证书任务的时限、续期检查间隔；`deploy.cloudflareApiUrl` 是 Cloudflare API 的根地址（只在测试里改）。DNS 令牌加密存库，不走环境变量；ACME 账号由主机上的 acme.sh 保存。
-- 首个超管：`make admin-create USERNAME=<名称>`，密码终端无回显输入或经管道传入一行。
+- 首个超管：`make admin-create USERNAME=<名称>`，密码终端无回显输入或经管道传入一行；没有所有者时它即所有者。
+- 管理员恢复（只在服务器上）：`make admin-owner-set USERNAME=<名称>`、`make admin-totp-reset USERNAME=<名称>`、`make admin-password-reset USERNAME=<名称>`（生产用法见 docs/02 §6）。
+- `auth.reauthWindow`：高危操作二次验证的有效期，默认 `5m`，须大于 0。没有关闭超管强制两步验证或二次验证的配置项（Ruling-98）。
 - `make run / test / build / lint`。
 
 ## 6. 测试策略
 
 - 单测：表驱动；`api` 用 `httptest`；`service` 用内存 fake Provider。
+- 接口用例里的超管一律经 `apiClient.loginSuper` 登录：首次登录后经 HTTP 开启两步验证，再次登录把认证服务的测试时钟推进一个步长后带验证码（不 sleep）；验证“未开启被拦”的用例单独用密码登录。
 - 契约测试：`manager/panel/xui` 用 `httptest` 模拟面板，请求 / 响应形状对照上游快照。
 - 集成：IT 用例起真实 3x-ui 容器（`--profile xui`）。
 
