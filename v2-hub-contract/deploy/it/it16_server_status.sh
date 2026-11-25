@@ -6,6 +6,7 @@
 #   趋势与列表近况出现三家的延迟（模拟端让联通全丢）→ 未登录 401。
 # 黑盒，只用 curl / jq / docker / python3（探测服务模拟端）。hub-server 不向真实的探测服务发任何请求（HUB_REACH_API_URL 指向本机）。
 # 注意：会重建 xui-a 容器（不挂数据卷）；hub-server 用缩短了探测与检测周期的临时配置启动。
+# 不依赖执行顺序：开测前经接口关掉连通 / 延迟检测、停用前面用例留下的服务器（run_all 里它们仍启用，会一起被测延迟），并保持停用。
 source "$(dirname "$0")/common.sh"
 set -e
 
@@ -122,6 +123,21 @@ expect_error() { expect_code "$1" "$3"; [ "$(jq -r .code "$WORK/body")" = "$2" ]
 CSRF="$(it_admin_login "$HUB_JAR" "$ROOT_USER" "$CRED")" || fail "hub 登录失败"
 hub() { call "$HUB_JAR" "$CSRF" "$@"; }
 
+# ---- 3.1 不依赖前面用例留下的数据：run_all 只在开头重置一次库，前面的用例会留下启用中的服务器（同在本机、公网 IP 相同）
+# 与开着的大陆连通检测（IT-13），它们也会被后台测延迟 / 检测、请求同样发到本机模拟端，干扰下面“只测一次”等计数断言。
+# 先关掉两种检测、停用别的服务器（停用的服务器不探测、不测延迟），等在途的一轮结束后清空模拟端记录。
+hub PUT /api/admin/settings '{"reach":{"enabled":false},"latency":{"enabled":false}}' >/dev/null; expect_code 200 "开测前关掉连通与延迟检测"
+hub GET /api/admin/servers > "$WORK/servers.json"; expect_code 200 "列出已有服务器"
+jq -c '.data[] | select(.isDisabled | not) | {id, name, providerType, baseUrl, apiToken: "", tlsMode, certPinSha256: (.certPinSha256 // ""), region, remark, isDisabled: true}' \
+  "$WORK/servers.json" > "$WORK/others.jsonl"
+while read -r other; do
+  [ -n "$other" ] || continue
+  hub PUT "/api/admin/servers/$(printf '%s' "$other" | jq -r .id)" "$(printf '%s' "$other" | jq -c 'del(.id)')" >/dev/null
+  expect_code 200 "停用前面用例留下的服务器 $(printf '%s' "$other" | jq -r .name)"
+done < "$WORK/others.jsonl"
+sleep $((${CHECK_INTERVAL%s} * 2))
+: > "$WORK/probe.log"
+
 # ---- 4. 接入：列表与详情带资源快照、流量周期与默认账单 ----
 SERVER_ID="$(hub POST /api/admin/servers "$(jq -nc --arg n "$SERVER_NAME" --arg u "$XUI_URL" --arg t "$XUI_TOKEN" \
   '{name:$n,providerType:"xui",baseUrl:$u,apiToken:$t,tlsMode:"verify",region:"US"}')" | jq -r '.data.id // empty')"
@@ -200,4 +216,4 @@ jq -e --argjson id "$SERVER_ID" '.data[] | select(.serverId == $id) | (.latency.
 call "$WORK/anon.jar" "" GET /api/admin/servers/trends >/dev/null; expect_error 401 unauthenticated "未登录看近况"
 call "$WORK/anon.jar" "" GET "/api/admin/servers/$SERVER_ID/metrics" >/dev/null; expect_error 401 unauthenticated "未登录看趋势"
 
-echo "IT-16 通过"
+echo "IT-16 PASS"
