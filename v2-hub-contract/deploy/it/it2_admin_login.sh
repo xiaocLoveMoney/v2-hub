@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # IT-2 管理员登录（docs/08）：admin-create 建超管 → 登录拿 Cookie 与 CSRF → me → 无 CSRF 的写请求 403
-# → 建只读角色与管理员 → 低权限访问管理员列表 403 → 登出后 401。黑盒，只用 curl。
+# → 绑定两步验证（超管必须开启，R10）→ 建只读角色与管理员 → 低权限访问管理员列表 403 → 登出后 401。
+# 黑盒，只用 curl（两步验证的辅助见 common.sh，另用 jq / python3）。
 # 注意：含逗号的 JSON 一律先放进变量再传参——macOS 自带 bash 3.2 会对 "$(… "{a,b}")" 做花括号展开。
 source "$(dirname "$0")/common.sh"
 set -e
@@ -11,11 +12,13 @@ VIEWER_USER=it-viewer
 CRED="it-$(openssl rand -hex 12)"
 JAR_ROOT="$(mktemp)"
 JAR_VIEWER="$(mktemp)"
-trap 'rm -f "$JAR_ROOT" "$JAR_VIEWER"; stop_all' EXIT
+HUB_CONFIG="$(mktemp)"
+trap 'rm -f "$JAR_ROOT" "$JAR_VIEWER" "$HUB_CONFIG"; stop_all' EXIT
 
 printf '%s\n' "$CRED" | (cd "$REPO_ROOT/v2-hub-server" && make -s admin-create USERNAME="$ROOT_USER") >/tmp/it-admin-create.log 2>&1 \
   || { echo "IT-2: admin-create 失败，见 /tmp/it-admin-create.log"; exit 1; }
-start_module v2-hub-server 8080
+it_hub_config "$HUB_CONFIG" || { echo "IT-2: 派生配置失败"; exit 1; }
+start_module v2-hub-server 8080 CONFIG="$HUB_CONFIG"
 
 # api <jar> <method> <path> [json] [csrf] → 打印 "状态码 响应体"
 api() {
@@ -50,6 +53,8 @@ CSRF="$(printf '%s' "$out" | csrf_of)"
 
 out="$(api "$JAR_ROOT" GET /api/admin/auth/me)";                         expect 200 "$out" "登录后 me"
 out="$(api "$JAR_ROOT" POST /api/admin/roles "$ROLE_BODY")";             expect 403 "$out" "缺 CSRF 的写请求"
+# 新建的超管还没开两步验证，先绑定才能调业务接口（R10，未绑定时的拦截与豁免由 IT-17 覆盖）
+it_admin_totp_bind "$JAR_ROOT" "$CSRF" "$ROOT_USER" || { echo "IT-2: 绑定两步验证失败"; exit 1; }
 out="$(api "$JAR_ROOT" POST /api/admin/roles "$ROLE_BODY" "$CSRF")";     expect 200 "$out" "建只读角色"
 out="$(api "$JAR_ROOT" POST /api/admin/admins "$VIEWER_BODY" "$CSRF")";  expect 200 "$out" "建只读管理员"
 

@@ -23,8 +23,8 @@ MAIL_DOMAIN=it13.example.com
 ALERT_MAIL="ops@$MAIL_DOMAIN"
 NODE_HOST=node.it13.example.com   # 对外地址：公网域名，只交给本机模拟端
 INBOUND_PORT=24013
-SUBJECT_BLOCKED="【$SITE_NAME】节点 $NODE_HOST:$INBOUND_PORT 大陆连不上（疑似被墙）"
-SUBJECT_RECOVERED="【$SITE_NAME】节点 $NODE_HOST:$INBOUND_PORT 大陆已恢复连通"
+SUBJECT_BLOCKED="【${SITE_NAME}】节点 $NODE_HOST:$INBOUND_PORT 大陆连不上（疑似被墙）"
+SUBJECT_RECOVERED="【${SITE_NAME}】节点 $NODE_HOST:$INBOUND_PORT 大陆已恢复连通"
 SMTP_HOST=127.0.0.1
 SMTP_DEAD_PORT=1        # 没有服务监听，连接立即被拒
 REACH_PORT=18766        # 探测服务模拟端
@@ -120,8 +120,8 @@ wait_port "$REACH_PORT" 10 || fail "探测服务模拟端没起来"
 probe_count() { jq -s --arg t "$1" '[.[] | select(.target == $t)] | length' "$WORK/reach.log"; }
 
 # ---- 3. hub-server（检测 2 秒一轮、分析不缓存、探测服务指向本机）与超管 ----
-sed -e "s/^  probeInterval: .*/  probeInterval: $PROBE_INTERVAL/" -e "s/^  checkInterval: .*/  checkInterval: $CHECK_INTERVAL/" \
-  -e 's/^  cacheTtl: .*/  cacheTtl: 0s/' "$REPO_ROOT/v2-hub-server/etc/hub-server.yaml" > "$WORK/hub-server.yaml"
+it_hub_config "$WORK/hub-server.yaml" -e "s/^  probeInterval: .*/  probeInterval: $PROBE_INTERVAL/" -e "s/^  checkInterval: .*/  checkInterval: $CHECK_INTERVAL/" \
+  -e 's/^  cacheTtl: .*/  cacheTtl: 0s/' || fail "派生配置失败"
 grep -q "checkInterval: $CHECK_INTERVAL" "$WORK/hub-server.yaml" && grep -q 'cacheTtl: 0s' "$WORK/hub-server.yaml" || fail "临时配置没有改到检测周期或分析缓存"
 printf '%s\n' "$CRED" | (cd "$REPO_ROOT/v2-hub-server" && make -s admin-create USERNAME="$ROOT_USER") >/tmp/it-admin-create.log 2>&1 || fail "admin-create 失败"
 start_module v2-hub-server 8080 CONFIG="$WORK/hub-server.yaml" HUB_REACH_API_URL="http://127.0.0.1:$REACH_PORT" \
@@ -138,8 +138,8 @@ call() {
 }
 expect_code() { [ "$(cat "$WORK/code")" = "$1" ] || fail "$2：期望 HTTP $1，实际 $(cat "$WORK/code") $(cat "$WORK/body")"; }
 expect_error() { expect_code "$1" "$3"; [ "$(jq -r .code "$WORK/body")" = "$2" ] || fail "$3：期望错误码 $2，实际 $(cat "$WORK/body")"; }
-CSRF="$(call "$HUB_JAR" "" POST /api/admin/auth/login "$(login_body_of "$ROOT_USER" "$CRED")" | jq -r '.data.csrfToken // empty')"
-[ -n "$CSRF" ] || fail "hub 登录失败"
+# 超管登录：首次登录当场绑定两步验证（R10）；登录即视为刚做过二次验证，联调配置把有效期拉长（common.sh it_admin_login）
+CSRF="$(it_admin_login "$HUB_JAR" "$ROOT_USER" "$CRED")" || fail "hub 登录失败"
 hub() { call "$HUB_JAR" "$CSRF" "$@"; }
 outbox_count() {
   hub GET "/api/admin/mail-outbox?pageSize=$OUTBOX_PAGE_SIZE" | jq --arg r "$ALERT_MAIL" --arg s "$1" '[.data.items[] | select(.recipient == $r and .subject == $s)] | length'

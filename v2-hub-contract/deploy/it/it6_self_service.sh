@@ -25,7 +25,8 @@ fail() { echo "IT-6: $*"; exit 1; }
 
 # ---- 1. hub-server 与超管 ----
 printf '%s\n' "$CRED" | (cd "$REPO_ROOT/v2-hub-server" && make -s admin-create USERNAME="$ROOT_USER") >/tmp/it-admin-create.log 2>&1 || fail "admin-create 失败"
-start_module v2-hub-server 8080
+it_hub_config "$WORK/hub-server.yaml" || fail "派生配置失败"
+start_module v2-hub-server 8080 CONFIG="$WORK/hub-server.yaml"
 HUB_JAR="$WORK/hub.jar"
 # login_body_of <用户名> <密码>
 login_body_of() { jq -nc --arg u "$1" --arg p "$2" '{username:$u,password:$p}'; }
@@ -47,8 +48,8 @@ expect_error() {
   expect_code "$1" "$3"
   [ "$(jq -r .code "$WORK/body")" = "$2" ] || fail "$3：期望错误码 $2，实际 $(cat "$WORK/body")"
 }
-CSRF="$(call "$HUB_JAR" "" POST /api/admin/auth/login "$(login_body_of "$ROOT_USER" "$CRED")" | jq -r '.data.csrfToken // empty')"
-[ -n "$CSRF" ] || fail "hub 登录失败"
+# 超管登录：首次登录当场绑定两步验证（R10）；登录即视为刚做过二次验证，联调配置把有效期拉长（common.sh it_admin_login）
+CSRF="$(it_admin_login "$HUB_JAR" "$ROOT_USER" "$CRED")" || fail "hub 登录失败"
 hub() { call "$HUB_JAR" "$CSRF" "$@"; }
 
 # ---- 2. 默认设置与站点信息（docs/03 §5.6、§5.7）：默认仅邀请注册；没配 SMTP 时邮件类接口 403 ----
@@ -90,7 +91,7 @@ first() { call "$FIRST_JAR" "$FIRST_CSRF" "$@"; }
 SECOND_JAR="$WORK/second.jar"
 call "$SECOND_JAR" "" POST /api/user/auth/register "$(register_body_of "$SECOND_USER" "$ADMIN_CODE")" >/dev/null; expect_code 400 "邀请码次数用尽"
 [ "$(hub GET "/api/admin/invite-codes?kind=admin" | jq --argjson id "$ADMIN_CODE_ID" '.data.items[] | select(.id == $id) | .usedCount')" = "$ADMIN_CODE_MAX_USES" ] \
-  || fail "管理员邀请码已用次数应为 $ADMIN_CODE_MAX_USES：$(cat "$WORK/body")"
+  || fail "管理员邀请码已用次数应为 ${ADMIN_CODE_MAX_USES}：$(cat "$WORK/body")"
 # 邮箱登录：先按用户名、再按邮箱
 call "$WORK/mail-login.jar" "" POST /api/user/auth/login "$(login_body_of "$FIRST_USER@$MAIL_DOMAIN" "$USER_CRED")" >/dev/null; expect_code 200 "用邮箱登录"
 
