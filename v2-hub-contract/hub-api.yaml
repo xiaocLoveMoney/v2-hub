@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: v2-hub API
-  version: 0.16.2
+  version: 0.17.0
   description: |
     v2-hub 对外接口契约（hub-server 提供，v2-hub-admin-web / v2-hub-user-web 消费）。
     - 管理端接口前缀 /api/admin，客户端接口前缀 /api/user，订阅端点前缀 /sub。
@@ -34,6 +34,10 @@ info:
       billing、traffic、host；连接测试结果的 status 同样换成 resources；新增 PUT /api/admin/servers/{id}/billing、GET /api/admin/servers/{id}/metrics、
       GET /api/admin/servers/trends；系统设置增加 latency 分组。
     0.16.2：公告与教程的图片上传（Ruling-89）——新增 POST /api/admin/uploads（multipart，content:write），返回站内路径 /uploads/…。
+    0.17.0：管理员分级加固（Ruling-95 – Ruling-100）——新增 PUT /api/admin/auth/password（本人改密码）、POST /api/admin/auth/reauth（二次验证）；
+      Session 加 isSuperAdmin、isOwner、totpSetupRequired，Admin 加 isOwner，Permission 加 superOnly；admin:* 与 host:* 改为超管专属；
+      主机批量新建 / 测试 / 修改 / 绑定 SSH / 重置主机密钥加只写的 credentialSecret；修改服务器时面板类型或地址有变化须重新提交 apiToken；
+      新增错误码 reauth_required、totp_setup_required（均 403）与可复用响应 ReauthRequired。
 servers:
   - url: http://127.0.0.1:8080
     description: 本地开发
@@ -43,13 +47,13 @@ tags:
   - name: admin-auth
     description: 管理员登录、登出、当前会话
   - name: admin-rbac
-    description: 管理员、角色、权限码（需 admin:read / admin:write）
+    description: 管理员、角色、权限码（需 admin:read / admin:write，超管专属，Ruling-95）
   - name: admin-audit
     description: 审计日志（需 audit:read）
   - name: admin-panel
     description: 服务器（server:*）、入站与节点（node:*），docs/03 §5.1
   - name: admin-hosts
-    description: SSH 凭据、托管主机、部署与运维任务（host:*），docs/03 §5.22
+    description: SSH 凭据、托管主机、部署与运维任务（host:*，超管专属，Ruling-95），docs/03 §5.22
   - name: admin-users
     description: 套餐（plan:*）与用户（user:*），docs/03 §5.2
   - name: admin-settings
@@ -214,7 +218,7 @@ paths:
     post:
       tags: [admin-auth]
       operationId: adminTotpDisable
-      summary: 提交当前验证码关闭两步验证
+      summary: 提交当前验证码关闭两步验证（超管 409，Ruling-98）
       parameters:
         - $ref: "#/components/parameters/CsrfHeader"
       requestBody:
@@ -228,6 +232,57 @@ paths:
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "403": { $ref: "#/components/responses/PermissionDenied" }
         "409": { $ref: "#/components/responses/Conflict" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /api/admin/auth/password:
+    put:
+      tags: [admin-auth]
+      operationId: adminChangePassword
+      summary: 修改自己的密码（任何已登录管理员；须提交旧密码，Ruling-96）
+      description: |
+        旧密码错误返回 400 并计入频控；成功后当前会话保留、本人其余会话全部失效。
+        超管未开启两步验证时本接口仍可用（Ruling-98 豁免）。
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AdminPasswordChangeInput" }
+      responses:
+        "200": { $ref: "#/components/responses/Ok" }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /api/admin/auth/reauth:
+    post:
+      tags: [admin-auth]
+      operationId: adminReauth
+      summary: 高危操作前重新验证身份（任何已登录管理员，Ruling-100）
+      description: |
+        已开启两步验证的账号必须给 totpCode，否则给 password；成功后 reauthUntil 之前高危接口不再返回 reauth_required。
+        验证失败返回 400 invalid_argument（不用 401，以免前端当成会话失效），计入频控并写审计。
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AdminReauthInput" }
+      responses:
+        "200":
+          description: 验证通过
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/AdminReauthResult" }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
         "429": { $ref: "#/components/responses/RateLimited" }
 
   /api/admin/dashboard:
@@ -248,6 +303,7 @@ paths:
                     properties:
                       data: { $ref: "#/components/schemas/AdminDashboard" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
   /api/admin/analytics/users:
     get:
       tags: [admin-dashboard]
@@ -354,6 +410,7 @@ paths:
                     properties:
                       data: { $ref: "#/components/schemas/AnalyticsBacklog" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
   /api/admin/permissions:
     get:
       tags: [admin-rbac]
@@ -397,7 +454,7 @@ paths:
     post:
       tags: [admin-rbac]
       operationId: createRole
-      summary: 新建角色（admin:write；权限须为操作者子集，R2）
+      summary: 新建角色（admin:write；权限码含超管专属码时 400，Ruling-95）
       parameters:
         - $ref: "#/components/parameters/CsrfHeader"
       requestBody:
@@ -413,7 +470,7 @@ paths:
               schema: { $ref: "#/components/schemas/RoleEnvelope" }
         "400": { $ref: "#/components/responses/InvalidArgument" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
-        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "403": { $ref: "#/components/responses/ReauthRequired" }
         "409": { $ref: "#/components/responses/Conflict" }
   /api/admin/roles/{id}:
     parameters:
@@ -421,7 +478,7 @@ paths:
     put:
       tags: [admin-rbac]
       operationId: updateRole
-      summary: 修改角色名称与权限码（admin:write；内置角色不可改，R2、R6）
+      summary: 修改角色名称与权限码（admin:write；权限码含超管专属码时 400；内置角色含四个预设均不可改，R6、Ruling-95）
       parameters:
         - $ref: "#/components/parameters/CsrfHeader"
       requestBody:
@@ -437,19 +494,19 @@ paths:
               schema: { $ref: "#/components/schemas/RoleEnvelope" }
         "400": { $ref: "#/components/responses/InvalidArgument" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
-        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "403": { $ref: "#/components/responses/ReauthRequired" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
     delete:
       tags: [admin-rbac]
       operationId: deleteRole
-      summary: 删除角色（admin:write；内置或被引用的角色不可删，R6）
+      summary: 删除角色（admin:write；内置角色含四个预设、或被引用的角色不可删，R6、Ruling-95）
       parameters:
         - $ref: "#/components/parameters/CsrfHeader"
       responses:
         "200": { $ref: "#/components/responses/Ok" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
-        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "403": { $ref: "#/components/responses/ReauthRequired" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
   /api/admin/admins:
@@ -484,7 +541,7 @@ paths:
     post:
       tags: [admin-rbac]
       operationId: createAdmin
-      summary: 新建管理员（admin:write；只能分配权限为自己子集的角色，R3）
+      summary: 新建管理员（admin:write，超管专属，Ruling-95）
       parameters:
         - $ref: "#/components/parameters/CsrfHeader"
       requestBody:
@@ -500,7 +557,7 @@ paths:
               schema: { $ref: "#/components/schemas/AdminEnvelope" }
         "400": { $ref: "#/components/responses/InvalidArgument" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
-        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "403": { $ref: "#/components/responses/ReauthRequired" }
         "409": { $ref: "#/components/responses/Conflict" }
   /api/admin/admins/{id}:
     parameters:
@@ -508,7 +565,7 @@ paths:
     put:
       tags: [admin-rbac]
       operationId: updateAdmin
-      summary: 修改管理员角色与禁用状态（admin:write；R3、R4、R5、R7）
+      summary: 修改管理员角色与禁用状态（admin:write；R4、R5、R7；目标是所有者时 403，Ruling-99）
       parameters:
         - $ref: "#/components/parameters/CsrfHeader"
       requestBody:
@@ -524,7 +581,7 @@ paths:
               schema: { $ref: "#/components/schemas/AdminEnvelope" }
         "400": { $ref: "#/components/responses/InvalidArgument" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
-        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "403": { $ref: "#/components/responses/ReauthRequired" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
   /api/admin/admins/{id}/password:
@@ -534,6 +591,7 @@ paths:
       tags: [admin-rbac]
       operationId: resetAdminPassword
       summary: 重置管理员密码（admin:write；对方全部会话失效，R7）
+      description: 对自己 409，改自己的密码用 `PUT /api/admin/auth/password`（Ruling-96）；目标是所有者时 403（Ruling-99）。
       parameters:
         - $ref: "#/components/parameters/CsrfHeader"
       requestBody:
@@ -549,21 +607,22 @@ paths:
         "200": { $ref: "#/components/responses/Ok" }
         "400": { $ref: "#/components/responses/InvalidArgument" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
-        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "403": { $ref: "#/components/responses/ReauthRequired" }
         "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
   /api/admin/admins/{id}/totp:
     parameters:
       - $ref: "#/components/parameters/IdPath"
     delete:
       tags: [admin-rbac]
       operationId: resetAdminTotp
-      summary: 清除他人的两步验证（遗失设备时；admin:write，R3、R4；对方全部会话失效）
+      summary: 清除他人的两步验证（遗失设备时；admin:write，R4；对方全部会话失效；目标是所有者时 403，Ruling-99）
       parameters:
         - $ref: "#/components/parameters/CsrfHeader"
       responses:
         "200": { $ref: "#/components/responses/Ok" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
-        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "403": { $ref: "#/components/responses/ReauthRequired" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
   /api/admin/audit-logs:
@@ -635,7 +694,7 @@ paths:
               schema: { $ref: "#/components/schemas/ServerEnvelope" }
         "400": { $ref: "#/components/responses/InvalidArgument" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
-        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "403": { $ref: "#/components/responses/ReauthRequired" }
         "409": { $ref: "#/components/responses/Conflict" }
         "502": { $ref: "#/components/responses/UpstreamUnavailable" }
   /api/admin/servers/trends:
@@ -756,7 +815,7 @@ paths:
               schema: { $ref: "#/components/schemas/ServerEnvelope" }
         "400": { $ref: "#/components/responses/InvalidArgument" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
-        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "403": { $ref: "#/components/responses/ReauthRequired" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
         "502": { $ref: "#/components/responses/UpstreamUnavailable" }
@@ -769,7 +828,7 @@ paths:
       responses:
         "200": { $ref: "#/components/responses/Ok" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
-        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "403": { $ref: "#/components/responses/ReauthRequired" }
         "404": { $ref: "#/components/responses/NotFound" }
   /api/admin/servers/{id}/chain-apply:
     parameters:
@@ -985,7 +1044,7 @@ paths:
                     properties:
                       data: { $ref: "#/components/schemas/NodeLink" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
-        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "403": { $ref: "#/components/responses/ReauthRequired" }
         "404": { $ref: "#/components/responses/NotFound" }
   /api/admin/chain-exits/{id}/test:
     parameters:
@@ -1228,7 +1287,7 @@ paths:
                     properties:
                       data: { $ref: "#/components/schemas/InboundPanelConfig" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
-        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "403": { $ref: "#/components/responses/ReauthRequired" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
         "502": { $ref: "#/components/responses/UpstreamUnavailable" }
@@ -1488,7 +1547,7 @@ paths:
                     properties:
                       data: { $ref: "#/components/schemas/InboundPresetPreview" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
-        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "403": { $ref: "#/components/responses/ReauthRequired" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
         "429": { $ref: "#/components/responses/RateLimited" }
@@ -1524,7 +1583,7 @@ paths:
                       data: { $ref: "#/components/schemas/HostTask" }
         "400": { $ref: "#/components/responses/InvalidArgument" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
-        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "403": { $ref: "#/components/responses/ReauthRequired" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
         "429": { $ref: "#/components/responses/RateLimited" }
@@ -1572,7 +1631,7 @@ paths:
                       data: { $ref: "#/components/schemas/SshCredential" }
         "400": { $ref: "#/components/responses/InvalidArgument" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
-        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "403": { $ref: "#/components/responses/ReauthRequired" }
         "409": { $ref: "#/components/responses/Conflict" }
   /api/admin/ssh-credentials/{id}:
     parameters:
@@ -1601,7 +1660,7 @@ paths:
                       data: { $ref: "#/components/schemas/SshCredential" }
         "400": { $ref: "#/components/responses/InvalidArgument" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
-        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "403": { $ref: "#/components/responses/ReauthRequired" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
     delete:
@@ -1613,7 +1672,7 @@ paths:
       responses:
         "200": { $ref: "#/components/responses/Ok" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
-        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "403": { $ref: "#/components/responses/ReauthRequired" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
   /api/admin/dns-accounts:
@@ -1660,7 +1719,7 @@ paths:
                       data: { $ref: "#/components/schemas/DnsAccount" }
         "400": { $ref: "#/components/responses/InvalidArgument" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
-        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "403": { $ref: "#/components/responses/ReauthRequired" }
         "409": { $ref: "#/components/responses/Conflict" }
         "502": { $ref: "#/components/responses/UpstreamUnavailable" }
   /api/admin/dns-accounts/{id}:
@@ -1690,7 +1749,7 @@ paths:
                       data: { $ref: "#/components/schemas/DnsAccount" }
         "400": { $ref: "#/components/responses/InvalidArgument" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
-        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "403": { $ref: "#/components/responses/ReauthRequired" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
         "502": { $ref: "#/components/responses/UpstreamUnavailable" }
@@ -1703,7 +1762,7 @@ paths:
       responses:
         "200": { $ref: "#/components/responses/Ok" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
-        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "403": { $ref: "#/components/responses/ReauthRequired" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
   /api/admin/server-hosts:
@@ -1753,8 +1812,9 @@ paths:
                         items: { $ref: "#/components/schemas/ServerHost" }
         "400": { $ref: "#/components/responses/InvalidArgument" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
-        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "403": { $ref: "#/components/responses/ReauthRequired" }
         "409": { $ref: "#/components/responses/Conflict" }
+        "429": { $ref: "#/components/responses/RateLimited" }
   /api/admin/server-hosts/test:
     post:
       tags: [admin-hosts]
@@ -1781,7 +1841,7 @@ paths:
                       data: { $ref: "#/components/schemas/HostDetection" }
         "400": { $ref: "#/components/responses/InvalidArgument" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
-        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "403": { $ref: "#/components/responses/ReauthRequired" }
         "429": { $ref: "#/components/responses/RateLimited" }
         "502": { $ref: "#/components/responses/UpstreamUnavailable" }
   /api/admin/server-hosts/{id}:
@@ -1829,9 +1889,10 @@ paths:
                       data: { $ref: "#/components/schemas/ServerHost" }
         "400": { $ref: "#/components/responses/InvalidArgument" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
-        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "403": { $ref: "#/components/responses/ReauthRequired" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
+        "429": { $ref: "#/components/responses/RateLimited" }
     delete:
       tags: [admin-hosts]
       operationId: deleteServerHost
@@ -1841,7 +1902,7 @@ paths:
       responses:
         "200": { $ref: "#/components/responses/Ok" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
-        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "403": { $ref: "#/components/responses/ReauthRequired" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
   /api/admin/server-hosts/{id}/reset-host-key:
@@ -1853,6 +1914,11 @@ paths:
       summary: 清空已固定的主机密钥，下次连接时重新记录（host:write）
       parameters:
         - $ref: "#/components/parameters/CsrfHeader"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ServerHostResetKeyInput" }
       responses:
         "200":
           description: 修改后的主机
@@ -1864,9 +1930,11 @@ paths:
                   - type: object
                     properties:
                       data: { $ref: "#/components/schemas/ServerHost" }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
-        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "403": { $ref: "#/components/responses/ReauthRequired" }
         "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/RateLimited" }
   /api/admin/server-hosts/{id}/tasks:
     parameters:
       - $ref: "#/components/parameters/IdPath"
@@ -1920,7 +1988,7 @@ paths:
                       data: { $ref: "#/components/schemas/HostTask" }
         "400": { $ref: "#/components/responses/InvalidArgument" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
-        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "403": { $ref: "#/components/responses/ReauthRequired" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
         "429": { $ref: "#/components/responses/RateLimited" }
@@ -1946,7 +2014,7 @@ paths:
                     properties:
                       data: { $ref: "#/components/schemas/PanelLogin" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
-        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "403": { $ref: "#/components/responses/ReauthRequired" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
         "429": { $ref: "#/components/responses/RateLimited" }
@@ -1993,7 +2061,7 @@ paths:
                     properties:
                       data: { $ref: "#/components/schemas/HostTask" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
-        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "403": { $ref: "#/components/responses/ReauthRequired" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
   /api/admin/servers/{id}/host:
@@ -2024,9 +2092,10 @@ paths:
                       data: { $ref: "#/components/schemas/ServerHost" }
         "400": { $ref: "#/components/responses/InvalidArgument" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
-        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "403": { $ref: "#/components/responses/ReauthRequired" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
+        "429": { $ref: "#/components/responses/RateLimited" }
   /api/admin/endpoints/{id}:
     parameters:
       - $ref: "#/components/parameters/IdPath"
@@ -2446,7 +2515,7 @@ paths:
       responses:
         "200": { $ref: "#/components/responses/Ok" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
-        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "403": { $ref: "#/components/responses/ReauthRequired" }
         "404": { $ref: "#/components/responses/NotFound" }
   /api/admin/users/{id}/plan:
     parameters:
@@ -2526,7 +2595,7 @@ paths:
         "200": { $ref: "#/components/responses/Ok" }
         "400": { $ref: "#/components/responses/InvalidArgument" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
-        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "403": { $ref: "#/components/responses/ReauthRequired" }
         "404": { $ref: "#/components/responses/NotFound" }
   /api/admin/users/{id}/provisions:
     parameters:
@@ -2589,7 +2658,7 @@ paths:
       responses:
         "200": { $ref: "#/components/responses/Ok" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
-        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "403": { $ref: "#/components/responses/ReauthRequired" }
         "404": { $ref: "#/components/responses/NotFound" }
   /api/admin/subscribe-logs:
     get:
@@ -2657,7 +2726,7 @@ paths:
                       data: { $ref: "#/components/schemas/Settings" }
         "400": { $ref: "#/components/responses/InvalidArgument" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
-        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "403": { $ref: "#/components/responses/ReauthRequired" }
   /api/admin/settings/test-mail:
     post:
       tags: [admin-settings]
@@ -3139,7 +3208,7 @@ paths:
                     properties:
                       data: { $ref: "#/components/schemas/SharedCredential" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
-        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "403": { $ref: "#/components/responses/ReauthRequired" }
         "404": { $ref: "#/components/responses/NotFound" }
   /api/admin/tickets:
     get:
@@ -3461,7 +3530,7 @@ paths:
                       data: { $ref: "#/components/schemas/TopupCodeBatch" }
         "400": { $ref: "#/components/responses/InvalidArgument" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
-        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "403": { $ref: "#/components/responses/ReauthRequired" }
   /api/admin/topup-codes/{id}:
     parameters:
       - $ref: "#/components/parameters/IdPath"
@@ -3525,7 +3594,7 @@ paths:
                     properties:
                       data: { $ref: "#/components/schemas/TopupCodeSecret" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
-        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "403": { $ref: "#/components/responses/ReauthRequired" }
         "404": { $ref: "#/components/responses/NotFound" }
   /api/admin/orders:
     get:
@@ -3697,7 +3766,7 @@ paths:
                       data: { $ref: "#/components/schemas/User" }
         "400": { $ref: "#/components/responses/InvalidArgument" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
-        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "403": { $ref: "#/components/responses/ReauthRequired" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
   /api/admin/users/{id}/impersonate:
@@ -3724,7 +3793,7 @@ paths:
                     properties:
                       data: { $ref: "#/components/schemas/ImpersonateTicket" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
-        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "403": { $ref: "#/components/responses/ReauthRequired" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
   /api/user/auth/login:
@@ -5209,7 +5278,15 @@ components:
         application/json:
           schema: { $ref: "#/components/schemas/Envelope" }
     PermissionDenied:
-      description: permission_denied（缺权限码或 CSRF 校验失败）
+      description: permission_denied（缺权限码或 CSRF 校验失败）；管理端接口另可能返回 totp_setup_required（超管未开启两步验证，查看会话、登出、生成与确认 TOTP、改自己密码除外，Ruling-98）
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Envelope" }
+    ReauthRequired:
+      description: |
+        高危接口（Ruling-100，清单见 docs/03 §4.4）的 403：reauth_required（二次验证已过期，先调 POST /api/admin/auth/reauth 再重发原请求）、
+        totp_setup_required（超管未开启两步验证，Ruling-98）或 permission_denied（缺权限码或 CSRF 校验失败）。
+        判定顺序：认证 → CSRF → 两步验证绑定 → 权限码 → 二次验证，缺权限的人不会被要求二次验证。
       content:
         application/json:
           schema: { $ref: "#/components/schemas/Envelope" }
@@ -5276,7 +5353,7 @@ components:
       properties:
         code:
           type: string
-          description: "\"0\" 表示成功，其余取值见 docs/03 §5"
+          description: "\"0\" 表示成功，其余取值见 docs/03 §5；管理端 403 另有 reauth_required（Ruling-100）、totp_setup_required（Ruling-98）"
         message:
           type: string
         data: {}
@@ -5308,6 +5385,23 @@ components:
       properties:
         secret: { type: string, description: Base32 密钥，供无法扫码时手动输入 }
         otpauthUri: { type: string, description: "otpauth://totp/... 地址，前端渲染为二维码" }
+    AdminPasswordChangeInput:
+      type: object
+      required: [oldPassword, newPassword]
+      properties:
+        oldPassword: { type: string, minLength: 1, maxLength: 128 }
+        newPassword: { $ref: "#/components/schemas/Password" }
+    AdminReauthInput:
+      type: object
+      description: 二选一：已开启两步验证的账号必须给 totpCode，否则给 password（Ruling-100）
+      properties:
+        password: { type: string, minLength: 1, maxLength: 128 }
+        totpCode: { $ref: "#/components/schemas/TotpCode" }
+    AdminReauthResult:
+      type: object
+      required: [reauthUntil]
+      properties:
+        reauthUntil: { type: string, format: date-time, description: 在此之前高危接口不再要求重新验证 }
     AdminBrief:
       type: object
       required: [id, username]
@@ -5316,11 +5410,16 @@ components:
         username: { type: string }
     Session:
       type: object
-      required: [admin, permissions, csrfToken, totpEnabled, menuOrder]
+      required: [admin, permissions, csrfToken, totpEnabled, menuOrder, isSuperAdmin, isOwner, totpSetupRequired]
       properties:
         admin: { $ref: "#/components/schemas/AdminBrief" }
         totpEnabled: { type: boolean }
         menuOrder: { $ref: "#/components/schemas/MenuOrder", description: "管理端侧栏菜单顺序（系统设置 menu.admin，0.7.3，Ruling-57）；空数组 = 默认顺序" }
+        isSuperAdmin: { type: boolean, description: 持有 super_admin 角色（Ruling-95） }
+        isOwner: { type: boolean, description: 是否所有者（Ruling-99） }
+        totpSetupRequired:
+          type: boolean
+          description: 超管未开启两步验证；为 true 时除豁免接口外都返回 403 totp_setup_required，管理端停在账号安全页（Ruling-98）
         permissions:
           type: array
           description: 有效权限码（super_admin 返回全部）
@@ -5334,10 +5433,11 @@ components:
             data: { $ref: "#/components/schemas/Session" }
     Permission:
       type: object
-      required: [code, name]
+      required: [code, name, superOnly]
       properties:
         code: { type: string }
         name: { type: string }
+        superOnly: { type: boolean, description: 超管专属，不能放进任何其它角色（Ruling-95） }
     Role:
       type: object
       required: [id, code, name, isBuiltin, permissions]
@@ -5345,7 +5445,7 @@ components:
         id: { type: integer, format: int64 }
         code: { type: string }
         name: { type: string }
-        isBuiltin: { type: boolean }
+        isBuiltin: { type: boolean, description: "内置角色：super_admin 与四个预设 operator / finance / ops / partner；不可改不可删，预设角色的 permissions 由代码定义（Ruling-95）" }
         permissions:
           type: array
           items: { type: string }
@@ -5370,12 +5470,13 @@ components:
             data: { $ref: "#/components/schemas/Role" }
     Admin:
       type: object
-      required: [id, username, isDisabled, totpEnabled, roles, createdAt]
+      required: [id, username, isDisabled, totpEnabled, isOwner, roles, createdAt]
       properties:
         id: { type: integer, format: int64 }
         username: { type: string }
         isDisabled: { type: boolean }
         totpEnabled: { type: boolean }
+        isOwner: { type: boolean, description: 所有者，不能经管理接口禁用、改角色、重置密码或两步验证（Ruling-99） }
         roles:
           type: array
           items: { type: string, description: 角色 code }
@@ -5432,7 +5533,7 @@ components:
       properties:
         providerType: { type: string, enum: [xui] }
         baseUrl: { $ref: "#/components/schemas/PanelBaseUrl" }
-        apiToken: { type: string, maxLength: 512, description: 只写；更新时留空表示沿用原值 }
+        apiToken: { type: string, maxLength: 512, description: 只写；更新时留空表示沿用原值，但面板类型或面板地址有变化时必填（Ruling-97） }
         tlsMode: { $ref: "#/components/schemas/TlsMode" }
         certPinSha256: { type: string, maxLength: 128 }
     ServerInput:
@@ -5865,11 +5966,13 @@ components:
         panelPort: { type: [integer, "null"], minimum: 1, maximum: 65535 }
         dnsAccountId: { type: [integer, "null"], format: int64, minimum: 1, description: null 或不带表示不用 DNS 账号 }
         domain: { $ref: "#/components/schemas/HostDomain" }
+        credentialSecret: { type: string, maxLength: 255, writeOnly: true, description: "所选凭据的密码，再输入一次用于比对；凭据是 password 类型、且这个（地址，端口）还没用过该凭据时必填（Ruling-97）" }
     ServerHostBatchInput:
       type: object
       required: [credentialId, providerType, hosts]
       properties:
         credentialId: { type: integer, format: int64, minimum: 1 }
+        credentialSecret: { type: string, maxLength: 255, writeOnly: true, description: "所选凭据的密码，再输入一次用于比对；凭据是 password 类型、且本批中有（地址，端口）还没用过该凭据时必填，整批比对一次（Ruling-97）" }
         sshPort: { type: integer, minimum: 1, maximum: 65535, default: 22 }
         providerType: { type: string, enum: [xui] }
         panelPort: { type: [integer, "null"], minimum: 1, maximum: 65535, description: 安装时用的面板端口，整批相同；null 为各自随机 }
@@ -5894,6 +5997,7 @@ components:
         sshPort: { type: integer, minimum: 1, maximum: 65535, default: 22 }
         credentialId: { type: integer, format: int64, minimum: 1 }
         providerType: { type: string, enum: [xui] }
+        credentialSecret: { type: string, maxLength: 255, writeOnly: true, description: "所选凭据的密码，再输入一次用于比对；凭据是 password 类型、且这个（地址，端口）还没用过该凭据时必填（Ruling-97）" }
     ServerHostBindInput:
       type: object
       required: [address, credentialId]
@@ -5901,6 +6005,11 @@ components:
         address: { $ref: "#/components/schemas/HostAddress" }
         sshPort: { type: integer, minimum: 1, maximum: 65535, default: 22 }
         credentialId: { type: integer, format: int64, minimum: 1 }
+        credentialSecret: { type: string, maxLength: 255, writeOnly: true, description: "所选凭据的密码，再输入一次用于比对；凭据是 password 类型、且这个（地址，端口）还没用过该凭据时必填（Ruling-97）" }
+    ServerHostResetKeyInput:
+      type: object
+      properties:
+        credentialSecret: { type: string, maxLength: 255, writeOnly: true, description: "该主机所用凭据的密码，再输入一次用于比对；凭据是 password 类型时必填——重置后下次连接接受任何主机密钥，等同该（地址，端口）首次使用该凭据（Ruling-97）" }
     HostDetection:
       type: object
       required: [hostKeySha256, osId, arch, isPrivileged, panelState, panelVersion, plan, reason]

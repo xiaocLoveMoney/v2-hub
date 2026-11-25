@@ -15,14 +15,17 @@ CREATE TABLE admin (
     last_login_at   TIMESTAMPTZ,
     created_at      TIMESTAMPTZ  NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ  NOT NULL DEFAULT now(),
-    CONSTRAINT uk_admin_username UNIQUE (username)
+    is_owner        BOOLEAN      NOT NULL DEFAULT FALSE, -- 所有者（Ruling-99）：至多一个、须为启用的 super_admin，只能在服务器上指定
+    CONSTRAINT uk_admin_username UNIQUE (username),
+    CONSTRAINT ck_admin_owner_enabled CHECK (NOT (is_owner AND is_disabled))
 );
+CREATE UNIQUE INDEX uk_admin_owner ON admin (is_owner) WHERE is_owner;
 
 CREATE TABLE role (
     id          BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    code        VARCHAR(64)  NOT NULL,               -- 如 super_admin / operator / auditor
+    code        VARCHAR(64)  NOT NULL,               -- 内置角色见种子段；自定义角色由超管创建
     name        VARCHAR(64)  NOT NULL,
-    is_builtin  BOOLEAN      NOT NULL DEFAULT FALSE, -- 内置角色不可删除
+    is_builtin  BOOLEAN      NOT NULL DEFAULT FALSE, -- 内置角色（super_admin 与四个预设，Ruling-95）不可改不可删，权限由代码定义
     created_at  TIMESTAMPTZ  NOT NULL DEFAULT now(),
     updated_at  TIMESTAMPTZ  NOT NULL DEFAULT now(),
     CONSTRAINT uk_role_code UNIQUE (code)
@@ -61,6 +64,7 @@ CREATE TABLE admin_session (
     expires_at    TIMESTAMPTZ  NOT NULL,               -- 绝对过期
     idle_until    TIMESTAMPTZ  NOT NULL,               -- 空闲过期，请求时顺延
     created_at    TIMESTAMPTZ  NOT NULL DEFAULT now(),
+    reauth_until  TIMESTAMPTZ,                         -- 二次验证有效期（Ruling-100）；NULL 或已过期 = 高危操作前须重新验证
     CONSTRAINT uk_admin_session_token_hash UNIQUE (token_hash)
 );
 CREATE INDEX idx_admin_session_admin_id ON admin_session (admin_id);
@@ -989,8 +993,14 @@ CREATE INDEX idx_host_task_queued ON host_task (id) WHERE status = 'queued';
 -- 种子数据 ---------------------------------------------------------------------
 -- 内置角色 super_admin 隐式拥有全部权限码（docs/03 §4），不写 role_permission。
 INSERT INTO role (code, name, is_builtin) VALUES ('super_admin', '超级管理员', TRUE);
+-- 四个预设角色（Ruling-95）：权限由代码定义（partner = 全部权限码减超管专属），同样不写 role_permission。
+INSERT INTO role (code, name, is_builtin) VALUES
+    ('operator', '客服运营', TRUE),
+    ('finance',  '财务',     TRUE),
+    ('ops',      '运维',     TRUE),
+    ('partner',  '合伙人',   TRUE);
 
--- 权限码清单与 docs/03 §4 权限码表逐行对应。
+-- 权限码清单与 docs/03 §4 权限码表逐行对应。admin:* 与 host:* 超管专属，不能放进其它角色（Ruling-95）。
 INSERT INTO permission (code, name) VALUES
     ('admin:read',   '查看管理员与角色'),
     ('admin:write',  '管理管理员与角色'),
