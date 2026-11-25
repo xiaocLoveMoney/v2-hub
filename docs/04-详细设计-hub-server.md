@@ -81,6 +81,25 @@ type CoreLiveApplier interface { AppliesCoreTemplateLive(ctx) (bool, error) }
 - 已存密钥不外借：`PanelService.UpdateServer` 在解密已存 token 之前比较面板类型与规范化后的面板地址（与保存时同一个 `panel.ParseBaseURL`），变了而没带新 token 即 400，与是否停用无关；主机任务内部的 `ReplaceServerConn` 不受影响。
   `service/host_secret_confirm.go` 做密码凭据的确认：凭据是 `password` 类型且（凭据，地址，端口）在 `server_host` 里没有时（修改主机为“三元组与本行原值不同”，重置主机密钥为“一律”）须带 `credentialSecret`，解密后 `subtle.ConstantTimeCompare`，输错按管理员计入频控（参数同登录频控），审计只记 `secretConfirmed`。
 
+二级代理（docs/03 §5.23，Ruling-101 – Ruling-104）的分工：
+- 账号与鉴权：`admin.kind`（`staff` / `agent`）。`loadPrincipal` 遇到非 `staff` 一律按代理处理：权限集合为空、`IsSuperAdmin` 为假，不读 `admin_role`；`AdminPrincipal.IsAgent()`、`Can()` 对代理恒假。
+  `requireAdmin` 在 CSRF 之后、R10 之前判账号类型：代理只放行挂了 `withSelf()` 的本人接口（查看会话、登出、两步验证 setup / enable / disable、改自己密码、二次验证），其余一律 403，权限码为空串的 `/dashboard`、`/analytics/backlog` 也一样（默认拒绝，新增路由不挂 `withSelf` 就对代理不可见）。
+  代理专用接口经 `requireAgent(next, opts...)`：认证 → CSRF → 只放行代理（员工含超管 403）→ `withFresh` 时判二次验证 → 非 GET/HEAD 记一次写操作频控（`AgentService.AllowWrite`，`ratelimit.FailureGuard` 按代理账号，配置 `agent.writeRatePerHour`，超出 429）。
+  `router_policy_test.go` 另核对：`withSelf` 的集合等于本人接口清单；`/api/admin/agent/*` 的路由集合与 yaml 完全相等且都经 `requireAgent`；高危清单含代理侧的删除用户、重置用户密码、清除用户两步验证与超管侧的代理写操作、用户划转。
+- 归属：代理侧查询全部在 `dao/queries/agent.sql`（`Agent*` 前缀），每条都在 SQL 里带 `agent_id = 当前代理`，代理 id 只取自会话（`service/agent.go` 的 `agentScope`）；`agent_id` 参数为 NULL 时匹配不到任何行。
+  按 id 的写操作在同一事务里先 `AgentLockUser` / `AgentLockTicket` / `AgentLockInviteCode`（`… WHERE id = $1 AND agent_id = $2 … FOR UPDATE`）锁定并确认归属，查不到一律 404，再调用与员工共用的事务内函数：
+  `UserService.updateUserTx`、`assignPlanTx`、`deleteUserTx`、`resetUserPasswordTx`、`clearUserTOTPTx`、`rotateSubscriptionTx`（从原方法里拆出，员工接口行为不变）。
+  `AgentLockUser`、`AgentLockPlan`、`AgentListOrders` 的列与 `GetUserQuota`、`GetPlan`、`ListOrders` 逐字段相同，service 层直接做类型转换复用现有的转换函数。
+- 配额：`agent_profile` 行是配额的锁，开通 / 续期 / 新建 / 经邀请码注册都先 `LockAgentProfile`（`FOR UPDATE`）再锁用户行，顺序固定；注册时锁顺序是邀请码 → 配额行。
+  扣减量 `agentPoolCost`（纯函数，周 7 天、月 30 天向上取整，溢出视为算不出、按 400 拒绝）；白名单套餐用 `AgentLockPlan`（`FOR SHARE`）取，流量或时长为 0 即 400；`chargePool` 判断剩余并以带条件的 `UPDATE` 扣减（兜底不超卖），不够返回 `agent_pool_insufficient`，`data` 为 `{poolCost, poolRemaining}`；每次扣减写一条 `agent_allocation`。
+  用户数上限按 `CountAgentUsers`（名下未删除）判断：代理新建 409 `agent_user_limit`，注册时按邀请码无效处理；超管划转不看上限。
+- 注册：`useInviteCode` 返回 `inviteUse{CodeID, InviterID, AgentID}`；代理码 `AgentID` 取码上的 `agent_id`、邀请人置 0（不返利），个人码 `AgentID` 取邀请人的 `agent_id`；有归属时 `checkAgentAcceptsSignup` 锁配额行判上限（代理码另判启用）。`Register` 有归属时不送 `register.planId`。
+- 超管侧：`service/agent_admin.go`（新建 / 修改 / 列表 / 详情 / 开通记录 / 划转），白名单 `checkWhitelist` 只收流量与时长都有限的套餐；停用代理即 `DeleteAdminSessionsByAdmin`。
+  `ListAdmins` / `CountAdmins` 只查 `kind = 'staff'`；`UpdateAdmin` 对代理 409；R5 的计数与 `SetAdminOwner` 只认员工，`TransferOwner` 拒绝代理。员工的用户列表带 `agent` 并可按 `agentId` 筛选，邀请码列表的 `kind` 多了 `agent` 并可按 `agentId` 筛选。
+- 工单、订单、流水：代理侧另写查询，员工回复的账号名在 SQL 里就置空（`CASE WHEN m.admin_id = 当前代理`），流水不选操作人；订单与流水只连现存（`deleted_at IS NULL`）的名下用户。
+- 测试：`service/agent_test.go`（扣减量表驱动含溢出、调低判定、并发开通不超卖、并发新建 / 注册不突破上限、注册归属、超管侧规则、写操作频控）；
+  `api/agent_test.go` 的越权矩阵从 `router.go` 源码取路由清单：代理遍历全部员工路由得 403、员工遍历全部代理接口得 403、代理对每个按 id 的代理接口传他人 / 平台 / 待删除 / 不存在的 id 得 404 且库快照不变（之后用自己的对象再调一遍确认能成功）、各列表接口只含名下数据；新增路由自动进入矩阵，新资源类型或未登记请求体的写接口会让用例失败。
+
 M9 链式改造（docs/03 §5.18、§5.19、§5.21）在 `internal/service` 里的分工：`chain.go` 管规则与用户出口的增删改与调顺序，
 `chain_resolve.go` 是生效计算的纯函数（哪条规则在哪个起飞入站上生效），`chain_guard.go` 管用户出口用于服务端链式的防护
 （公网地址判定、域名解析与固定 IP、字段白名单、防环；DNS 解析走可注入的接口，单测不发真实查询），
@@ -119,6 +138,7 @@ M11 SSH 托管（docs/03 §5.22）的分工：`manager/remote` 只管“连上�
 - 首个超管：`make admin-create USERNAME=<名称>`，密码终端无回显输入或经管道传入一行；没有所有者时它即所有者。
 - 管理员恢复（只在服务器上）：`make admin-owner-set USERNAME=<名称>`、`make admin-totp-reset USERNAME=<名称>`、`make admin-password-reset USERNAME=<名称>`（生产用法见 docs/02 §6）。
 - `auth.reauthWindow`：高危操作二次验证的有效期，默认 `5m`，须大于 0。没有关闭超管强制两步验证或二次验证的配置项（Ruling-98）。
+- `agent.writeRatePerHour`：每个代理账号的写操作每小时合计上限，默认 `120`，须大于 0（docs/03 §5.23，Ruling-104）。
 - `make run / test / build / lint`。
 
 ## 6. 测试策略
