@@ -56,8 +56,10 @@ const (
 var endUserNamePattern = regexp.MustCompile(`^[A-Za-z0-9_.-]{3,64}$`)
 
 const (
-	msgBadUsername   = "用户名须为 3–64 位字母、数字或 _ . -"
-	msgUsernameTaken = "用户名已存在"
+	msgBadUsername    = "用户名须为 3–64 位字母、数字或 _ . -"
+	msgUsernameTaken  = "用户名已存在"
+	msgBadAgentFilter = "agentId 须为正整数"
+	msgUserDisabled   = "用户已停用，请先启用"
 )
 
 // UserConfig 是用户与下发的运行参数。
@@ -449,6 +451,9 @@ type User struct {
 	// Balance 是余额（分）；AutoRenew 表示开了扣余额自动续费（docs/03 §5.14、§5.16）。
 	Balance   int64
 	AutoRenew bool
+	// AgentID 为 nil 表示平台用户，否则是所属代理的管理员 id（Ruling-102）；AgentUsername 是该代理的用户名。
+	AgentID       *int64
+	AgentUsername string
 }
 
 // UserFilter 是用户列表的筛选条件。
@@ -456,6 +461,8 @@ type UserFilter struct {
 	Keyword string
 	Status  string
 	PlanID  int64
+	// AgentID 非 0 时只看该代理名下的用户（员工的用户列表筛选，Ruling-102）。
+	AgentID int64
 }
 
 // clientCredential 是用户在各面板 client 上共用的凭据，加密存储（关联数据 end_user:<id>:client）。
@@ -585,6 +592,7 @@ type newUserSpec struct {
 	PlanID        int64 // 0 = 不分配套餐
 	InvitedBy     int64 // 0 = 没有邀请人
 	InviteCodeID  int64
+	AgentID       int64 // 0 = 平台用户；否则归该代理名下（Ruling-102）
 }
 
 // createUserTx 在事务里建用户：生成面板凭据并加密保存，按套餐写入额度。
@@ -613,6 +621,7 @@ func (s *UserService) createUserTx(ctx context.Context, q *sqlcgen.Queries, spec
 		EmailVerifiedAt: pgtype.Timestamptz{Time: now, Valid: spec.Email != "" && spec.EmailVerified},
 		InvitedBy:       int8Arg(spec.InvitedBy),
 		InviteCodeID:    int8Arg(spec.InviteCodeID),
+		AgentID:         int8Arg(spec.AgentID),
 	})
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -731,6 +740,10 @@ func userFromRow(r sqlcgen.ListUsersRow) User {
 		id := r.PlanID.Int64
 		u.PlanID = &id
 	}
+	if r.AgentID.Valid {
+		id := r.AgentID.Int64
+		u.AgentID, u.AgentUsername = &id, r.AgentUsername
+	}
 	return u
 }
 
@@ -755,7 +768,12 @@ func (s *UserService) ListUsers(ctx context.Context, f UserFilter, page, size in
 	if utf8.RuneCountInString(f.Keyword) > maxPlanNameLen {
 		return nil, 0, newError(CodeInvalidArgument, "关键字过长")
 	}
-	total, err := s.q.CountUsers(ctx, sqlcgen.CountUsersParams{Keyword: textArg(f.Keyword), Status: textArg(f.Status), PlanID: int8Arg(f.PlanID)})
+	if f.AgentID < 0 {
+		return nil, 0, newError(CodeInvalidArgument, msgBadAgentFilter)
+	}
+	total, err := s.q.CountUsers(ctx, sqlcgen.CountUsersParams{
+		Keyword: textArg(f.Keyword), Status: textArg(f.Status), PlanID: int8Arg(f.PlanID), AgentID: int8Arg(f.AgentID),
+	})
 	if err != nil {
 		return nil, 0, fmt.Errorf("count users: %w", err)
 	}
@@ -763,7 +781,7 @@ func (s *UserService) ListUsers(ctx context.Context, f UserFilter, page, size in
 		return []User{}, 0, nil
 	}
 	rows, err := s.q.ListUsers(ctx, sqlcgen.ListUsersParams{
-		Keyword: textArg(f.Keyword), Status: textArg(f.Status), PlanID: int8Arg(f.PlanID),
+		Keyword: textArg(f.Keyword), Status: textArg(f.Status), PlanID: int8Arg(f.PlanID), AgentID: int8Arg(f.AgentID),
 		RowLimit: int32(size), RowOffset: int32((page - 1) * size),
 	})
 	if err != nil {
@@ -845,21 +863,27 @@ func (s *UserService) UpdateUser(ctx context.Context, actor *AdminPrincipal, id 
 				return err
 			}
 		}
-		qt := quotaFromRow(row)
-		qt.Disabled = in.IsDisabled
-		status := qt.Status(now)
-		if err := saveQuota(ctx, q, id, row.PlanID, qt, status); err != nil {
-			return err
-		}
-		if _, err := q.UpdateUserRemark(ctx, sqlcgen.UpdateUserRemarkParams{ID: id, Remark: in.Remark}); err != nil {
-			return fmt.Errorf("update user %d remark: %w", id, err)
-		}
-		return s.afterQuotaChange(ctx, q, actor, id, ActionUserUpdate, ip, map[string]any{"isDisabled": in.IsDisabled}, row.Status != status)
+		return s.updateUserTx(ctx, q, actor, row, in.Remark, in.IsDisabled, now, ip)
 	})
 	if err != nil {
 		return nil, err
 	}
 	return s.GetUser(ctx, id)
+}
+
+// updateUserTx 改备注与启停并记审计（员工与代理共用，Ruling-101）；调用方须已在同一事务里锁住用户行（row）。
+func (s *UserService) updateUserTx(ctx context.Context, q *sqlcgen.Queries, actor *AdminPrincipal, row sqlcgen.GetUserQuotaRow,
+	remark string, disabled bool, now time.Time, ip *netip.Addr) error {
+	qt := quotaFromRow(row)
+	qt.Disabled = disabled
+	status := qt.Status(now)
+	if err := saveQuota(ctx, q, row.ID, row.PlanID, qt, status); err != nil {
+		return err
+	}
+	if _, err := q.UpdateUserRemark(ctx, sqlcgen.UpdateUserRemarkParams{ID: row.ID, Remark: remark}); err != nil {
+		return fmt.Errorf("update user %d remark: %w", row.ID, err)
+	}
+	return s.afterQuotaChange(ctx, q, actor, row.ID, ActionUserUpdate, ip, map[string]any{"isDisabled": disabled}, row.Status != status)
 }
 
 // afterQuotaChange 记审计；需要改面板时把该用户的下发标为待同步并触发对账。
@@ -882,23 +906,30 @@ func (s *UserService) AssignPlan(ctx context.Context, actor *AdminPrincipal, id,
 			return err
 		}
 		if row.IsDisabled {
-			return newError(CodeConflict, "用户已停用，请先启用")
+			return newError(CodeConflict, msgUserDisabled)
 		}
 		p, err := s.loadPlan(ctx, q, planID)
 		if err != nil {
 			return err
 		}
-		qt := quotaFromRow(row)
-		qt.ApplyPlan(planQuotaFromRow(p), now)
-		if err := saveQuota(ctx, q, id, pgtype.Int8{Int64: p.ID, Valid: true}, qt, qt.Status(now)); err != nil {
-			return err
-		}
-		return s.afterQuotaChange(ctx, q, actor, id, ActionUserPlan, ip, map[string]any{"planId": planID, "planName": p.Name}, true)
+		return s.assignPlanTx(ctx, q, actor, row, p, now, ip)
 	})
 	if err != nil {
 		return nil, err
 	}
 	return s.GetUser(ctx, id)
+}
+
+// assignPlanTx 按套餐写入额度（未到期的顺延、已到期的从 now 起算、已用清零，U6）并记审计；员工与代理共用（Ruling-101）。
+// 调用方须已在同一事务里锁住用户行（row）并确认未停用。
+func (s *UserService) assignPlanTx(ctx context.Context, q *sqlcgen.Queries, actor *AdminPrincipal, row sqlcgen.GetUserQuotaRow,
+	p sqlcgen.GetPlanRow, now time.Time, ip *netip.Addr) error {
+	qt := quotaFromRow(row)
+	qt.ApplyPlan(planQuotaFromRow(p), now)
+	if err := saveQuota(ctx, q, row.ID, pgtype.Int8{Int64: p.ID, Valid: true}, qt, qt.Status(now)); err != nil {
+		return err
+	}
+	return s.afterQuotaChange(ctx, q, actor, row.ID, ActionUserPlan, ip, map[string]any{"planId": p.ID, "planName": p.Name}, true)
 }
 
 // UserQuotaInput 是管理员直接改配额的输入（U7），整体替换。
@@ -968,19 +999,25 @@ func (s *UserService) ResetUserPassword(ctx context.Context, actor *AdminPrincip
 		return fmt.Errorf("hash user password: %w", err)
 	}
 	return s.inTx(ctx, func(q *sqlcgen.Queries) error {
-		n, err := q.SetUserPasswordHash(ctx, sqlcgen.SetUserPasswordHashParams{ID: id, PasswordHash: hash})
-		if err != nil {
-			return fmt.Errorf("set user %d password: %w", id, err)
-		}
-		if n == 0 {
-			return newError(CodeNotFound, msgUserNotFound)
-		}
-		// 管理员重置密码后该用户全部会话失效（docs/03 §5.3）
-		if err := q.DeleteUserSessionsByUser(ctx, id); err != nil {
-			return fmt.Errorf("revoke sessions of user %d: %w", id, err)
-		}
-		return writeAudit(ctx, q, adminAudit(actor, ActionUserPasswordReset, targetUser, id, ip, nil))
+		return resetUserPasswordTx(ctx, q, actor, id, hash, ip)
 	})
+}
+
+// resetUserPasswordTx 写入新密码哈希、吊销该用户全部会话并记审计（员工与代理共用，Ruling-101）。
+// 用户不存在或待删除返回 CodeNotFound。代理侧调用前须已用 AgentLockUser 锁定并确认归属。
+func resetUserPasswordTx(ctx context.Context, q *sqlcgen.Queries, actor *AdminPrincipal, id int64, hash string, ip *netip.Addr) error {
+	n, err := q.SetUserPasswordHash(ctx, sqlcgen.SetUserPasswordHashParams{ID: id, PasswordHash: hash})
+	if err != nil {
+		return fmt.Errorf("set user %d password: %w", id, err)
+	}
+	if n == 0 {
+		return newError(CodeNotFound, msgUserNotFound)
+	}
+	// 管理员重置密码后该用户全部会话失效（docs/03 §5.3）
+	if err := q.DeleteUserSessionsByUser(ctx, id); err != nil {
+		return fmt.Errorf("revoke sessions of user %d: %w", id, err)
+	}
+	return writeAudit(ctx, q, adminAudit(actor, ActionUserPasswordReset, targetUser, id, ip, nil))
 }
 
 // DeleteUser 把用户标为待删除；对账删掉各面板 client 后再删记录（docs/03 §5.2）。
@@ -994,44 +1031,55 @@ func (s *UserService) deleteUser(ctx context.Context, id int64, audit AuditEntry
 	var servers []int64
 	err := s.inTx(ctx, func(q *sqlcgen.Queries) error {
 		var err error
-		if servers, err = q.ListUserServerIDs(ctx, id); err != nil {
-			return fmt.Errorf("list servers of user %d: %w", id, err)
-		}
-		// 剩余余额作废并留一条流水，之后订单与流水保留、user_id 置空（Ruling-32）
-		if err := forfeitBalance(ctx, q, id, s.now()); err != nil {
-			return err
-		}
-		n, err := q.MarkUserDeleted(ctx, id)
-		if err != nil {
-			return fmt.Errorf("mark user %d deleted: %w", id, err)
-		}
-		if n == 0 {
-			return newError(CodeNotFound, msgUserNotFound)
-		}
-		if err := q.DeleteUserSessionsByUser(ctx, id); err != nil {
-			return fmt.Errorf("revoke sessions of user %d: %w", id, err)
-		}
-		if err := q.DeleteUnclosedTicketsByUser(ctx, id); err != nil {
-			return fmt.Errorf("delete open tickets of user %d: %w", id, err)
-		}
-		// 链式规则与用户出口随用户删除（docs/03 §5.18 生命周期）；先删规则，再删它引用的出口
-		if err := q.DeleteChainRoutesByUser(ctx, id); err != nil {
-			return fmt.Errorf("delete chain routes of user %d: %w", id, err)
-		}
-		if err := q.DeleteChainExitsByUser(ctx, id); err != nil {
-			return fmt.Errorf("delete chain exits of user %d: %w", id, err)
-		}
-		// 没有任何面板 client 的用户不会再有对账来收尾，这里当场清除；有 client 的等对账删完后清除
-		if _, err := q.PurgeDeletedUsers(ctx); err != nil {
-			return fmt.Errorf("purge deleted users: %w", err)
-		}
-		return writeAudit(ctx, q, audit)
+		servers, err = s.deleteUserTx(ctx, q, id, audit)
+		return err
 	})
 	if err != nil {
 		return err
 	}
 	s.reconcileServers(ctx, servers)
 	return nil
+}
+
+// deleteUserTx 是 deleteUser 的事务内部分（员工、本人注销与代理共用，Ruling-101），返回提交后需要对账的服务器。
+// 用户不存在或已待删除返回 CodeNotFound。代理侧调用前须已用 AgentLockUser 锁定并确认归属。
+func (s *UserService) deleteUserTx(ctx context.Context, q *sqlcgen.Queries, id int64, audit AuditEntry) ([]int64, error) {
+	servers, err := q.ListUserServerIDs(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("list servers of user %d: %w", id, err)
+	}
+	// 剩余余额作废并留一条流水，之后订单与流水保留、user_id 置空（Ruling-32）
+	if err := forfeitBalance(ctx, q, id, s.now()); err != nil {
+		return nil, err
+	}
+	n, err := q.MarkUserDeleted(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("mark user %d deleted: %w", id, err)
+	}
+	if n == 0 {
+		return nil, newError(CodeNotFound, msgUserNotFound)
+	}
+	if err := q.DeleteUserSessionsByUser(ctx, id); err != nil {
+		return nil, fmt.Errorf("revoke sessions of user %d: %w", id, err)
+	}
+	if err := q.DeleteUnclosedTicketsByUser(ctx, id); err != nil {
+		return nil, fmt.Errorf("delete open tickets of user %d: %w", id, err)
+	}
+	// 链式规则与用户出口随用户删除（docs/03 §5.18 生命周期）；先删规则，再删它引用的出口
+	if err := q.DeleteChainRoutesByUser(ctx, id); err != nil {
+		return nil, fmt.Errorf("delete chain routes of user %d: %w", id, err)
+	}
+	if err := q.DeleteChainExitsByUser(ctx, id); err != nil {
+		return nil, fmt.Errorf("delete chain exits of user %d: %w", id, err)
+	}
+	// 没有任何面板 client 的用户不会再有对账来收尾，这里当场清除；有 client 的等对账删完后清除
+	if _, err := q.PurgeDeletedUsers(ctx); err != nil {
+		return nil, fmt.Errorf("purge deleted users: %w", err)
+	}
+	if err := writeAudit(ctx, q, audit); err != nil {
+		return nil, err
+	}
+	return servers, nil
 }
 
 // Provision 是用户在某台面板上的下发状态。

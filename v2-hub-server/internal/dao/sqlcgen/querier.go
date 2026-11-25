@@ -11,6 +11,8 @@ import (
 )
 
 type Querier interface {
+	// 扣流量池；超过总量时不更新（调用方已在同一事务里锁行并判断过，这里再兜一层）
+	AddAgentPoolUsed(ctx context.Context, arg AddAgentPoolUsedParams) (int64, error)
 	// 先加后删（见 RemoveChainRouteEntriesExcept）：起飞节点被删光时触发器会连规则一起删
 	AddChainRouteEntries(ctx context.Context, arg AddChainRouteEntriesParams) error
 	AddExitNodeGroups(ctx context.Context, arg AddExitNodeGroupsParams) error
@@ -24,6 +26,36 @@ type Querier interface {
 	AdvanceUserTOTPStep(ctx context.Context, arg AdvanceUserTOTPStepParams) (int64, error)
 	// 显示名两头加前缀 / 后缀（Ruling-80）；长度由调用方先查过
 	AffixNodeDisplayNames(ctx context.Context, arg AffixNodeDisplayNamesParams) (int64, error)
+	AgentCountInviteCodes(ctx context.Context, agentID pgtype.Int8) (int64, error)
+	AgentCountLedger(ctx context.Context, arg AgentCountLedgerParams) (int64, error)
+	AgentCountOrders(ctx context.Context, arg AgentCountOrdersParams) (int64, error)
+	AgentCountTickets(ctx context.Context, arg AgentCountTicketsParams) (int64, error)
+	AgentCountUsers(ctx context.Context, arg AgentCountUsersParams) (int64, error)
+	AgentCreateInviteCode(ctx context.Context, arg AgentCreateInviteCodeParams) (int64, error)
+	AgentDeleteInviteCode(ctx context.Context, arg AgentDeleteInviteCodeParams) (int64, error)
+	// ---- 代理侧：配额与套餐 ----
+	AgentGetSummary(ctx context.Context, adminID int64) (AgentGetSummaryRow, error)
+	// ---- 代理侧：邀请码 ----
+	AgentListInviteCodes(ctx context.Context, arg AgentListInviteCodesParams) ([]AgentListInviteCodesRow, error)
+	// 不带操作人（员工账号名不向代理暴露）
+	AgentListLedger(ctx context.Context, arg AgentListLedgerParams) ([]AgentListLedgerRow, error)
+	// ---- 代理侧：订单与余额流水（只含现存名下用户，Ruling-102） ----
+	// 行结构须与 shop.sql 的 ListOrders 逐字段相同
+	AgentListOrders(ctx context.Context, arg AgentListOrdersParams) ([]AgentListOrdersRow, error)
+	AgentListPlans(ctx context.Context, adminID int64) ([]AgentListPlansRow, error)
+	// 员工的回复不带账号名，只有代理本人的回复带他自己的用户名（docs/03 §5.23 不暴露员工）
+	AgentListTicketMessages(ctx context.Context, arg AgentListTicketMessagesParams) ([]AgentListTicketMessagesRow, error)
+	// ---- 代理侧：工单 ----
+	AgentListTickets(ctx context.Context, arg AgentListTicketsParams) ([]AgentListTicketsRow, error)
+	// ---- 代理侧：名下用户 ----
+	AgentListUsers(ctx context.Context, arg AgentListUsersParams) ([]AgentListUsersRow, error)
+	AgentLockInviteCode(ctx context.Context, arg AgentLockInviteCodeParams) (int64, error)
+	// 白名单里的套餐；FOR SHARE 让本事务结束前套餐不能被改成不限。行结构须与 user.sql 的 GetPlan 逐字段相同
+	AgentLockPlan(ctx context.Context, arg AgentLockPlanParams) (AgentLockPlanRow, error)
+	AgentLockTicket(ctx context.Context, arg AgentLockTicketParams) (AgentLockTicketRow, error)
+	// 代理侧按 id 的写操作唯一的归属入口：不在名下或待删除一律查不到（404）。行结构须与 user.sql 的 GetUserQuota 逐字段相同
+	AgentLockUser(ctx context.Context, arg AgentLockUserParams) (AgentLockUserRow, error)
+	AgentUpdateInviteCode(ctx context.Context, arg AgentUpdateInviteCodeParams) (int64, error)
 	// 每个自然日有流量的去重用户数
 	AnalyticsActiveDays(ctx context.Context, arg AnalyticsActiveDaysParams) ([]AnalyticsActiveDaysRow, error)
 	AnalyticsChainFailed(ctx context.Context, rowLimit int32) ([]AnalyticsChainFailedRow, error)
@@ -96,6 +128,10 @@ type Querier interface {
 	CountAdminChainRoutes(ctx context.Context, arg CountAdminChainRoutesParams) (int64, error)
 	CountAdmins(ctx context.Context) (int64, error)
 	CountAdminsByRole(ctx context.Context, roleID int64) (int64, error)
+	CountAgentAllocations(ctx context.Context, arg CountAgentAllocationsParams) (int64, error)
+	// 名下未删除用户数（用户数上限只计这些，docs/03 §5.23）
+	CountAgentUsers(ctx context.Context, agentID pgtype.Int8) (int64, error)
+	CountAgents(ctx context.Context, keyword pgtype.Text) (int64, error)
 	CountAnnouncements(ctx context.Context) (int64, error)
 	CountAuditLogs(ctx context.Context) (int64, error)
 	CountBlockedReachTargets(ctx context.Context) (int32, error)
@@ -105,9 +141,9 @@ type Querier interface {
 	CountCoupons(ctx context.Context) (int64, error)
 	CountEmailCodesByEmailSince(ctx context.Context, arg CountEmailCodesByEmailSinceParams) (int64, error)
 	CountEmailCodesByIPSince(ctx context.Context, arg CountEmailCodesByIPSinceParams) (int64, error)
-	// 用于 R5：除 excluded_admin_id 外，仍持有该角色且启用的管理员数。
+	// 用于 R5：除 excluded_admin_id 外，仍持有该角色且启用的员工数（代理即使库里有角色行也不算，Ruling-101）。
 	CountEnabledAdminsWithRoleExcluding(ctx context.Context, arg CountEnabledAdminsWithRoleExcludingParams) (int64, error)
-	CountInviteCodes(ctx context.Context, kind string) (int64, error)
+	CountInviteCodes(ctx context.Context, arg CountInviteCodesParams) (int64, error)
 	CountLedger(ctx context.Context, arg CountLedgerParams) (int64, error)
 	CountLiveUsersByIDs(ctx context.Context, ids []int64) (int64, error)
 	CountMailOutbox(ctx context.Context, status string) (int64, error)
@@ -144,6 +180,12 @@ type Querier interface {
 	CreateAdminInviteCode(ctx context.Context, arg CreateAdminInviteCodeParams) (int64, error)
 	// reauth_until：登录成功视为刚做过二次验证（Ruling-100）
 	CreateAdminSession(ctx context.Context, arg CreateAdminSessionParams) (int64, error)
+	// 代理账号（Ruling-101）：kind 创建后不可改，不持角色
+	CreateAgentAdmin(ctx context.Context, arg CreateAgentAdminParams) (CreateAgentAdminRow, error)
+	// 二级代理（docs/03 §5.23，Ruling-101 – Ruling-104）-------------------------------------
+	// 代理侧（Agent 前缀）的每个查询都必须带 agent_id = 当前代理 的条件，agent_id 只取自会话，不接受请求里的值。
+	// ---- 超管侧：代理账号与配额 ----
+	CreateAgentProfile(ctx context.Context, arg CreateAgentProfileParams) error
 	CreateAnnouncement(ctx context.Context, arg CreateAnnouncementParams) (int64, error)
 	CreateCoupon(ctx context.Context, arg CreateCouponParams) (int64, error)
 	// 密文依赖 id 作关联数据，先写占位，同一事务内再 SetDNSAccountToken
@@ -176,6 +218,7 @@ type Querier interface {
 	DeleteAdminRoles(ctx context.Context, adminID int64) error
 	DeleteAdminSessionByID(ctx context.Context, id int64) error
 	DeleteAdminSessionsByAdmin(ctx context.Context, adminID int64) error
+	DeleteAgentPlans(ctx context.Context, adminID int64) error
 	DeleteAnnouncement(ctx context.Context, id int64) (int64, error)
 	DeleteChainExit(ctx context.Context, arg DeleteChainExitParams) (int64, error)
 	DeleteChainExitByID(ctx context.Context, id int64) (int64, error)
@@ -225,6 +268,7 @@ type Querier interface {
 	EnsureNode(ctx context.Context, arg EnsureNodeParams) error
 	// 首次查看时生成个人码；已有（或随机码撞了别人的）时什么都不做，由调用方重读
 	EnsureUserInviteCode(ctx context.Context, arg EnsureUserInviteCodeParams) error
+	ExistsAgent(ctx context.Context, id int64) (bool, error)
 	// 邮箱是否已被占用：等于某个用户的邮箱，或等于某个（存量、含 @ 的）用户名（docs/03 §5.8 冲突）
 	ExistsEndUserIdentity(ctx context.Context, email string) (bool, error)
 	ExistsPlan(ctx context.Context, id int64) (bool, error)
@@ -235,7 +279,7 @@ type Querier interface {
 	FillServerRegion(ctx context.Context, arg FillServerRegionParams) (int64, error)
 	FinishHostTask(ctx context.Context, arg FinishHostTaskParams) (int64, error)
 	GetActiveEmailCodeForUpdate(ctx context.Context, arg GetActiveEmailCodeForUpdateParams) (GetActiveEmailCodeForUpdateRow, error)
-	// 行结构须与 ListAdmins 逐字段相同（service 层直接做类型转换）。
+	// 行结构须与 ListAdmins 逐字段相同（service 层直接做类型转换）。含代理账号：重置密码、清两步验证对代理照常可用（docs/03 §5.23）。
 	GetAdminByID(ctx context.Context, id int64) (GetAdminByIDRow, error)
 	GetAdminByUsername(ctx context.Context, username string) (GetAdminByUsernameRow, error)
 	// 本人改密码与二次验证用（Ruling-96、Ruling-100）。
@@ -273,6 +317,7 @@ type Querier interface {
 	GetInbound(ctx context.Context, id int64) (GetInboundRow, error)
 	// 注册、邀请码与账号自助（docs/03 §5.8）。
 	// 注册时锁住邀请码行，计数与上限的判断在同一事务内完成（并发注册不超发）
+	// agent_id：代理码的代理；owner_agent_id：个人码的主人所属的代理（新用户随邀请人归属，Ruling-102）
 	GetInviteCodeForUpdate(ctx context.Context, code string) (GetInviteCodeForUpdateRow, error)
 	GetInviteCodeOwner(ctx context.Context, id int64) (pgtype.Int8, error)
 	GetJobState(ctx context.Context, key string) (string, error)
@@ -325,7 +370,7 @@ type Querier interface {
 	// 提醒邮件只发给有已验证邮箱且未停用的用户
 	GetUserNotifyTarget(ctx context.Context, id int64) (GetUserNotifyTargetRow, error)
 	GetUserPlanStatus(ctx context.Context, id int64) (GetUserPlanStatusRow, error)
-	// 读写配额前加行锁，避免流量任务与管理员操作互相覆盖
+	// 读写配额前加行锁，避免流量任务与管理员操作互相覆盖。行结构须与 agent.sql 的 AgentLockUser 逐字段相同。
 	GetUserQuota(ctx context.Context, id int64) (GetUserQuotaRow, error)
 	GetUserSessionByTokenHash(ctx context.Context, tokenHash []byte) (GetUserSessionByTokenHashRow, error)
 	// 用户与购买有关的状态；不加锁，只用于展示
@@ -338,6 +383,9 @@ type Querier interface {
 	GetVisibleSharedAccountCredential(ctx context.Context, arg GetVisibleSharedAccountCredentialParams) ([]byte, error)
 	HasTrialOrder(ctx context.Context, userID pgtype.Int8) (bool, error)
 	InsertAdminRoles(ctx context.Context, arg InsertAdminRolesParams) error
+	// 开通记录只追加（Ruling-103）
+	InsertAgentAllocation(ctx context.Context, arg InsertAgentAllocationParams) error
+	InsertAgentPlans(ctx context.Context, arg InsertAgentPlansParams) error
 	InsertAuditLog(ctx context.Context, arg InsertAuditLogParams) error
 	// 链接密文的关联数据含 id，所以先插入空值，拿到 id 后由 SetChainExitLink 回填。user_id 为空 = 平台出口
 	InsertChainExit(ctx context.Context, arg InsertChainExitParams) (int64, error)
@@ -374,7 +422,11 @@ type Querier interface {
 	ListAdminChainExits(ctx context.Context, arg ListAdminChainExitsParams) ([]ListAdminChainExitsRow, error)
 	// 全站规则（管理端只读，Ruling-41），按 id 倒序分页；只取 id 与归属，内容由调用方按用户整体装配
 	ListAdminChainRoutes(ctx context.Context, arg ListAdminChainRoutesParams) ([]ListAdminChainRoutesRow, error)
+	// 只列员工，代理见 agent.sql（Ruling-101）
 	ListAdmins(ctx context.Context, arg ListAdminsParams) ([]ListAdminsRow, error)
+	ListAgentAllocations(ctx context.Context, arg ListAgentAllocationsParams) ([]AgentAllocation, error)
+	ListAgentPlanIDs(ctx context.Context, adminIds []int64) ([]AgentPlan, error)
+	ListAgents(ctx context.Context, arg ListAgentsParams) ([]ListAgentsRow, error)
 	// 启用中、不在线达到阈值且这次掉线还没告警的服务器
 	ListAlertDueServers(ctx context.Context, before pgtype.Timestamptz) ([]ListAlertDueServersRow, error)
 	// 公告、教程、共享账号、工单与签到（docs/03 §5.9–§5.11）。
@@ -418,6 +470,7 @@ type Querier interface {
 	ListInboundsByIDs(ctx context.Context, ids []int64) ([]ListInboundsByIDsRow, error)
 	// 入站与对外地址缓存（docs/03 §5.1）------------------------------------------
 	ListInboundsByServer(ctx context.Context, serverID int64) ([]ListInboundsByServerRow, error)
+	// 三类码（Ruling-102）：个人码有 owner_user_id，代理码有 agent_id，两者都空是管理员码
 	ListInviteCodes(ctx context.Context, arg ListInviteCodesParams) ([]ListInviteCodesRow, error)
 	ListInvitees(ctx context.Context, arg ListInviteesParams) ([]ListInviteesRow, error)
 	// 三网延迟（docs/03 §5.20，Ruling-86）-----------------------------------------
@@ -438,6 +491,8 @@ type Querier interface {
 	// 只取自定义角色的 role_permission 行；内置角色的权限由代码定义，库里即使有行也不算（Ruling-95）。
 	ListPermissionCodesForAdmin(ctx context.Context, adminID int64) ([]string, error)
 	ListPermissions(ctx context.Context) ([]ListPermissionsRow, error)
+	// 校验白名单：只收流量与时长都有限的套餐（Ruling-103）
+	ListPlanLimitsByIDs(ctx context.Context, ids []int64) ([]ListPlanLimitsByIDsRow, error)
 	// 全部套餐的时长选项（docs/03 §5.12），按套餐、天数升序；套餐数量有限，一次取完在内存里归组
 	ListPlanPrices(ctx context.Context) ([]ListPlanPricesRow, error)
 	ListPlanPricesOnSale(ctx context.Context) ([]ListPlanPricesOnSaleRow, error)
@@ -537,6 +592,8 @@ type Querier interface {
 	ListUsersByIDs(ctx context.Context, ids []int64) ([]ListUsersByIDsRow, error)
 	// 用户端：已发布，且没有限定套餐或限定里包含该用户的套餐
 	ListVisibleSharedAccounts(ctx context.Context, planID int64) ([]ListVisibleSharedAccountsRow, error)
+	// 配额判断前锁住代理的配额行（Ruling-103）：开通、续期、新建与注册都先锁它再锁用户行，顺序固定防死锁
+	LockAgentProfile(ctx context.Context, adminID int64) (LockAgentProfileRow, error)
 	// 批量加前后缀前锁住这些节点、取现有显示名的字符数（Ruling-80）；按 id 排序加锁，避免两批互相等锁
 	LockNodeNameLengths(ctx context.Context, ids []int64) ([]LockNodeNameLengthsRow, error)
 	// R5 的并发保护：改动可能影响 super_admin 数量的事务先锁住该角色行，串行化判断。
@@ -592,7 +649,7 @@ type Querier interface {
 	RotateUserSubscription(ctx context.Context, arg RotateUserSubscriptionParams) (int64, error)
 	SaveReachResult(ctx context.Context, arg SaveReachResultParams) error
 	SaveUserQuota(ctx context.Context, arg SaveUserQuotaParams) error
-	// 只能设给启用状态的管理员；是否持有 super_admin 由调用方在同一事务里先查
+	// 只能设给启用状态的员工（代理不能成为所有者，Ruling-101）；是否持有 super_admin 由调用方在同一事务里先查
 	SetAdminOwner(ctx context.Context, id int64) (int64, error)
 	SetAdminSessionReauth(ctx context.Context, arg SetAdminSessionReauthParams) error
 	SetAdminTOTPPending(ctx context.Context, arg SetAdminTOTPPendingParams) error
@@ -639,6 +696,8 @@ type Querier interface {
 	SetTicketStatus(ctx context.Context, arg SetTicketStatusParams) error
 	SetTopupCodeDisabled(ctx context.Context, arg SetTopupCodeDisabledParams) error
 	SetTrafficNotified(ctx context.Context, id int64) error
+	// 超管划转或收回（Ruling-102）：只改归属
+	SetUserAgent(ctx context.Context, arg SetUserAgentParams) (int64, error)
 	SetUserAutoRenew(ctx context.Context, arg SetUserAutoRenewParams) error
 	SetUserBalance(ctx context.Context, arg SetUserBalanceParams) error
 	SetUserCredential(ctx context.Context, arg SetUserCredentialParams) error
@@ -663,6 +722,7 @@ type Querier interface {
 	UpdateAdminInviteCode(ctx context.Context, arg UpdateAdminInviteCodeParams) error
 	UpdateAdminLastLogin(ctx context.Context, id int64) error
 	UpdateAdminPasswordHash(ctx context.Context, arg UpdateAdminPasswordHashParams) (int64, error)
+	UpdateAgentProfile(ctx context.Context, arg UpdateAgentProfileParams) error
 	UpdateAnnouncement(ctx context.Context, arg UpdateAnnouncementParams) error
 	UpdateChainRoute(ctx context.Context, arg UpdateChainRouteParams) (int64, error)
 	UpdateCoupon(ctx context.Context, arg UpdateCouponParams) (int64, error)

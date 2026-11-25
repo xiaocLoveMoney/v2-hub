@@ -23,12 +23,19 @@ func (q *Queries) BumpInviteCodeUse(ctx context.Context, id int64) error {
 const countInviteCodes = `-- name: CountInviteCodes :one
 SELECT count(*) FROM invite_code c
 WHERE ($1::text = ''
-       OR ($1::text = 'admin' AND c.owner_user_id IS NULL)
-       OR ($1::text = 'user' AND c.owner_user_id IS NOT NULL))
+       OR ($1::text = 'admin' AND c.owner_user_id IS NULL AND c.agent_id IS NULL)
+       OR ($1::text = 'user' AND c.owner_user_id IS NOT NULL)
+       OR ($1::text = 'agent' AND c.agent_id IS NOT NULL))
+  AND ($2::bigint = 0 OR c.agent_id = $2::bigint)
 `
 
-func (q *Queries) CountInviteCodes(ctx context.Context, kind string) (int64, error) {
-	row := q.db.QueryRow(ctx, countInviteCodes, kind)
+type CountInviteCodesParams struct {
+	Kind    string
+	AgentID int64
+}
+
+func (q *Queries) CountInviteCodes(ctx context.Context, arg CountInviteCodesParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countInviteCodes, arg.Kind, arg.AgentID)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -101,7 +108,8 @@ func (q *Queries) GetEndUserEmail(ctx context.Context, id int64) (pgtype.Text, e
 const getInviteCodeForUpdate = `-- name: GetInviteCodeForUpdate :one
 
 SELECT c.id, c.owner_user_id, c.max_uses, c.used_count, c.expires_at, c.is_disabled,
-       (o.id IS NOT NULL AND (o.deleted_at IS NOT NULL OR o.is_disabled))::boolean AS is_owner_inactive
+       (o.id IS NOT NULL AND (o.deleted_at IS NOT NULL OR o.is_disabled))::boolean AS is_owner_inactive,
+       c.agent_id, o.agent_id AS owner_agent_id
 FROM invite_code c
 LEFT JOIN end_user o ON o.id = c.owner_user_id
 WHERE c.code = $1
@@ -116,10 +124,13 @@ type GetInviteCodeForUpdateRow struct {
 	ExpiresAt       pgtype.Timestamptz
 	IsDisabled      bool
 	IsOwnerInactive bool
+	AgentID         pgtype.Int8
+	OwnerAgentID    pgtype.Int8
 }
 
 // 注册、邀请码与账号自助（docs/03 §5.8）。
 // 注册时锁住邀请码行，计数与上限的判断在同一事务内完成（并发注册不超发）
+// agent_id：代理码的代理；owner_agent_id：个人码的主人所属的代理（新用户随邀请人归属，Ruling-102）
 func (q *Queries) GetInviteCodeForUpdate(ctx context.Context, code string) (GetInviteCodeForUpdateRow, error) {
 	row := q.db.QueryRow(ctx, getInviteCodeForUpdate, code)
 	var i GetInviteCodeForUpdateRow
@@ -131,6 +142,8 @@ func (q *Queries) GetInviteCodeForUpdate(ctx context.Context, code string) (GetI
 		&i.ExpiresAt,
 		&i.IsDisabled,
 		&i.IsOwnerInactive,
+		&i.AgentID,
+		&i.OwnerAgentID,
 	)
 	return i, err
 }
@@ -171,20 +184,24 @@ func (q *Queries) GetUserInviteCode(ctx context.Context, ownerUserID pgtype.Int8
 
 const listInviteCodes = `-- name: ListInviteCodes :many
 SELECT c.id, c.code, c.owner_user_id, COALESCE(o.username, '')::text AS owner_username, c.max_uses, c.used_count, c.expires_at,
-       c.is_disabled, c.remark, c.created_at
+       c.is_disabled, c.remark, c.created_at, c.agent_id, COALESCE(ag.username, '')::text AS agent_username
 FROM invite_code c
 LEFT JOIN end_user o ON o.id = c.owner_user_id
+LEFT JOIN admin ag ON ag.id = c.agent_id
 WHERE ($1::text = ''
-       OR ($1::text = 'admin' AND c.owner_user_id IS NULL)
-       OR ($1::text = 'user' AND c.owner_user_id IS NOT NULL))
+       OR ($1::text = 'admin' AND c.owner_user_id IS NULL AND c.agent_id IS NULL)
+       OR ($1::text = 'user' AND c.owner_user_id IS NOT NULL)
+       OR ($1::text = 'agent' AND c.agent_id IS NOT NULL))
   AND ($2::bigint = 0 OR c.id = $2::bigint)
+  AND ($3::bigint = 0 OR c.agent_id = $3::bigint)
 ORDER BY c.id DESC
-LIMIT $4 OFFSET $3
+LIMIT $5 OFFSET $4
 `
 
 type ListInviteCodesParams struct {
 	Kind      string
 	ID        int64
+	AgentID   int64
 	RowOffset int32
 	RowLimit  int32
 }
@@ -200,12 +217,16 @@ type ListInviteCodesRow struct {
 	IsDisabled    bool
 	Remark        string
 	CreatedAt     pgtype.Timestamptz
+	AgentID       pgtype.Int8
+	AgentUsername string
 }
 
+// 三类码（Ruling-102）：个人码有 owner_user_id，代理码有 agent_id，两者都空是管理员码
 func (q *Queries) ListInviteCodes(ctx context.Context, arg ListInviteCodesParams) ([]ListInviteCodesRow, error) {
 	rows, err := q.db.Query(ctx, listInviteCodes,
 		arg.Kind,
 		arg.ID,
+		arg.AgentID,
 		arg.RowOffset,
 		arg.RowLimit,
 	)
@@ -227,6 +248,8 @@ func (q *Queries) ListInviteCodes(ctx context.Context, arg ListInviteCodesParams
 			&i.IsDisabled,
 			&i.Remark,
 			&i.CreatedAt,
+			&i.AgentID,
+			&i.AgentUsername,
 		); err != nil {
 			return nil, err
 		}

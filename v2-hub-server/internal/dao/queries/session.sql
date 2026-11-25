@@ -7,7 +7,7 @@ RETURNING id;
 -- name: GetAdminSessionByTokenHash :one
 -- 同时取管理员状态：被禁用的管理员会话视为无效（R7）。
 SELECT s.id, s.admin_id, s.csrf_token, s.expires_at, s.idle_until, a.username, a.is_disabled,
-       (a.totp_secret_enc IS NOT NULL)::boolean AS totp_enabled, s.reauth_until, a.is_owner
+       (a.totp_secret_enc IS NOT NULL)::boolean AS totp_enabled, s.reauth_until, a.is_owner, a.kind
 FROM admin_session s
 JOIN admin a ON a.id = s.admin_id
 WHERE s.token_hash = $1;

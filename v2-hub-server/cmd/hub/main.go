@@ -298,6 +298,10 @@ func runServer(args []string) error {
 		MaxBytes: cfg.Upload.MaxBytes, Limit: cfg.Upload.Limit, Window: cfg.Upload.Window,
 	})
 
+	tickets := service.NewTicketService(pool, settings, mails, telegramSvc, nil)
+	// 二级代理（docs/03 §5.23）：写操作频控取配置 agent.writeRatePerHour（Ruling-104）
+	agents := service.NewAgentService(pool, users, tickets, service.AgentServiceConfig{WriteRatePerHour: cfg.Agent.WriteRatePerHour})
+
 	srv := &http.Server{
 		Addr: cfg.Server.ListenAddr,
 		Handler: api.NewRouter(api.Deps{
@@ -313,7 +317,7 @@ func runServer(args []string) error {
 			Mail:           mails,
 			Account:        account,
 			Content:        service.NewContentService(pool, sealer, settings, mails, nil),
-			Tickets:        service.NewTicketService(pool, settings, mails, telegramSvc, nil),
+			Tickets:        tickets,
 			Wallet:         service.NewWalletService(pool, sealer, settings, nil),
 			Shop:           shop,
 			Finance:        shop,
@@ -327,6 +331,7 @@ func runServer(args []string) error {
 			Reach:          reachSvc,
 			Hosts:          hosts,
 			Uploads:        uploads,
+			Agents:         agents,
 			Cookie:         api.CookieConfig{Secure: secureCookie},
 			TrustedProxies: trusted,
 		}),

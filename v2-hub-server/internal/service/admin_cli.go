@@ -54,6 +54,10 @@ func (s *RBACService) TransferOwner(ctx context.Context, username string) (previ
 		if err != nil {
 			return err
 		}
+		// 代理不能成为所有者（Ruling-101）；库里另有约束 ck_admin_owner_staff 兜底
+		if target.Kind != AdminKindStaff {
+			return newError(CodeConflict, msgOwnerNotSuper)
+		}
 		roles, err := q.ListRolesForAdmin(ctx, target.ID)
 		if err != nil {
 			return fmt.Errorf("list roles of admin %d: %w", target.ID, err)

@@ -14,6 +14,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+
 	"v2-hub-server/internal/dao/daotest"
 	"v2-hub-server/internal/manager/crypto"
 	"v2-hub-server/internal/manager/deploy"
@@ -62,6 +64,9 @@ var (
 // testReauthWindow 是接口用例里的二次验证有效期（同生产默认值）。
 const testReauthWindow = 5 * time.Minute
 
+// testAgentWriteRate 是接口用例里代理写操作的每小时上限：放得很宽，越权矩阵不会被频控打断；频控另有专门用例。
+const testAgentWriteRate = 100000
+
 type apiResult struct {
 	Status int
 	Body   envelope
@@ -69,6 +74,13 @@ type apiResult struct {
 }
 
 func newAPIServer(t *testing.T) (*httptest.Server, *service.RBACService) {
+	t.Helper()
+	srv, rbac, _ := newAPIServerWithPool(t)
+	return srv, rbac
+}
+
+// newAPIServerWithPool 同 newAPIServer，另返回连接池，供需要直接核对库里数据的用例（如代理的越权矩阵）使用。
+func newAPIServerWithPool(t *testing.T) (*httptest.Server, *service.RBACService, *pgxpool.Pool) {
 	t.Helper()
 	pool := daotest.NewPool(t)
 	sealer, err := crypto.NewSealer(testSealerKey)
@@ -120,10 +132,12 @@ func newAPIServer(t *testing.T) (*httptest.Server, *service.RBACService) {
 		CommandTimeout: time.Second, InstallTimeout: time.Second, TestLimit: 10, TestWindow: time.Minute,
 		ActionLimit: 10, ActionWindow: time.Minute, MaxBatch: 5, PanelWaitAttempts: 1, PanelWaitInterval: time.Millisecond,
 	})
+	tickets := service.NewTicketService(pool, settings, mails, nil, nil)
+	agents := service.NewAgentService(pool, users, tickets, service.AgentServiceConfig{WriteRatePerHour: testAgentWriteRate})
 	srv := httptest.NewServer(NewRouter(Deps{
-		Database: pool, PingTimeout: time.Second, Auth: auth, RBAC: rbac, Hosts: hosts,
+		Database: pool, PingTimeout: time.Second, Auth: auth, RBAC: rbac, Hosts: hosts, Agents: agents,
 		Settings: settings, Mail: mails, Account: account, Users: users, PortalAuth: portal, Portal: users,
-		Content: service.NewContentService(pool, sealer, settings, mails, nil), Tickets: service.NewTicketService(pool, settings, mails, nil, nil),
+		Content: service.NewContentService(pool, sealer, settings, mails, nil), Tickets: tickets,
 		Wallet: service.NewWalletService(pool, sealer, settings, nil), Shop: shop, Finance: shop, Pay: service.NewPayService(pool, settings, testGateways(t), nil, nil),
 		Chain: chains, ChainAdmin: chains, ChainApply: applier,
 		Telegram: telegramSvc, Ops: ops,
@@ -133,7 +147,7 @@ func newAPIServer(t *testing.T) (*httptest.Server, *service.RBACService) {
 	t.Cleanup(srv.Close)
 	apiClocks.Store(srv.URL, clock)
 	t.Cleanup(func() { apiClocks.Delete(srv.URL) })
-	return srv, rbac
+	return srv, rbac, pool
 }
 
 func newClient(t *testing.T, base string) *apiClient {

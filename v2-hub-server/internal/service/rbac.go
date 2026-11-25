@@ -38,6 +38,7 @@ const (
 	msgLastSuperAdmin = "至少需要保留一个启用的超级管理员"
 	msgRoleCodeTaken  = "角色编码已存在"
 	msgOwnerNotSuper  = "所有者必须是启用状态的超级管理员"
+	msgAgentNotAdmin  = "该账号是代理，请在代理管理里修改"
 )
 
 // RBACService 负责管理员、角色、权限码与审计日志查询（授权规则 R1–R7、R11 见 docs/03 §4.1）。
@@ -73,7 +74,9 @@ type Admin struct {
 	IsDisabled  bool
 	TOTPEnabled bool
 	// IsOwner 是否所有者（Ruling-99）。
-	IsOwner     bool
+	IsOwner bool
+	// Kind 是账号类型（Ruling-101），管理员列表只含员工；不对外输出。
+	Kind        string
 	Roles       []string
 	LastLoginAt *time.Time
 	CreatedAt   time.Time
@@ -521,6 +524,10 @@ func (s *RBACService) UpdateAdmin(ctx context.Context, actor *AdminPrincipal, id
 		if target.IsOwner {
 			return newError(CodePermissionDenied, msgOwnerProtected)
 		}
+		// 代理不能持有角色，启用 / 停用走代理管理接口（Ruling-101）
+		if target.Kind != AdminKindStaff {
+			return newError(CodeConflict, msgAgentNotAdmin)
+		}
 		// R3：现有角色与新角色都必须是操作者可分配的，非超管因此无法改动超管
 		var roles roleCache
 		if _, err := resolveAssignableRolesCached(ctx, q, actor, currentRoles, &roles); err != nil {
@@ -621,7 +628,7 @@ func getAdminWithRoles(ctx context.Context, q *sqlcgen.Queries, id int64) (*Admi
 // adminFromRow 把管理员行与其角色码组装成 Admin；roles 原样放入，不做 nil 处理。
 func adminFromRow(r sqlcgen.ListAdminsRow, roles []string) Admin {
 	return Admin{
-		ID: r.ID, Username: r.Username, IsDisabled: r.IsDisabled, TOTPEnabled: r.TotpEnabled, IsOwner: r.IsOwner, Roles: roles,
+		ID: r.ID, Username: r.Username, IsDisabled: r.IsDisabled, TOTPEnabled: r.TotpEnabled, IsOwner: r.IsOwner, Kind: r.Kind, Roles: roles,
 		LastLoginAt: timePtr(r.LastLoginAt), CreatedAt: r.CreatedAt.Time,
 	}
 }

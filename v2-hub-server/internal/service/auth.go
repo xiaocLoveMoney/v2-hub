@@ -171,7 +171,7 @@ func (s *AuthService) Login(ctx context.Context, in LoginInput) (*LoginResult, e
 		if err := q.UpdateAdminLastLogin(ctx, admin.ID); err != nil {
 			return fmt.Errorf("update last login: %w", err)
 		}
-		p, err := loadPrincipal(ctx, q, admin.ID, admin.Username)
+		p, err := loadPrincipal(ctx, q, admin.ID, admin.Username, admin.Kind)
 		if err != nil {
 			return err
 		}
@@ -249,7 +249,7 @@ func (s *AuthService) Authenticate(ctx context.Context, token string) (*AdminPri
 			return nil, fmt.Errorf("touch session %d: %w", row.ID, err)
 		}
 	}
-	p, err := loadPrincipal(ctx, s.q, row.AdminID, row.Username)
+	p, err := loadPrincipal(ctx, s.q, row.AdminID, row.Username, row.Kind)
 	if err != nil {
 		return nil, err
 	}
@@ -283,7 +283,11 @@ func (s *AuthService) PurgeExpiredSessions(ctx context.Context) (int64, error) {
 
 // loadPrincipal 按管理员持有的角色算出身份与有效权限（R1）：内置角色只在 is_builtin 为真时按编码取代码定义的权限，
 // 自定义角色读 role_permission，多个角色取并集，非超管再剔除超管专属码（Ruling-95）。
-func loadPrincipal(ctx context.Context, q *sqlcgen.Queries, adminID int64, username string) (*AdminPrincipal, error) {
+// 代理（kind = agent）的权限集合恒为空、不是超管，库里即使有角色关联行也不读（Ruling-101）；kind 不认识时按代理处理（默认拒绝）。
+func loadPrincipal(ctx context.Context, q *sqlcgen.Queries, adminID int64, username, kind string) (*AdminPrincipal, error) {
+	if kind != AdminKindStaff {
+		return &AdminPrincipal{AdminID: adminID, Username: username, Kind: AdminKindAgent, Permissions: PermissionSet{}}, nil
+	}
 	roles, err := q.ListRolesForAdmin(ctx, adminID)
 	if err != nil {
 		return nil, fmt.Errorf("list roles of admin %d: %w", adminID, err)
@@ -293,7 +297,7 @@ func loadPrincipal(ctx context.Context, q *sqlcgen.Queries, adminID int64, usern
 	})
 	if isSuper {
 		// 超管的权限集固定为全部权限，不必再查权限码
-		return &AdminPrincipal{AdminID: adminID, Username: username, IsSuperAdmin: true, Permissions: effectivePermissions(true, nil)}, nil
+		return &AdminPrincipal{AdminID: adminID, Username: username, Kind: AdminKindStaff, IsSuperAdmin: true, Permissions: effectivePermissions(true, nil)}, nil
 	}
 	// 只含自定义角色的行（查询里已排除内置角色）
 	codes, err := q.ListPermissionCodesForAdmin(ctx, adminID)
@@ -308,7 +312,7 @@ func loadPrincipal(ctx context.Context, q *sqlcgen.Queries, adminID int64, usern
 			codes = append(codes, builtin.Sorted()...)
 		}
 	}
-	return &AdminPrincipal{AdminID: adminID, Username: username, Permissions: effectivePermissions(false, codes)}, nil
+	return &AdminPrincipal{AdminID: adminID, Username: username, Kind: AdminKindStaff, Permissions: effectivePermissions(false, codes)}, nil
 }
 
 // Reauth 做一次二次验证（R12，docs/03 §4.4）：已开启两步验证的账号验验证码（防重放），否则验密码。

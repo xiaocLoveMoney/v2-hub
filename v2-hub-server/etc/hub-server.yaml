@@ -103,3 +103,6 @@ upload:
   maxBytes: 5242880
   limit: 60
   window: 1h
+# 二级代理，语义见 docs/03 §5.23（Ruling-104）：每个代理账号的写操作每小时合计上限，超出返回 429
+agent:
+  writeRatePerHour: 120

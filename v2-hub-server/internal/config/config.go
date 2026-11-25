@@ -99,6 +99,8 @@ const (
 	defaultUploadMaxBytes = 5 << 20
 	defaultUploadLimit    = 60
 	defaultUploadWindow   = time.Hour
+	// defaultAgentWriteRatePerHour 是代理写操作的每小时合计上限（docs/03 §5.23，Ruling-104）
+	defaultAgentWriteRatePerHour = 120
 )
 
 // ErrInvalidConfig 表示配置内容不合法。
@@ -123,6 +125,13 @@ type Config struct {
 	Subscription SubscriptionConfig `yaml:"subscription"`
 	// Upload 是公告 / 教程图片上传（docs/03 §5.9，Ruling-89）。
 	Upload UploadConfig `yaml:"upload"`
+	// Agent 是二级代理（docs/03 §5.23，Ruling-104）。
+	Agent AgentConfig `yaml:"agent"`
+}
+
+// AgentConfig 是二级代理的防护参数：WriteRatePerHour 是每个代理账号的写操作每小时合计上限（Ruling-104）。
+type AgentConfig struct {
+	WriteRatePerHour int `yaml:"writeRatePerHour"`
 }
 
 // UploadConfig 是图片上传：Endpoint / Bucket / Region 指向 S3 兼容存储（生产为同一 compose 里的 MinIO），
@@ -374,6 +383,8 @@ func defaults() Config {
 		ACME: ACMEConfig{
 			DirectoryURL: defaultACMEDirectoryURL, Timeout: defaultACMETimeout, RenewInterval: defaultACMERenewInterval,
 		},
+	}, Agent: AgentConfig{
+		WriteRatePerHour: defaultAgentWriteRatePerHour,
 	}, Subscription: SubscriptionConfig{
 		Title:               defaultSubscriptionTitle,
 		UpdateIntervalHours: defaultSubscriptionIntervalHours,
@@ -445,6 +456,9 @@ func (c Config) validate() error {
 	uc := c.Upload
 	if uc.Endpoint == "" || uc.Bucket == "" || uc.Timeout <= 0 || uc.MaxBytes <= 0 || uc.Limit <= 0 || uc.Window <= 0 {
 		return fmt.Errorf("%w: upload endpoint, bucket, timeout, maxBytes, limit and window must be set", ErrInvalidConfig)
+	}
+	if c.Agent.WriteRatePerHour <= 0 {
+		return fmt.Errorf("%w: agent.writeRatePerHour must be positive", ErrInvalidConfig)
 	}
 	po := c.Portal
 	if po.SessionIdleTimeout <= a.SessionTouchInterval || po.SessionMaxAge < po.SessionIdleTimeout || po.LoginLogRetention <= 0 {

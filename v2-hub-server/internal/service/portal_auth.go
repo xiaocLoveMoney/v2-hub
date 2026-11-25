@@ -561,16 +561,22 @@ func (s *PortalAuthService) PurgeExpiredSessions(ctx context.Context) (int64, er
 // ClearUserTOTP 由管理员为遗失设备的用户清除两步验证，并使其全部会话失效（docs/03 §5.3）。
 func (s *UserService) ClearUserTOTP(ctx context.Context, actor *AdminPrincipal, id int64, ip *netip.Addr) error {
 	return s.inTx(ctx, func(q *sqlcgen.Queries) error {
-		n, err := q.ClearUserTOTP(ctx, id)
-		if err != nil {
-			return fmt.Errorf("clear totp of user %d: %w", id, err)
-		}
-		if n == 0 {
-			return newError(CodeNotFound, msgUserNotFound)
-		}
-		if err := q.DeleteUserSessionsByUser(ctx, id); err != nil {
-			return fmt.Errorf("revoke sessions of user %d: %w", id, err)
-		}
-		return writeAudit(ctx, q, AuditEntry{ActorType: ActorAdmin, ActorID: actor.AdminID, Action: ActionUserTOTPReset, TargetType: targetUser, TargetID: fmt.Sprint(id), ClientIP: ip})
+		return clearUserTOTPTx(ctx, q, actor, id, ip)
 	})
+}
+
+// clearUserTOTPTx 清除用户的两步验证、吊销其全部会话并记审计（员工与代理共用，Ruling-101）。
+// 用户不存在或待删除返回 CodeNotFound。代理侧调用前须已用 AgentLockUser 锁定并确认归属。
+func clearUserTOTPTx(ctx context.Context, q *sqlcgen.Queries, actor *AdminPrincipal, id int64, ip *netip.Addr) error {
+	n, err := q.ClearUserTOTP(ctx, id)
+	if err != nil {
+		return fmt.Errorf("clear totp of user %d: %w", id, err)
+	}
+	if n == 0 {
+		return newError(CodeNotFound, msgUserNotFound)
+	}
+	if err := q.DeleteUserSessionsByUser(ctx, id); err != nil {
+		return fmt.Errorf("revoke sessions of user %d: %w", id, err)
+	}
+	return writeAudit(ctx, q, AuditEntry{ActorType: ActorAdmin, ActorID: actor.AdminID, Action: ActionUserTOTPReset, TargetType: targetUser, TargetID: fmt.Sprint(id), ClientIP: ip})
 }

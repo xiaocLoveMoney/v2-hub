@@ -82,6 +82,8 @@ type Deps struct {
 	Hosts HostManager
 	// Uploads 提供公告 / 教程图片上传（docs/03 §5.9，Ruling-89）。
 	Uploads UploadManager
+	// Agents 提供二级代理：代理专用接口与超管侧的代理管理、用户划转（docs/03 §5.23）。
+	Agents AgentManager
 	// Cookie 是会话 Cookie 属性。
 	Cookie CookieConfig
 	// TrustedProxies 是可采信 X-Forwarded-For 的直连网段（如 Caddy 所在 docker 网络）。
@@ -113,6 +115,7 @@ type handlers struct {
 	reach          ReachManager
 	hosts          HostManager
 	uploads        UploadManager
+	agents         AgentManager
 	cookie         CookieConfig
 	trustedProxies []netip.Prefix
 }
@@ -120,22 +123,55 @@ type handlers struct {
 // NewRouter 返回注册好全部路由的 http.Handler。路由与 hub-api.yaml 的 paths 逐条对应。
 func NewRouter(deps Deps) http.Handler {
 	h := &handlers{auth: deps.Auth, rbac: deps.RBAC, panels: deps.Panels, users: deps.Users, portalAuth: deps.PortalAuth, portal: deps.Portal,
-		settings: deps.Settings, mail: deps.Mail, account: deps.Account, content: deps.Content, tickets: deps.Tickets, wallet: deps.Wallet, shop: deps.Shop, finance: deps.Finance, pay: deps.Pay, chain: deps.Chain, chainApply: deps.ChainApply, chainAdmin: deps.ChainAdmin, telegram: deps.Telegram, ops: deps.Ops, analytics: deps.Analytics, reach: deps.Reach, hosts: deps.Hosts, uploads: deps.Uploads, cookie: deps.Cookie, trustedProxies: deps.TrustedProxies}
+		settings: deps.Settings, mail: deps.Mail, account: deps.Account, content: deps.Content, tickets: deps.Tickets, wallet: deps.Wallet, shop: deps.Shop, finance: deps.Finance, pay: deps.Pay, chain: deps.Chain, chainApply: deps.ChainApply, chainAdmin: deps.ChainAdmin, telegram: deps.Telegram, ops: deps.Ops, analytics: deps.Analytics, reach: deps.Reach, hosts: deps.Hosts, uploads: deps.Uploads, agents: deps.Agents, cookie: deps.Cookie, trustedProxies: deps.TrustedProxies}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", handleHealthz)
 	mux.HandleFunc("GET /readyz", newReadyzHandler(deps.Database, deps.PingTimeout))
 
-	// 管理端路由的鉴权选项：withSetupExempt = R10 豁免，withFresh = R12 高危接口（docs/03 §4.4），withPerm = 追加权限码；
-	// 归类由 router_policy_test.go 逐条核对，新增路由时同步更新那里的清单。
+	// 管理端路由的鉴权选项：withSetupExempt = R10 豁免，withFresh = R12 高危接口（docs/03 §4.4），withPerm = 追加权限码，
+	// withSelf = 本人接口（代理也放行，Ruling-101；没有它的 requireAdmin 路由对代理一律 403）；
+	// requireAgent 是代理专用接口（只放行代理）。归类由 router_policy_test.go 逐条核对，新增路由时同步更新那里的清单。
 	mux.HandleFunc("POST /api/admin/auth/login", h.login)
-	mux.HandleFunc("POST /api/admin/auth/logout", h.requireAdmin("", h.logout, withSetupExempt()))
-	mux.HandleFunc("GET /api/admin/auth/me", h.requireAdmin("", h.me, withSetupExempt()))
-	mux.HandleFunc("POST /api/admin/auth/totp/setup", h.requireAdmin("", h.totpSetup, withSetupExempt()))
-	mux.HandleFunc("POST /api/admin/auth/totp/enable", h.requireAdmin("", h.totpEnable, withSetupExempt()))
-	mux.HandleFunc("POST /api/admin/auth/totp/disable", h.requireAdmin("", h.totpDisable))
+	mux.HandleFunc("POST /api/admin/auth/logout", h.requireAdmin("", h.logout, withSetupExempt(), withSelf()))
+	mux.HandleFunc("GET /api/admin/auth/me", h.requireAdmin("", h.me, withSetupExempt(), withSelf()))
+	mux.HandleFunc("POST /api/admin/auth/totp/setup", h.requireAdmin("", h.totpSetup, withSetupExempt(), withSelf()))
+	mux.HandleFunc("POST /api/admin/auth/totp/enable", h.requireAdmin("", h.totpEnable, withSetupExempt(), withSelf()))
+	mux.HandleFunc("POST /api/admin/auth/totp/disable", h.requireAdmin("", h.totpDisable, withSelf()))
 	// 本人改密码（R9）与二次验证（R12）：只需登录；改密码对未开启两步验证的超管也开放（R10 豁免）
-	mux.HandleFunc("PUT /api/admin/auth/password", h.requireAdmin("", h.changeOwnPassword, withSetupExempt()))
-	mux.HandleFunc("POST /api/admin/auth/reauth", h.requireAdmin("", h.reauth))
+	mux.HandleFunc("PUT /api/admin/auth/password", h.requireAdmin("", h.changeOwnPassword, withSetupExempt(), withSelf()))
+	mux.HandleFunc("POST /api/admin/auth/reauth", h.requireAdmin("", h.reauth, withSelf()))
+
+	// 二级代理（docs/03 §5.23）：超管侧管理（admin:* 超管专属，写操作须二次验证）
+	mux.HandleFunc("GET /api/admin/agents", h.requireAdmin(service.PermAdminRead, h.listAgents))
+	mux.HandleFunc("POST /api/admin/agents", h.requireAdmin(service.PermAdminWrite, h.createAgent, withFresh()))
+	mux.HandleFunc("GET /api/admin/agents/{id}", h.requireAdmin(service.PermAdminRead, h.getAgent))
+	mux.HandleFunc("PUT /api/admin/agents/{id}", h.requireAdmin(service.PermAdminWrite, h.updateAgent, withFresh()))
+	mux.HandleFunc("GET /api/admin/agents/{id}/allocations", h.requireAdmin(service.PermAdminRead, h.listAgentAllocations))
+	mux.HandleFunc("PUT /api/admin/users/{id}/agent", h.requireAdmin(service.PermAdminWrite, h.transferUserAgent, withFresh()))
+	// 代理专用接口（Ruling-101）：只放行代理会话；删除用户、重置用户密码、清除用户两步验证须二次验证（Ruling-104）
+	mux.HandleFunc("GET /api/admin/agent/summary", h.requireAgent(h.agentGetSummary))
+	mux.HandleFunc("GET /api/admin/agent/plans", h.requireAgent(h.agentListPlans))
+	mux.HandleFunc("GET /api/admin/agent/users", h.requireAgent(h.agentListUsers))
+	mux.HandleFunc("POST /api/admin/agent/users", h.requireAgent(h.agentCreateUser))
+	mux.HandleFunc("GET /api/admin/agent/users/{id}", h.requireAgent(h.agentGetUser))
+	mux.HandleFunc("PUT /api/admin/agent/users/{id}", h.requireAgent(h.agentUpdateUser))
+	mux.HandleFunc("DELETE /api/admin/agent/users/{id}", h.requireAgent(h.agentDeleteUser, withFresh()))
+	mux.HandleFunc("POST /api/admin/agent/users/{id}/plan", h.requireAgent(h.agentAssignUserPlan))
+	mux.HandleFunc("PUT /api/admin/agent/users/{id}/quota", h.requireAgent(h.agentUpdateUserQuota))
+	mux.HandleFunc("PUT /api/admin/agent/users/{id}/password", h.requireAgent(h.agentResetUserPassword, withFresh()))
+	mux.HandleFunc("DELETE /api/admin/agent/users/{id}/totp", h.requireAgent(h.agentClearUserTOTP, withFresh()))
+	mux.HandleFunc("POST /api/admin/agent/users/{id}/subscription/reset", h.requireAgent(h.agentResetUserSubscription))
+	mux.HandleFunc("GET /api/admin/agent/invite-codes", h.requireAgent(h.agentListInviteCodes))
+	mux.HandleFunc("POST /api/admin/agent/invite-codes", h.requireAgent(h.agentCreateInviteCode))
+	mux.HandleFunc("PUT /api/admin/agent/invite-codes/{id}", h.requireAgent(h.agentUpdateInviteCode))
+	mux.HandleFunc("DELETE /api/admin/agent/invite-codes/{id}", h.requireAgent(h.agentDeleteInviteCode))
+	mux.HandleFunc("GET /api/admin/agent/tickets", h.requireAgent(h.agentListTickets))
+	mux.HandleFunc("GET /api/admin/agent/tickets/{id}", h.requireAgent(h.agentGetTicket))
+	mux.HandleFunc("POST /api/admin/agent/tickets/{id}/messages", h.requireAgent(h.agentReplyTicket))
+	mux.HandleFunc("POST /api/admin/agent/tickets/{id}/close", h.requireAgent(h.agentCloseTicket))
+	mux.HandleFunc("GET /api/admin/agent/orders", h.requireAgent(h.agentListOrders))
+	mux.HandleFunc("GET /api/admin/agent/wallet-ledger", h.requireAgent(h.agentListWalletLedger))
+	mux.HandleFunc("GET /api/admin/agent/allocations", h.requireAgent(h.agentListAllocations))
 
 	mux.HandleFunc("GET /api/admin/permissions", h.requireAdmin(service.PermAdminRead, h.listPermissions))
 	mux.HandleFunc("GET /api/admin/roles", h.requireAdmin(service.PermAdminRead, h.listRoles))

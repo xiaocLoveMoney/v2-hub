@@ -53,6 +53,9 @@ var statusByCode = map[service.Code]int{
 	service.CodeFeatureDisabled:   http.StatusForbidden,
 	// 余额不足按“当前状态不允许”处理，前端凭 code 与 data.shortfall 引导充值（docs/03 §5 错误码表）
 	service.CodeInsufficientBalance: http.StatusConflict,
+	// 代理配额不足（docs/03 §5 错误码表、§5.23）
+	service.CodeAgentPoolInsufficient: http.StatusConflict,
+	service.CodeAgentUserLimit:        http.StatusConflict,
 }
 
 // pageVO 是分页列表的统一响应体；Items 恒为非 nil 切片，空列表输出 []。

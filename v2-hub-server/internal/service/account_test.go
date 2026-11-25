@@ -286,7 +286,7 @@ func TestPersonalInviteCode(t *testing.T) {
 	}
 
 	// 管理员停用个人码；个人码不可删
-	page, err := f.account.ListInviteCodes(ctx, InviteKindUser, PageQuery{})
+	page, err := f.account.ListInviteCodes(ctx, InviteKindUser, 0, PageQuery{})
 	if err != nil || page.Total != 1 || page.Items[0].OwnerUsername != "alice" || page.Items[0].MaxUses != 0 {
 		t.Fatalf("user invite codes = %+v, %v", page, err)
 	}
@@ -339,7 +339,7 @@ func TestAdminInviteCodeLifecycle(t *testing.T) {
 	if _, err := f.account.CreateInviteCode(ctx, f.actor, InviteCodeInput{MaxUses: -1}, nil); !errors.Is(err, ErrInvalidArgument) {
 		t.Fatalf("negative uses = %v", err)
 	}
-	if _, err := f.account.ListInviteCodes(ctx, "nope", PageQuery{}); !errors.Is(err, ErrInvalidArgument) {
+	if _, err := f.account.ListInviteCodes(ctx, "nope", 0, PageQuery{}); !errors.Is(err, ErrInvalidArgument) {
 		t.Fatalf("bad kind = %v", err)
 	}
 	if err := f.account.DeleteInviteCode(ctx, f.actor, expired.ID, nil); err != nil {

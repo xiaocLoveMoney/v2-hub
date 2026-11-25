@@ -53,7 +53,7 @@ func (q *Queries) ClearAdminTOTP(ctx context.Context, id int64) (int64, error) {
 }
 
 const countAdmins = `-- name: CountAdmins :one
-SELECT COUNT(*) FROM admin
+SELECT COUNT(*) FROM admin WHERE kind = 'staff'
 `
 
 func (q *Queries) CountAdmins(ctx context.Context) (int64, error) {
@@ -68,6 +68,7 @@ SELECT COUNT(DISTINCT a.id)
 FROM admin a
 JOIN admin_role ar ON ar.admin_id = a.id
 WHERE ar.role_id = $1
+  AND a.kind = 'staff'
   AND a.is_disabled = FALSE
   AND a.id <> $2
 `
@@ -77,7 +78,7 @@ type CountEnabledAdminsWithRoleExcludingParams struct {
 	ExcludedAdminID int64
 }
 
-// 用于 R5：除 excluded_admin_id 外，仍持有该角色且启用的管理员数。
+// 用于 R5：除 excluded_admin_id 外，仍持有该角色且启用的员工数（代理即使库里有角色行也不算，Ruling-101）。
 func (q *Queries) CountEnabledAdminsWithRoleExcluding(ctx context.Context, arg CountEnabledAdminsWithRoleExcludingParams) (int64, error) {
 	row := q.db.QueryRow(ctx, countEnabledAdminsWithRoleExcluding, arg.RoleID, arg.ExcludedAdminID)
 	var count int64
@@ -104,6 +105,30 @@ type CreateAdminRow struct {
 func (q *Queries) CreateAdmin(ctx context.Context, arg CreateAdminParams) (CreateAdminRow, error) {
 	row := q.db.QueryRow(ctx, createAdmin, arg.Username, arg.PasswordHash)
 	var i CreateAdminRow
+	err := row.Scan(&i.ID, &i.CreatedAt)
+	return i, err
+}
+
+const createAgentAdmin = `-- name: CreateAgentAdmin :one
+INSERT INTO admin (username, password_hash, kind)
+VALUES ($1, $2, 'agent')
+RETURNING id, created_at
+`
+
+type CreateAgentAdminParams struct {
+	Username     string
+	PasswordHash string
+}
+
+type CreateAgentAdminRow struct {
+	ID        int64
+	CreatedAt pgtype.Timestamptz
+}
+
+// 代理账号（Ruling-101）：kind 创建后不可改，不持角色
+func (q *Queries) CreateAgentAdmin(ctx context.Context, arg CreateAgentAdminParams) (CreateAgentAdminRow, error) {
+	row := q.db.QueryRow(ctx, createAgentAdmin, arg.Username, arg.PasswordHash)
+	var i CreateAgentAdminRow
 	err := row.Scan(&i.ID, &i.CreatedAt)
 	return i, err
 }
@@ -136,7 +161,7 @@ func (q *Queries) EnableAdminTOTP(ctx context.Context, arg EnableAdminTOTPParams
 }
 
 const getAdminByID = `-- name: GetAdminByID :one
-SELECT id, username, is_disabled, (totp_secret_enc IS NOT NULL)::boolean AS totp_enabled, last_login_at, created_at, is_owner
+SELECT id, username, is_disabled, (totp_secret_enc IS NOT NULL)::boolean AS totp_enabled, last_login_at, created_at, is_owner, kind
 FROM admin
 WHERE id = $1
 `
@@ -149,9 +174,10 @@ type GetAdminByIDRow struct {
 	LastLoginAt pgtype.Timestamptz
 	CreatedAt   pgtype.Timestamptz
 	IsOwner     bool
+	Kind        string
 }
 
-// 行结构须与 ListAdmins 逐字段相同（service 层直接做类型转换）。
+// 行结构须与 ListAdmins 逐字段相同（service 层直接做类型转换）。含代理账号：重置密码、清两步验证对代理照常可用（docs/03 §5.23）。
 func (q *Queries) GetAdminByID(ctx context.Context, id int64) (GetAdminByIDRow, error) {
 	row := q.db.QueryRow(ctx, getAdminByID, id)
 	var i GetAdminByIDRow
@@ -163,12 +189,13 @@ func (q *Queries) GetAdminByID(ctx context.Context, id int64) (GetAdminByIDRow, 
 		&i.LastLoginAt,
 		&i.CreatedAt,
 		&i.IsOwner,
+		&i.Kind,
 	)
 	return i, err
 }
 
 const getAdminByUsername = `-- name: GetAdminByUsername :one
-SELECT id, username, password_hash, is_disabled, totp_secret_enc, totp_last_step, is_owner
+SELECT id, username, password_hash, is_disabled, totp_secret_enc, totp_last_step, is_owner, kind
 FROM admin
 WHERE username = $1
 `
@@ -181,6 +208,7 @@ type GetAdminByUsernameRow struct {
 	TotpSecretEnc []byte
 	TotpLastStep  int64
 	IsOwner       bool
+	Kind          string
 }
 
 func (q *Queries) GetAdminByUsername(ctx context.Context, username string) (GetAdminByUsernameRow, error) {
@@ -194,6 +222,7 @@ func (q *Queries) GetAdminByUsername(ctx context.Context, username string) (GetA
 		&i.TotpSecretEnc,
 		&i.TotpLastStep,
 		&i.IsOwner,
+		&i.Kind,
 	)
 	return i, err
 }
@@ -264,8 +293,9 @@ func (q *Queries) InsertAdminRoles(ctx context.Context, arg InsertAdminRolesPara
 }
 
 const listAdmins = `-- name: ListAdmins :many
-SELECT id, username, is_disabled, (totp_secret_enc IS NOT NULL)::boolean AS totp_enabled, last_login_at, created_at, is_owner
+SELECT id, username, is_disabled, (totp_secret_enc IS NOT NULL)::boolean AS totp_enabled, last_login_at, created_at, is_owner, kind
 FROM admin
+WHERE kind = 'staff'
 ORDER BY id
 LIMIT $1 OFFSET $2
 `
@@ -283,8 +313,10 @@ type ListAdminsRow struct {
 	LastLoginAt pgtype.Timestamptz
 	CreatedAt   pgtype.Timestamptz
 	IsOwner     bool
+	Kind        string
 }
 
+// 只列员工，代理见 agent.sql（Ruling-101）
 func (q *Queries) ListAdmins(ctx context.Context, arg ListAdminsParams) ([]ListAdminsRow, error) {
 	rows, err := q.db.Query(ctx, listAdmins, arg.Limit, arg.Offset)
 	if err != nil {
@@ -302,6 +334,7 @@ func (q *Queries) ListAdmins(ctx context.Context, arg ListAdminsParams) ([]ListA
 			&i.LastLoginAt,
 			&i.CreatedAt,
 			&i.IsOwner,
+			&i.Kind,
 		); err != nil {
 			return nil, err
 		}
@@ -357,10 +390,10 @@ func (q *Queries) LockSuperAdminRole(ctx context.Context) error {
 }
 
 const setAdminOwner = `-- name: SetAdminOwner :execrows
-UPDATE admin SET is_owner = TRUE, updated_at = now() WHERE id = $1 AND is_disabled = FALSE
+UPDATE admin SET is_owner = TRUE, updated_at = now() WHERE id = $1 AND is_disabled = FALSE AND kind = 'staff'
 `
 
-// 只能设给启用状态的管理员；是否持有 super_admin 由调用方在同一事务里先查
+// 只能设给启用状态的员工（代理不能成为所有者，Ruling-101）；是否持有 super_admin 由调用方在同一事务里先查
 func (q *Queries) SetAdminOwner(ctx context.Context, id int64) (int64, error) {
 	result, err := q.db.Exec(ctx, setAdminOwner, id)
 	if err != nil {

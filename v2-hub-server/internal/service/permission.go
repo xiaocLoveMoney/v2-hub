@@ -143,10 +143,18 @@ func (s PermissionSet) Sorted() []string {
 	return out
 }
 
+// 管理端账号类型（admin.kind，Ruling-101）：创建后不可改。
+const (
+	AdminKindStaff = "staff"
+	AdminKindAgent = "agent"
+)
+
 // AdminPrincipal 是一次请求中已认证的管理员身份。
 type AdminPrincipal struct {
-	AdminID      int64
-	Username     string
+	AdminID  int64
+	Username string
+	// Kind 是账号类型：AdminKindStaff 员工 / AdminKindAgent 代理（Ruling-101）。代理的 Permissions 恒为空、IsSuperAdmin 恒为假。
+	Kind         string
 	SessionID    int64
 	CSRFToken    string
 	IsSuperAdmin bool
@@ -158,9 +166,17 @@ type AdminPrincipal struct {
 	Permissions PermissionSet
 }
 
-// Can 报告管理员是否拥有权限码 code（R1）。
+// Can 报告管理员是否拥有权限码 code（R1）；代理一律没有（Ruling-101）。
 func (p *AdminPrincipal) Can(code string) bool {
+	if p.IsAgent() {
+		return false
+	}
 	return p.IsSuperAdmin || p.Permissions.Has(code)
+}
+
+// IsAgent 报告该账号是二级代理（Ruling-101）：只能访问本人接口与代理专用接口。
+func (p *AdminPrincipal) IsAgent() bool {
+	return p.Kind == AdminKindAgent
 }
 
 // TOTPSetupRequired 报告该管理员是尚未开启两步验证的超管，除豁免接口外都应被拦下（R10）。

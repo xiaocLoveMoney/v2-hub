@@ -310,40 +310,64 @@ func (s *UserService) newSubToken(userID int64) (token string, hash, sealed []by
 	return token, crypto.SHA256(token), sealed, nil
 }
 
-// rotateSubscription 换新 token 并轮换连接凭据，把下发标为待同步（docs/03 §5.4 重置）。audit 的动作与操作者由调用方给出。
-func (s *UserService) rotateSubscription(ctx context.Context, userID int64, audit AuditEntry) (string, error) {
+// subRotation 是一次重置订阅预先生成好的新 token 与新连接凭据（加密后），在事务外生成、事务内写入。
+type subRotation struct {
+	token       string
+	hash        []byte
+	sealedToken []byte
+	sealedCred  []byte
+}
+
+// newSubRotation 生成新 token 与新连接凭据；新凭据不带自设的连接密码：重置即一并改回随机（Ruling-58）。
+func (s *UserService) newSubRotation(userID int64) (subRotation, error) {
 	token, hash, sealedToken, err := s.newSubToken(userID)
 	if err != nil {
-		return "", err
+		return subRotation{}, err
 	}
-	// 新凭据不带自设的连接密码：重置即一并改回随机（Ruling-58）
 	cred, err := newClientCredential()
 	if err != nil {
-		return "", err
+		return subRotation{}, err
 	}
 	sealedCred, err := s.sealCredential(userID, cred)
+	if err != nil {
+		return subRotation{}, err
+	}
+	return subRotation{token: token, hash: hash, sealedToken: sealedToken, sealedCred: sealedCred}, nil
+}
+
+// rotateSubscription 换新 token 并轮换连接凭据，把下发标为待同步（docs/03 §5.4 重置）。audit 的动作与操作者由调用方给出。
+func (s *UserService) rotateSubscription(ctx context.Context, userID int64, audit AuditEntry) (string, error) {
+	rot, err := s.newSubRotation(userID)
 	if err != nil {
 		return "", err
 	}
 	err = s.inTx(ctx, func(q *sqlcgen.Queries) error {
-		n, err := q.RotateUserSubscription(ctx, sqlcgen.RotateUserSubscriptionParams{ID: userID, SubTokenHash: hash, SubTokenEnc: sealedToken, ClientCredEnc: sealedCred})
-		if err != nil {
-			return fmt.Errorf("rotate subscription of user %d: %w", userID, err)
-		}
-		if n == 0 {
-			return newError(CodeNotFound, msgUserNotFound)
-		}
-		if err := q.MarkUserProvisionsPending(ctx, userID); err != nil {
-			return fmt.Errorf("mark provisions of user %d pending: %w", userID, err)
-		}
-		audit.TargetType, audit.TargetID = targetUser, fmt.Sprint(userID)
-		return writeAudit(ctx, q, audit)
+		return rotateSubscriptionTx(ctx, q, userID, rot, audit)
 	})
 	if err != nil {
 		return "", err
 	}
 	s.TriggerReconcile()
-	return token, nil
+	return rot.token, nil
+}
+
+// rotateSubscriptionTx 是 rotateSubscription 的事务内部分（员工、本人与代理共用，Ruling-101）；提交后由调用方触发对账。
+// 用户不存在或待删除返回 CodeNotFound。代理侧调用前须已用 AgentLockUser 锁定并确认归属。
+func rotateSubscriptionTx(ctx context.Context, q *sqlcgen.Queries, userID int64, rot subRotation, audit AuditEntry) error {
+	n, err := q.RotateUserSubscription(ctx, sqlcgen.RotateUserSubscriptionParams{
+		ID: userID, SubTokenHash: rot.hash, SubTokenEnc: rot.sealedToken, ClientCredEnc: rot.sealedCred,
+	})
+	if err != nil {
+		return fmt.Errorf("rotate subscription of user %d: %w", userID, err)
+	}
+	if n == 0 {
+		return newError(CodeNotFound, msgUserNotFound)
+	}
+	if err := q.MarkUserProvisionsPending(ctx, userID); err != nil {
+		return fmt.Errorf("mark provisions of user %d pending: %w", userID, err)
+	}
+	audit.TargetType, audit.TargetID = targetUser, fmt.Sprint(userID)
+	return writeAudit(ctx, q, audit)
 }
 
 // ResetOwnSubscription 由用户本人重置订阅，返回新地址。

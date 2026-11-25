@@ -93,7 +93,7 @@ func (q *Queries) DeleteOtherAdminSessions(ctx context.Context, arg DeleteOtherA
 
 const getAdminSessionByTokenHash = `-- name: GetAdminSessionByTokenHash :one
 SELECT s.id, s.admin_id, s.csrf_token, s.expires_at, s.idle_until, a.username, a.is_disabled,
-       (a.totp_secret_enc IS NOT NULL)::boolean AS totp_enabled, s.reauth_until, a.is_owner
+       (a.totp_secret_enc IS NOT NULL)::boolean AS totp_enabled, s.reauth_until, a.is_owner, a.kind
 FROM admin_session s
 JOIN admin a ON a.id = s.admin_id
 WHERE s.token_hash = $1
@@ -110,6 +110,7 @@ type GetAdminSessionByTokenHashRow struct {
 	TotpEnabled bool
 	ReauthUntil pgtype.Timestamptz
 	IsOwner     bool
+	Kind        string
 }
 
 // 同时取管理员状态：被禁用的管理员会话视为无效（R7）。
@@ -127,6 +128,7 @@ func (q *Queries) GetAdminSessionByTokenHash(ctx context.Context, tokenHash []by
 		&i.TotpEnabled,
 		&i.ReauthUntil,
 		&i.IsOwner,
+		&i.Kind,
 	)
 	return i, err
 }

@@ -534,6 +534,15 @@ func (s *ShopService) listOrders(ctx context.Context, f OrderFilter, pq PageQuer
 	if err != nil {
 		return nil, fmt.Errorf("count orders: %w", err)
 	}
+	items, err := ordersFromRows(rows)
+	if err != nil {
+		return nil, err
+	}
+	return &Page[Order]{Items: items, Total: total}, nil
+}
+
+// ordersFromRows 把订单行（含商品快照 JSON）转换为 Order；管理端与代理侧共用。
+func ordersFromRows(rows []sqlcgen.ListOrdersRow) ([]Order, error) {
 	items := make([]Order, 0, len(rows))
 	for _, r := range rows {
 		var item orderItem
@@ -546,7 +555,7 @@ func (s *ShopService) listOrders(ctx context.Context, f OrderFilter, pq PageQuer
 			CouponCode: r.CouponCode, CreatedAt: r.CreatedAt.Time,
 		})
 	}
-	return &Page[Order]{Items: items, Total: total}, nil
+	return items, nil
 }
 
 // ListOrders 返回全部订单分页（管理端，finance:read）。

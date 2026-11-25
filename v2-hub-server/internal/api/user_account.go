@@ -22,7 +22,7 @@ type AccountManager interface {
 	DeleteOwnAccount(ctx context.Context, p *service.UserPrincipal, secret, totpCode string, ip *netip.Addr) error
 	GetInvite(ctx context.Context, p *service.UserPrincipal) (*service.InviteInfo, error)
 	ResetInvite(ctx context.Context, p *service.UserPrincipal, ip *netip.Addr) (*service.InviteInfo, error)
-	ListInviteCodes(ctx context.Context, kind string, pq service.PageQuery) (*service.Page[service.InviteCode], error)
+	ListInviteCodes(ctx context.Context, kind string, agentID int64, pq service.PageQuery) (*service.Page[service.InviteCode], error)
 	CreateInviteCode(ctx context.Context, actor *service.AdminPrincipal, in service.InviteCodeInput, ip *netip.Addr) (*service.InviteCode, error)
 	UpdateInviteCode(ctx context.Context, actor *service.AdminPrincipal, id int64, in service.InviteCodeInput, ip *netip.Addr) (*service.InviteCode, error)
 	DeleteInviteCode(ctx context.Context, actor *service.AdminPrincipal, id int64, ip *netip.Addr) error

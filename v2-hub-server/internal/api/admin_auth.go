@@ -51,10 +51,12 @@ type adminBriefVO struct {
 }
 
 type sessionVO struct {
-	Admin       adminBriefVO `json:"admin"`
-	Permissions []string     `json:"permissions"`
-	CSRFToken   string       `json:"csrfToken"`
-	TOTPEnabled bool         `json:"totpEnabled"`
+	Admin adminBriefVO `json:"admin"`
+	// Kind 是账号类型 staff / agent（Ruling-101）；代理的权限、菜单为空，超管 / 所有者 / 待开两步验证恒为假。
+	Kind        string   `json:"kind"`
+	Permissions []string `json:"permissions"`
+	CSRFToken   string   `json:"csrfToken"`
+	TOTPEnabled bool     `json:"totpEnabled"`
 	// MenuOrder 是管理端侧栏菜单顺序（设置 menu.admin，Ruling-57），空 = 默认顺序。
 	MenuOrder []string `json:"menuOrder"`
 	// IsSuperAdmin / IsOwner / TOTPSetupRequired 供前端显隐与跳转，后端仍是最终裁决（docs/03 §4.2）。
@@ -66,6 +68,7 @@ type sessionVO struct {
 func toSessionVO(p *service.AdminPrincipal) sessionVO {
 	return sessionVO{
 		Admin:             adminBriefVO{ID: p.AdminID, Username: p.Username},
+		Kind:              sessionKind(p),
 		Permissions:       p.Permissions.Sorted(),
 		CSRFToken:         p.CSRFToken,
 		TOTPEnabled:       p.TOTPEnabled,
@@ -76,10 +79,21 @@ func toSessionVO(p *service.AdminPrincipal) sessionVO {
 	}
 }
 
+// sessionKind 返回会话的账号类型；只有确认是代理才输出 agent，其余按员工。
+func sessionKind(p *service.AdminPrincipal) string {
+	if p.IsAgent() {
+		return service.AdminKindAgent
+	}
+	return service.AdminKindStaff
+}
+
 // adminSessionVO 组装会话信息并带上管理端菜单顺序。设置读不到时按默认顺序返回并留痕：
-// 它只影响菜单排列，不能因此让登录失败。
+// 它只影响菜单排列，不能因此让登录失败。代理的菜单固定，不读设置（docs/03 §5.6）。
 func (h *handlers) adminSessionVO(r *http.Request, p *service.AdminPrincipal) sessionVO {
 	vo := toSessionVO(p)
+	if p.IsAgent() {
+		return vo
+	}
 	cur, err := h.settings.Current(r.Context())
 	if err != nil {
 		slog.Error("load menu order", "admin_id", p.AdminID, "err", err)
@@ -181,6 +195,8 @@ type routePolicy struct {
 	setupExempt bool
 	// fresh 为 true 时要求二次验证仍在有效期内（R12 的高危接口，docs/03 §4.4）。
 	fresh bool
+	// self 为 true 时代理账号也能访问（本人接口：查看会话、登出、两步验证、改自己密码、二次验证，Ruling-101）；默认不放行代理。
+	self bool
 }
 
 // routeOption 修改一条路由的 routePolicy。
@@ -201,25 +217,45 @@ func withFresh() routeOption {
 	return func(p *routePolicy) { p.fresh = true }
 }
 
+// withSelf 标出本人接口：员工与代理都放行（Ruling-101）。没有这个选项的管理端路由对代理一律 403，权限码为空串的也一样。
+func withSelf() routeOption {
+	return func(p *routePolicy) { p.self = true }
+}
+
+// authenticateAdmin 校验管理端会话与 CSRF（非 GET/HEAD）；失败时已写出错误响应，返回 nil。
+func (h *handlers) authenticateAdmin(w http.ResponseWriter, r *http.Request) *service.AdminPrincipal {
+	token := ""
+	if c, err := r.Cookie(adminSessionCookie); err == nil {
+		token = c.Value
+	}
+	p, err := h.auth.Authenticate(r.Context(), token)
+	if err != nil {
+		writeError(w, r, err)
+		return nil
+	}
+	if isUnsafeMethod(r.Method) && !csrfMatches(r.Header.Get(headerCSRF), p.CSRFToken) {
+		writeError(w, r, &service.Error{Code: service.CodePermissionDenied, Message: msgCSRFFailed})
+		return nil
+	}
+	return p
+}
+
 // requireAdmin 校验会话、CSRF（非 GET/HEAD）与权限码（perm 为空表示只需登录），见 docs/03 §4.1 R1、§4.2。
-// 判定顺序：认证 → CSRF → 超管未开启两步验证（R10）→ 权限码 → 二次验证（R12）；没有权限的人不会被要求二次验证。
+// 判定顺序：认证 → CSRF → 代理账号（只放行 withSelf 的本人接口，Ruling-101）→ 超管未开启两步验证（R10）→ 权限码 → 二次验证（R12）；
+// 没有权限的人不会被要求二次验证。
 func (h *handlers) requireAdmin(perm string, next adminHandler, opts ...routeOption) http.HandlerFunc {
 	var policy routePolicy
 	for _, opt := range opts {
 		opt(&policy)
 	}
 	return func(w http.ResponseWriter, r *http.Request) {
-		token := ""
-		if c, err := r.Cookie(adminSessionCookie); err == nil {
-			token = c.Value
-		}
-		p, err := h.auth.Authenticate(r.Context(), token)
-		if err != nil {
-			writeError(w, r, err)
+		p := h.authenticateAdmin(w, r)
+		if p == nil {
 			return
 		}
-		if isUnsafeMethod(r.Method) && !csrfMatches(r.Header.Get(headerCSRF), p.CSRFToken) {
-			writeError(w, r, &service.Error{Code: service.CodePermissionDenied, Message: msgCSRFFailed})
+		// 默认拒绝：代理只能用本人接口与 /api/admin/agent/*（Ruling-101）
+		if p.IsAgent() && !policy.self {
+			writeError(w, r, &service.Error{Code: service.CodePermissionDenied, Message: msgNoPermission})
 			return
 		}
 		if p.TOTPSetupRequired() && !policy.setupExempt {
@@ -234,6 +270,36 @@ func (h *handlers) requireAdmin(perm string, next adminHandler, opts ...routeOpt
 		if policy.fresh && !p.ReauthFresh {
 			writeError(w, r, &service.Error{Code: service.CodeReauthRequired, Message: msgReauthRequired})
 			return
+		}
+		next(w, r, p)
+	}
+}
+
+// requireAgent 是代理专用接口 /api/admin/agent/* 的鉴权（Ruling-101）：只放行代理会话，员工（含超管）一律 403，不看权限码。
+// 判定顺序：认证 → CSRF → 账号类型 → 二次验证（带 withFresh 时，R12）→ 写操作频控（非 GET/HEAD，Ruling-104）。
+func (h *handlers) requireAgent(next adminHandler, opts ...routeOption) http.HandlerFunc {
+	var policy routePolicy
+	for _, opt := range opts {
+		opt(&policy)
+	}
+	return func(w http.ResponseWriter, r *http.Request) {
+		p := h.authenticateAdmin(w, r)
+		if p == nil {
+			return
+		}
+		if !p.IsAgent() {
+			writeError(w, r, &service.Error{Code: service.CodePermissionDenied, Message: msgNoPermission})
+			return
+		}
+		if policy.fresh && !p.ReauthFresh {
+			writeError(w, r, &service.Error{Code: service.CodeReauthRequired, Message: msgReauthRequired})
+			return
+		}
+		if isUnsafeMethod(r.Method) {
+			if err := h.agents.AllowWrite(p); err != nil {
+				writeError(w, r, err)
+				return
+			}
 		}
 		next(w, r, p)
 	}

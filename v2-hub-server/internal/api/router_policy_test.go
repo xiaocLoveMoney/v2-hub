@@ -28,6 +28,9 @@ const (
 	optFresh       = "withFresh"
 	optSetupExempt = "withSetupExempt"
 	optPerm        = "withPerm"
+	optSelf        = "withSelf"
+	// agentPrefix 是代理专用接口的前缀（Ruling-101），其下的路由必须且只能经 requireAgent
+	agentPrefix = "/api/admin/agent/"
 	// reauthRefSuffix 是 hub-api.yaml 里高危接口 403 引用的响应
 	reauthRefSuffix = "/ReauthRequired"
 )
@@ -46,6 +49,17 @@ var loginOnlyRoutes = []string{
 	"POST /api/admin/auth/reauth",
 	"GET /api/admin/dashboard",
 	"GET /api/admin/analytics/backlog",
+}
+
+// selfRoutes 是本人接口：员工与代理都放行（Ruling-101）。其余 requireAdmin 路由对代理一律 403，包括只需登录的总览。
+var selfRoutes = []string{
+	"POST /api/admin/auth/logout",
+	"GET /api/admin/auth/me",
+	"POST /api/admin/auth/totp/setup",
+	"POST /api/admin/auth/totp/enable",
+	"POST /api/admin/auth/totp/disable",
+	"PUT /api/admin/auth/password",
+	"POST /api/admin/auth/reauth",
 }
 
 // setupExemptRoutes 是尚未开启两步验证的超管也能访问的路由（R10）。
@@ -82,6 +96,10 @@ var freshRoutes = []string{
 	"POST /api/admin/topup-codes",
 	// ⑧ 保存系统设置（含菜单顺序）
 	"PUT /api/admin/settings",
+	// 二级代理（docs/03 §5.23）：超管侧的代理写操作与用户划转（admin:write 一律高危，Ruling-104）
+	"POST /api/admin/agents", "PUT /api/admin/agents/{id}", "PUT /api/admin/users/{id}/agent",
+	// 代理侧：删除用户、重置用户密码、清除用户两步验证（Ruling-104）
+	"DELETE /api/admin/agent/users/{id}", "PUT /api/admin/agent/users/{id}/password", "DELETE /api/admin/agent/users/{id}/totp",
 }
 
 // routeMeta 是从源码里读出的一条管理端路由的鉴权声明。
@@ -90,6 +108,8 @@ type routeMeta struct {
 	extraPerm   string
 	fresh       bool
 	setupExempt bool
+	self        bool // withSelf：代理也放行的本人接口
+	agent       bool // 经 requireAgent 的代理专用接口
 	public      bool // 不经 requireAdmin（只有登录）
 }
 
@@ -109,7 +129,7 @@ func parseAdminRoutes(t *testing.T) map[string]routeMeta {
 		}
 		handler := call.Args[1]
 		lit, isLit := call.Args[0].(*ast.BasicLit)
-		usesRequireAdmin := isRequireAdmin(handler)
+		usesRequireAdmin := isRequireAdmin(handler) || isRequireAgent(handler)
 		if !isLit {
 			if usesRequireAdmin {
 				t.Fatalf("%s: 管理端路由的 pattern 必须是字面量，测试才能核对", fset.Position(call.Pos()))
@@ -149,6 +169,11 @@ func isRequireAdmin(e ast.Expr) bool {
 	return ok && isSelector(call.Fun, "h", "requireAdmin")
 }
 
+func isRequireAgent(e ast.Expr) bool {
+	call, ok := e.(*ast.CallExpr)
+	return ok && isSelector(call.Fun, "h", "requireAgent")
+}
+
 // permName 取权限码实参：空串字面量或 service.PermXxx。
 func permName(t *testing.T, pattern string, e ast.Expr) string {
 	t.Helper()
@@ -165,6 +190,9 @@ func permName(t *testing.T, pattern string, e ast.Expr) string {
 
 func metaOf(t *testing.T, pattern string, handler ast.Expr) routeMeta {
 	t.Helper()
+	if isRequireAgent(handler) {
+		return agentMetaOf(t, pattern, handler.(*ast.CallExpr))
+	}
 	if !isRequireAdmin(handler) {
 		if pattern != adminLoginPath {
 			t.Fatalf("%s 没有经过 requireAdmin", pattern)
@@ -176,7 +204,28 @@ func metaOf(t *testing.T, pattern string, handler ast.Expr) routeMeta {
 		t.Fatalf("%s: requireAdmin 实参不足", pattern)
 	}
 	m := routeMeta{perm: permName(t, pattern, call.Args[0])}
-	for _, opt := range call.Args[2:] {
+	applyOptions(t, pattern, call.Args[2:], &m)
+	return m
+}
+
+// agentMetaOf 读 requireAgent(next, opts...) 的声明：代理专用接口不挂权限码，只认 withFresh。
+func agentMetaOf(t *testing.T, pattern string, call *ast.CallExpr) routeMeta {
+	t.Helper()
+	if len(call.Args) < 1 {
+		t.Fatalf("%s: requireAgent 实参不足", pattern)
+	}
+	m := routeMeta{agent: true}
+	applyOptions(t, pattern, call.Args[1:], &m)
+	if m.setupExempt || m.self || m.extraPerm != "" {
+		t.Fatalf("%s: requireAgent 只接受 withFresh", pattern)
+	}
+	return m
+}
+
+// applyOptions 把路由选项写进 m；不认识的选项让测试失败。
+func applyOptions(t *testing.T, pattern string, opts []ast.Expr, m *routeMeta) {
+	t.Helper()
+	for _, opt := range opts {
 		oc, ok := opt.(*ast.CallExpr)
 		id, isIdent := func() (*ast.Ident, bool) {
 			if !ok {
@@ -195,11 +244,12 @@ func metaOf(t *testing.T, pattern string, handler ast.Expr) routeMeta {
 			m.setupExempt = true
 		case optPerm:
 			m.extraPerm = permName(t, pattern, oc.Args[0])
+		case optSelf:
+			m.self = true
 		default:
 			t.Fatalf("%s: 不认识的鉴权选项 %s", pattern, id.Name)
 		}
 	}
-	return m
 }
 
 // contractRoutes 读 hub-api.yaml：返回全部管理端接口与其中 403 引用 ReauthRequired 的接口。
@@ -275,11 +325,23 @@ func TestAdminRoutePolicies(t *testing.T) {
 	if got := sortedKeys(routes, func(m routeMeta) bool { return m.setupExempt }); !slices.Equal(got, sortedCopy(setupExemptRoutes)) {
 		t.Fatalf("R10 豁免清单不一致\ngot:  %v\nwant: %v", got, sortedCopy(setupExemptRoutes))
 	}
-	if got := sortedKeys(routes, func(m routeMeta) bool { return !m.public && m.perm == "" }); !slices.Equal(got, sortedCopy(loginOnlyRoutes)) {
+	if got := sortedKeys(routes, func(m routeMeta) bool { return m.self }); !slices.Equal(got, sortedCopy(selfRoutes)) {
+		t.Fatalf("代理也放行的本人接口清单不一致（Ruling-101）\ngot:  %v\nwant: %v", got, sortedCopy(selfRoutes))
+	}
+	var wantAgent []string
+	for _, k := range all {
+		if _, path, _ := strings.Cut(k, " "); strings.HasPrefix(path, agentPrefix) {
+			wantAgent = append(wantAgent, k)
+		}
+	}
+	if got := sortedKeys(routes, func(m routeMeta) bool { return m.agent }); !slices.Equal(got, wantAgent) || len(got) == 0 {
+		t.Fatalf("经 requireAgent 的路由与 hub-api.yaml 的 %s* 不一致（Ruling-101）\ngot:  %v\nwant: %v", agentPrefix, got, wantAgent)
+	}
+	if got := sortedKeys(routes, func(m routeMeta) bool { return !m.public && !m.agent && m.perm == "" }); !slices.Equal(got, sortedCopy(loginOnlyRoutes)) {
 		t.Fatalf("只需登录的路由不一致（其余管理端路由都必须挂权限码）\ngot:  %v\nwant: %v", got, sortedCopy(loginOnlyRoutes))
 	}
 	for pattern, m := range routes {
-		if m.fresh && m.perm == "" {
+		if m.fresh && m.perm == "" && !m.agent {
 			t.Fatalf("%s: 高危接口必须同时挂权限码", pattern)
 		}
 		// 超管专属码的写接口都是高危接口
@@ -320,6 +382,11 @@ func TestAdminRoutePoliciesAtRuntime(t *testing.T) {
 		}
 		method, path := concretePath(pattern)
 		expectStatus(t, anonymous.do(method, path, nil), http.StatusUnauthorized, string(service.CodeUnauthenticated))
+		// 代理专用接口对员工一律 403（另见 agent_test.go 的越权矩阵）
+		if m.agent {
+			expectStatus(t, root.do(method, path, map[string]any{}), http.StatusForbidden, string(service.CodePermissionDenied))
+			continue
+		}
 		if !m.fresh {
 			continue
 		}
