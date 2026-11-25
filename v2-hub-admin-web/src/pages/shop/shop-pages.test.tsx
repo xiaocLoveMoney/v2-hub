@@ -191,7 +191,7 @@ describe('UsersPage 的余额与切换身份', () => {
   const user = {
     id: 9, username: 'alice', remark: '', planId: null, planName: '', status: 'active', isDisabled: false, trafficLimit: 0, trafficUsed: 0, expiresAt: null,
     pendingDays: 0, limitIp: 0, renewEveryDays: 0, renewMonthDay: 0, renewWeekday: 0, renewMax: 0, renewCount: 0, trafficReset: 'never', trafficResetDay: 1,
-    provisions: { synced: 0, pending: 0, failed: 0 }, createdAt: NOW, balance: 2000, autoRenew: false,
+    provisions: { synced: 0, pending: 0, failed: 0 }, agent: null, createdAt: NOW, balance: 2000, autoRenew: false,
   }
 
   it('调整余额按分提交并带备注；切换身份在新窗口打开带票据片段的门户地址', async () => {

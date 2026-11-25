@@ -1,4 +1,5 @@
 import type { TrafficReset, UserStatus } from '../../api/client'
+import { formatTime } from '../system/format'
 
 /** 1 GB 的字节数；额度在界面上按 GB 填写，接口按字节传（hub-api PlanInput.trafficLimit）。 */
 export const BYTES_PER_GB = 1024 ** 3
@@ -93,4 +94,12 @@ export function describeReset(reset: TrafficReset, day: number): string {
     return `每月 ${day} 号`
   }
   return TRAFFIC_RESET_OPTIONS.find((o) => o.value === reset)?.label ?? reset
+}
+
+/** 到期时间的文字：有到期时间显示时间，等待首次使用显示天数，否则不过期。 */
+export function describeExpiry(u: { expiresAt?: string | null; pendingDays: number }): string {
+  if (u.expiresAt !== null && u.expiresAt !== undefined) {
+    return formatTime(u.expiresAt)
+  }
+  return u.pendingDays > 0 ? `首次使用后 ${u.pendingDays} 天` : '不过期'
 }

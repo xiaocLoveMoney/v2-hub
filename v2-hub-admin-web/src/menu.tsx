@@ -1,5 +1,6 @@
 import {
   AccountBookOutlined,
+  ApartmentOutlined,
   AuditOutlined,
   BarChartOutlined,
   BookOutlined,
@@ -60,6 +61,7 @@ export const ROUTES = {
   FINANCE_STATS: '/shop/stats',
   ADMINS: '/system/admins',
   ROLES: '/system/roles',
+  AGENTS: '/system/agents',
   AUDIT_LOGS: '/system/audit-logs',
   SETTINGS: '/system/settings',
   MENU_ORDER: '/system/menu-order',
@@ -140,6 +142,7 @@ export const MENU: readonly MenuEntry[] = [
   { key: 'finance-stats', path: ROUTES.FINANCE_STATS, label: '收支统计', icon: <BarChartOutlined />, permission: PERMISSIONS.FINANCE_READ, group: GROUP_SHOP },
   { key: 'admins', path: ROUTES.ADMINS, label: '管理员', icon: <TeamOutlined />, permission: PERMISSIONS.ADMIN_READ, group: GROUP_SYSTEM },
   { key: 'roles', path: ROUTES.ROLES, label: '角色与权限', icon: <SafetyOutlined />, permission: PERMISSIONS.ADMIN_READ, group: GROUP_SYSTEM },
+  { key: 'agents', path: ROUTES.AGENTS, label: '代理', icon: <ApartmentOutlined />, permission: PERMISSIONS.ADMIN_READ, group: GROUP_SYSTEM },
   { key: 'audit-logs', path: ROUTES.AUDIT_LOGS, label: '审计日志', icon: <AuditOutlined />, permission: PERMISSIONS.AUDIT_READ, group: GROUP_SYSTEM },
   { key: 'settings', path: ROUTES.SETTINGS, label: '系统设置', icon: <SettingOutlined />, permission: PERMISSIONS.SETTING_READ, group: GROUP_SYSTEM },
   { key: 'menu-order', path: ROUTES.MENU_ORDER, label: '菜单顺序', icon: <OrderedListOutlined />, permission: PERMISSIONS.SETTING_READ, group: GROUP_SYSTEM },
