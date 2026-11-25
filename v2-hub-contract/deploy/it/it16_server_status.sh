@@ -103,8 +103,7 @@ set +m
 wait_port "$REACH_PORT" 10 || fail "探测服务模拟端没起来"
 
 # ---- 3. hub-server（探测 3 秒、检测 2 秒一轮、探测服务指向本机）与超管 ----
-sed -e "s/^  probeInterval: .*/  probeInterval: $PROBE_INTERVAL/" -e "s/^  checkInterval: .*/  checkInterval: $CHECK_INTERVAL/" \
-  "$REPO_ROOT/v2-hub-server/etc/hub-server.yaml" > "$WORK/hub-server.yaml"
+it_hub_config "$WORK/hub-server.yaml" -e "s/^  probeInterval: .*/  probeInterval: $PROBE_INTERVAL/" -e "s/^  checkInterval: .*/  checkInterval: $CHECK_INTERVAL/" || fail "派生配置失败"
 grep -q "checkInterval: $CHECK_INTERVAL" "$WORK/hub-server.yaml" && grep -q "probeInterval: $PROBE_INTERVAL" "$WORK/hub-server.yaml" || fail "临时配置没有改到周期"
 printf '%s\n' "$CRED" | (cd "$REPO_ROOT/v2-hub-server" && make -s admin-create USERNAME="$ROOT_USER") >/tmp/it-admin-create.log 2>&1 || fail "admin-create 失败"
 start_module v2-hub-server 8080 CONFIG="$WORK/hub-server.yaml" HUB_REACH_API_URL="http://127.0.0.1:$REACH_PORT"
@@ -119,8 +118,8 @@ call() {
 }
 expect_code() { [ "$(cat "$WORK/code")" = "$1" ] || fail "$2：期望 HTTP $1，实际 $(cat "$WORK/code") $(cat "$WORK/body")"; }
 expect_error() { expect_code "$1" "$3"; [ "$(jq -r .code "$WORK/body")" = "$2" ] || fail "$3：期望错误码 $2，实际 $(cat "$WORK/body")"; }
-CSRF="$(call "$HUB_JAR" "" POST /api/admin/auth/login "$(jq -nc --arg u "$ROOT_USER" --arg p "$CRED" '{username:$u,password:$p}')" | jq -r '.data.csrfToken // empty')"
-[ -n "$CSRF" ] || fail "hub 登录失败"
+# 超管登录：首次登录当场绑定两步验证（R10）；登录即视为刚做过二次验证，联调配置把有效期拉长（common.sh it_admin_login）
+CSRF="$(it_admin_login "$HUB_JAR" "$ROOT_USER" "$CRED")" || fail "hub 登录失败"
 hub() { call "$HUB_JAR" "$CSRF" "$@"; }
 
 # ---- 4. 接入：列表与详情带资源快照、流量周期与默认账单 ----

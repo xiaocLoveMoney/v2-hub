@@ -15,8 +15,8 @@ BUYER_MAIL="$BUYER@$MAIL_DOMAIN"
 CRED="it-$(openssl rand -hex 12)"
 USER_CRED="it-$(openssl rand -hex 12)"
 SITE_NAME="IT7 站点"
-SUBJECT_RENEW_OK="【$SITE_NAME】已自动续费"
-SUBJECT_RENEW_FAILED="【$SITE_NAME】自动续费失败"
+SUBJECT_RENEW_OK="【${SITE_NAME}】已自动续费"
+SUBJECT_RENEW_FAILED="【${SITE_NAME}】自动续费失败"
 SMTP_HOST=127.0.0.1
 SMTP_DEAD_PORT=1  # 没有服务监听，连接立即被拒
 GIB=1073741824
@@ -40,7 +40,8 @@ fail() { echo "IT-7: $*"; exit 1; }
 
 # ---- 1. hub-server（带 SMTP 环境变量）与超管 ----
 printf '%s\n' "$CRED" | (cd "$REPO_ROOT/v2-hub-server" && make -s admin-create USERNAME="$ROOT_USER") >/tmp/it-admin-create.log 2>&1 || fail "admin-create 失败"
-start_module v2-hub-server 8080 HUB_SMTP_HOST="$SMTP_HOST" HUB_SMTP_PORT="$SMTP_DEAD_PORT" HUB_SMTP_FROM="noreply@$MAIL_DOMAIN" HUB_SMTP_TLS=none
+it_hub_config "$WORK/hub-server.yaml" || fail "派生配置失败"
+start_module v2-hub-server 8080 CONFIG="$WORK/hub-server.yaml" HUB_SMTP_HOST="$SMTP_HOST" HUB_SMTP_PORT="$SMTP_DEAD_PORT" HUB_SMTP_FROM="noreply@$MAIL_DOMAIN" HUB_SMTP_TLS=none
 HUB_JAR="$WORK/hub.jar"
 login_body_of() { jq -nc --arg u "$1" --arg p "$2" '{username:$u,password:$p}'; }
 # call <cookie jar> <csrf> <method> <path> [json] → 打印响应体；状态码写入 $WORK/code
@@ -57,8 +58,8 @@ expect_error() {
   expect_code "$1" "$3"
   [ "$(jq -r .code "$WORK/body")" = "$2" ] || fail "$3：期望错误码 $2，实际 $(cat "$WORK/body")"
 }
-CSRF="$(call "$HUB_JAR" "" POST /api/admin/auth/login "$(login_body_of "$ROOT_USER" "$CRED")" | jq -r '.data.csrfToken // empty')"
-[ -n "$CSRF" ] || fail "hub 登录失败"
+# 超管登录：首次登录当场绑定两步验证（R10）；登录即视为刚做过二次验证，联调配置把有效期拉长（common.sh it_admin_login）
+CSRF="$(it_admin_login "$HUB_JAR" "$ROOT_USER" "$CRED")" || fail "hub 登录失败"
 hub() { call "$HUB_JAR" "$CSRF" "$@"; }
 
 # ---- 2. 套餐与时长选项、用户（管理员建的用户，邮箱视为已验证）----
@@ -108,13 +109,13 @@ call "$BUYER_JAR" "" POST /api/user/wallet/redeem "$(redeem_body_of "$FIRST_CODE
 buyer POST /api/user/wallet/redeem "$(redeem_body_of "AAAAAAAAAAAAAAAA")" >/dev/null; expect_code 400 "不存在的充值码"
 buyer POST /api/user/wallet/redeem "$(redeem_body_of "$FIRST_CODE")" >/dev/null; expect_code 200 "兑换充值码"
 buyer POST /api/user/wallet/redeem "$(redeem_body_of "$FIRST_CODE")" >/dev/null; expect_code 400 "同一个充值码兑换第二次"
-[ "$(buyer GET /api/user/wallet | jq -r .data.balance)" = "$TOPUP_AMOUNT" ] || fail "兑换后余额应为 $TOPUP_AMOUNT：$(cat "$WORK/body")"
+[ "$(buyer GET /api/user/wallet | jq -r .data.balance)" = "$TOPUP_AMOUNT" ] || fail "兑换后余额应为 ${TOPUP_AMOUNT}：$(cat "$WORK/body")"
 [ "$(buyer GET /api/user/wallet/ledger | jq -r '.data.items[0] | .kind + "," + (.amount | tostring) + "," + (.balanceAfter | tostring)')" = "topup_code,$TOPUP_AMOUNT,$TOPUP_AMOUNT" ] \
   || fail "流水应记一笔充值码入账：$(cat "$WORK/body")"
 
 # ---- 6. 购买（docs/03 §5.13）：扣余额、立即生效、记流水 ----
 order="$(buyer POST /api/user/orders "$order_body")"; expect_code 200 "购买"
-[ "$(printf '%s' "$order" | jq -r '.data.kind + "," + (.data.amountPaid | tostring)')" = "plan,$PLAN_PRICE" ] || fail "订单应为套餐、实付 $PLAN_PRICE：$order"
+[ "$(printf '%s' "$order" | jq -r '.data.kind + "," + (.data.amountPaid | tostring)')" = "plan,$PLAN_PRICE" ] || fail "订单应为套餐、实付 ${PLAN_PRICE}：$order"
 AFTER_BUY=$((TOPUP_AMOUNT - PLAN_PRICE))
 dash="$(buyer GET /api/user/dashboard)"
 [ "$(printf '%s' "$dash" | jq -r '[.data.status, .data.planName, .data.balance, .data.trafficLimit] | map(tostring) | join(",")')" = "active,it7-plan,$AFTER_BUY,$GIB" ] \

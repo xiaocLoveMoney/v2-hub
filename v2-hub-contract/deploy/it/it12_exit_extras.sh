@@ -104,17 +104,16 @@ python3 -I "$WORK/geo_stub.py" "$GEO_PORT" "$WORK/geo.log" "$GEO_COUNTRY" >/dev/
 IT_PIDS+=($!)
 set +m
 wait_port "$GEO_PORT" 10 || fail "模拟 IP 库没起来"
-sed -e 's/^  applyInterval: .*/  applyInterval: 2s/' -e 's/^  minApplyInterval: .*/  minApplyInterval: 5s/' -e 's/^  probeInterval: .*/  probeInterval: 2s/' \
-  -e "s/^  userTestLimit: .*/  userTestLimit: $TEST_LIMIT/" "$REPO_ROOT/v2-hub-server/etc/hub-server.yaml" > "$WORK/hub-server.yaml"
+it_hub_config "$WORK/hub-server.yaml" -e 's/^  applyInterval: .*/  applyInterval: 2s/' -e 's/^  minApplyInterval: .*/  minApplyInterval: 5s/' -e 's/^  probeInterval: .*/  probeInterval: 2s/' \
+  -e "s/^  userTestLimit: .*/  userTestLimit: $TEST_LIMIT/" || fail "派生配置失败"
 grep -q 'applyInterval: 2s' "$WORK/hub-server.yaml" || fail "临时配置没有改到下发间隔"
 grep -q "userTestLimit: $TEST_LIMIT" "$WORK/hub-server.yaml" || fail "临时配置没有改到测试次数上限"
 printf '%s\n' "$CRED" | (cd "$REPO_ROOT/v2-hub-server" && make -s admin-create USERNAME="$ROOT_USER") >/tmp/it-admin-create.log 2>&1 || fail "admin-create 失败"
 start_module v2-hub-server 8080 CONFIG="$WORK/hub-server.yaml" HUB_GEOIP_LOOKUP_URL="http://127.0.0.1:$GEO_PORT/geo/{ip}"
 HUB_JAR="$WORK/hub.jar"
 login_body_of() { jq -nc --arg u "$1" --arg p "$2" '{username:$u,password:$p}'; }
-CSRF="$(curl -s -b "$HUB_JAR" -c "$HUB_JAR" -X POST "$BASE/api/admin/auth/login" -H 'Content-Type: application/json' --data "$(login_body_of "$ROOT_USER" "$CRED")" \
-  | jq -r '.data.csrfToken // empty')"
-[ -n "$CSRF" ] || fail "hub 登录失败"
+# 超管登录：首次登录当场绑定两步验证（R10）；登录即视为刚做过二次验证，联调配置把有效期拉长（common.sh it_admin_login）
+CSRF="$(it_admin_login "$HUB_JAR" "$ROOT_USER" "$CRED")" || fail "hub 登录失败"
 call() {
   local args=(-s -o "$WORK/body" -w '%{http_code}' -b "$1" -c "$1" -X "$3" -H 'Content-Type: application/json')
   [ -n "$2" ] && args+=(-H "X-CSRF-Token: $2")
@@ -253,8 +252,8 @@ admin_test "$LOOP_EXIT" "$SERVER_A" tcp >/dev/null; expect_code 400 "管理员�
 CLOSED_ID="$(hub POST /api/admin/chain-exits "$(jq -nc --arg l "$CLOSED_LINK" --argjson g "[$GROUP_ID]" \
   '{name:"it12-关着的端口",link:$l,remark:"",isEnabled:true,allowServer:true,allowClient:false,nodeGroupIds:$g}')" | jq -r '.data.id // empty')"; expect_code 200 "新建端口关着的平台出口"
 for mode in tcp http; do
-  res="$(admin_test "$CLOSED_ID" "$SERVER_A" "$mode")"; expect_code 200 "管理员测试端口关着的出口（$mode）"
-  printf '%s' "$res" | jq -e '.data | .ok == false and .reason == "refused" and .delayMs == 0' >/dev/null || fail "端口关着应归到 refused（$mode）：$res"
+  res="$(admin_test "$CLOSED_ID" "$SERVER_A" "$mode")"; expect_code 200 "管理员测试端口关着的出口（${mode}）"
+  printf '%s' "$res" | jq -e '.data | .ok == false and .reason == "refused" and .delayMs == 0' >/dev/null || fail "端口关着应归到 refused（${mode}）：$res"
 done
 hub DELETE "/api/admin/chain-exits/$CLOSED_ID" >/dev/null; expect_code 200 "删除端口关着的平台出口"
 admin_test "$PLATFORM_ID" 999999 tcp >/dev/null; expect_code 404 "从不存在的服务器发起测试"

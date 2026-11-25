@@ -70,8 +70,7 @@ panel POST /inbounds/add "$(jq -nc --argjson p "$INBOUND_PORT" --arg r "$INBOUND
   settings:{clients:[]},streamSettings:{network:"ws",security:"none",wsSettings:{path:"/it14"}},sniffing:{enabled:false}}')" | jq -e .success >/dev/null || fail "面板上预建入站失败"
 
 # ---- 2. hub-server（允许回环地址、任务 1 秒领取一次）与超管 ----
-sed -e 's/^  allowLoopback: .*/  allowLoopback: true/' -e "s/^  pollInterval: .*/  pollInterval: $POLL_INTERVAL/" \
-  "$REPO_ROOT/v2-hub-server/etc/hub-server.yaml" > "$WORK/hub-server.yaml"
+it_hub_config "$WORK/hub-server.yaml" -e 's/^  allowLoopback: .*/  allowLoopback: true/' -e "s/^  pollInterval: .*/  pollInterval: $POLL_INTERVAL/" || fail "派生配置失败"
 grep -q 'allowLoopback: true' "$WORK/hub-server.yaml" && grep -q "pollInterval: $POLL_INTERVAL" "$WORK/hub-server.yaml" || fail "临时配置没有改到回环开关或轮询间隔"
 printf '%s\n' "$CRED" | (cd "$REPO_ROOT/v2-hub-server" && make -s admin-create USERNAME="$ROOT_USER") >/tmp/it-admin-create.log 2>&1 || fail "admin-create 失败"
 start_module v2-hub-server 8080 CONFIG="$WORK/hub-server.yaml"
@@ -89,8 +88,8 @@ call() {
 }
 expect_code() { [ "$(cat "$WORK/code")" = "$1" ] || fail "$2：期望 HTTP $1，实际 $(cat "$WORK/code") $(cat "$WORK/body")"; }
 expect_error() { expect_code "$1" "$3"; [ "$(jq -r .code "$WORK/body")" = "$2" ] || fail "$3：期望错误码 $2，实际 $(cat "$WORK/body")"; }
-CSRF="$(call "$HUB_JAR" "" POST /api/admin/auth/login "$(login_body_of "$ROOT_USER" "$CRED")" | jq -r '.data.csrfToken // empty')"
-[ -n "$CSRF" ] || fail "hub 登录失败"
+# 超管登录：首次登录当场绑定两步验证（R10）；登录即视为刚做过二次验证，联调配置把有效期拉长（common.sh it_admin_login）
+CSRF="$(it_admin_login "$HUB_JAR" "$ROOT_USER" "$CRED")" || fail "hub 登录失败"
 hub() { call "$HUB_JAR" "$CSRF" "$@"; }
 # wait_task <任务 id>：等任务结束，打印最终状态
 wait_task() {
@@ -109,7 +108,7 @@ run_action() {
   expect_code 200 "发起 $1"
   status="$(wait_task "$id")"
   hub GET "/api/admin/host-tasks/$id" > "$WORK/task.json"
-  [ "$status" = "$2" ] || fail "$1 应 $2，实际 $status：$(jq -c '{errorCode:.data.errorCode,lastError:.data.lastError,log:.data.log}' "$WORK/task.json")"
+  [ "$status" = "$2" ] || fail "$1 应 $2，实际 ${status}：$(jq -c '{errorCode:.data.errorCode,lastError:.data.lastError,log:.data.log}' "$WORK/task.json")"
   [ -z "${3:-}" ] || [ "$(jq -r .data.errorCode "$WORK/task.json")" = "$3" ] || fail "$1 的原因应是 $3：$(jq -c .data "$WORK/task.json")"
 }
 server_field() { hub GET "/api/admin/servers/$SERVER_ID" | jq -r "$1"; }
