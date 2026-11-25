@@ -1,17 +1,17 @@
 import { PlusOutlined } from '@ant-design/icons'
 import { App, Button, Form, Input, Modal, Popconfirm, Select, Space, Switch, Tag, Typography, type TableProps } from 'antd'
 import { useCallback, useState } from 'react'
+import { Link } from 'react-router'
 import { api, csrfHeader, type Admin, type ApiError, type Role } from '../../api/client'
 import { useSession } from '../../auth/session-context'
 import { mutate, useRemote } from '../../hooks/use-remote'
-import { PERMISSIONS } from '../../menu'
+import { PERMISSIONS, ROUTES } from '../../menu'
+import { MAX_ADMIN_PASSWORD_LEN, MIN_ADMIN_PASSWORD_LEN } from '../form-limits'
 import { formatTime } from './format'
 import { ErrorAlert } from '../../components/ErrorAlert'
 import { PagedTable } from '../../components/PagedTable'
 import { PageHeader } from '../../components/PageHeader'
 
-const MIN_CREDENTIAL_LEN = 12
-const MAX_CREDENTIAL_LEN = 128
 const USERNAME_PATTERN = /^[a-zA-Z0-9_.-]{3,64}$/
 
 interface CreateForm {
@@ -34,10 +34,10 @@ const loadRoles = (signal: AbortSignal) => api.GET('/api/admin/roles', { signal 
 
 const credentialRules = [
   { required: true, message: '请输入密码' },
-  { min: MIN_CREDENTIAL_LEN, max: MAX_CREDENTIAL_LEN, message: `密码长度须为 ${MIN_CREDENTIAL_LEN}–${MAX_CREDENTIAL_LEN} 个字符` },
+  { min: MIN_ADMIN_PASSWORD_LEN, max: MAX_ADMIN_PASSWORD_LEN, message: `密码长度须为 ${MIN_ADMIN_PASSWORD_LEN}–${MAX_ADMIN_PASSWORD_LEN} 个字符` },
 ]
 
-/** 管理员管理（admin:read 查看，admin:write 增改；越权规则由后端按 docs/03 R2–R5 执行）。 */
+/** 管理员管理（admin:read 查看，admin:write 增改；越权规则由后端按 docs/03 R3–R5、R11 执行，前端只做显隐）。 */
 export function AdminsPage() {
   const { can, session } = useSession()
   const { message } = App.useApp()
@@ -117,7 +117,11 @@ export function AdminsPage() {
   }
 
   const columns: TableProps<Admin>['columns'] = [
-    { title: '用户名', dataIndex: 'username' },
+    {
+      title: '用户名',
+      dataIndex: 'username',
+      render: (username: string, admin: Admin) => (admin.isOwner ? <Space>{username}<Tag color="gold">所有者</Tag></Space> : username),
+    },
     {
       title: '角色',
       dataIndex: 'roles',
@@ -133,17 +137,23 @@ export function AdminsPage() {
       title: '操作',
       key: 'actions',
       render: (_: unknown, admin: Admin) => {
-        // R4：不能经管理接口改自己，按钮直接不给
-        const isSelf = admin.id === session?.admin.id
+        // R4：不能经管理接口改自己，改密码去账号安全页（R9）
+        if (admin.id === session?.admin.id) {
+          return <Link to={ROUTES.SECURITY}>去账号安全页改密码</Link>
+        }
+        // R11：所有者不能经管理接口改动，按钮直接不给
+        if (admin.isOwner) {
+          return <Typography.Text type="secondary">所有者不可修改</Typography.Text>
+        }
         return (
           <Space>
-            <Button size="small" disabled={isSelf} onClick={() => setEditing(admin)}>
+            <Button size="small" onClick={() => setEditing(admin)}>
               编辑
             </Button>
             <Button size="small" onClick={() => setResetting(admin)}>
               重置密码
             </Button>
-            {admin.totpEnabled && !isSelf && (
+            {admin.totpEnabled && (
               <Popconfirm
                 title={`清除 ${admin.username} 的两步验证？`}
                 description="用于对方遗失验证器设备；清除后其全部会话失效"

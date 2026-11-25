@@ -135,8 +135,50 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** 提交当前验证码关闭两步验证 */
+        /** 提交当前验证码关闭两步验证（超管 409，Ruling-98） */
         post: operations["adminTotpDisable"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/auth/password": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * 修改自己的密码（任何已登录管理员；须提交旧密码，Ruling-96）
+         * @description 旧密码错误返回 400 并计入频控；成功后当前会话保留、本人其余会话全部失效。
+         *     超管未开启两步验证时本接口仍可用（Ruling-98 豁免）。
+         */
+        put: operations["adminChangePassword"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/auth/reauth": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 高危操作前重新验证身份（任何已登录管理员，Ruling-100）
+         * @description 已开启两步验证的账号必须给 totpCode，否则给 password；成功后 reauthUntil 之前高危接口不再返回 reauth_required。
+         *     验证失败返回 400 invalid_argument（不用 401，以免前端当成会话失效），计入频控并写审计。
+         */
+        post: operations["adminReauth"];
         delete?: never;
         options?: never;
         head?: never;
@@ -281,7 +323,7 @@ export interface paths {
         /** 全部角色及其权限码（admin:read） */
         get: operations["listRoles"];
         put?: never;
-        /** 新建角色（admin:write；权限须为操作者子集，R2） */
+        /** 新建角色（admin:write；权限码含超管专属码时 400，Ruling-95） */
         post: operations["createRole"];
         delete?: never;
         options?: never;
@@ -299,10 +341,10 @@ export interface paths {
             cookie?: never;
         };
         get?: never;
-        /** 修改角色名称与权限码（admin:write；内置角色不可改，R2、R6） */
+        /** 修改角色名称与权限码（admin:write；权限码含超管专属码时 400；内置角色含四个预设均不可改，R6、Ruling-95） */
         put: operations["updateRole"];
         post?: never;
-        /** 删除角色（admin:write；内置或被引用的角色不可删，R6） */
+        /** 删除角色（admin:write；内置角色含四个预设、或被引用的角色不可删，R6、Ruling-95） */
         delete: operations["deleteRole"];
         options?: never;
         head?: never;
@@ -319,7 +361,7 @@ export interface paths {
         /** 分页列出管理员（admin:read） */
         get: operations["listAdmins"];
         put?: never;
-        /** 新建管理员（admin:write；只能分配权限为自己子集的角色，R3） */
+        /** 新建管理员（admin:write，超管专属，Ruling-95） */
         post: operations["createAdmin"];
         delete?: never;
         options?: never;
@@ -337,7 +379,7 @@ export interface paths {
             cookie?: never;
         };
         get?: never;
-        /** 修改管理员角色与禁用状态（admin:write；R3、R4、R5、R7） */
+        /** 修改管理员角色与禁用状态（admin:write；R4、R5、R7；目标是所有者时 403，Ruling-99） */
         put: operations["updateAdmin"];
         post?: never;
         delete?: never;
@@ -356,7 +398,10 @@ export interface paths {
             cookie?: never;
         };
         get?: never;
-        /** 重置管理员密码（admin:write；对方全部会话失效，R7） */
+        /**
+         * 重置管理员密码（admin:write；对方全部会话失效，R7）
+         * @description 对自己 409，改自己的密码用 `PUT /api/admin/auth/password`（Ruling-96）；目标是所有者时 403（Ruling-99）。
+         */
         put: operations["resetAdminPassword"];
         post?: never;
         delete?: never;
@@ -377,7 +422,7 @@ export interface paths {
         get?: never;
         put?: never;
         post?: never;
-        /** 清除他人的两步验证（遗失设备时；admin:write，R3、R4；对方全部会话失效） */
+        /** 清除他人的两步验证（遗失设备时；admin:write，R4；对方全部会话失效；目标是所有者时 403，Ruling-99） */
         delete: operations["resetAdminTotp"];
         options?: never;
         head?: never;
@@ -3376,7 +3421,7 @@ export interface components {
         };
         /** @description 业务接口统一响应信封（/healthz、/readyz 与 /sub 除外） */
         Envelope: {
-            /** @description "0" 表示成功，其余取值见 docs/03 §5 */
+            /** @description "0" 表示成功，其余取值见 docs/03 §5；管理端 403 另有 reauth_required（Ruling-100）、totp_setup_required（Ruling-98） */
             code: string;
             message: string;
             data?: unknown;
@@ -3398,6 +3443,22 @@ export interface components {
             /** @description otpauth://totp/... 地址，前端渲染为二维码 */
             otpauthUri: string;
         };
+        AdminPasswordChangeInput: {
+            oldPassword: string;
+            newPassword: components["schemas"]["Password"];
+        };
+        /** @description 二选一：已开启两步验证的账号必须给 totpCode，否则给 password（Ruling-100） */
+        AdminReauthInput: {
+            password?: string;
+            totpCode?: components["schemas"]["TotpCode"];
+        };
+        AdminReauthResult: {
+            /**
+             * Format: date-time
+             * @description 在此之前高危接口不再要求重新验证
+             */
+            reauthUntil: string;
+        };
         AdminBrief: {
             /** Format: int64 */
             id: number;
@@ -3408,6 +3469,12 @@ export interface components {
             totpEnabled: boolean;
             /** @description 管理端侧栏菜单顺序（系统设置 menu.admin，0.7.3，Ruling-57）；空数组 = 默认顺序 */
             menuOrder: components["schemas"]["MenuOrder"];
+            /** @description 持有 super_admin 角色（Ruling-95） */
+            isSuperAdmin: boolean;
+            /** @description 是否所有者（Ruling-99） */
+            isOwner: boolean;
+            /** @description 超管未开启两步验证；为 true 时除豁免接口外都返回 403 totp_setup_required，管理端停在账号安全页（Ruling-98） */
+            totpSetupRequired: boolean;
             /** @description 有效权限码（super_admin 返回全部） */
             permissions: string[];
             csrfToken: string;
@@ -3418,12 +3485,15 @@ export interface components {
         Permission: {
             code: string;
             name: string;
+            /** @description 超管专属，不能放进任何其它角色（Ruling-95） */
+            superOnly: boolean;
         };
         Role: {
             /** Format: int64 */
             id: number;
             code: string;
             name: string;
+            /** @description 内置角色：super_admin 与四个预设 operator / finance / ops / partner；不可改不可删，预设角色的 permissions 由代码定义（Ruling-95） */
             isBuiltin: boolean;
             permissions: string[];
         };
@@ -3442,6 +3512,8 @@ export interface components {
             username: string;
             isDisabled: boolean;
             totpEnabled: boolean;
+            /** @description 所有者，不能经管理接口禁用、改角色、重置密码或两步验证（Ruling-99） */
+            isOwner: boolean;
             roles: string[];
             /** Format: date-time */
             lastLoginAt?: string | null;
@@ -3485,7 +3557,7 @@ export interface components {
             /** @enum {string} */
             providerType: "xui";
             baseUrl: components["schemas"]["PanelBaseUrl"];
-            /** @description 只写；更新时留空表示沿用原值 */
+            /** @description 只写；更新时留空表示沿用原值，但面板类型或面板地址有变化时必填（Ruling-97） */
             apiToken: string;
             tlsMode: components["schemas"]["TlsMode"];
             certPinSha256?: string;
@@ -3973,10 +4045,14 @@ export interface components {
              */
             dnsAccountId?: number | null;
             domain?: components["schemas"]["HostDomain"];
+            /** @description 所选凭据的密码，再输入一次用于比对；凭据是 password 类型、且这个（地址，端口）还没用过该凭据时必填（Ruling-97） */
+            credentialSecret?: string;
         };
         ServerHostBatchInput: {
             /** Format: int64 */
             credentialId: number;
+            /** @description 所选凭据的密码，再输入一次用于比对；凭据是 password 类型、且本批中有（地址，端口）还没用过该凭据时必填，整批比对一次（Ruling-97） */
+            credentialSecret?: string;
             /** @default 22 */
             sshPort: number;
             /** @enum {string} */
@@ -4003,6 +4079,8 @@ export interface components {
             credentialId: number;
             /** @enum {string} */
             providerType: "xui";
+            /** @description 所选凭据的密码，再输入一次用于比对；凭据是 password 类型、且这个（地址，端口）还没用过该凭据时必填（Ruling-97） */
+            credentialSecret?: string;
         };
         ServerHostBindInput: {
             address: components["schemas"]["HostAddress"];
@@ -4010,6 +4088,12 @@ export interface components {
             sshPort: number;
             /** Format: int64 */
             credentialId: number;
+            /** @description 所选凭据的密码，再输入一次用于比对；凭据是 password 类型、且这个（地址，端口）还没用过该凭据时必填（Ruling-97） */
+            credentialSecret?: string;
+        };
+        ServerHostResetKeyInput: {
+            /** @description 该主机所用凭据的密码，再输入一次用于比对；凭据是 password 类型时必填——重置后下次连接接受任何主机密钥，等同该（地址，端口）首次使用该凭据（Ruling-97） */
+            credentialSecret?: string;
         };
         HostDetection: {
             /** @description 本次连接看到的主机公钥指纹（SHA256:…） */
@@ -6359,8 +6443,21 @@ export interface components {
                 "application/json": components["schemas"]["Envelope"];
             };
         };
-        /** @description permission_denied（缺权限码或 CSRF 校验失败） */
+        /** @description permission_denied（缺权限码或 CSRF 校验失败）；管理端接口另可能返回 totp_setup_required（超管未开启两步验证，查看会话、登出、生成与确认 TOTP、改自己密码除外，Ruling-98） */
         PermissionDenied: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Envelope"];
+            };
+        };
+        /**
+         * @description 高危接口（Ruling-100，清单见 docs/03 §4.4）的 403：reauth_required（二次验证已过期，先调 POST /api/admin/auth/reauth 再重发原请求）、
+         *     totp_setup_required（超管未开启两步验证，Ruling-98）或 permission_denied（缺权限码或 CSRF 校验失败）。
+         *     判定顺序：认证 → CSRF → 两步验证绑定 → 权限码 → 二次验证，缺权限的人不会被要求二次验证。
+         */
+        ReauthRequired: {
             headers: {
                 [name: string]: unknown;
             };
@@ -6655,6 +6752,60 @@ export interface operations {
             429: components["responses"]["RateLimited"];
         };
     };
+    adminChangePassword: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminPasswordChangeInput"];
+            };
+        };
+        responses: {
+            200: components["responses"]["Ok"];
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    adminReauth: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminReauthInput"];
+            };
+        };
+        responses: {
+            /** @description 验证通过 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["AdminReauthResult"];
+                    };
+                };
+            };
+            400: components["responses"]["InvalidArgument"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
     getAdminDashboard: {
         parameters: {
             query?: never;
@@ -6676,6 +6827,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
         };
     };
     getAnalyticsUsers: {
@@ -6810,6 +6962,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
         };
     };
     listPermissions: {
@@ -6886,7 +7039,7 @@ export interface operations {
             };
             400: components["responses"]["InvalidArgument"];
             401: components["responses"]["Unauthenticated"];
-            403: components["responses"]["PermissionDenied"];
+            403: components["responses"]["ReauthRequired"];
             409: components["responses"]["Conflict"];
         };
     };
@@ -6918,7 +7071,7 @@ export interface operations {
             };
             400: components["responses"]["InvalidArgument"];
             401: components["responses"]["Unauthenticated"];
-            403: components["responses"]["PermissionDenied"];
+            403: components["responses"]["ReauthRequired"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
         };
@@ -6938,7 +7091,7 @@ export interface operations {
         responses: {
             200: components["responses"]["Ok"];
             401: components["responses"]["Unauthenticated"];
-            403: components["responses"]["PermissionDenied"];
+            403: components["responses"]["ReauthRequired"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
         };
@@ -7001,7 +7154,7 @@ export interface operations {
             };
             400: components["responses"]["InvalidArgument"];
             401: components["responses"]["Unauthenticated"];
-            403: components["responses"]["PermissionDenied"];
+            403: components["responses"]["ReauthRequired"];
             409: components["responses"]["Conflict"];
         };
     };
@@ -7033,7 +7186,7 @@ export interface operations {
             };
             400: components["responses"]["InvalidArgument"];
             401: components["responses"]["Unauthenticated"];
-            403: components["responses"]["PermissionDenied"];
+            403: components["responses"]["ReauthRequired"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
         };
@@ -7060,8 +7213,9 @@ export interface operations {
             200: components["responses"]["Ok"];
             400: components["responses"]["InvalidArgument"];
             401: components["responses"]["Unauthenticated"];
-            403: components["responses"]["PermissionDenied"];
+            403: components["responses"]["ReauthRequired"];
             404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
         };
     };
     resetAdminTotp: {
@@ -7079,7 +7233,7 @@ export interface operations {
         responses: {
             200: components["responses"]["Ok"];
             401: components["responses"]["Unauthenticated"];
-            403: components["responses"]["PermissionDenied"];
+            403: components["responses"]["ReauthRequired"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
         };
@@ -7166,7 +7320,7 @@ export interface operations {
             };
             400: components["responses"]["InvalidArgument"];
             401: components["responses"]["Unauthenticated"];
-            403: components["responses"]["PermissionDenied"];
+            403: components["responses"]["ReauthRequired"];
             409: components["responses"]["Conflict"];
             502: components["responses"]["UpstreamUnavailable"];
         };
@@ -7316,7 +7470,7 @@ export interface operations {
             };
             400: components["responses"]["InvalidArgument"];
             401: components["responses"]["Unauthenticated"];
-            403: components["responses"]["PermissionDenied"];
+            403: components["responses"]["ReauthRequired"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             502: components["responses"]["UpstreamUnavailable"];
@@ -7337,7 +7491,7 @@ export interface operations {
         responses: {
             200: components["responses"]["Ok"];
             401: components["responses"]["Unauthenticated"];
-            403: components["responses"]["PermissionDenied"];
+            403: components["responses"]["ReauthRequired"];
             404: components["responses"]["NotFound"];
         };
     };
@@ -7606,7 +7760,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthenticated"];
-            403: components["responses"]["PermissionDenied"];
+            403: components["responses"]["ReauthRequired"];
             404: components["responses"]["NotFound"];
         };
     };
@@ -7920,7 +8074,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthenticated"];
-            403: components["responses"]["PermissionDenied"];
+            403: components["responses"]["ReauthRequired"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             502: components["responses"]["UpstreamUnavailable"];
@@ -8220,7 +8374,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthenticated"];
-            403: components["responses"]["PermissionDenied"];
+            403: components["responses"]["ReauthRequired"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             429: components["responses"]["RateLimited"];
@@ -8257,7 +8411,7 @@ export interface operations {
             };
             400: components["responses"]["InvalidArgument"];
             401: components["responses"]["Unauthenticated"];
-            403: components["responses"]["PermissionDenied"];
+            403: components["responses"]["ReauthRequired"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             429: components["responses"]["RateLimited"];
@@ -8315,7 +8469,7 @@ export interface operations {
             };
             400: components["responses"]["InvalidArgument"];
             401: components["responses"]["Unauthenticated"];
-            403: components["responses"]["PermissionDenied"];
+            403: components["responses"]["ReauthRequired"];
             409: components["responses"]["Conflict"];
         };
     };
@@ -8349,7 +8503,7 @@ export interface operations {
             };
             400: components["responses"]["InvalidArgument"];
             401: components["responses"]["Unauthenticated"];
-            403: components["responses"]["PermissionDenied"];
+            403: components["responses"]["ReauthRequired"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
         };
@@ -8369,7 +8523,7 @@ export interface operations {
         responses: {
             200: components["responses"]["Ok"];
             401: components["responses"]["Unauthenticated"];
-            403: components["responses"]["PermissionDenied"];
+            403: components["responses"]["ReauthRequired"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
         };
@@ -8426,7 +8580,7 @@ export interface operations {
             };
             400: components["responses"]["InvalidArgument"];
             401: components["responses"]["Unauthenticated"];
-            403: components["responses"]["PermissionDenied"];
+            403: components["responses"]["ReauthRequired"];
             409: components["responses"]["Conflict"];
             502: components["responses"]["UpstreamUnavailable"];
         };
@@ -8461,7 +8615,7 @@ export interface operations {
             };
             400: components["responses"]["InvalidArgument"];
             401: components["responses"]["Unauthenticated"];
-            403: components["responses"]["PermissionDenied"];
+            403: components["responses"]["ReauthRequired"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             502: components["responses"]["UpstreamUnavailable"];
@@ -8482,7 +8636,7 @@ export interface operations {
         responses: {
             200: components["responses"]["Ok"];
             401: components["responses"]["Unauthenticated"];
-            403: components["responses"]["PermissionDenied"];
+            403: components["responses"]["ReauthRequired"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
         };
@@ -8539,8 +8693,9 @@ export interface operations {
             };
             400: components["responses"]["InvalidArgument"];
             401: components["responses"]["Unauthenticated"];
-            403: components["responses"]["PermissionDenied"];
+            403: components["responses"]["ReauthRequired"];
             409: components["responses"]["Conflict"];
+            429: components["responses"]["RateLimited"];
         };
     };
     testServerHost: {
@@ -8571,7 +8726,7 @@ export interface operations {
             };
             400: components["responses"]["InvalidArgument"];
             401: components["responses"]["Unauthenticated"];
-            403: components["responses"]["PermissionDenied"];
+            403: components["responses"]["ReauthRequired"];
             429: components["responses"]["RateLimited"];
             502: components["responses"]["UpstreamUnavailable"];
         };
@@ -8633,9 +8788,10 @@ export interface operations {
             };
             400: components["responses"]["InvalidArgument"];
             401: components["responses"]["Unauthenticated"];
-            403: components["responses"]["PermissionDenied"];
+            403: components["responses"]["ReauthRequired"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
+            429: components["responses"]["RateLimited"];
         };
     };
     deleteServerHost: {
@@ -8653,7 +8809,7 @@ export interface operations {
         responses: {
             200: components["responses"]["Ok"];
             401: components["responses"]["Unauthenticated"];
-            403: components["responses"]["PermissionDenied"];
+            403: components["responses"]["ReauthRequired"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
         };
@@ -8669,7 +8825,11 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["ServerHostResetKeyInput"];
+            };
+        };
         responses: {
             /** @description 修改后的主机 */
             200: {
@@ -8682,9 +8842,11 @@ export interface operations {
                     };
                 };
             };
+            400: components["responses"]["InvalidArgument"];
             401: components["responses"]["Unauthenticated"];
-            403: components["responses"]["PermissionDenied"];
+            403: components["responses"]["ReauthRequired"];
             404: components["responses"]["NotFound"];
+            429: components["responses"]["RateLimited"];
         };
     };
     listServerHostTasks: {
@@ -8744,7 +8906,7 @@ export interface operations {
             };
             400: components["responses"]["InvalidArgument"];
             401: components["responses"]["Unauthenticated"];
-            403: components["responses"]["PermissionDenied"];
+            403: components["responses"]["ReauthRequired"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             429: components["responses"]["RateLimited"];
@@ -8775,7 +8937,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthenticated"];
-            403: components["responses"]["PermissionDenied"];
+            403: components["responses"]["ReauthRequired"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             429: components["responses"]["RateLimited"];
@@ -8834,7 +8996,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthenticated"];
-            403: components["responses"]["PermissionDenied"];
+            403: components["responses"]["ReauthRequired"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
         };
@@ -8869,9 +9031,10 @@ export interface operations {
             };
             400: components["responses"]["InvalidArgument"];
             401: components["responses"]["Unauthenticated"];
-            403: components["responses"]["PermissionDenied"];
+            403: components["responses"]["ReauthRequired"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
+            429: components["responses"]["RateLimited"];
         };
     };
     deleteEndpoint: {
@@ -9396,7 +9559,7 @@ export interface operations {
         responses: {
             200: components["responses"]["Ok"];
             401: components["responses"]["Unauthenticated"];
-            403: components["responses"]["PermissionDenied"];
+            403: components["responses"]["ReauthRequired"];
             404: components["responses"]["NotFound"];
         };
     };
@@ -9495,7 +9658,7 @@ export interface operations {
             200: components["responses"]["Ok"];
             400: components["responses"]["InvalidArgument"];
             401: components["responses"]["Unauthenticated"];
-            403: components["responses"]["PermissionDenied"];
+            403: components["responses"]["ReauthRequired"];
             404: components["responses"]["NotFound"];
         };
     };
@@ -9579,7 +9742,7 @@ export interface operations {
         responses: {
             200: components["responses"]["Ok"];
             401: components["responses"]["Unauthenticated"];
-            403: components["responses"]["PermissionDenied"];
+            403: components["responses"]["ReauthRequired"];
             404: components["responses"]["NotFound"];
         };
     };
@@ -9664,7 +9827,7 @@ export interface operations {
             };
             400: components["responses"]["InvalidArgument"];
             401: components["responses"]["Unauthenticated"];
-            403: components["responses"]["PermissionDenied"];
+            403: components["responses"]["ReauthRequired"];
         };
     };
     sendTestMail: {
@@ -10272,7 +10435,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthenticated"];
-            403: components["responses"]["PermissionDenied"];
+            403: components["responses"]["ReauthRequired"];
             404: components["responses"]["NotFound"];
         };
     };
@@ -10680,7 +10843,7 @@ export interface operations {
             };
             400: components["responses"]["InvalidArgument"];
             401: components["responses"]["Unauthenticated"];
-            403: components["responses"]["PermissionDenied"];
+            403: components["responses"]["ReauthRequired"];
         };
     };
     updateTopupCode: {
@@ -10761,7 +10924,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthenticated"];
-            403: components["responses"]["PermissionDenied"];
+            403: components["responses"]["ReauthRequired"];
             404: components["responses"]["NotFound"];
         };
     };
@@ -10979,7 +11142,7 @@ export interface operations {
             };
             400: components["responses"]["InvalidArgument"];
             401: components["responses"]["Unauthenticated"];
-            403: components["responses"]["PermissionDenied"];
+            403: components["responses"]["ReauthRequired"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
         };
@@ -11009,7 +11172,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthenticated"];
-            403: components["responses"]["PermissionDenied"];
+            403: components["responses"]["ReauthRequired"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
         };

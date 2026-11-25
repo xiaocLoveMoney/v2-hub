@@ -90,6 +90,15 @@ const SAFE_METHODS = new Set(['GET', 'HEAD'])
 const FALLBACK_MESSAGE = '网络异常，请稍后重试'
 /** 密码正确但需要两步验证码（docs/03 §4.3）。 */
 export const CODE_TOTP_REQUIRED = 'totp_required'
+/** 高危操作须先做二次验证（R12，Ruling-100）。 */
+export const CODE_REAUTH_REQUIRED = 'reauth_required'
+/** 超级管理员尚未开启两步验证（R10，Ruling-98）。 */
+export const CODE_TOTP_SETUP_REQUIRED = 'totp_setup_required'
+/** 频控触发（docs/03 §5）。 */
+export const CODE_RATE_LIMITED = 'rate_limited'
+const HTTP_FORBIDDEN = 403
+/** 会话与验证类接口：本身不会要求二次验证，也不能被拦截（否则验证请求会递归弹框）。 */
+const AUTH_PATH_PREFIX = '/api/admin/auth/'
 
 let csrfToken = ''
 
@@ -115,14 +124,101 @@ const csrfMiddleware: Middleware = {
   },
 }
 
+/** 二次验证处理器：弹出验证框，验证通过返回 true，用户取消返回 false。 */
+export type ReauthHandler = () => Promise<boolean>
+
+let reauthHandler: ReauthHandler | null = null
+/** 进行中的那一次验证；并发遇到 reauth_required 的请求共用它，只弹一次框。 */
+let pendingReauth: Promise<boolean> | null = null
+let totpSetupHandler: (() => void) | null = null
+
+/**
+ * 登记二次验证处理器（由 ReauthProvider 挂载时调用，Ruling-100）。
+ * @param handler 弹框并返回是否验证通过
+ * @returns 注销函数；只注销自己登记的那一个
+ */
+export function registerReauthHandler(handler: ReauthHandler): () => void {
+  reauthHandler = handler
+  return () => {
+    if (reauthHandler === handler) {
+      reauthHandler = null
+    }
+  }
+}
+
+/**
+ * 登记“超管须先开启两步验证”的处理器（由 SessionProvider 挂载时调用，用来刷新会话，Ruling-98）。
+ * @param handler 收到 totp_setup_required 时调用
+ * @returns 注销函数；只注销自己登记的那一个
+ */
+export function registerTotpSetupHandler(handler: () => void): () => void {
+  totpSetupHandler = handler
+  return () => {
+    if (totpSetupHandler === handler) {
+      totpSetupHandler = null
+    }
+  }
+}
+
+/** 读出 403 响应信封里的错误码；读不出（非 JSON 等）返回空串。读的是副本，原响应的 body 不受影响。 */
+async function peekErrorCode(response: Response): Promise<string> {
+  try {
+    const envelope: unknown = await response.clone().json()
+    if (typeof envelope === 'object' && envelope !== null && 'code' in envelope && typeof envelope.code === 'string') {
+      return envelope.code
+    }
+  } catch (err) {
+    // 403 却不是 JSON 信封（如网关页）：按普通 403 交还调用方
+    reportError(err)
+  }
+  return ''
+}
+
+/** 发起（或加入进行中的）一次二次验证。 */
+function requestReauth(handler: ReauthHandler): Promise<boolean> {
+  if (pendingReauth === null) {
+    pendingReauth = handler().finally(() => {
+      pendingReauth = null
+    })
+  }
+  return pendingReauth
+}
+
+/**
+ * 所有接口请求的唯一出口：403 reauth_required 时弹验证框，通过后用发请求前留底的副本原样重发一次
+ * （方法、URL、请求体、CSRF 头都不变；重发结果直接交还，不再拦截，避免循环）；取消则把原 403 交还调用方（Ruling-100）。
+ * 403 totp_setup_required 时通知会话层刷新（Ruling-98）。/api/admin/auth/ 下的请求不拦截。
+ */
+async function guardedFetch(request: Request): Promise<Response> {
+  if (new URL(request.url).pathname.startsWith(AUTH_PATH_PREFIX)) {
+    return globalThis.fetch(request)
+  }
+  const replica = request.clone()
+  const response = await globalThis.fetch(request)
+  if (response.status !== HTTP_FORBIDDEN) {
+    return response
+  }
+  const code = await peekErrorCode(response)
+  if (code === CODE_TOTP_SETUP_REQUIRED) {
+    totpSetupHandler?.()
+    return response
+  }
+  const handler = reauthHandler
+  if (code !== CODE_REAUTH_REQUIRED || handler === null) {
+    return response
+  }
+  const isPassed = await requestReauth(handler)
+  return isPassed ? globalThis.fetch(replica) : response
+}
+
 /**
  * hub-server 的类型安全客户端。同域部署（Ruling-5），会话 Cookie 由浏览器自动携带。
- * fetch 包一层而不是直接传 globalThis.fetch，便于测试时替换全局 fetch。
+ * fetch 包一层而不是直接传 globalThis.fetch，便于测试时替换全局 fetch，也是二次验证拦截的位置。
  */
 export const api = createClient<paths>({
   baseUrl: globalThis.location?.origin ?? '',
   credentials: 'same-origin',
-  fetch: (request: Request) => globalThis.fetch(request),
+  fetch: guardedFetch,
 })
 api.use(csrfMiddleware)
 

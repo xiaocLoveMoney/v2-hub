@@ -1,68 +1,41 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { App as AntApp, ConfigProvider } from 'antd'
+import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import type { ReactNode } from 'react'
+import { MemoryRouter } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { setCsrfToken } from '../../api/client'
-import { SessionContext, type SessionContextValue } from '../../auth/session-context'
 import { PERMISSIONS } from '../../menu'
+import { TEST_CSRF as CSRF, mockServer, ok, renderWith as renderInHarness } from '../../test/harness'
 import { AdminsPage } from './AdminsPage'
 import { AuditLogsPage } from './AuditLogsPage'
 import { RolesPage } from './RolesPage'
 
-const CSRF = 'csrf-test-token'
 const SELF_ID = 1
 /** 表单里输入的初始密码（仅测试用）。 */
 const typed = 'long-enough-value'
-const ok = (data: unknown) => Response.json({ code: '0', message: 'ok', data })
-
-function sessionWith(permissions: string[]): SessionContextValue {
-  const granted = new Set(permissions)
-  return {
-    status: 'authenticated',
-    session: { admin: { id: SELF_ID, username: 'root' }, permissions, csrfToken: CSRF, totpEnabled: false, menuOrder: [] },
-    login: async () => null,
-    logout: async () => undefined,
-    refresh: async () => undefined,
-    can: (p) => granted.has(p),
-  }
-}
+const CREATED_AT = '2026-11-11T00:00:00Z'
 
 function renderWith(permissions: string[], node: ReactNode) {
-  setCsrfToken(CSRF)
-  return render(
-    <ConfigProvider>
-      <AntApp>
-        <SessionContext.Provider value={sessionWith(permissions)}>{node}</SessionContext.Provider>
-      </AntApp>
-    </ConfigProvider>,
-  )
+  return renderInHarness(permissions, <MemoryRouter>{node}</MemoryRouter>)
 }
 
-interface Recorded {
-  method: string
-  path: string
-  csrf: string | null
-  body: unknown
-}
-
-function mockServer(handlers: Record<string, () => Response>) {
-  const calls: Recorded[] = []
-  vi.stubGlobal(
-    'fetch',
-    vi.fn(async (req: Request) => {
-      const path = new URL(req.url).pathname
-      const text = await req.clone().text()
-      calls.push({ method: req.method, path, csrf: req.headers.get('X-CSRF-Token'), body: text === '' ? null : JSON.parse(text) })
-      const handler = handlers[`${req.method} ${path}`]
-      return handler === undefined ? Response.json({ code: 'not_found', message: '' }, { status: 404 }) : handler()
-    }),
-  )
-  return calls
+function rowOf(text: string): HTMLElement {
+  const row = screen.getByText(text).closest('tr')
+  if (row === null) {
+    throw new Error(`row not rendered: ${text}`)
+  }
+  return row
 }
 
 const roles = [
-  { id: 1, code: 'super_admin', name: '超级管理员', isBuiltin: true, permissions: ['admin:read', 'admin:write'] },
-  { id: 2, code: 'viewer', name: '只读', isBuiltin: false, permissions: ['node:read'] },
+  { id: 1, code: 'super_admin', name: '超级管理员', isBuiltin: true, permissions: [] },
+  { id: 2, code: 'operator', name: '客服运营', isBuiltin: true, permissions: ['node:read', 'user:write'] },
+  { id: 3, code: 'viewer', name: '只读', isBuiltin: false, permissions: ['node:read'] },
+]
+
+const permissionList = [
+  { code: 'node:read', name: '查看节点', superOnly: false },
+  { code: 'user:write', name: '管理用户', superOnly: false },
+  { code: 'admin:write', name: '管理管理员', superOnly: true },
+  { code: 'host:write', name: '管理 SSH 托管', superOnly: true },
 ]
 
 afterEach(() => {
@@ -71,10 +44,10 @@ afterEach(() => {
 })
 
 describe('AdminsPage', () => {
-  it('列出管理员；自己那行不能编辑；新建时带 CSRF 头与表单内容', async () => {
+  it('列出管理员；自己那行只有去账号安全页的入口；新建时带 CSRF 头与表单内容', async () => {
     const admins = [
-      { id: SELF_ID, username: 'root', isDisabled: false, totpEnabled: false, roles: ['super_admin'], lastLoginAt: null, createdAt: '2026-11-11T00:00:00Z' },
-      { id: 2, username: 'ops', isDisabled: true, totpEnabled: true, roles: [], lastLoginAt: null, createdAt: '2026-11-11T00:00:00Z' },
+      { id: SELF_ID, username: 'root', isDisabled: false, totpEnabled: false, isOwner: false, roles: ['super_admin'], lastLoginAt: null, createdAt: CREATED_AT },
+      { id: 2, username: 'ops', isDisabled: true, totpEnabled: true, isOwner: false, roles: [], lastLoginAt: null, createdAt: CREATED_AT },
     ]
     const calls = mockServer({
       'GET /api/admin/admins': () => ok({ items: admins, total: 2 }),
@@ -83,9 +56,12 @@ describe('AdminsPage', () => {
     })
     renderWith([PERMISSIONS.ADMIN_READ, PERMISSIONS.ADMIN_WRITE], <AdminsPage />)
 
-    const rootRow = (await screen.findByText('root')).closest('tr')
-    expect(rootRow).not.toBeNull()
-    expect(within(rootRow as HTMLElement).getByRole('button', { name: /编\s*辑/ })).toHaveProperty('disabled', true)
+    await screen.findByText('root')
+    const rootRow = rowOf('root')
+    // R4 / R9：自己那行不给编辑与重置密码，改密码去账号安全页
+    expect(within(rootRow).queryByRole('button')).toBeNull()
+    expect(within(rootRow).getByRole('link', { name: '去账号安全页改密码' }).getAttribute('href')).toBe('/account/security')
+    expect(within(rowOf('ops')).getByRole('button', { name: /重置密码/ })).toBeDefined()
     expect(screen.getByText('已禁用')).toBeDefined()
 
     fireEvent.click(screen.getByRole('button', { name: /新建管理员/ }))
@@ -110,19 +86,73 @@ describe('AdminsPage', () => {
     expect(screen.queryByRole('button', { name: /新建管理员/ })).toBeNull()
     expect(screen.queryByText('操作')).toBeNull()
   })
+
+  it('所有者那行显示“所有者”标记，不给编辑、重置密码与清除两步验证（R11）', async () => {
+    const admins = [
+      { id: SELF_ID, username: 'root', isDisabled: false, totpEnabled: true, isOwner: false, roles: ['super_admin'], lastLoginAt: null, createdAt: CREATED_AT },
+      { id: 5, username: 'boss', isDisabled: false, totpEnabled: true, isOwner: true, roles: ['super_admin'], lastLoginAt: null, createdAt: CREATED_AT },
+      { id: 6, username: 'peer', isDisabled: false, totpEnabled: true, isOwner: false, roles: ['super_admin'], lastLoginAt: null, createdAt: CREATED_AT },
+    ]
+    mockServer({
+      'GET /api/admin/admins': () => ok({ items: admins, total: admins.length }),
+      'GET /api/admin/roles': () => ok(roles),
+    })
+    renderWith([PERMISSIONS.ADMIN_READ, PERMISSIONS.ADMIN_WRITE], <AdminsPage />)
+    await screen.findByText('boss')
+    const ownerRow = rowOf('boss')
+    expect(within(ownerRow).getByText('所有者')).toBeDefined()
+    expect(within(ownerRow).queryByRole('button')).toBeNull()
+    expect(within(ownerRow).getByText('所有者不可修改')).toBeDefined()
+    const peerRow = rowOf('peer')
+    expect(within(peerRow).queryByText('所有者')).toBeNull()
+    for (const name of [/编\s*辑/, /重置密码/, /清除两步验证/]) {
+      expect(within(peerRow).getByRole('button', { name })).toBeDefined()
+    }
+  })
 })
 
 describe('RolesPage', () => {
-  it('内置角色不可修改，普通角色可编辑删除', async () => {
+  it('内置角色（含预设）显示“内置”“不可修改”并列出权限；普通角色可编辑删除', async () => {
     mockServer({
       'GET /api/admin/roles': () => ok(roles),
-      'GET /api/admin/permissions': () => ok([{ code: 'node:read', name: '查看节点' }]),
+      'GET /api/admin/permissions': () => ok(permissionList),
     })
     renderWith([PERMISSIONS.ADMIN_READ, PERMISSIONS.ADMIN_WRITE], <RolesPage />)
-    expect(await screen.findByText('不可修改')).toBeDefined()
-    const viewerRow = screen.getByText('viewer').closest('tr') as HTMLElement
+    expect(await screen.findAllByText('不可修改')).toHaveLength(2)
+    const operatorRow = rowOf('operator')
+    expect(within(operatorRow).getByText('内置')).toBeDefined()
+    await waitFor(() => expect(within(operatorRow).getByText('管理用户')).toBeDefined())
+    expect(within(rowOf('super_admin')).getByText('全部权限')).toBeDefined()
+    const viewerRow = rowOf('viewer')
     expect(within(viewerRow).getByRole('button', { name: /删\s*除/ })).toBeDefined()
-    await waitFor(() => expect(within(viewerRow).getByText('查看节点')).toBeDefined())
+    expect(within(viewerRow).getByText('查看节点')).toBeDefined()
+  })
+
+  it('新建角色的勾选项不列超管专属权限码，也不再按自己拥有的权限过滤（Ruling-95）', async () => {
+    const calls = mockServer({
+      'GET /api/admin/roles': () => ok(roles),
+      'GET /api/admin/permissions': () => ok(permissionList),
+      'POST /api/admin/roles': () => ok({ id: 9, code: 'support', name: '客服', isBuiltin: false, permissions: ['user:write'] }),
+    })
+    // 只给 admin:read / admin:write，勾选项仍列出全部非超管专属的权限码
+    renderWith([PERMISSIONS.ADMIN_READ, PERMISSIONS.ADMIN_WRITE], <RolesPage />)
+    await screen.findByText('viewer')
+    fireEvent.click(screen.getByRole('button', { name: /新建角色/ }))
+    const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getByLabelText('查看节点（node:read）')).toBeDefined()
+    expect(within(dialog).getByLabelText('管理用户（user:write）')).toBeDefined()
+    expect(within(dialog).queryByText(/admin:write/)).toBeNull()
+    expect(within(dialog).queryByText(/host:write/)).toBeNull()
+    expect(within(dialog).queryByText(/只列出你拥有的权限/)).toBeNull()
+
+    fireEvent.change(within(dialog).getByLabelText('编码'), { target: { value: 'support' } })
+    fireEvent.change(within(dialog).getByLabelText('名称'), { target: { value: '客服' } })
+    fireEvent.click(within(dialog).getByLabelText('管理用户（user:write）'))
+    fireEvent.click(within(dialog).getByRole('button', { name: /创\s*建/ }))
+    await waitFor(() => expect(calls.some((c) => c.method === 'POST')).toBe(true))
+    const post = calls.find((c) => c.method === 'POST')
+    expect(post?.csrf).toBe(CSRF)
+    expect(post?.body).toEqual({ code: 'support', name: '客服', permissions: ['user:write'] })
   })
 })
 

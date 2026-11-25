@@ -1,5 +1,5 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { ConfigProvider } from 'antd'
+import { App as AntApp, ConfigProvider } from 'antd'
 import { RouterProvider, createMemoryRouter } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { routes } from './routes'
@@ -8,8 +8,21 @@ import { MENU, PERMISSIONS, ROUTES, visibleMenu } from './menu'
 
 const CSRF = 'csrf-from-server'
 
-function sessionBody(permissions: string[]) {
-  return { code: '0', message: 'ok', data: { admin: { id: 2, username: 'viewer1' }, permissions, csrfToken: CSRF, totpEnabled: false, menuOrder: [] } }
+function sessionBody(permissions: string[], isTotpSetupRequired = false) {
+  return {
+    code: '0',
+    message: 'ok',
+    data: {
+      admin: { id: 2, username: 'viewer1' },
+      permissions,
+      csrfToken: CSRF,
+      totpEnabled: !isTotpSetupRequired,
+      menuOrder: [],
+      isSuperAdmin: isTotpSetupRequired,
+      isOwner: false,
+      totpSetupRequired: isTotpSetupRequired,
+    },
+  }
 }
 
 const unauthenticated = { code: 'unauthenticated', message: '请先登录' }
@@ -31,9 +44,11 @@ function renderAt(path: string) {
   const router = createMemoryRouter(routes, { initialEntries: [path] })
   return render(
     <ConfigProvider>
-      <SessionProvider>
-        <RouterProvider router={router} />
-      </SessionProvider>
+      <AntApp>
+        <SessionProvider>
+          <RouterProvider router={router} />
+        </SessionProvider>
+      </AntApp>
     </ConfigProvider>,
   )
 }
@@ -143,5 +158,48 @@ describe('管理端登录流程', () => {
     const logoutCall = calls.find((c) => new URL(c.url).pathname === '/api/admin/auth/logout')
     expect(logoutCall?.headers.get('X-CSRF-Token')).toBe(CSRF)
     expect(await screen.findByText('v2-hub 管理端')).toBeDefined()
+  })
+
+  it('超管未开启两步验证：任何页面都跳到账号安全页，侧栏只剩账号安全并提示；开启后刷新会话恢复（Ruling-98）', async () => {
+    let isSetupRequired = true
+    mockServer({
+      'GET /api/admin/auth/me': () => Response.json(sessionBody([PERMISSIONS.NODE_READ, PERMISSIONS.ADMIN_READ], isSetupRequired)),
+      'POST /api/admin/auth/totp/setup': () => Response.json({ code: '0', message: 'ok', data: { secret: 'JBSWY3DPEHPK3PXP', otpauthUri: 'otpauth://totp/v2-hub:viewer1' } }),
+      'POST /api/admin/auth/totp/enable': () => {
+        isSetupRequired = false
+        return Response.json({ code: '0', message: 'ok' })
+      },
+    })
+    renderAt(ROUTES.NODES)
+
+    expect(await screen.findByText('超级管理员必须先开启两步验证')).toBeDefined()
+    expect(screen.getByRole('heading', { name: '账号安全' })).toBeDefined()
+    const menuItems = screen.getAllByRole('menuitem').map((el) => el.textContent)
+    expect(menuItems).toEqual(['账号安全'])
+    expect(screen.queryByRole('tab', { name: '节点目录' })).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: /开启两步验证/ }))
+    fireEvent.change(await screen.findByPlaceholderText('6 位验证码'), { target: { value: '123456' } })
+    fireEvent.click(screen.getByRole('button', { name: /确认开启/ }))
+    await waitFor(() => expect(screen.queryByText('超级管理员必须先开启两步验证')).toBeNull())
+    expect(screen.getAllByRole('menuitem').map((el) => el.textContent)).toContain('节点')
+  })
+
+  it('会话里没标强制绑定、但接口回 totp_setup_required：刷新会话后跳到账号安全页（Ruling-98）', async () => {
+    let isSetupRequired = false
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (req: Request) => {
+        if (new URL(req.url).pathname === '/api/admin/auth/me') {
+          return Response.json(sessionBody([PERMISSIONS.NODE_READ], isSetupRequired))
+        }
+        // 后端发现该超管还没开启两步验证：除豁免接口外一律 403
+        isSetupRequired = true
+        return Response.json({ code: 'totp_setup_required', message: '请先开启两步验证' }, { status: 403 })
+      }),
+    )
+    renderAt(ROUTES.NODES)
+    expect(await screen.findByText('超级管理员必须先开启两步验证')).toBeDefined()
+    expect(screen.getAllByRole('menuitem').map((el) => el.textContent)).toEqual(['账号安全'])
   })
 })

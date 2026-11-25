@@ -1,12 +1,12 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
-import { api, setCsrfToken, toApiError, type ApiError, type Session } from '../api/client'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { api, registerTotpSetupHandler, setCsrfToken, toApiError, type ApiError, type Session } from '../api/client'
 import { SessionContext, type SessionContextValue, type SessionStatus } from './session-context'
 
 interface SessionProviderProps {
   children: ReactNode
 }
 
-/** 持有当前管理员会话：启动时调 /me 恢复，登录 / 登出时更新，并同步 CSRF token。 */
+/** 持有当前管理员会话：启动时调 /me 恢复，登录 / 登出时更新，并同步 CSRF token；接口要求超管先开启两步验证时刷新会话。 */
 export function SessionProvider({ children }: SessionProviderProps) {
   const [status, setStatus] = useState<SessionStatus>('loading')
   const [session, setSession] = useState<Session | null>(null)
@@ -75,6 +75,22 @@ export function SessionProvider({ children }: SessionProviderProps) {
       reportError(err)
     }
   }, [apply])
+
+  // 接口回 totp_setup_required 时刷新会话，布局据 totpSetupRequired 停到账号安全页（Ruling-98）；并发的多次只刷新一次
+  const isRefreshingRef = useRef(false)
+  useEffect(
+    () =>
+      registerTotpSetupHandler(() => {
+        if (isRefreshingRef.current) {
+          return
+        }
+        isRefreshingRef.current = true
+        void refresh().finally(() => {
+          isRefreshingRef.current = false
+        })
+      }),
+    [refresh],
+  )
 
   const value = useMemo<SessionContextValue>(() => {
     const granted = new Set(session?.permissions ?? [])

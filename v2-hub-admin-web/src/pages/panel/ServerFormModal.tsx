@@ -23,6 +23,17 @@ interface ServerForm {
   isDisabled?: boolean
 }
 
+/** API token 输入框下的说明：新建、编辑且地址未变、编辑且面板类型或地址已变三种情况。 */
+function tokenHint(isEdit: boolean, isEndpointChanged: boolean): string {
+  if (!isEdit) {
+    return '在 3x-ui「设置 → 安全 → API Token」中创建，范围选 admin'
+  }
+  if (isEndpointChanged) {
+    return '面板类型或面板地址已修改，须重新填写 API token：平台不会拿已保存的 token 去连新地址'
+  }
+  return '留空表示沿用原 token'
+}
+
 interface ServerFormModalProps {
   /** null 表示新建 */
   server: Server | null
@@ -49,14 +60,20 @@ interface ServerFormBodyProps {
   onSaved: () => void
 }
 
-/** 服务器表单本体。API token 只写不读：编辑时留空表示沿用原值（docs/03 §5.1）。 */
+/** 服务器表单本体。API token 只写不读：编辑时留空表示沿用原值，面板类型或地址变了则必填（docs/03 §5.1，Ruling-97）。 */
 function ServerFormBody({ server, onSaved }: ServerFormBodyProps) {
   const [form] = Form.useForm<ServerForm>()
   const { message } = App.useApp()
   const [error, setError] = useState<ApiError | null>(null)
   const [isBusy, setIsBusy] = useState(false)
   const tlsMode = Form.useWatch('tlsMode', form)
+  const providerType = Form.useWatch('providerType', form)
+  const baseUrl = Form.useWatch('baseUrl', form)
   const isEdit = server !== null
+  // Ruling-97：编辑时面板类型或面板地址变了，必须重新填 token
+  const isEndpointChanged =
+    server !== null && ((providerType ?? server.providerType) !== server.providerType || (baseUrl ?? server.baseUrl).trim() !== server.baseUrl)
+  const isTokenRequired = !isEdit || isEndpointChanged
 
   const body = (v: ServerForm) => ({
     name: v.name,
@@ -188,8 +205,8 @@ function ServerFormBody({ server, onSaved }: ServerFormBodyProps) {
         <Form.Item
           name="apiToken"
           label="API token"
-          extra={isEdit ? '留空表示沿用原 token' : '在 3x-ui「设置 → 安全 → API Token」中创建，范围选 admin'}
-          rules={isEdit ? [] : [{ required: true, message: '请输入 API token' }]}
+          extra={tokenHint(isEdit, isEndpointChanged)}
+          rules={isTokenRequired ? [{ required: true, message: '请输入 API token' }] : []}
         >
           <Input.Password autoComplete="new-password" />
         </Form.Item>

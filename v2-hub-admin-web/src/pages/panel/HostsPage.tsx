@@ -2,7 +2,7 @@ import { PlusOutlined } from '@ant-design/icons'
 import { App, Button, Popconfirm, Space, Table, Typography, type TableProps } from 'antd'
 import { useState } from 'react'
 import { Link } from 'react-router'
-import { api, csrfHeader, type HostAction, type HostTask, type ServerHost } from '../../api/client'
+import { api, csrfHeader, type HostAction, type HostTask, type ServerHost, type SshCredential } from '../../api/client'
 import { useSession } from '../../auth/session-context'
 import { ErrorAlert } from '../../components/ErrorAlert'
 import { PageHeader } from '../../components/PageHeader'
@@ -11,13 +11,15 @@ import { useRemote } from '../../hooks/use-remote'
 import { useRowAction } from '../../hooks/use-submit'
 import { PERMISSIONS, ROUTES } from '../../menu'
 import { TABLE_SCROLL } from '../system/format'
+import { PASSWORD_AUTH_TYPE } from './credential-secret'
 import { DnsAccountsModal } from './DnsAccountsModal'
 import { HostCreateModal } from './HostCreateModal'
 import { HostEditModal } from './HostEditModal'
+import { HostResetKeyModal } from './HostResetKeyModal'
 import { HostTaskDrawer } from './HostTaskDrawer'
 import { HostTaskSummary } from './HostTaskSummary'
 import { SshCredentialsModal } from './SshCredentialsModal'
-import { startHostAction, type OpenedHostTasks } from './host-actions'
+import { loadSshCredentials, startHostAction, type OpenedHostTasks } from './host-actions'
 import { EMPTY, certExpiryText, isHostTaskActive } from './host-labels'
 import { formatHostEndpoint } from './host-list'
 
@@ -54,11 +56,13 @@ interface HostRowActionsProps {
   onProvision: () => Promise<void>
   onEdit: () => void
   onResetHostKey: () => Promise<unknown>
+  /** 主机的凭据是密码类型时给出：重置主机密钥改为打开带密码输入框的确认弹窗（Ruling-97）。 */
+  onOpenResetKey?: () => void
   onDelete: () => Promise<unknown>
 }
 
 /** 一台主机的行内操作；写操作只在有 host:write 时出现，主机有未结束的任务时部署、编辑、删除不可点（后端会回 409）。 */
-function HostRowActions({ host, canWrite, onOpenTasks, onProvision, onEdit, onResetHostKey, onDelete }: HostRowActionsProps) {
+function HostRowActions({ host, canWrite, onOpenTasks, onProvision, onEdit, onResetHostKey, onOpenResetKey, onDelete }: HostRowActionsProps) {
   const isBusy = isHostTaskActive(host.lastTask)
   return (
     <Space>
@@ -81,13 +85,19 @@ function HostRowActions({ host, canWrite, onOpenTasks, onProvision, onEdit, onRe
           <Button size="small" disabled={isBusy} onClick={onEdit}>
             编辑
           </Button>
-          <Popconfirm
-            title={`重置 ${host.name} 的主机密钥？`}
-            description="清空已固定的主机密钥，下次连接时重新记录。只在确认机器确实重装过之后做"
-            onConfirm={onResetHostKey}
-          >
-            <Button size="small">重置主机密钥</Button>
-          </Popconfirm>
+          {onOpenResetKey === undefined ? (
+            <Popconfirm
+              title={`重置 ${host.name} 的主机密钥？`}
+              description="清空已固定的主机密钥，下次连接时重新记录。只在确认机器确实重装过之后做"
+              onConfirm={onResetHostKey}
+            >
+              <Button size="small">重置主机密钥</Button>
+            </Popconfirm>
+          ) : (
+            <Button size="small" onClick={onOpenResetKey}>
+              重置主机密钥
+            </Button>
+          )}
           <Popconfirm
             title={`删除主机 ${host.name}？`}
             description="只删除平台里的 SSH 记录与任务历史，不动这台机器，也不删已关联的服务器"
@@ -115,6 +125,10 @@ export function HostsPage() {
   const [isCredentialsOpen, setIsCredentialsOpen] = useState(false)
   const [isDnsAccountsOpen, setIsDnsAccountsOpen] = useState(false)
   const [editing, setEditing] = useState<ServerHost | null>(null)
+  const [resettingKey, setResettingKey] = useState<ServerHost | null>(null)
+  // 重置主机密钥要知道每台主机所用凭据的认证方式（主机列表里没有），有 host:write 才取
+  const credentials = useRemote<SshCredential[]>(loadSshCredentials, canWrite)
+  const passwordCredentialIds = new Set((credentials.data ?? []).filter((c) => c.authType === PASSWORD_AUTH_TYPE).map((c) => c.id))
   const [opened, setOpened] = useState<OpenedHostTasks | null>(null)
   const act = useRowAction(hosts.reload)
 
@@ -164,6 +178,7 @@ export function HostsPage() {
           onProvision={() => handleProvision(h)}
           onEdit={() => setEditing(h)}
           onResetHostKey={() => act(() => api.POST('/api/admin/server-hosts/{id}/reset-host-key', hostPath(h)), '已重置主机密钥')}
+          onOpenResetKey={passwordCredentialIds.has(h.credentialId) ? () => setResettingKey(h) : undefined}
           onDelete={() => act(() => api.DELETE('/api/admin/server-hosts/{id}', hostPath(h)), '已删除（目标机未改动）')}
         />
       ),
@@ -212,7 +227,23 @@ export function HostsPage() {
           hosts.reload()
         }}
       />
-      <SshCredentialsModal isOpen={isCredentialsOpen} canWrite={canWrite} onClose={() => setIsCredentialsOpen(false)} onChanged={hosts.reload} />
+      <HostResetKeyModal
+        host={resettingKey}
+        onClose={() => setResettingKey(null)}
+        onDone={() => {
+          setResettingKey(null)
+          hosts.reload()
+        }}
+      />
+      <SshCredentialsModal
+        isOpen={isCredentialsOpen}
+        canWrite={canWrite}
+        onClose={() => setIsCredentialsOpen(false)}
+        onChanged={() => {
+          hosts.reload()
+          credentials.reload()
+        }}
+      />
       <DnsAccountsModal isOpen={isDnsAccountsOpen} canWrite={canWrite} onClose={() => setIsDnsAccountsOpen(false)} onChanged={hosts.reload} />
       <HostTaskDrawer
         host={opened?.host ?? null}
