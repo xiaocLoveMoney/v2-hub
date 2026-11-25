@@ -113,6 +113,20 @@ GitHub 仓库设置见 `docs/github-仓库设置清单.md`。
 - 修订（Ruling-93、Ruling-94）：下发与对账不再让全服断线——服务端链式下发不再重启 Xray（3x-ui ≥ 3.3.1 保存模板时自己热应用，平台不再另调重启；更老的面板保留重启），
   平台同步服务器时把面板的“client 停用即重启内核”设置关掉（代价：被停用用户已建立的连接留到自己断开）。实现在 `service/chain_apply.go`、`panel/xui/core.go`、`panel/xui/setting.go`、
   `service/panel_core_keep.go`。3x-ui v3.11.0 容器上实测：下发、停用、删除 client 时 Xray 进程都不变，IT-9 通过。真实外网流量下的长连接在下发时不断，待在测试机上人工验证。
+- 补充（Ruling-95 – Ruling-100，hub-api 0.17.0，migrations 0025）：管理员分级加固——`admin:*`、`host:*` 成为超管专属权限码（任何其它角色装不进去，管理员与角色只有超管能管），
+  另设四个代码定义的内置预设角色（`operator` / `finance` / `ops` / `partner`）；超管强制两步验证；高危接口二次验证（`admin_session.reauth_until`，`auth.reauthWindow` 默认 5 分钟，
+  管理端统一拦截 `reauth_required` 后重发原请求）；所有者（`admin.is_owner`，只能用 `hub admin-owner-set` 指定，另有 `admin-totp-reset` / `admin-password-reset`）；
+  本人改密码（`PUT /api/admin/auth/password`）；已存密钥不外借（改面板类型或地址须重填 token，密码类型 SSH 凭据用到新主机须再输一次）。
+  实现在 `service/permission.go`、`api/admin_auth.go`（`requireAdmin` 的 `withFresh` / `withSetupExempt` / `withPerm`）、`service/admin_cli.go`、`service/host_secret_confirm.go`；
+  `api/router_policy_test.go` 把管理端路由与契约逐条对照（新增路由漏挂鉴权或二次验证会红）。IT-17 通过；IT 登录统一经 `common.sh` 的 `it_admin_login` 绑定两步验证。
+  上线前须在生产库核对：含超管专属码的自定义角色（迁移会清掉并留审计）、未开两步验证的超管、迁移回填的所有者（最早创建的启用超管）。
+  密码凭据真正连上 SSH 的路径、登录后的页面浏览器实测待人工验证。
+- 补充（Ruling-101 – Ruling-104，hub-api 0.18.0，migrations 0026，docs/03 §5.23）：二级代理——管理端新增账号类型 `admin.kind = agent`，不持角色与权限码；
+  隔离用默认拒绝：现有管理端接口对代理一律 403（只放行 `withSelf` 的本人接口），代理只走 `/api/admin/agent/*`（`requireAgent`），每个查询在 SQL 里带归属条件、不在名下一律 404。
+  名下用户记在 `end_user.agent_id`（代理新建、代理码或名下用户个人码注册、超管划转）；配额为套餐白名单 + 用户数上限 + 累计流量池（开通即扣、删用户不退、每次扣减留 `agent_allocation`），线下结算；
+  代理只能调低额度、提前到期，写操作限速（`agent.writeRatePerHour`）。实现在 `service/agent*.go`、`api/agent.go`、`api/admin_agents.go`、`dao/queries/agent.sql`；
+  越权矩阵 `api/agent_test.go` 随路由清单自动扩展。管理端：代理走独立布局（`src/layout/AgentLayout.tsx`、`src/pages/agent/`），超管侧“代理”页与用户归属划转。IT-18 通过。
+  已知缺口：代理读不到站点币种（金额按 CNY 显示）、员工侧分不出工单回复来自代理。代理端与超管侧代理页登录后的浏览器实测待人工验证。
 - 路线图 M3–M8、M9（链式改造）、M10（出口补全与入站预填）与 M11（SSH 托管与面板部署）已完成；后续工作待定。
 - 路线（2026-11-13，Ruling-17 – Ruling-22）：参考 SSPanel-Uim Malio 的功能与界面，自行实现；里程碑为
   M3 订阅与用户端基础 → M4 自助运营 → M5 商店与钱包 → M6 / M7 两种链式 → M8 运营，见 docs/07。
