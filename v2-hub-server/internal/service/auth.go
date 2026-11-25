@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/netip"
+	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -26,6 +27,16 @@ const (
 	maxAuditUsernameLen = 64
 	guardKeyUserPrefix  = "u:"
 	guardKeyIPPrefix    = "ip:"
+	// guardKeyReauthPrefix / guardKeyPasswordPrefix：二次验证与本人改密码各自计数，不与登录共用（Ruling-96、Ruling-100）
+	guardKeyReauthPrefix   = "reauth:"
+	guardKeyPasswordPrefix = "admin-password:"
+	reauthMethodTOTP       = "totp"
+	reauthMethodPassword   = "password"
+	msgReauthTOTPMissing   = "该账号已开启两步验证，请输入验证码"
+	msgReauthPassMissing   = "请输入密码"
+	msgReauthPassInvalid   = "密码错误"
+	msgReauthTooMany       = "验证失败次数过多，请稍后再试"
+	msgOldPasswordInvalid  = "旧密码不正确"
 	// dummyPassword 只用于给不存在的用户名也跑一次 argon2，抹平响应时间差，防止枚举用户名。
 	dummyPassword = "v2-hub-timing-equalizer"
 )
@@ -39,6 +50,8 @@ type AuthConfig struct {
 	LoginWindow          time.Duration
 	LoginLockout         time.Duration
 	LoginMaxTrackedKeys  int
+	// ReauthWindow 是二次验证的有效期（配置 auth.reauthWindow，R12）。
+	ReauthWindow time.Duration
 }
 
 // AuthService 负责管理员登录、会话校验与登出。
@@ -141,7 +154,7 @@ func (s *AuthService) Login(ctx context.Context, in LoginInput) (*LoginResult, e
 	expiresAt := now.Add(s.cfg.SessionMaxAge)
 	var principal *AdminPrincipal
 	err = s.inTx(ctx, func(q *sqlcgen.Queries) error {
-		if err := q.CreateAdminSession(ctx, sqlcgen.CreateAdminSessionParams{
+		sessionID, err := q.CreateAdminSession(ctx, sqlcgen.CreateAdminSessionParams{
 			TokenHash: crypto.SHA256(token),
 			AdminID:   admin.ID,
 			CsrfToken: csrf,
@@ -149,7 +162,10 @@ func (s *AuthService) Login(ctx context.Context, in LoginInput) (*LoginResult, e
 			UserAgent: pgtype.Text{String: truncate(in.UserAgent, maxUserAgentLen), Valid: in.UserAgent != ""},
 			ExpiresAt: pgtype.Timestamptz{Time: expiresAt, Valid: true},
 			IdleUntil: pgtype.Timestamptz{Time: now.Add(s.cfg.SessionIdleTimeout), Valid: true},
-		}); err != nil {
+			// 登录成功视为刚做过二次验证（R12）
+			ReauthUntil: pgtype.Timestamptz{Time: now.Add(s.cfg.ReauthWindow), Valid: true},
+		})
+		if err != nil {
 			return fmt.Errorf("create session: %w", err)
 		}
 		if err := q.UpdateAdminLastLogin(ctx, admin.ID); err != nil {
@@ -159,8 +175,11 @@ func (s *AuthService) Login(ctx context.Context, in LoginInput) (*LoginResult, e
 		if err != nil {
 			return err
 		}
+		p.SessionID = sessionID
 		p.CSRFToken = csrf
 		p.TOTPEnabled = admin.TotpSecretEnc != nil
+		p.IsOwner = admin.IsOwner
+		p.ReauthFresh = true
 		principal = p
 		return writeAudit(ctx, q, adminAudit(p, ActionAdminLogin, targetAdmin, admin.ID, in.ClientIP, nil))
 	})
@@ -237,6 +256,9 @@ func (s *AuthService) Authenticate(ctx context.Context, token string) (*AdminPri
 	p.SessionID = row.ID
 	p.CSRFToken = row.CsrfToken
 	p.TOTPEnabled = row.TotpEnabled
+	p.IsOwner = row.IsOwner
+	// 有效期为空（存量会话、迁移前登录）或已过期都要重新验证（docs/03 §4.4）
+	p.ReauthFresh = row.ReauthUntil.Valid && now.Before(row.ReauthUntil.Time)
 	return p, nil
 }
 
@@ -259,32 +281,145 @@ func (s *AuthService) PurgeExpiredSessions(ctx context.Context) (int64, error) {
 	return n, nil
 }
 
+// loadPrincipal 按管理员持有的角色算出身份与有效权限（R1）：内置角色只在 is_builtin 为真时按编码取代码定义的权限，
+// 自定义角色读 role_permission，多个角色取并集，非超管再剔除超管专属码（Ruling-95）。
 func loadPrincipal(ctx context.Context, q *sqlcgen.Queries, adminID int64, username string) (*AdminPrincipal, error) {
-	roles, err := q.ListRoleCodesForAdmin(ctx, adminID)
+	roles, err := q.ListRolesForAdmin(ctx, adminID)
 	if err != nil {
 		return nil, fmt.Errorf("list roles of admin %d: %w", adminID, err)
 	}
-	isSuper := false
+	isSuper := slices.ContainsFunc(roles, func(r sqlcgen.ListRolesForAdminRow) bool {
+		return r.IsBuiltin && r.Code == RoleSuperAdmin
+	})
+	if isSuper {
+		// 超管的权限集固定为全部权限，不必再查权限码
+		return &AdminPrincipal{AdminID: adminID, Username: username, IsSuperAdmin: true, Permissions: effectivePermissions(true, nil)}, nil
+	}
+	// 只含自定义角色的行（查询里已排除内置角色）
+	codes, err := q.ListPermissionCodesForAdmin(ctx, adminID)
+	if err != nil {
+		return nil, fmt.Errorf("list permissions of admin %d: %w", adminID, err)
+	}
 	for _, r := range roles {
-		if r == RoleSuperAdmin {
-			isSuper = true
-			break
+		if !r.IsBuiltin {
+			continue
+		}
+		if builtin, ok := builtinRolePermissions(r.Code); ok {
+			codes = append(codes, builtin.Sorted()...)
 		}
 	}
-	// 超管的权限集固定为全部权限（effectivePermissions 不看 codes），不必再查权限码
-	var perms []string
-	if !isSuper {
-		perms, err = q.ListPermissionCodesForAdmin(ctx, adminID)
-		if err != nil {
-			return nil, fmt.Errorf("list permissions of admin %d: %w", adminID, err)
-		}
+	return &AdminPrincipal{AdminID: adminID, Username: username, Permissions: effectivePermissions(false, codes)}, nil
+}
+
+// Reauth 做一次二次验证（R12，docs/03 §4.4）：已开启两步验证的账号验验证码（防重放），否则验密码。
+// 成功后把当前会话的有效期设为 now + ReauthWindow 并返回该时刻。
+// 错误：CodeInvalidArgument（验证失败或缺字段，失败计入频控）、CodeRateLimited。
+func (s *AuthService) Reauth(ctx context.Context, p *AdminPrincipal, password, totpCode string, ip *netip.Addr) (time.Time, error) {
+	guardKey := guardKeyReauthPrefix + fmt.Sprint(p.AdminID)
+	if s.guard.IsLocked(guardKey) {
+		return time.Time{}, newError(CodeRateLimited, msgReauthTooMany)
 	}
-	return &AdminPrincipal{
-		AdminID:      adminID,
-		Username:     username,
-		IsSuperAdmin: isSuper,
-		Permissions:  effectivePermissions(isSuper, perms),
-	}, nil
+	row, err := s.q.GetAdminSecrets(ctx, p.AdminID)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("get secrets of admin %d: %w", p.AdminID, err)
+	}
+	method, ok, err := s.verifyReauth(ctx, p.AdminID, row, password, totpCode)
+	if err != nil {
+		return time.Time{}, err
+	}
+	if !ok {
+		s.guard.RecordFailure(guardKey)
+		entry := adminAudit(p, ActionAdminReauthFailed, targetAdmin, p.AdminID, ip, map[string]any{"method": method})
+		// 审计写失败不影响验证结果，但必须留痕
+		if aerr := writeAudit(ctx, s.q, entry); aerr != nil {
+			slog.Error("audit reauth failure", "admin_id", p.AdminID, "err", aerr)
+		}
+		if method == reauthMethodTOTP {
+			return time.Time{}, newError(CodeInvalidArgument, msgTOTPInvalid)
+		}
+		return time.Time{}, newError(CodeInvalidArgument, msgReauthPassInvalid)
+	}
+	s.guard.Reset(guardKey)
+	until := s.now().Add(s.cfg.ReauthWindow)
+	err = s.inTx(ctx, func(q *sqlcgen.Queries) error {
+		if err := q.SetAdminSessionReauth(ctx, sqlcgen.SetAdminSessionReauthParams{
+			ID: p.SessionID, ReauthUntil: pgtype.Timestamptz{Time: until, Valid: true},
+		}); err != nil {
+			return fmt.Errorf("set reauth of session %d: %w", p.SessionID, err)
+		}
+		return writeAudit(ctx, q, adminAudit(p, ActionAdminReauth, targetAdmin, p.AdminID, ip, map[string]any{"method": method}))
+	})
+	if err != nil {
+		return time.Time{}, err
+	}
+	return until, nil
+}
+
+// verifyReauth 按账号是否开启两步验证选择校验方式，返回 (方式, 是否通过, 系统错误)。
+// 缺少该方式需要的字段时返回 CodeInvalidArgument，不计入频控。
+func (s *AuthService) verifyReauth(ctx context.Context, adminID int64, row sqlcgen.GetAdminSecretsRow, password, totpCode string) (string, bool, error) {
+	if row.TotpSecretEnc != nil {
+		if totpCode == "" {
+			return reauthMethodTOTP, false, newError(CodeInvalidArgument, msgReauthTOTPMissing)
+		}
+		ok, err := s.consumeTOTP(ctx, adminID, row.TotpSecretEnc, row.TotpLastStep, totpCode)
+		return reauthMethodTOTP, ok, err
+	}
+	if password == "" {
+		return reauthMethodPassword, false, newError(CodeInvalidArgument, msgReauthPassMissing)
+	}
+	ok, err := crypto.VerifyPassword(password, row.PasswordHash)
+	if err != nil {
+		return reauthMethodPassword, false, fmt.Errorf("verify password of admin %d: %w", adminID, err)
+	}
+	return reauthMethodPassword, ok, nil
+}
+
+// refreshReauth 把会话的二次验证有效期设为 now + ReauthWindow（开启两步验证成功时调用，R12）。
+func (s *AuthService) refreshReauth(ctx context.Context, q *sqlcgen.Queries, sessionID int64) error {
+	until := pgtype.Timestamptz{Time: s.now().Add(s.cfg.ReauthWindow), Valid: true}
+	if err := q.SetAdminSessionReauth(ctx, sqlcgen.SetAdminSessionReauthParams{ID: sessionID, ReauthUntil: until}); err != nil {
+		return fmt.Errorf("set reauth of session %d: %w", sessionID, err)
+	}
+	return nil
+}
+
+// ChangeOwnPassword 本人改密码（R9，Ruling-96）：须提交旧密码，旧密码错误计入频控；成功后当前会话保留、其余失效（R7）。
+// 错误：CodeInvalidArgument（新密码不合规或旧密码错误）、CodeRateLimited。
+func (s *AuthService) ChangeOwnPassword(ctx context.Context, p *AdminPrincipal, oldPassword, newPassword string, ip *netip.Addr) error {
+	if err := validatePassword(newPassword); err != nil {
+		return err
+	}
+	guardKey := guardKeyPasswordPrefix + fmt.Sprint(p.AdminID)
+	if s.guard.IsLocked(guardKey) {
+		return newError(CodeRateLimited, msgTooManyLogin)
+	}
+	row, err := s.q.GetAdminSecrets(ctx, p.AdminID)
+	if err != nil {
+		return fmt.Errorf("get secrets of admin %d: %w", p.AdminID, err)
+	}
+	ok, err := crypto.VerifyPassword(oldPassword, row.PasswordHash)
+	if err != nil {
+		return fmt.Errorf("verify password of admin %d: %w", p.AdminID, err)
+	}
+	if !ok {
+		s.guard.RecordFailure(guardKey)
+		return newError(CodeInvalidArgument, msgOldPasswordInvalid)
+	}
+	s.guard.Reset(guardKey)
+	hash, err := crypto.HashPassword(newPassword)
+	if err != nil {
+		return fmt.Errorf("hash password: %w", err)
+	}
+	return s.inTx(ctx, func(q *sqlcgen.Queries) error {
+		if _, err := q.UpdateAdminPasswordHash(ctx, sqlcgen.UpdateAdminPasswordHashParams{ID: p.AdminID, PasswordHash: hash}); err != nil {
+			return fmt.Errorf("update password of admin %d: %w", p.AdminID, err)
+		}
+		if err := q.DeleteOtherAdminSessions(ctx, sqlcgen.DeleteOtherAdminSessionsParams{AdminID: p.AdminID, KeepID: p.SessionID}); err != nil {
+			return fmt.Errorf("revoke other sessions of admin %d: %w", p.AdminID, err)
+		}
+		return writeAudit(ctx, q, adminAudit(p, ActionAdminPasswordChange, targetAdmin, p.AdminID, ip, nil))
+	})
 }
 
 func truncate(s string, maxRunes int) string {

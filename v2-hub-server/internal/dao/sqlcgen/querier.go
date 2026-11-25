@@ -76,6 +76,7 @@ type Querier interface {
 	ClaimDueTelegram(ctx context.Context, arg ClaimDueTelegramParams) ([]ClaimDueTelegramRow, error)
 	// 领取排队的任务：按先后取至多 N 条置为进行中；SKIP LOCKED 让并发领取互不等待
 	ClaimQueuedHostTasks(ctx context.Context, limit int32) ([]int64, error)
+	ClearAdminOwner(ctx context.Context) error
 	ClearAdminTOTP(ctx context.Context, id int64) (int64, error)
 	ClearCouponPlans(ctx context.Context, couponID int64) error
 	ClearNodeGroupItems(ctx context.Context, nodeGroupID int64) error
@@ -123,6 +124,8 @@ type Querier interface {
 	CountPlansByIDs(ctx context.Context, ids []int64) (int64, error)
 	CountPublishedAnnouncements(ctx context.Context) (int64, error)
 	CountRebates(ctx context.Context, inviterID int64) (int64, error)
+	// 密码凭据的确认（Ruling-97）：这份凭据是否已用在这个（地址，端口）上
+	CountServerHostsByTarget(ctx context.Context, arg CountServerHostsByTargetParams) (int64, error)
 	CountServerRoutesByExit(ctx context.Context, exitID pgtype.Int8) (int64, error)
 	// 新建主机时名称不能与已有服务器重名（部署成功后主机名就是服务器名）
 	CountServersByName(ctx context.Context, name string) (int64, error)
@@ -139,7 +142,8 @@ type Querier interface {
 	CouponExists(ctx context.Context, id int64) (bool, error)
 	CreateAdmin(ctx context.Context, arg CreateAdminParams) (CreateAdminRow, error)
 	CreateAdminInviteCode(ctx context.Context, arg CreateAdminInviteCodeParams) (int64, error)
-	CreateAdminSession(ctx context.Context, arg CreateAdminSessionParams) error
+	// reauth_until：登录成功视为刚做过二次验证（Ruling-100）
+	CreateAdminSession(ctx context.Context, arg CreateAdminSessionParams) (int64, error)
 	CreateAnnouncement(ctx context.Context, arg CreateAnnouncementParams) (int64, error)
 	CreateCoupon(ctx context.Context, arg CreateCouponParams) (int64, error)
 	// 密文依赖 id 作关联数据，先写占位，同一事务内再 SetDNSAccountToken
@@ -189,6 +193,8 @@ type Querier interface {
 	DeleteNodeGroup(ctx context.Context, id int64) (int64, error)
 	DeleteOldSubscribeLogs(ctx context.Context, createdAt pgtype.Timestamptz) (int64, error)
 	DeleteOldUserLoginLogs(ctx context.Context, createdAt pgtype.Timestamptz) (int64, error)
+	// 本人改密码：保留当前会话，其余失效（R7）
+	DeleteOtherAdminSessions(ctx context.Context, arg DeleteOtherAdminSessionsParams) error
 	DeleteOtherUserSessions(ctx context.Context, arg DeleteOtherUserSessionsParams) error
 	DeletePlan(ctx context.Context, id int64) (int64, error)
 	DeletePlanPricesExcept(ctx context.Context, arg DeletePlanPricesExceptParams) error
@@ -229,8 +235,11 @@ type Querier interface {
 	FillServerRegion(ctx context.Context, arg FillServerRegionParams) (int64, error)
 	FinishHostTask(ctx context.Context, arg FinishHostTaskParams) (int64, error)
 	GetActiveEmailCodeForUpdate(ctx context.Context, arg GetActiveEmailCodeForUpdateParams) (GetActiveEmailCodeForUpdateRow, error)
+	// 行结构须与 ListAdmins 逐字段相同（service 层直接做类型转换）。
 	GetAdminByID(ctx context.Context, id int64) (GetAdminByIDRow, error)
 	GetAdminByUsername(ctx context.Context, username string) (GetAdminByUsernameRow, error)
+	// 本人改密码与二次验证用（Ruling-96、Ruling-100）。
+	GetAdminSecrets(ctx context.Context, id int64) (GetAdminSecretsRow, error)
 	// 同时取管理员状态：被禁用的管理员会话视为无效（R7）。
 	GetAdminSessionByTokenHash(ctx context.Context, tokenHash []byte) (GetAdminSessionByTokenHashRow, error)
 	// 两步验证（docs/03 §4.3）---------------------------------------------------
@@ -267,6 +276,8 @@ type Querier interface {
 	GetInviteCodeForUpdate(ctx context.Context, code string) (GetInviteCodeForUpdateRow, error)
 	GetInviteCodeOwner(ctx context.Context, id int64) (pgtype.Int8, error)
 	GetJobState(ctx context.Context, key string) (string, error)
+	// 所有者（Ruling-99）--------------------------------------------------------
+	GetOwnerAdminID(ctx context.Context) (int64, error)
 	// 入账前锁住充值单，重复通知只入账一次
 	GetPaymentByTradeNoForUpdate(ctx context.Context, tradeNo string) (GetPaymentByTradeNoForUpdateRow, error)
 	GetPlan(ctx context.Context, id int64) (GetPlanRow, error)
@@ -424,6 +435,7 @@ type Querier interface {
 	ListOfflineServers(ctx context.Context, rowLimit int32) ([]ListOfflineServersRow, error)
 	ListOrders(ctx context.Context, arg ListOrdersParams) ([]ListOrdersRow, error)
 	ListPayments(ctx context.Context, arg ListPaymentsParams) ([]ListPaymentsRow, error)
+	// 只取自定义角色的 role_permission 行；内置角色的权限由代码定义，库里即使有行也不算（Ruling-95）。
 	ListPermissionCodesForAdmin(ctx context.Context, adminID int64) ([]string, error)
 	ListPermissions(ctx context.Context) ([]ListPermissionsRow, error)
 	// 全部套餐的时长选项（docs/03 §5.12），按套餐、天数升序；套餐数量有限，一次取完在内存里归组
@@ -452,6 +464,8 @@ type Querier interface {
 	ListRoleCodesForAdmin(ctx context.Context, adminID int64) ([]string, error)
 	ListRolePermissionCodes(ctx context.Context) ([]ListRolePermissionCodesRow, error)
 	ListRoles(ctx context.Context) ([]ListRolesRow, error)
+	// 鉴权用：内置角色只在 is_builtin 为真时按编码取代码定义的权限（Ruling-95）。
+	ListRolesForAdmin(ctx context.Context, adminID int64) ([]ListRolesForAdminRow, error)
 	// SSH 托管与面板部署（docs/03 §5.22，Ruling-68 – Ruling-71）----------------------
 	ListSSHCredentials(ctx context.Context) ([]ListSSHCredentialsRow, error)
 	// 这些服务器上全部对外地址（含未授权的），用来判断一条链接是不是某个对外地址的
@@ -578,6 +592,9 @@ type Querier interface {
 	RotateUserSubscription(ctx context.Context, arg RotateUserSubscriptionParams) (int64, error)
 	SaveReachResult(ctx context.Context, arg SaveReachResultParams) error
 	SaveUserQuota(ctx context.Context, arg SaveUserQuotaParams) error
+	// 只能设给启用状态的管理员；是否持有 super_admin 由调用方在同一事务里先查
+	SetAdminOwner(ctx context.Context, id int64) (int64, error)
+	SetAdminSessionReauth(ctx context.Context, arg SetAdminSessionReauthParams) error
 	SetAdminTOTPPending(ctx context.Context, arg SetAdminTOTPPendingParams) error
 	SetChainExitAssignMode(ctx context.Context, arg SetChainExitAssignModeParams) error
 	SetChainExitEnabled(ctx context.Context, arg SetChainExitEnabledParams) (int64, error)

@@ -21,6 +21,7 @@ type Admin struct {
 	LastLoginAt    pgtype.Timestamptz
 	CreatedAt      pgtype.Timestamptz
 	UpdatedAt      pgtype.Timestamptz
+	IsOwner        bool
 }
 
 type AdminRole struct {
@@ -29,15 +30,16 @@ type AdminRole struct {
 }
 
 type AdminSession struct {
-	ID        int64
-	TokenHash []byte
-	AdminID   int64
-	CsrfToken string
-	ClientIp  *netip.Addr
-	UserAgent pgtype.Text
-	ExpiresAt pgtype.Timestamptz
-	IdleUntil pgtype.Timestamptz
-	CreatedAt pgtype.Timestamptz
+	ID          int64
+	TokenHash   []byte
+	AdminID     int64
+	CsrfToken   string
+	ClientIp    *netip.Addr
+	UserAgent   pgtype.Text
+	ExpiresAt   pgtype.Timestamptz
+	IdleUntil   pgtype.Timestamptz
+	CreatedAt   pgtype.Timestamptz
+	ReauthUntil pgtype.Timestamptz
 }
 
 type Announcement struct {

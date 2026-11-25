@@ -15,8 +15,12 @@ const (
 	CodeConflict         Code = "conflict"
 	CodeRateLimited      Code = "rate_limited"
 	CodeTOTPRequired     Code = "totp_required"
-	CodeUpstream         Code = "upstream_unavailable"
-	CodeInternal         Code = "internal"
+	// CodeTOTPSetupRequired 表示超管尚未开启两步验证，须先开启（R10）。
+	CodeTOTPSetupRequired Code = "totp_setup_required"
+	// CodeReauthRequired 表示高危操作须先做二次验证（R12，docs/03 §4.4）。
+	CodeReauthRequired Code = "reauth_required"
+	CodeUpstream       Code = "upstream_unavailable"
+	CodeInternal       Code = "internal"
 	// CodeFeatureDisabled 表示功能未开启（注册关闭、邮件未配置等，docs/03 §5）。
 	CodeFeatureDisabled Code = "feature_disabled"
 	// CodeInsufficientBalance 表示余额不足以支付本次下单（docs/03 §5.13）；Error.Data 带差额。
@@ -43,16 +47,18 @@ func (e *Error) Is(target error) bool {
 
 // 供 errors.Is 判定的哨兵值。
 var (
-	ErrInvalidArgument  = &Error{Code: CodeInvalidArgument}
-	ErrUnauthenticated  = &Error{Code: CodeUnauthenticated}
-	ErrPermissionDenied = &Error{Code: CodePermissionDenied}
-	ErrNotFound         = &Error{Code: CodeNotFound}
-	ErrConflict         = &Error{Code: CodeConflict}
-	ErrRateLimited      = &Error{Code: CodeRateLimited}
-	ErrTOTPRequired     = &Error{Code: CodeTOTPRequired}
-	ErrUpstream         = &Error{Code: CodeUpstream}
-	ErrFeatureDisabled  = &Error{Code: CodeFeatureDisabled}
-	ErrInsufficient     = &Error{Code: CodeInsufficientBalance}
+	ErrInvalidArgument   = &Error{Code: CodeInvalidArgument}
+	ErrUnauthenticated   = &Error{Code: CodeUnauthenticated}
+	ErrPermissionDenied  = &Error{Code: CodePermissionDenied}
+	ErrNotFound          = &Error{Code: CodeNotFound}
+	ErrConflict          = &Error{Code: CodeConflict}
+	ErrRateLimited       = &Error{Code: CodeRateLimited}
+	ErrTOTPRequired      = &Error{Code: CodeTOTPRequired}
+	ErrTOTPSetupRequired = &Error{Code: CodeTOTPSetupRequired}
+	ErrReauthRequired    = &Error{Code: CodeReauthRequired}
+	ErrUpstream          = &Error{Code: CodeUpstream}
+	ErrFeatureDisabled   = &Error{Code: CodeFeatureDisabled}
+	ErrInsufficient      = &Error{Code: CodeInsufficientBalance}
 )
 
 func newError(code Code, message string) *Error {

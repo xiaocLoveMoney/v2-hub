@@ -9,6 +9,8 @@ import (
 	"net/http/cookiejar"
 	"net/http/httptest"
 	"net/netip"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -40,7 +42,25 @@ type apiClient struct {
 	base string
 	http *http.Client
 	csrf string
+	// clock 是该测试服务器上认证服务的时钟，用来算 TOTP 验证码、推进步长
+	clock *apiClock
 }
+
+// apiClock 是接口用例里认证服务的时钟：真实时间加一个可推进的偏移，跨 TOTP 步长防重放时推进它而不是 sleep。
+type apiClock struct{ offset atomic.Int64 }
+
+func (c *apiClock) now() time.Time { return time.Now().Add(time.Duration(c.offset.Load())) }
+
+func (c *apiClock) advance(d time.Duration) { c.offset.Add(int64(d)) }
+
+// apiClocks 按测试服务器地址登记时钟；apiTOTPSeeds 按“服务器地址 + 用户名”记下 loginSuper 绑定的 TOTP 密钥。
+var (
+	apiClocks    sync.Map // string → *apiClock
+	apiTOTPSeeds sync.Map // string → []byte
+)
+
+// testReauthWindow 是接口用例里的二次验证有效期（同生产默认值）。
+const testReauthWindow = 5 * time.Minute
 
 type apiResult struct {
 	Status int
@@ -55,10 +75,12 @@ func newAPIServer(t *testing.T) (*httptest.Server, *service.RBACService) {
 	if err != nil {
 		t.Fatalf("NewSealer: %v", err)
 	}
+	clock := &apiClock{}
 	auth, err := service.NewAuthService(pool, service.AuthConfig{
 		SessionIdleTimeout: 2 * time.Hour, SessionMaxAge: 24 * time.Hour, SessionTouchInterval: time.Minute,
 		LoginMaxFailures: 5, LoginWindow: 15 * time.Minute, LoginLockout: 15 * time.Minute, LoginMaxTrackedKeys: 100,
-	}, sealer, nil)
+		ReauthWindow: testReauthWindow,
+	}, sealer, clock.now)
 	if err != nil {
 		t.Fatalf("NewAuthService: %v", err)
 	}
@@ -109,6 +131,8 @@ func newAPIServer(t *testing.T) (*httptest.Server, *service.RBACService) {
 		Cookie: CookieConfig{Secure: false}, TrustedProxies: []netip.Prefix{},
 	}))
 	t.Cleanup(srv.Close)
+	apiClocks.Store(srv.URL, clock)
+	t.Cleanup(func() { apiClocks.Delete(srv.URL) })
 	return srv, rbac
 }
 
@@ -118,7 +142,11 @@ func newClient(t *testing.T, base string) *apiClient {
 	if err != nil {
 		t.Fatalf("cookiejar: %v", err)
 	}
-	return &apiClient{t: t, base: base, http: &http.Client{Jar: jar}}
+	c := &apiClient{t: t, base: base, http: &http.Client{Jar: jar}, clock: &apiClock{}}
+	if v, ok := apiClocks.Load(base); ok {
+		c.clock = v.(*apiClock)
+	}
+	return c
 }
 
 func (c *apiClient) do(method, path string, body any) apiResult {
@@ -171,6 +199,72 @@ func (c *apiClient) login(username string) sessionVO {
 	return s
 }
 
+// loginSuper 以超管身份登录并保证已开启两步验证（R10）：第一次登录后经 HTTP 走完 setup → enable
+// （开启成功即视为刚做过二次验证），之后的登录把时钟推进一个步长再带验证码，避开防重放。
+func (c *apiClient) loginSuper(username string) sessionVO {
+	c.t.Helper()
+	key := c.base + "|" + username
+	if v, ok := apiTOTPSeeds.Load(key); ok {
+		c.clock.advance(totp.Period)
+		code := totp.CodeAt(v.([]byte), totp.Step(c.clock.now()))
+		res := c.do(http.MethodPost, "/api/admin/auth/login", map[string]string{"username": username, "password": cred, "totpCode": code})
+		return c.adoptSession(res, username)
+	}
+	c.login(username)
+	seed := c.bindTOTP()
+	apiTOTPSeeds.Store(key, seed)
+	return c.me()
+}
+
+// bindTOTP 为当前会话的管理员开启两步验证，返回原始密钥。
+func (c *apiClient) bindTOTP() []byte {
+	c.t.Helper()
+	setup := c.do(http.MethodPost, "/api/admin/auth/totp/setup", nil)
+	expectStatus(c.t, setup, http.StatusOK, codeOK)
+	var vo totpSetupVO
+	if err := json.Unmarshal(setup.Data, &vo); err != nil {
+		c.t.Fatalf("decode totp setup: %v", err)
+	}
+	raw, err := base32.StdEncoding.WithPadding(base32.NoPadding).DecodeString(vo.Secret)
+	if err != nil {
+		c.t.Fatalf("decode totp key: %v", err)
+	}
+	code := totp.CodeAt(raw, totp.Step(c.clock.now()))
+	expectStatus(c.t, c.do(http.MethodPost, "/api/admin/auth/totp/enable", map[string]string{"code": code}), http.StatusOK, codeOK)
+	return raw
+}
+
+// me 取当前会话信息。
+func (c *apiClient) me() sessionVO {
+	c.t.Helper()
+	return c.adoptSession(c.do(http.MethodGet, "/api/admin/auth/me", nil), "me")
+}
+
+// adoptSession 校验登录 / me 的响应并记下 CSRF token。
+func (c *apiClient) adoptSession(res apiResult, who string) sessionVO {
+	c.t.Helper()
+	if res.Status != http.StatusOK {
+		c.t.Fatalf("session %s: %d %+v", who, res.Status, res.Body)
+	}
+	var s sessionVO
+	if err := json.Unmarshal(res.Data, &s); err != nil {
+		c.t.Fatalf("decode session: %v", err)
+	}
+	c.csrf = s.CSRFToken
+	return s
+}
+
+// bootstrapRoot 用命令行同款入口建出超管 root（它是所有者），返回已登录并开启两步验证的客户端。
+func bootstrapRoot(t *testing.T, srv *httptest.Server, rbac *service.RBACService) *apiClient {
+	t.Helper()
+	if _, err := rbac.BootstrapSuperAdmin(context.Background(), "root", cred); err != nil {
+		t.Fatalf("bootstrap: %v", err)
+	}
+	root := newClient(t, srv.URL)
+	root.loginSuper("root")
+	return root
+}
+
 func expectStatus(t *testing.T, res apiResult, want int, wantCode string) {
 	t.Helper()
 	if res.Status != want || res.Body.Code != wantCode {
@@ -191,7 +285,7 @@ func TestAdminAuthFlow(t *testing.T) {
 	expectStatus(t, c.do(http.MethodPost, "/api/admin/auth/login", map[string]any{"username": "root", "extra": 1}),
 		http.StatusBadRequest, string(service.CodeInvalidArgument))
 
-	s := c.login("root")
+	s := c.loginSuper("root")
 	if len(s.Permissions) != len(service.AllPermissions) {
 		t.Fatalf("super admin permissions = %v", s.Permissions)
 	}
@@ -215,7 +309,7 @@ func TestAdminRBACEndpoints(t *testing.T) {
 		t.Fatalf("bootstrap: %v", err)
 	}
 	root := newClient(t, srv.URL)
-	root.login("root")
+	root.loginSuper("root")
 
 	expectStatus(t, root.do(http.MethodPost, "/api/admin/roles",
 		map[string]any{"code": "viewer", "name": "只读", "permissions": []string{service.PermNodeRead}}), http.StatusOK, codeOK)
@@ -255,12 +349,12 @@ func TestAdminRBACEndpoints(t *testing.T) {
 
 func TestAdminTOTPEndpoints(t *testing.T) {
 	srv, rbac := newAPIServer(t)
-	if _, err := rbac.BootstrapSuperAdmin(context.Background(), "root", cred); err != nil {
-		t.Fatalf("bootstrap: %v", err)
-	}
+	root := bootstrapRoot(t, srv, rbac)
+	expectStatus(t, root.do(http.MethodPost, "/api/admin/admins",
+		map[string]any{"username": "agent", "password": cred, "roles": []string{service.RoleOperator}}), http.StatusOK, codeOK)
 	c := newClient(t, srv.URL)
-	if s := c.login("root"); s.TOTPEnabled {
-		t.Fatal("totp should be off initially")
+	if s := c.login("agent"); s.TOTPEnabled || s.TOTPSetupRequired {
+		t.Fatalf("non-super admin without totp = %+v", s)
 	}
 
 	setup := c.do(http.MethodPost, "/api/admin/auth/totp/setup", nil)
@@ -273,20 +367,22 @@ func TestAdminTOTPEndpoints(t *testing.T) {
 		http.StatusBadRequest, string(service.CodeInvalidArgument))
 	raw, err := base32.StdEncoding.WithPadding(base32.NoPadding).DecodeString(vo.Secret)
 	if err != nil {
-		t.Fatalf("decode secret: %v", err)
+		t.Fatalf("decode key: %v", err)
 	}
-	code := totp.CodeAt(raw, totp.Step(time.Now()))
+	code := totp.CodeAt(raw, totp.Step(c.clock.now()))
 	expectStatus(t, c.do(http.MethodPost, "/api/admin/auth/totp/enable", map[string]string{"code": code}), http.StatusOK, codeOK)
 
 	// 新会话：密码正确但缺验证码 → 401 totp_required
 	other := newClient(t, srv.URL)
-	expectStatus(t, other.do(http.MethodPost, "/api/admin/auth/login", map[string]string{"username": "root", "password": cred}),
+	expectStatus(t, other.do(http.MethodPost, "/api/admin/auth/login", map[string]string{"username": "agent", "password": cred}),
 		http.StatusUnauthorized, string(service.CodeTOTPRequired))
-	me := c.do(http.MethodGet, "/api/admin/auth/me", nil)
-	var s sessionVO
-	if err := json.Unmarshal(me.Data, &s); err != nil || !s.TOTPEnabled {
-		t.Fatalf("me after enable = %+v, %v", s, err)
+	if s := c.me(); !s.TOTPEnabled {
+		t.Fatalf("me after enable = %+v", s)
 	}
+	// 非超管可以关闭自己的两步验证（超管不行，见 TestSuperAdminMustBindTOTP）
+	c.clock.advance(totp.Period)
+	code = totp.CodeAt(raw, totp.Step(c.clock.now()))
+	expectStatus(t, c.do(http.MethodPost, "/api/admin/auth/totp/disable", map[string]string{"code": code}), http.StatusOK, codeOK)
 }
 
 func TestClientIP(t *testing.T) {

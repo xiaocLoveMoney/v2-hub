@@ -29,6 +29,15 @@ func (q *Queries) AdvanceAdminTOTPStep(ctx context.Context, arg AdvanceAdminTOTP
 	return result.RowsAffected(), nil
 }
 
+const clearAdminOwner = `-- name: ClearAdminOwner :exec
+UPDATE admin SET is_owner = FALSE, updated_at = now() WHERE is_owner
+`
+
+func (q *Queries) ClearAdminOwner(ctx context.Context) error {
+	_, err := q.db.Exec(ctx, clearAdminOwner)
+	return err
+}
+
 const clearAdminTOTP = `-- name: ClearAdminTOTP :execrows
 UPDATE admin
 SET totp_secret_enc = NULL, totp_pending_enc = NULL, totp_last_step = 0, updated_at = now()
@@ -127,7 +136,7 @@ func (q *Queries) EnableAdminTOTP(ctx context.Context, arg EnableAdminTOTPParams
 }
 
 const getAdminByID = `-- name: GetAdminByID :one
-SELECT id, username, is_disabled, (totp_secret_enc IS NOT NULL)::boolean AS totp_enabled, last_login_at, created_at
+SELECT id, username, is_disabled, (totp_secret_enc IS NOT NULL)::boolean AS totp_enabled, last_login_at, created_at, is_owner
 FROM admin
 WHERE id = $1
 `
@@ -139,8 +148,10 @@ type GetAdminByIDRow struct {
 	TotpEnabled bool
 	LastLoginAt pgtype.Timestamptz
 	CreatedAt   pgtype.Timestamptz
+	IsOwner     bool
 }
 
+// 行结构须与 ListAdmins 逐字段相同（service 层直接做类型转换）。
 func (q *Queries) GetAdminByID(ctx context.Context, id int64) (GetAdminByIDRow, error) {
 	row := q.db.QueryRow(ctx, getAdminByID, id)
 	var i GetAdminByIDRow
@@ -151,12 +162,13 @@ func (q *Queries) GetAdminByID(ctx context.Context, id int64) (GetAdminByIDRow, 
 		&i.TotpEnabled,
 		&i.LastLoginAt,
 		&i.CreatedAt,
+		&i.IsOwner,
 	)
 	return i, err
 }
 
 const getAdminByUsername = `-- name: GetAdminByUsername :one
-SELECT id, username, password_hash, is_disabled, totp_secret_enc, totp_last_step
+SELECT id, username, password_hash, is_disabled, totp_secret_enc, totp_last_step, is_owner
 FROM admin
 WHERE username = $1
 `
@@ -168,6 +180,7 @@ type GetAdminByUsernameRow struct {
 	IsDisabled    bool
 	TotpSecretEnc []byte
 	TotpLastStep  int64
+	IsOwner       bool
 }
 
 func (q *Queries) GetAdminByUsername(ctx context.Context, username string) (GetAdminByUsernameRow, error) {
@@ -180,7 +193,26 @@ func (q *Queries) GetAdminByUsername(ctx context.Context, username string) (GetA
 		&i.IsDisabled,
 		&i.TotpSecretEnc,
 		&i.TotpLastStep,
+		&i.IsOwner,
 	)
+	return i, err
+}
+
+const getAdminSecrets = `-- name: GetAdminSecrets :one
+SELECT password_hash, totp_secret_enc, totp_last_step FROM admin WHERE id = $1
+`
+
+type GetAdminSecretsRow struct {
+	PasswordHash  string
+	TotpSecretEnc []byte
+	TotpLastStep  int64
+}
+
+// 本人改密码与二次验证用（Ruling-96、Ruling-100）。
+func (q *Queries) GetAdminSecrets(ctx context.Context, id int64) (GetAdminSecretsRow, error) {
+	row := q.db.QueryRow(ctx, getAdminSecrets, id)
+	var i GetAdminSecretsRow
+	err := row.Scan(&i.PasswordHash, &i.TotpSecretEnc, &i.TotpLastStep)
 	return i, err
 }
 
@@ -203,6 +235,19 @@ func (q *Queries) GetAdminTOTP(ctx context.Context, id int64) (GetAdminTOTPRow, 
 	return i, err
 }
 
+const getOwnerAdminID = `-- name: GetOwnerAdminID :one
+
+SELECT id FROM admin WHERE is_owner
+`
+
+// 所有者（Ruling-99）--------------------------------------------------------
+func (q *Queries) GetOwnerAdminID(ctx context.Context) (int64, error) {
+	row := q.db.QueryRow(ctx, getOwnerAdminID)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}
+
 const insertAdminRoles = `-- name: InsertAdminRoles :exec
 INSERT INTO admin_role (admin_id, role_id)
 SELECT $1::bigint, unnest($2::bigint[])
@@ -219,7 +264,7 @@ func (q *Queries) InsertAdminRoles(ctx context.Context, arg InsertAdminRolesPara
 }
 
 const listAdmins = `-- name: ListAdmins :many
-SELECT id, username, is_disabled, (totp_secret_enc IS NOT NULL)::boolean AS totp_enabled, last_login_at, created_at
+SELECT id, username, is_disabled, (totp_secret_enc IS NOT NULL)::boolean AS totp_enabled, last_login_at, created_at, is_owner
 FROM admin
 ORDER BY id
 LIMIT $1 OFFSET $2
@@ -237,6 +282,7 @@ type ListAdminsRow struct {
 	TotpEnabled bool
 	LastLoginAt pgtype.Timestamptz
 	CreatedAt   pgtype.Timestamptz
+	IsOwner     bool
 }
 
 func (q *Queries) ListAdmins(ctx context.Context, arg ListAdminsParams) ([]ListAdminsRow, error) {
@@ -255,6 +301,7 @@ func (q *Queries) ListAdmins(ctx context.Context, arg ListAdminsParams) ([]ListA
 			&i.TotpEnabled,
 			&i.LastLoginAt,
 			&i.CreatedAt,
+			&i.IsOwner,
 		); err != nil {
 			return nil, err
 		}
@@ -307,6 +354,19 @@ SELECT id FROM role WHERE code = 'super_admin' FOR UPDATE
 func (q *Queries) LockSuperAdminRole(ctx context.Context) error {
 	_, err := q.db.Exec(ctx, lockSuperAdminRole)
 	return err
+}
+
+const setAdminOwner = `-- name: SetAdminOwner :execrows
+UPDATE admin SET is_owner = TRUE, updated_at = now() WHERE id = $1 AND is_disabled = FALSE
+`
+
+// 只能设给启用状态的管理员；是否持有 super_admin 由调用方在同一事务里先查
+func (q *Queries) SetAdminOwner(ctx context.Context, id int64) (int64, error) {
+	result, err := q.db.Exec(ctx, setAdminOwner, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const setAdminTOTPPending = `-- name: SetAdminTOTPPending :exec

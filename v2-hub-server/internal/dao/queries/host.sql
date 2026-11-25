@@ -17,6 +17,10 @@ SELECT id, username, auth_type, secret_enc, passphrase_enc
 FROM ssh_credential
 WHERE id = $1;
 
+-- name: CountServerHostsByTarget :one
+-- 密码凭据的确认（Ruling-97）：这份凭据是否已用在这个（地址，端口）上
+SELECT COUNT(*) FROM server_host WHERE credential_id = $1 AND address = $2 AND ssh_port = $3;
+
 -- name: CreateSSHCredential :one
 -- 密文依赖 id 作关联数据，先写占位，同一事务内再 SetSSHCredentialSecret
 INSERT INTO ssh_credential (name, username, auth_type, secret_enc, remark)

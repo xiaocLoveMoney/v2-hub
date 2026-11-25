@@ -18,7 +18,7 @@ func TestWalletEndpoints(t *testing.T) {
 		t.Fatalf("bootstrap: %v", err)
 	}
 	root := newClient(t, srv.URL)
-	root.login("root")
+	root.loginSuper("root")
 	alice := newClient(t, srv.URL)
 
 	// 商店默认关闭：站点信息如实反映，兑换入口 403

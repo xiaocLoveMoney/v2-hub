@@ -55,6 +55,8 @@ type ServerHostInput struct {
 	PanelPort    *int
 	DNSAccountID *int64
 	Domain       string
+	// CredentialSecret 是所选密码凭据的密码，再输入一次用于比对；只在“密码凭据的确认”要求时使用，不保存（Ruling-97）。
+	CredentialSecret string
 }
 
 // HostBatchItem 是批量新建里的一行；Domain 的规则同 ServerHostInput。
@@ -73,6 +75,8 @@ type HostBatchInput struct {
 	PanelPort    *int
 	DNSAccountID *int64
 	Hosts        []HostBatchItem
+	// CredentialSecret 同 ServerHostInput.CredentialSecret，整批比对一次。
+	CredentialSecret string
 }
 
 // HostTestInput 是用未保存的信息做连接测试的输入。
@@ -81,6 +85,8 @@ type HostTestInput struct {
 	SSHPort      int
 	CredentialID int64
 	ProviderType string
+	// CredentialSecret 同 ServerHostInput.CredentialSecret。
+	CredentialSecret string
 }
 
 // HostBindInput 是给已接入的服务器绑定 SSH 的输入。
@@ -88,6 +94,8 @@ type HostBindInput struct {
 	Address      string
 	SSHPort      int
 	CredentialID int64
+	// CredentialSecret 同 ServerHostInput.CredentialSecret。
+	CredentialSecret string
 }
 
 // HostDetection 是连接测试的结果。
@@ -257,12 +265,21 @@ func (s *HostService) CreateHosts(ctx context.Context, actor *AdminPrincipal, in
 	if err != nil {
 		return nil, err
 	}
+	targets := make([]hostTarget, 0, len(in.Hosts))
+	for _, item := range in.Hosts {
+		targets = append(targets, hostTarget{address: item.Address, port: in.SSHPort})
+	}
+	confirmed, err := s.confirmCredentialForNewTargets(ctx, actor, in.CredentialID, targets, in.CredentialSecret)
+	if err != nil {
+		return nil, err
+	}
 	ids := make([]int64, 0, len(in.Hosts))
 	err = s.inTx(ctx, func(q *sqlcgen.Queries) error {
 		for _, item := range in.Hosts {
 			id, err := s.createHost(ctx, q, actor, ip, createHostParams{
 				item: item, credentialID: in.CredentialID, sshPort: in.SSHPort, providerType: in.ProviderType,
 				panelPort: in.PanelPort, dnsAccountID: in.DNSAccountID, kind: HostTaskProvision, action: ActionHostCreate,
+				secretConfirmed: confirmed,
 			})
 			if err != nil {
 				return err
@@ -298,6 +315,8 @@ type createHostParams struct {
 	serverID int64
 	kind     string
 	action   string
+	// secretConfirmed 记进审计详情：这次是否做过密码凭据的确认（不含密码本身，Ruling-97）。
+	secretConfirmed bool
 }
 
 // createHost 在事务里建一台主机、排它的第一条任务并写审计。
@@ -339,7 +358,10 @@ func (s *HostService) createHost(ctx context.Context, q *sqlcgen.Queries, actor 
 	}
 	return id, writeAudit(ctx, q, AuditEntry{
 		ActorType: ActorAdmin, ActorID: actor.AdminID, Action: p.action, TargetType: targetHost, TargetID: fmt.Sprint(id), ClientIP: ip,
-		Detail: map[string]any{"name": p.item.Name, "address": p.item.Address, "sshPort": p.sshPort, "credentialId": p.credentialID, "serverId": p.serverID, "domain": domain},
+		Detail: map[string]any{
+			"name": p.item.Name, "address": p.item.Address, "sshPort": p.sshPort, "credentialId": p.credentialID, "serverId": p.serverID,
+			"domain": domain, "secretConfirmed": p.secretConfirmed,
+		},
 	})
 }
 
@@ -373,6 +395,18 @@ func (s *HostService) UpdateHost(ctx context.Context, actor *AdminPrincipal, id 
 	if err := validateServerRegion(in.Region); err != nil {
 		return nil, err
 	}
+	current, err := s.hostRow(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	// 凭据、地址、端口改后的组合与本行原值不同才要求确认（Ruling-97）
+	confirmed := false
+	targetChanged := current.CredentialID != in.CredentialID || current.Address != address || int(current.SshPort) != in.SSHPort
+	if targetChanged {
+		if confirmed, err = s.confirmCredential(ctx, actor, in.CredentialID, in.CredentialSecret); err != nil {
+			return nil, err
+		}
+	}
 	err = s.inTx(ctx, func(q *sqlcgen.Queries) error {
 		if err := s.ensureIdle(ctx, q, id); err != nil {
 			return err
@@ -400,7 +434,10 @@ func (s *HostService) UpdateHost(ctx context.Context, actor *AdminPrincipal, id 
 		}
 		return writeAudit(ctx, q, AuditEntry{
 			ActorType: ActorAdmin, ActorID: actor.AdminID, Action: ActionHostUpdate, TargetType: targetHost, TargetID: fmt.Sprint(id), ClientIP: ip,
-			Detail: map[string]any{"name": name, "address": address, "sshPort": in.SSHPort, "credentialId": in.CredentialID, "domain": domain},
+			Detail: map[string]any{
+				"name": name, "address": address, "sshPort": in.SSHPort, "credentialId": in.CredentialID, "domain": domain,
+				"secretConfirmed": confirmed,
+			},
 		})
 	})
 	if err != nil {
@@ -428,17 +465,24 @@ func (s *HostService) DeleteHost(ctx context.Context, actor *AdminPrincipal, id 
 	})
 }
 
-// ResetHostKey 清空已固定的主机密钥，下次连接重新记录。
-func (s *HostService) ResetHostKey(ctx context.Context, actor *AdminPrincipal, id int64, ip *netip.Addr) (*ServerHost, error) {
-	if _, err := s.hostRow(ctx, id); err != nil {
+// ResetHostKey 清空已固定的主机密钥，下次连接重新记录。主机凭据是密码类型时须带 credentialSecret：
+// 重置后下一次连接接受任何主机密钥，等同该（地址，端口）首次使用该凭据（Ruling-97）。
+func (s *HostService) ResetHostKey(ctx context.Context, actor *AdminPrincipal, id int64, credentialSecret string, ip *netip.Addr) (*ServerHost, error) {
+	row, err := s.hostRow(ctx, id)
+	if err != nil {
 		return nil, err
 	}
-	err := s.inTx(ctx, func(q *sqlcgen.Queries) error {
+	confirmed, err := s.confirmCredential(ctx, actor, row.CredentialID, credentialSecret)
+	if err != nil {
+		return nil, err
+	}
+	err = s.inTx(ctx, func(q *sqlcgen.Queries) error {
 		if err := q.SetServerHostKey(ctx, sqlcgen.SetServerHostKeyParams{ID: id, HostKeySha256: ""}); err != nil {
 			return fmt.Errorf("reset host key of %d: %w", id, err)
 		}
 		return writeAudit(ctx, q, AuditEntry{
 			ActorType: ActorAdmin, ActorID: actor.AdminID, Action: ActionHostResetHostKey, TargetType: targetHost, TargetID: fmt.Sprint(id), ClientIP: ip,
+			Detail: map[string]any{"secretConfirmed": confirmed},
 		})
 	})
 	if err != nil {
@@ -460,12 +504,16 @@ func (s *HostService) BindServer(ctx context.Context, actor *AdminPrincipal, ser
 	if err := s.checkProviderType(srv.ProviderType); err != nil {
 		return nil, err
 	}
+	confirmed, err := s.confirmCredentialForNewTargets(ctx, actor, in.CredentialID, []hostTarget{{address: address, port: sshPort}}, in.CredentialSecret)
+	if err != nil {
+		return nil, err
+	}
 	var id int64
 	err = s.inTx(ctx, func(q *sqlcgen.Queries) error {
 		var err error
 		id, err = s.createHost(ctx, q, actor, ip, createHostParams{
 			item: HostBatchItem{Address: address, Name: srv.Name, Region: srv.Region}, credentialID: in.CredentialID, sshPort: sshPort,
-			providerType: srv.ProviderType, serverID: serverID, kind: HostTaskVerify, action: ActionHostBind,
+			providerType: srv.ProviderType, serverID: serverID, kind: HostTaskVerify, action: ActionHostBind, secretConfirmed: confirmed,
 		})
 		return err
 	})
@@ -521,6 +569,9 @@ func (s *HostService) TestHost(ctx context.Context, actor *AdminPrincipal, in Ho
 	deployer, ok := s.deployers.Get(in.ProviderType)
 	if !ok {
 		return nil, newError(CodeInvalidArgument, msgBadProviderType+in.ProviderType)
+	}
+	if _, err := s.confirmCredentialForNewTargets(ctx, actor, in.CredentialID, []hostTarget{{address: address, port: sshPort}}, in.CredentialSecret); err != nil {
+		return nil, err
 	}
 	if err := allow(s.tests, actor.AdminID); err != nil {
 		return nil, err

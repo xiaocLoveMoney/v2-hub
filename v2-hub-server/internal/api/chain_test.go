@@ -28,7 +28,7 @@ func TestChainEndpoints(t *testing.T) {
 		t.Fatalf("bootstrap: %v", err)
 	}
 	root := newClient(t, srv.URL)
-	root.login("root")
+	root.loginSuper("root")
 	expectStatus(t, root.do(http.MethodPut, "/api/admin/settings", map[string]any{"register": map[string]any{"mode": service.RegisterOpen}}), http.StatusOK, codeOK)
 
 	register := func(name string) (*apiClient, userSessionVO) {

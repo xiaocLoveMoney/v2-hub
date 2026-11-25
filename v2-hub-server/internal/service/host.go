@@ -36,7 +36,10 @@ const (
 	maxSSHPassphraseLen = 255
 	defaultSSHPort      = 22
 	hostGuardMaxKeys    = 1024
-	localhostName       = "localhost"
+	// defaultConfirmMaxFailures / defaultConfirmWindow：密码凭据的确认输错频控的默认值（docs/03 §5.22，锁定时长同窗口）
+	defaultConfirmMaxFailures = 5
+	defaultConfirmWindow      = 15 * time.Minute
+	localhostName             = "localhost"
 
 	ActionSSHCredentialCreate = "ssh_credential.create"
 	ActionSSHCredentialUpdate = "ssh_credential.update"
@@ -90,6 +93,11 @@ type HostConfig struct {
 	// PanelWaitAttempts / PanelWaitInterval 是面板重启后等它回来的探测次数与间隔。
 	PanelWaitAttempts int
 	PanelWaitInterval time.Duration
+	// ConfirmMaxFailures / ConfirmWindow / ConfirmLockout 是“密码凭据的确认”输错的频控（按管理员，Ruling-97）；
+	// 任一项不大于 0 时取 docs/03 §5.22 的默认值（15 分钟内 5 次、锁 15 分钟）。
+	ConfirmMaxFailures int
+	ConfirmWindow      time.Duration
+	ConfirmLockout     time.Duration
 	// Now 为 nil 时用 time.Now。
 	Now func() time.Time
 }
@@ -124,6 +132,8 @@ type HostService struct {
 	cfg        HostConfig
 	tests      *ratelimit.FailureGuard
 	actions    *ratelimit.FailureGuard
+	// confirms 统计“密码凭据的确认”输错的次数（Ruling-97）。
+	confirms *ratelimit.FailureGuard
 	// logins 保证同一台主机同时只有一次“重置面板登录口令”。
 	logins *exitTestLocks
 	kick   chan struct{}
@@ -139,11 +149,18 @@ func NewHostService(pool *pgxpool.Pool, sealer *crypto.Sealer, deps HostDeps, cf
 	guard := func(limit int, window time.Duration) *ratelimit.FailureGuard {
 		return ratelimit.NewFailureGuard(ratelimit.FailureGuardConfig{MaxFailures: limit, Window: window, Lockout: window, MaxKeys: hostGuardMaxKeys}, now)
 	}
+	confirm := ratelimit.FailureGuardConfig{
+		MaxFailures: cfg.ConfirmMaxFailures, Window: cfg.ConfirmWindow, Lockout: cfg.ConfirmLockout, MaxKeys: hostGuardMaxKeys,
+	}
+	if confirm.MaxFailures <= 0 || confirm.Window <= 0 || confirm.Lockout <= 0 {
+		confirm.MaxFailures, confirm.Window, confirm.Lockout = defaultConfirmMaxFailures, defaultConfirmWindow, defaultConfirmWindow
+	}
 	return &HostService{
 		store: newStore(pool), sealer: sealer, dialer: deps.Dialer, deployers: deps.Deployers, dns: deps.DNS,
 		panels: deps.Panels, reconciler: deps.Reconciler, cfg: cfg,
 		tests: guard(cfg.TestLimit, cfg.TestWindow), actions: guard(cfg.ActionLimit, cfg.ActionWindow),
-		logins: newExitTestLocks(), kick: make(chan struct{}, 1), now: now,
+		confirms: ratelimit.NewFailureGuard(confirm, now),
+		logins:   newExitTestLocks(), kick: make(chan struct{}, 1), now: now,
 	}
 }
 

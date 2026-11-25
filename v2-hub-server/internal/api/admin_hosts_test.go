@@ -35,7 +35,7 @@ func apiTestKey(t *testing.T) string {
 	return string(pem.EncodeToMemory(block))
 }
 
-// SSH 托管接口走 HTTP（docs/03 §5.22）：凭据只写不读、host:read 能看不能改、没有 host 权限的管理员碰不到、
+// SSH 托管接口走 HTTP（docs/03 §5.22）：凭据只写不读、host:* 超管专属（Ruling-95）、
 // CSRF、连接测试、不存在的资源 404。部署与动作本身由 service 层的假执行器用例覆盖。
 func TestHostEndpoints(t *testing.T) {
 	srv, rbac := newAPIServer(t)
@@ -43,7 +43,7 @@ func TestHostEndpoints(t *testing.T) {
 		t.Fatalf("bootstrap: %v", err)
 	}
 	root := newClient(t, srv.URL)
-	root.login("root")
+	root.loginSuper("root")
 	key := apiTestKey(t)
 
 	// 新建凭据：响应里没有私钥，也没有 secret / passphrase 字段
@@ -102,15 +102,18 @@ func TestHostEndpoints(t *testing.T) {
 	expectStatus(t, root.do(http.MethodPut, "/api/admin/servers/999999/host", map[string]any{"address": testHostAddress, "credentialId": c.ID}),
 		http.StatusNotFound, string(service.CodeNotFound))
 
-	// host:read 能看不能改；server:write 不等于 host:write（Ruling-68）
-	for code, perms := range map[string][]string{"host_viewer": {service.PermHostRead}, "server_admin": {service.PermServerRead, service.PermServerWrite}} {
-		expectStatus(t, root.do(http.MethodPost, "/api/admin/roles", map[string]any{"code": code, "name": code, "permissions": perms}), http.StatusOK, codeOK)
-		expectStatus(t, root.do(http.MethodPost, "/api/admin/admins", map[string]any{"username": code, "password": cred, "roles": []string{code}}), http.StatusOK, codeOK)
+	// host:* 超管专属（Ruling-95）：不能装进自建角色；持全部非专属权限的合伙人也碰不到 SSH 托管
+	expectStatus(t, root.do(http.MethodPost, "/api/admin/roles", map[string]any{"code": "host_viewer", "name": "x", "permissions": []string{service.PermHostRead}}),
+		http.StatusBadRequest, string(service.CodeInvalidArgument))
+	expectStatus(t, root.do(http.MethodPost, "/api/admin/roles", map[string]any{"code": "server_admin", "name": "x", "permissions": []string{service.PermServerRead, service.PermServerWrite}}),
+		http.StatusOK, codeOK)
+	for username, role := range map[string]string{"partner1": service.RolePartner, "server_admin": "server_admin"} {
+		expectStatus(t, root.do(http.MethodPost, "/api/admin/admins", map[string]any{"username": username, "password": cred, "roles": []string{role}}), http.StatusOK, codeOK)
 	}
 	viewer := newClient(t, srv.URL)
-	viewer.login("host_viewer")
-	expectStatus(t, viewer.do(http.MethodGet, sshCredentialsPath, nil), http.StatusOK, codeOK)
-	expectStatus(t, viewer.do(http.MethodGet, serverHostsPath, nil), http.StatusOK, codeOK)
+	viewer.login("partner1")
+	expectStatus(t, viewer.do(http.MethodGet, sshCredentialsPath, nil), http.StatusForbidden, string(service.CodePermissionDenied))
+	expectStatus(t, viewer.do(http.MethodGet, serverHostsPath, nil), http.StatusForbidden, string(service.CodePermissionDenied))
 	denied := []struct {
 		method, path string
 		body         any
@@ -125,6 +128,9 @@ func TestHostEndpoints(t *testing.T) {
 		{http.MethodPost, serverHostsPath + "/1/reset-host-key", nil},
 		{http.MethodPost, "/api/admin/host-tasks/1/cancel", nil},
 		{http.MethodPut, "/api/admin/servers/1/host", map[string]any{"address": testHostAddress, "credentialId": c.ID}},
+		// 一键部署入站：合伙人有 node:write 但没有 host:write
+		{http.MethodPost, "/api/admin/servers/1/inbound-presets/preview", nil},
+		{http.MethodPost, "/api/admin/servers/1/inbound-presets", map[string]any{}},
 	}
 	for _, d := range denied {
 		expectStatus(t, viewer.do(d.method, d.path, d.body), http.StatusForbidden, string(service.CodePermissionDenied))
@@ -137,7 +143,7 @@ func TestHostEndpoints(t *testing.T) {
 
 	// 不带 CSRF 的写请求被拦下；未登录 401
 	noCSRF := newClient(t, srv.URL)
-	noCSRF.login("root")
+	noCSRF.loginSuper("root")
 	noCSRF.csrf = ""
 	expectStatus(t, noCSRF.do(http.MethodDelete, credPath, nil), http.StatusForbidden, string(service.CodePermissionDenied))
 	expectStatus(t, newClient(t, srv.URL).do(http.MethodGet, serverHostsPath, nil), http.StatusUnauthorized, string(service.CodeUnauthenticated))
@@ -148,14 +154,14 @@ func TestHostEndpoints(t *testing.T) {
 
 const dnsAccountsPath = "/api/admin/dns-accounts"
 
-// DNS 账号接口走 HTTP（docs/03 §5.22，Ruling-72）：令牌只写不读、host:read 能看不能改、没有 host 权限的管理员碰不到。
+// DNS 账号接口走 HTTP（docs/03 §5.22，Ruling-72）：令牌只写不读、host:* 超管专属，非超管碰不到（Ruling-95）。
 func TestDNSAccountEndpoints(t *testing.T) {
 	srv, rbac := newAPIServer(t)
 	if _, err := rbac.BootstrapSuperAdmin(context.Background(), "root", cred); err != nil {
 		t.Fatalf("bootstrap: %v", err)
 	}
 	root := newClient(t, srv.URL)
-	root.login("root")
+	root.loginSuper("root")
 	const apiValue = "cf-api-value-0123456789"
 	body := map[string]any{"name": "cf-main", "providerType": testDNSType, "zone": "Example.COM", "token": apiValue, "remark": "主域名"}
 
@@ -182,13 +188,14 @@ func TestDNSAccountEndpoints(t *testing.T) {
 	expectStatus(t, root.do(http.MethodPut, accountPath, map[string]any{"name": "cf-2", "providerType": testDNSType, "zone": "example.com"}), http.StatusOK, codeOK)
 	expectStatus(t, root.do(http.MethodPut, dnsAccountsPath+"/999999", body), http.StatusNotFound, string(service.CodeNotFound))
 
-	for code, perms := range map[string][]string{"host_viewer": {service.PermHostRead}, "server_admin": {service.PermServerRead, service.PermServerWrite}} {
-		expectStatus(t, root.do(http.MethodPost, "/api/admin/roles", map[string]any{"code": code, "name": code, "permissions": perms}), http.StatusOK, codeOK)
-		expectStatus(t, root.do(http.MethodPost, "/api/admin/admins", map[string]any{"username": code, "password": cred, "roles": []string{code}}), http.StatusOK, codeOK)
+	expectStatus(t, root.do(http.MethodPost, "/api/admin/roles", map[string]any{"code": "server_admin", "name": "x", "permissions": []string{service.PermServerRead, service.PermServerWrite}}),
+		http.StatusOK, codeOK)
+	for username, role := range map[string]string{"partner1": service.RolePartner, "server_admin": "server_admin"} {
+		expectStatus(t, root.do(http.MethodPost, "/api/admin/admins", map[string]any{"username": username, "password": cred, "roles": []string{role}}), http.StatusOK, codeOK)
 	}
 	viewer := newClient(t, srv.URL)
-	viewer.login("host_viewer")
-	expectStatus(t, viewer.do(http.MethodGet, dnsAccountsPath, nil), http.StatusOK, codeOK)
+	viewer.login("partner1")
+	expectStatus(t, viewer.do(http.MethodGet, dnsAccountsPath, nil), http.StatusForbidden, string(service.CodePermissionDenied))
 	expectStatus(t, viewer.do(http.MethodPost, dnsAccountsPath, body), http.StatusForbidden, string(service.CodePermissionDenied))
 	expectStatus(t, viewer.do(http.MethodPut, accountPath, body), http.StatusForbidden, string(service.CodePermissionDenied))
 	expectStatus(t, viewer.do(http.MethodDelete, accountPath, nil), http.StatusForbidden, string(service.CodePermissionDenied))

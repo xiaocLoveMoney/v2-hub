@@ -31,6 +31,8 @@ const (
 	defaultLoginWindow          = 15 * time.Minute
 	defaultLoginLockout         = 15 * time.Minute
 	defaultLoginMaxTrackedKeys  = 10000
+	// defaultReauthWindow 是二次验证的有效期（docs/03 §4.4，Ruling-100）
+	defaultReauthWindow = 5 * time.Minute
 
 	// 面板探测与同步默认值，语义见 docs/03 §5.1
 	defaultPanelProbeInterval  = 30 * time.Second
@@ -257,6 +259,8 @@ type AuthConfig struct {
 	LoginWindow            time.Duration `yaml:"loginWindow"`
 	LoginLockout           time.Duration `yaml:"loginLockout"`
 	LoginMaxTrackedKeys    int           `yaml:"loginMaxTrackedKeys"`
+	// ReauthWindow 是高危操作二次验证的有效期（R12）；登录、开启两步验证、二次验证成功后从当时起算。
+	ReauthWindow time.Duration `yaml:"reauthWindow"`
 }
 
 // DatabaseConfig 是 PostgreSQL 连接池参数。连接串（含密码）只从环境变量 HUB_DATABASE_URL 读（Ruling-2）。
@@ -316,6 +320,7 @@ func defaults() Config {
 		LoginWindow:            defaultLoginWindow,
 		LoginLockout:           defaultLoginLockout,
 		LoginMaxTrackedKeys:    defaultLoginMaxTrackedKeys,
+		ReauthWindow:           defaultReauthWindow,
 	}, Panel: PanelConfig{
 		ProbeInterval:  defaultPanelProbeInterval,
 		SyncInterval:   defaultPanelSyncInterval,
@@ -394,6 +399,9 @@ func (c Config) validate() error {
 	}
 	if a.LoginMaxFailures <= 0 || a.LoginWindow <= 0 || a.LoginLockout <= 0 || a.LoginMaxTrackedKeys <= 0 {
 		return fmt.Errorf("%w: auth login rate limit must be positive", ErrInvalidConfig)
+	}
+	if a.ReauthWindow <= 0 {
+		return fmt.Errorf("%w: auth.reauthWindow must be positive", ErrInvalidConfig)
 	}
 	pc := c.Panel
 	if pc.ProbeInterval <= 0 || pc.SyncInterval <= 0 || pc.RequestTimeout <= 0 || pc.Concurrency <= 0 {

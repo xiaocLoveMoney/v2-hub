@@ -21,6 +21,8 @@ auth:
   loginWindow: 15m
   loginLockout: 15m
   loginMaxTrackedKeys: 10000
+  # 高危操作二次验证的有效期（docs/03 §4.4，Ruling-100）
+  reauthWindow: 5m
 # 面板探测与同步，语义见 docs/03 §5.1
 panel:
   probeInterval: 30s

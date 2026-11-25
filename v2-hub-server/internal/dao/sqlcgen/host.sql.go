@@ -83,6 +83,24 @@ func (q *Queries) CountActiveHostTasks(ctx context.Context, hostID int64) (int64
 	return count, err
 }
 
+const countServerHostsByTarget = `-- name: CountServerHostsByTarget :one
+SELECT COUNT(*) FROM server_host WHERE credential_id = $1 AND address = $2 AND ssh_port = $3
+`
+
+type CountServerHostsByTargetParams struct {
+	CredentialID int64
+	Address      string
+	SshPort      int32
+}
+
+// 密码凭据的确认（Ruling-97）：这份凭据是否已用在这个（地址，端口）上
+func (q *Queries) CountServerHostsByTarget(ctx context.Context, arg CountServerHostsByTargetParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countServerHostsByTarget, arg.CredentialID, arg.Address, arg.SshPort)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countServersByName = `-- name: CountServersByName :one
 SELECT COUNT(*) FROM server WHERE name = $1
 `

@@ -32,13 +32,14 @@ const (
 )
 
 const (
-	maxServerNameLen      = 64
-	maxRemarkLen          = 255
-	maxTokenLen           = 512
-	maxLastErrorLen       = 255
-	msgServerNotFound     = "服务器不存在"
-	msgServerDisabled     = "服务器已停用，请先启用"
-	msgWebCertUnsupported = "这台服务器的面板不支持读取证书路径"
+	maxServerNameLen       = 64
+	maxRemarkLen           = 255
+	maxTokenLen            = 512
+	maxLastErrorLen        = 255
+	msgServerNotFound      = "服务器不存在"
+	msgTokenRequiredOnMove = "面板类型或面板地址有变化，须重新填写 API token"
+	msgServerDisabled      = "服务器已停用，请先启用"
+	msgWebCertUnsupported  = "这台服务器的面板不支持读取证书路径"
 
 	ActionServerCreate = "server.create"
 	ActionServerUpdate = "server.update"
@@ -460,6 +461,16 @@ func (s *PanelService) CreateServer(ctx context.Context, actor *AdminPrincipal, 
 	return s.GetServer(ctx, id)
 }
 
+// normalizedBaseURL 用与保存时相同的规范化（panel.ParseBaseURL）处理库里的面板地址；解析不了时原样返回，
+// 与任何合法输入都不相等，按“地址变了”处理（Ruling-97 取保守一侧）。
+func normalizedBaseURL(stored string) string {
+	u, err := panel.ParseBaseURL(stored)
+	if err != nil {
+		return stored
+	}
+	return u.String()
+}
+
 // redactURL 只保留 scheme 与主机端口，base path 可能是面板的隐藏入口，不进审计详情。
 func redactURL(raw string) string {
 	u, err := url.Parse(raw)
@@ -515,6 +526,10 @@ func (s *PanelService) UpdateServer(ctx context.Context, actor *AdminPrincipal, 
 		return nil, fmt.Errorf("get server %d: %w", id, err)
 	}
 	tokenChanged := conn.APIToken != ""
+	// Ruling-97：面板类型或面板地址变了就必须重新提交 token；判定在解密已存 token 之前，与是否停用无关
+	if !tokenChanged && (conn.ProviderType != current.ProviderType || conn.BaseURL != normalizedBaseURL(current.BaseUrl)) {
+		return nil, newError(CodeInvalidArgument, msgTokenRequiredOnMove)
+	}
 	if !tokenChanged {
 		if conn.APIToken, err = s.openToken(id, current.ApiTokenEnc); err != nil {
 			return nil, err

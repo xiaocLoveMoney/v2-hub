@@ -19,6 +19,11 @@ const (
 	msgCSRFFailed      = "CSRF 校验失败，请刷新页面后重试"
 	msgNoPermission    = "没有权限执行该操作"
 	msgEmptyLogin      = "用户名和密码不能为空"
+	// 两条 message 要让还没更新的旧管理端页面也看得懂、知道怎么办（R10、R12）
+	msgTOTPSetupRequired  = "超级管理员必须先开启两步验证：请到“账号安全”页完成绑定后再操作"
+	msgReauthRequired     = "该操作需要重新验证身份；如果页面没有弹出验证框，请退出后重新登录，再在几分钟内重试"
+	msgReauthEmpty        = "请输入密码或两步验证码"
+	msgOldCredentialEmpty = "请输入旧密码"
 )
 
 // AdminAuthenticator 是 Web 层需要的认证能力（由 service.AuthService 实现）。
@@ -29,6 +34,9 @@ type AdminAuthenticator interface {
 	SetupTOTP(ctx context.Context, p *service.AdminPrincipal) (*service.TOTPSetup, error)
 	EnableTOTP(ctx context.Context, p *service.AdminPrincipal, code string, ip *netip.Addr) error
 	DisableTOTP(ctx context.Context, p *service.AdminPrincipal, code string, ip *netip.Addr) error
+	// Reauth 做二次验证，返回新的有效期（R12）；ChangeOwnPassword 本人改密码（R9）。
+	Reauth(ctx context.Context, p *service.AdminPrincipal, password, totpCode string, ip *netip.Addr) (time.Time, error)
+	ChangeOwnPassword(ctx context.Context, p *service.AdminPrincipal, oldPassword, newPassword string, ip *netip.Addr) error
 }
 
 // CookieConfig 是会话 Cookie 的属性。
@@ -49,15 +57,22 @@ type sessionVO struct {
 	TOTPEnabled bool         `json:"totpEnabled"`
 	// MenuOrder 是管理端侧栏菜单顺序（设置 menu.admin，Ruling-57），空 = 默认顺序。
 	MenuOrder []string `json:"menuOrder"`
+	// IsSuperAdmin / IsOwner / TOTPSetupRequired 供前端显隐与跳转，后端仍是最终裁决（docs/03 §4.2）。
+	IsSuperAdmin      bool `json:"isSuperAdmin"`
+	IsOwner           bool `json:"isOwner"`
+	TOTPSetupRequired bool `json:"totpSetupRequired"`
 }
 
 func toSessionVO(p *service.AdminPrincipal) sessionVO {
 	return sessionVO{
-		Admin:       adminBriefVO{ID: p.AdminID, Username: p.Username},
-		Permissions: p.Permissions.Sorted(),
-		CSRFToken:   p.CSRFToken,
-		TOTPEnabled: p.TOTPEnabled,
-		MenuOrder:   []string{},
+		Admin:             adminBriefVO{ID: p.AdminID, Username: p.Username},
+		Permissions:       p.Permissions.Sorted(),
+		CSRFToken:         p.CSRFToken,
+		TOTPEnabled:       p.TOTPEnabled,
+		MenuOrder:         []string{},
+		IsSuperAdmin:      p.IsSuperAdmin,
+		IsOwner:           p.IsOwner,
+		TOTPSetupRequired: p.TOTPSetupRequired(),
 	}
 }
 
@@ -158,8 +173,41 @@ func (h *handlers) expiredCookie(name, path string) *http.Cookie {
 	return expired
 }
 
+// routePolicy 是一条管理端路由在权限码之外的鉴权要求，由 requireAdmin 的可变选项设置。
+type routePolicy struct {
+	// extraPerm 是同时要求的第二个权限码（一键部署入站要 node:write 与 host:write，Ruling-76）。
+	extraPerm string
+	// setupExempt 为 true 时尚未开启两步验证的超管也能访问（R10 的豁免接口）。
+	setupExempt bool
+	// fresh 为 true 时要求二次验证仍在有效期内（R12 的高危接口，docs/03 §4.4）。
+	fresh bool
+}
+
+// routeOption 修改一条路由的 routePolicy。
+type routeOption func(*routePolicy)
+
+// withPerm 追加一个必须同时拥有的权限码。
+func withPerm(code string) routeOption {
+	return func(p *routePolicy) { p.extraPerm = code }
+}
+
+// withSetupExempt 让尚未开启两步验证的超管也能访问（查看会话、登出、生成与确认 TOTP、改自己密码，R10）。
+func withSetupExempt() routeOption {
+	return func(p *routePolicy) { p.setupExempt = true }
+}
+
+// withFresh 要求二次验证仍在有效期内（R12）。
+func withFresh() routeOption {
+	return func(p *routePolicy) { p.fresh = true }
+}
+
 // requireAdmin 校验会话、CSRF（非 GET/HEAD）与权限码（perm 为空表示只需登录），见 docs/03 §4.1 R1、§4.2。
-func (h *handlers) requireAdmin(perm string, next adminHandler) http.HandlerFunc {
+// 判定顺序：认证 → CSRF → 超管未开启两步验证（R10）→ 权限码 → 二次验证（R12）；没有权限的人不会被要求二次验证。
+func (h *handlers) requireAdmin(perm string, next adminHandler, opts ...routeOption) http.HandlerFunc {
+	var policy routePolicy
+	for _, opt := range opts {
+		opt(&policy)
+	}
 	return func(w http.ResponseWriter, r *http.Request) {
 		token := ""
 		if c, err := r.Cookie(adminSessionCookie); err == nil {
@@ -174,8 +222,17 @@ func (h *handlers) requireAdmin(perm string, next adminHandler) http.HandlerFunc
 			writeError(w, r, &service.Error{Code: service.CodePermissionDenied, Message: msgCSRFFailed})
 			return
 		}
-		if perm != "" && !p.Can(perm) {
+		if p.TOTPSetupRequired() && !policy.setupExempt {
+			writeError(w, r, &service.Error{Code: service.CodeTOTPSetupRequired, Message: msgTOTPSetupRequired})
+			return
+		}
+		lacksPerm := (perm != "" && !p.Can(perm)) || (policy.extraPerm != "" && !p.Can(policy.extraPerm))
+		if lacksPerm {
 			writeError(w, r, &service.Error{Code: service.CodePermissionDenied, Message: msgNoPermission})
+			return
+		}
+		if policy.fresh && !p.ReauthFresh {
+			writeError(w, r, &service.Error{Code: service.CodeReauthRequired, Message: msgReauthRequired})
 			return
 		}
 		next(w, r, p)
@@ -232,4 +289,57 @@ func (h *handlers) totpDisable(w http.ResponseWriter, r *http.Request, p *servic
 		return
 	}
 	writeOK(w, nil)
+}
+
+// adminPasswordChangeRequest 对应 hub-api.yaml AdminPasswordChangeInput。
+type adminPasswordChangeRequest struct {
+	OldCredential string `json:"oldPassword"`
+	NewCredential string `json:"newPassword"`
+}
+
+// changeOwnPassword 本人改密码（R9，Ruling-96）。
+func (h *handlers) changeOwnPassword(w http.ResponseWriter, r *http.Request, p *service.AdminPrincipal) {
+	var req adminPasswordChangeRequest
+	if err := decodeJSON(w, r, &req); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	if req.OldCredential == "" {
+		writeError(w, r, badRequest(msgOldCredentialEmpty))
+		return
+	}
+	if err := h.auth.ChangeOwnPassword(r.Context(), p, req.OldCredential, req.NewCredential, clientIP(r, h.trustedProxies)); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeOK(w, nil)
+}
+
+// adminReauthRequest 对应 hub-api.yaml AdminReauthInput：二选一，由 service 按账号是否开启两步验证决定用哪个。
+type adminReauthRequest struct {
+	Credential string `json:"password"`
+	TOTPCode   string `json:"totpCode"`
+}
+
+type adminReauthVO struct {
+	ReauthUntil time.Time `json:"reauthUntil"`
+}
+
+// reauth 高危操作前的二次验证（R12，Ruling-100）。
+func (h *handlers) reauth(w http.ResponseWriter, r *http.Request, p *service.AdminPrincipal) {
+	var req adminReauthRequest
+	if err := decodeJSON(w, r, &req); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	if req.Credential == "" && req.TOTPCode == "" {
+		writeError(w, r, badRequest(msgReauthEmpty))
+		return
+	}
+	until, err := h.auth.Reauth(r.Context(), p, req.Credential, req.TOTPCode, clientIP(r, h.trustedProxies))
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeOK(w, adminReauthVO{ReauthUntil: until})
 }

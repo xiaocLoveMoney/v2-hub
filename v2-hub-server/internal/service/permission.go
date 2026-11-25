@@ -46,8 +46,74 @@ var AllPermissions = []string{
 	PermHostRead, PermHostWrite,
 }
 
-// RoleSuperAdmin 是内置超级管理员角色 code。
-const RoleSuperAdmin = "super_admin"
+// SuperOnlyPermissions 是超管专属权限码：只有 super_admin 拥有，任何其它角色都不能包含，库里即使有行也不生效（Ruling-95，R1 / R2）。
+var SuperOnlyPermissions = []string{PermAdminRead, PermAdminWrite, PermHostRead, PermHostWrite}
+
+// 内置角色 code（docs/03 §4 预设角色表，Ruling-95）。
+const (
+	// RoleSuperAdmin 是内置超级管理员角色，隐式拥有全部权限码。
+	RoleSuperAdmin = "super_admin"
+	// RoleOperator 客服运营、RoleFinance 财务、RoleOps 运维、RolePartner 合伙人：预设角色，权限由代码定义、不存 role_permission。
+	RoleOperator = "operator"
+	RoleFinance  = "finance"
+	RoleOps      = "ops"
+	RolePartner  = "partner"
+)
+
+// BuiltinRoleCodes 是全部内置角色 code，与 init.sql 里 is_builtin 的角色行逐行对应。
+var BuiltinRoleCodes = []string{RoleSuperAdmin, RoleOperator, RoleFinance, RoleOps, RolePartner}
+
+// presetRolePermissions 是显式列出权限码的预设角色；partner 按全集计算，不在此表（docs/03 §4）。
+var presetRolePermissions = map[string][]string{
+	RoleOperator: {
+		PermUserRead, PermUserWrite, PermTicketRead, PermTicketWrite, PermContentRead, PermContentWrite,
+		PermPlanRead, PermShopRead, PermServerRead, PermNodeRead, PermFinanceRead, PermSettingRead,
+	},
+	RoleFinance: {
+		PermFinanceRead, PermFinanceWrite, PermShopRead, PermShopWrite, PermPlanRead, PermPlanWrite, PermUserRead,
+	},
+	RoleOps: {
+		PermServerRead, PermServerWrite, PermNodeRead, PermNodeWrite, PermUserRead, PermSettingRead,
+	},
+}
+
+// IsSuperOnlyPermission 报告 code 是否为超管专属权限码。
+func IsSuperOnlyPermission(code string) bool {
+	return slices.Contains(SuperOnlyPermissions, code)
+}
+
+// isBuiltinRoleCode 报告 code 是否为内置角色的编码；自定义角色不能用这些编码。
+func isBuiltinRoleCode(code string) bool {
+	return slices.Contains(BuiltinRoleCodes, code)
+}
+
+// builtinRolePermissions 返回内置角色由代码定义的权限码集合；code 不是内置角色时 ok 为 false。
+// 调用方须先确认角色行的 is_builtin 为真，不能只凭编码（Ruling-95）。
+func builtinRolePermissions(code string) (set PermissionSet, ok bool) {
+	switch code {
+	case RoleSuperAdmin:
+		return NewPermissionSet(AllPermissions), true
+	case RolePartner:
+		return withoutSuperOnly(AllPermissions), true
+	default:
+		codes, found := presetRolePermissions[code]
+		if !found {
+			return nil, false
+		}
+		return withoutSuperOnly(codes), true
+	}
+}
+
+// withoutSuperOnly 由权限码列表构造集合并剔除超管专属码。
+func withoutSuperOnly(codes []string) PermissionSet {
+	set := make(PermissionSet, len(codes))
+	for _, c := range codes {
+		if !IsSuperOnlyPermission(c) {
+			set[c] = struct{}{}
+		}
+	}
+	return set
+}
 
 // PermissionSet 是权限码集合。
 type PermissionSet map[string]struct{}
@@ -67,16 +133,6 @@ func (s PermissionSet) Has(code string) bool {
 	return ok
 }
 
-// Contains 报告 other 是否为 s 的子集。
-func (s PermissionSet) Contains(other PermissionSet) bool {
-	for c := range other {
-		if !s.Has(c) {
-			return false
-		}
-	}
-	return true
-}
-
 // Sorted 返回排好序的权限码列表。
 func (s PermissionSet) Sorted() []string {
 	out := make([]string, 0, len(s))
@@ -94,8 +150,12 @@ type AdminPrincipal struct {
 	SessionID    int64
 	CSRFToken    string
 	IsSuperAdmin bool
-	TOTPEnabled  bool
-	Permissions  PermissionSet
+	// IsOwner 是否所有者（Ruling-99）。
+	IsOwner     bool
+	TOTPEnabled bool
+	// ReauthFresh 表示本会话的二次验证仍在有效期内（R12）；由 service 层按会话的 reauth_until 与时钟算好，Web 层不碰时钟。
+	ReauthFresh bool
+	Permissions PermissionSet
 }
 
 // Can 报告管理员是否拥有权限码 code（R1）。
@@ -103,16 +163,17 @@ func (p *AdminPrincipal) Can(code string) bool {
 	return p.IsSuperAdmin || p.Permissions.Has(code)
 }
 
-// canGrant 报告管理员能否授予 codes 中的全部权限（R2）。
-func (p *AdminPrincipal) canGrant(codes PermissionSet) bool {
-	return p.IsSuperAdmin || p.Permissions.Contains(codes)
+// TOTPSetupRequired 报告该管理员是尚未开启两步验证的超管，除豁免接口外都应被拦下（R10）。
+func (p *AdminPrincipal) TOTPSetupRequired() bool {
+	return p.IsSuperAdmin && !p.TOTPEnabled
 }
 
+// effectivePermissions 算出有效权限：超管为全集；其余剔除超管专属码（R1，运行时兜底，覆盖手工改库）。
 func effectivePermissions(isSuper bool, codes []string) PermissionSet {
 	if isSuper {
 		return NewPermissionSet(AllPermissions)
 	}
-	return NewPermissionSet(codes)
+	return withoutSuperOnly(codes)
 }
 
 func isKnownPermission(code string) bool {

@@ -12,12 +12,14 @@ import (
 // TOTP 相关业务（docs/03 §4.3）。
 
 const (
-	totpIssuer           = "v2-hub"
-	guardKeyTOTPPrefix   = "totp:"
-	msgTOTPAlreadyOn     = "两步验证已开启"
-	msgTOTPNotOn         = "两步验证未开启"
-	msgTOTPNoPending     = "请先生成密钥再确认"
-	msgTOTPCodeMalformed = "验证码须为 6 位数字"
+	totpIssuer            = "v2-hub"
+	guardKeyTOTPPrefix    = "totp:"
+	msgTOTPAlreadyOn      = "两步验证已开启"
+	msgTOTPNotOn          = "两步验证未开启"
+	msgTOTPNoPending      = "请先生成密钥再确认"
+	msgTOTPCodeMalformed  = "验证码须为 6 位数字"
+	msgTOTPSuperCannotOff = "超级管理员必须保持两步验证开启"
+	msgOwnerProtected     = "所有者只能在服务器上用命令行处理"
 )
 
 // TOTPSetup 是开启流程第一步的结果；Secret 只返回这一次。
@@ -127,12 +129,19 @@ func (s *AuthService) EnableTOTP(ctx context.Context, p *AdminPrincipal, code st
 		if err := q.EnableAdminTOTP(ctx, sqlcgen.EnableAdminTOTPParams{ID: p.AdminID, TotpSecretEnc: sealed, TotpLastStep: step}); err != nil {
 			return fmt.Errorf("enable totp of admin %d: %w", p.AdminID, err)
 		}
+		// 开启成功视为刚做过二次验证（R12）：刚用掉的步长不能再拿来验一次
+		if err := s.refreshReauth(ctx, q, p.SessionID); err != nil {
+			return err
+		}
 		return writeAudit(ctx, q, adminAudit(p, ActionAdminTOTPEnable, targetAdmin, p.AdminID, ip, nil))
 	})
 }
 
-// DisableTOTP 本人凭当前验证码关闭两步验证。
+// DisableTOTP 本人凭当前验证码关闭两步验证；超管不能关闭（R10，409）。
 func (s *AuthService) DisableTOTP(ctx context.Context, p *AdminPrincipal, code string, ip *netip.Addr) error {
+	if p.IsSuperAdmin {
+		return newError(CodeConflict, msgTOTPSuperCannotOff)
+	}
 	if !validTOTPCode(code) {
 		return newError(CodeInvalidArgument, msgTOTPCodeMalformed)
 	}
@@ -164,15 +173,18 @@ func (s *AuthService) DisableTOTP(ctx context.Context, p *AdminPrincipal, code s
 	})
 }
 
-// ResetAdminTOTP 为遗失设备的管理员清除两步验证（R3、R4），并使其全部会话失效。
+// ResetAdminTOTP 为遗失设备的管理员清除两步验证（R3、R4、R11），并使其全部会话失效（R7）。
 func (s *RBACService) ResetAdminTOTP(ctx context.Context, actor *AdminPrincipal, id int64, ip *netip.Addr) error {
 	if id == actor.AdminID {
 		return newError(CodeConflict, "请在账号安全页用验证码关闭自己的两步验证")
 	}
 	return s.inTx(ctx, func(q *sqlcgen.Queries) error {
-		_, currentRoles, err := getAdminWithRoles(ctx, q, id)
+		target, currentRoles, err := getAdminWithRoles(ctx, q, id)
 		if err != nil {
 			return err
+		}
+		if target.IsOwner {
+			return newError(CodePermissionDenied, msgOwnerProtected)
 		}
 		if _, err := resolveAssignableRoles(ctx, q, actor, currentRoles); err != nil {
 			return err
