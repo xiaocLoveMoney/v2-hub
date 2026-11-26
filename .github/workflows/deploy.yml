@@ -21,7 +21,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        runner-label: [v2-hub-prod, v2-hub-prod-b]
+        runner-label: [v2-hub-prod]
     runs-on: [self-hosted, "${{ matrix.runner-label }}"]
     timeout-minutes: 40
     # 每套环境同一时间只部署一次；排队中的被更新的提交取代，进行中的不取消
