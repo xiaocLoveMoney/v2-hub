@@ -75,19 +75,20 @@ func TestAgentPoolCost(t *testing.T) {
 		ok      bool
 	}{
 		{"never 按 1 期", gib, 30, TrafficResetNever, gib, true},
-		{"hourly 按小时折算", gib, 2, TrafficResetHourly, 48 * gib, true},
-		{"daily 按天", gib, 30, TrafficResetDaily, 30 * gib, true},
-		{"weekly 恰好整周", gib, 14, TrafficResetWeekly, 2 * gib, true},
-		{"weekly 向上取整", gib, 8, TrafficResetWeekly, 2 * gib, true},
-		{"weekly 不足一周按一周", gib, 1, TrafficResetWeekly, gib, true},
-		{"monthly 恰好 30 天", gib, 30, TrafficResetMonthly, gib, true},
-		{"monthly 31 天算两期", gib, 31, TrafficResetMonthly, 2 * gib, true},
-		{"monthly 一年 13 期", gib, 365, TrafficResetMonthly, 13 * gib, true},
+		{"hourly 天数 × 24 + 1", gib, 2, TrafficResetHourly, 49 * gib, true},
+		{"hourly 1 天 25 期", gib, 1, TrafficResetHourly, 25 * gib, true},
+		{"daily 天数 + 1", gib, 30, TrafficResetDaily, 31 * gib, true},
+		{"weekly 恰好整周", gib, 14, TrafficResetWeekly, 3 * gib, true},
+		{"weekly 向上取整", gib, 8, TrafficResetWeekly, 3 * gib, true},
+		{"weekly 不足一周", gib, 1, TrafficResetWeekly, 2 * gib, true},
+		{"monthly 恰好 28 天", gib, 28, TrafficResetMonthly, 2 * gib, true},
+		{"monthly 30 天最坏 3 期", gib, 30, TrafficResetMonthly, 3 * gib, true},
+		{"monthly 一年", gib, 365, TrafficResetMonthly, 15 * gib, true},
 		{"不限流量", 0, 30, TrafficResetNever, 0, false},
 		{"不限时长", gib, 0, TrafficResetNever, 0, false},
 		{"周期不认识", gib, 30, "yearly", 0, false},
-		{"恰好不溢出", math.MaxInt64 / 2, 2, TrafficResetDaily, math.MaxInt64 / 2 * 2, true},
-		{"溢出", math.MaxInt64/2 + 1, 2, TrafficResetDaily, 0, false},
+		{"恰好不溢出", math.MaxInt64 / 3, 2, TrafficResetDaily, math.MaxInt64 / 3 * 3, true},
+		{"溢出", math.MaxInt64/3 + 1, 2, TrafficResetDaily, 0, false},
 		{"hourly 大时长溢出", math.MaxInt64 / 24, 36500, TrafficResetHourly, 0, false},
 		{"最大值 never", math.MaxInt64, 1, TrafficResetNever, math.MaxInt64, true},
 	}
@@ -292,7 +293,7 @@ func TestAgentConcurrentRegisterRespectsUserLimit(t *testing.T) {
 func TestAgentPlanRulesAndPoolShortage(t *testing.T) {
 	f := newAgentFixture(t)
 	ctx := context.Background()
-	daily := f.limitedPlan(t, "daily", gib, 10, TrafficResetDaily) // 扣 10 GiB
+	daily := f.limitedPlan(t, "daily", gib, 10, TrafficResetDaily) // 扣 11 GiB（天数 + 1，Ruling-108）
 	other := f.limitedPlan(t, "other", gib, 30, TrafficResetNever)
 	unlimited := f.plan(t, "unl", PlanQuota{TrafficLimit: 0, DurationDays: 30})
 	if _, err := f.agents.CreateAgent(ctx, f.actor, AgentCreateInput{Username: "agent-x", Password: cred,
@@ -314,7 +315,7 @@ func TestAgentPlanRulesAndPoolShortage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateUser: %v", err)
 	}
-	if u.PlanID == nil || *u.PlanID != daily.ID || u.TrafficLimit != gib || f.poolUsed(t, a.ID) != 10*gib {
+	if u.PlanID == nil || *u.PlanID != daily.ID || u.TrafficLimit != gib || f.poolUsed(t, a.ID) != 11*gib {
 		t.Fatalf("created user = %+v used=%d", u, f.poolUsed(t, a.ID))
 	}
 	_, err = f.agents.AssignPlan(ctx, p, u.ID, daily.ID, nil)
@@ -322,7 +323,7 @@ func TestAgentPlanRulesAndPoolShortage(t *testing.T) {
 	if !errors.As(err, &se) || se.Code != CodeAgentPoolInsufficient {
 		t.Fatalf("assign beyond pool = %v", err)
 	}
-	if d, ok := se.Data.(AgentPoolShortage); !ok || d.PoolCost != 10*gib || d.PoolRemaining != 5*gib {
+	if d, ok := se.Data.(AgentPoolShortage); !ok || d.PoolCost != 11*gib || d.PoolRemaining != 4*gib {
 		t.Fatalf("shortage data = %#v", se.Data)
 	}
 	// 套餐事后被改成不限时长：仍在白名单，但不能再开通
@@ -333,7 +334,7 @@ func TestAgentPlanRulesAndPoolShortage(t *testing.T) {
 	if _, err := f.agents.AssignPlan(ctx, p, u.ID, daily.ID, nil); !errors.Is(err, ErrInvalidArgument) {
 		t.Fatalf("assign plan turned unlimited = %v, want invalid_argument", err)
 	}
-	if f.poolUsed(t, a.ID) != 10*gib {
+	if f.poolUsed(t, a.ID) != 11*gib {
 		t.Fatalf("pool changed on rejected assign: %d", f.poolUsed(t, a.ID))
 	}
 }
@@ -561,5 +562,66 @@ func TestAgentWriteRateLimit(t *testing.T) {
 	f.clock.advance(time.Hour + time.Second)
 	if err := svc.AllowWrite(p); err != nil {
 		t.Fatalf("AllowWrite after window: %v", err)
+	}
+}
+
+// 代理分配套餐与用户自己下单同一规则（Ruling-108）：同一套餐续期顺延；换成别的套餐立即生效、原剩余时长作废；
+// 扣减按时长内最多能用到的周期数。员工分配不受影响（仍顺延）。
+func TestAgentAssignPlanRenewOrReplace(t *testing.T) {
+	f := newAgentFixture(t)
+	ctx := context.Background()
+	monthly := f.limitedPlan(t, "m30", gib, 30, TrafficResetNever)
+	hourly := f.limitedPlan(t, "h1", gib, 1, TrafficResetHourly) // 1 天按小时重置：扣 25 GiB
+	a, p := f.newAgent(t, "agent-r", 10, 1000*gib, monthly.ID, hourly.ID)
+	in := AgentUserCreateInput{Username: "ru1", PlanID: monthly.ID}
+	in.Password = cred
+	u, err := f.agents.CreateUser(ctx, p, in, nil)
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	now := f.clock.now()
+	day := 24 * time.Hour
+	wantExpiry := func(u *AgentUser, want time.Time) {
+		t.Helper()
+		if u.ExpiresAt == nil || !u.ExpiresAt.Equal(want) {
+			t.Fatalf("expiresAt = %v, want %v", u.ExpiresAt, want)
+		}
+	}
+	wantExpiry(u, now.AddDate(0, 0, 30))
+
+	// 剩 30 天时换成 1 天按小时重置的套餐：立即生效，到期 = now + 1 天，不是 31 天
+	got, err := f.agents.AssignPlan(ctx, p, u.ID, hourly.ID, nil)
+	if err != nil {
+		t.Fatalf("AssignPlan(hourly): %v", err)
+	}
+	wantExpiry(got, now.Add(day))
+	if got.PlanID == nil || *got.PlanID != hourly.ID || f.poolUsed(t, a.ID) != gib+25*gib {
+		t.Fatalf("after replace plan=%v used=%d", got.PlanID, f.poolUsed(t, a.ID))
+	}
+	// 同一套餐再分配一次：续期，从原到期日顺延
+	if got, err = f.agents.AssignPlan(ctx, p, u.ID, hourly.ID, nil); err != nil {
+		t.Fatalf("AssignPlan(hourly again): %v", err)
+	}
+	wantExpiry(got, now.Add(2*day))
+	if f.poolUsed(t, a.ID) != gib+50*gib {
+		t.Fatalf("pool used = %d", f.poolUsed(t, a.ID))
+	}
+	// 没有套餐的用户：按换购，从 now 起算
+	plain := f.newUser(t, "ru2", 0)
+	if _, err := f.agents.TransferUser(ctx, f.actor, plain.ID, &a.ID, nil); err != nil {
+		t.Fatalf("TransferUser: %v", err)
+	}
+	if got, err = f.agents.AssignPlan(ctx, p, plain.ID, monthly.ID, nil); err != nil {
+		t.Fatalf("AssignPlan(no plan): %v", err)
+	}
+	wantExpiry(got, now.AddDate(0, 0, 30))
+
+	// 员工分配不同套餐仍按原规则顺延
+	staff, err := f.users.AssignPlan(ctx, f.actor, plain.ID, hourly.ID, nil)
+	if err != nil {
+		t.Fatalf("staff AssignPlan: %v", err)
+	}
+	if staff.Quota.ExpiresAt == nil || !staff.Quota.ExpiresAt.Equal(now.AddDate(0, 0, 30).Add(day)) {
+		t.Fatalf("staff assign expiresAt = %v, want extended", staff.Quota.ExpiresAt)
 	}
 }

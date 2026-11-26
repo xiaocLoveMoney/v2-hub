@@ -92,6 +92,10 @@ WHERE id = sqlc.arg(id);
 -- name: DeleteServerHost :execrows
 DELETE FROM server_host WHERE id = $1;
 
+-- name: GetPinnedHostKeyByTarget :one
+-- 连接测试按目标（地址，端口）已固定的主机密钥校验（Ruling-107）；没有主机行时返回空串，空串 = 还没固定。
+SELECT COALESCE((SELECT host_key_sha256 FROM server_host WHERE address = sqlc.arg(address) AND ssh_port = sqlc.arg(ssh_port)::integer), '')::text AS host_key_sha256;
+
 -- name: SetServerHostKey :exec
 UPDATE server_host SET host_key_sha256 = $2, updated_at = now() WHERE id = $1;
 

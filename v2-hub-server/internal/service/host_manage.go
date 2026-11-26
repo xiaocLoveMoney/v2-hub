@@ -561,6 +561,7 @@ func (s *HostService) withRunner(ctx context.Context, e endpoint, fn func(ctx co
 }
 
 // TestHost 用未保存的信息连一次主机并检测；不落库，按管理员频控。SSH 失败返回 502。
+// 密码凭据一律要再输一次密码；目标（地址，端口）已有主机并固定了主机密钥时按那把密钥校验，不符即 502 host_key_changed（Ruling-107）。
 func (s *HostService) TestHost(ctx context.Context, actor *AdminPrincipal, in HostTestInput) (*HostDetection, error) {
 	address, sshPort, err := s.normalizeEndpoint(in.Address, in.SSHPort)
 	if err != nil {
@@ -570,14 +571,20 @@ func (s *HostService) TestHost(ctx context.Context, actor *AdminPrincipal, in Ho
 	if !ok {
 		return nil, newError(CodeInvalidArgument, msgBadProviderType+in.ProviderType)
 	}
-	if _, err := s.confirmCredentialForNewTargets(ctx, actor, in.CredentialID, sshPort, []string{address}, in.CredentialSecret); err != nil {
+	if _, err := s.confirmCredential(ctx, actor, in.CredentialID, in.CredentialSecret); err != nil {
 		return nil, err
+	}
+	pinned, err := s.q.GetPinnedHostKeyByTarget(ctx, sqlcgen.GetPinnedHostKeyByTargetParams{
+		Address: address, SshPort: int32(sshPort), //nolint:gosec // 端口已校验在 1–65535
+	})
+	if err != nil {
+		return nil, fmt.Errorf("get pinned host key of %s:%d: %w", address, sshPort, err)
 	}
 	if err := allow(s.tests, actor.AdminID); err != nil {
 		return nil, err
 	}
 	var out HostDetection
-	err = s.withRunner(ctx, endpoint{address: address, port: sshPort, credentialID: in.CredentialID}, func(ctx context.Context, r remote.Runner) error {
+	err = s.withRunner(ctx, endpoint{address: address, port: sshPort, credentialID: in.CredentialID, pinnedKey: pinned}, func(ctx context.Context, r remote.Runner) error {
 		det, err := deployer.Detect(ctx, r)
 		out = HostDetection{HostKeySHA256: r.HostKeySHA256(), Detection: det}
 		return err

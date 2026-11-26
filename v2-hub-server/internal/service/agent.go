@@ -29,9 +29,10 @@ const (
 	AgentAllocationCreate = "create"
 	AgentAllocationAssign = "assign"
 
-	// 流量池按周期折算：周按 7 天（daysPerWeek 在 user_quota.go）、月按 30 天（Ruling-103）
+	// 流量池按最多能用到的周期数折算（Ruling-108）：周按 7 天（daysPerWeek 在 user_quota.go）；
+	// 月取最短的 28 天——按月重置在每月某日的自然边界上，时长内最多跨过 ⌈天数 / 28⌉ 个边界
 	hoursPerDay       = 24
-	agentDaysPerMonth = 30
+	agentDaysPerMonth = 28
 
 	agentWriteWindow   = time.Hour
 	agentGuardMaxKeys  = 1024
@@ -108,8 +109,9 @@ func (s *AgentService) AllowWrite(p *AdminPrincipal) error {
 
 // ---- 流量池 ----------------------------------------------------------------------
 
-// agentPoolCost 算开通或续期一次从流量池扣减的字节数 = 套餐流量 × 时长内的重置周期数（Ruling-103）：
-// never 按 1 期，hourly / daily 按时长折算，weekly 按 7 天、monthly 按 30 天向上取整。
+// agentPoolCost 算开通或续期一次从流量池扣减的字节数 = 套餐流量 × 时长内最多能用到的重置周期数（Ruling-108）：
+// 重置发生在自然边界上，按时长内最多跨过的边界数再加 1 期——never 按 1 期，hourly = 天数 × 24 + 1，daily = 天数 + 1，
+// weekly = ⌈天数 / 7⌉ + 1，monthly = ⌈天数 / 28⌉ + 1。/agent/plans 的 poolCost、实际扣减与开通记录都用它。
 // 流量或时长不限（≤ 0）、重置周期不认识、乘积溢出 int64 时 ok 为假。
 func agentPoolCost(trafficLimit int64, durationDays int, reset string) (cost int64, ok bool) {
 	if trafficLimit <= 0 || durationDays <= 0 {
@@ -121,13 +123,13 @@ func agentPoolCost(trafficLimit int64, durationDays int, reset string) (cost int
 	case TrafficResetNever:
 		periods = 1
 	case TrafficResetHourly:
-		periods = days * hoursPerDay
+		periods = days*hoursPerDay + 1
 	case TrafficResetDaily:
-		periods = days
+		periods = days + 1
 	case TrafficResetWeekly:
-		periods = ceilDiv(days, daysPerWeek)
+		periods = ceilDiv(days, daysPerWeek) + 1
 	case TrafficResetMonthly:
-		periods = ceilDiv(days, agentDaysPerMonth)
+		periods = ceilDiv(days, agentDaysPerMonth) + 1
 	default:
 		return 0, false
 	}
@@ -509,7 +511,8 @@ func (s *AgentService) DeleteUser(ctx context.Context, p *AdminPrincipal, id int
 	return nil
 }
 
-// AssignPlan 给名下用户分配或续期白名单套餐（规则同员工分配，扣流量池，开通记录 kind = assign，Ruling-103）。
+// AssignPlan 给名下用户分配或续期白名单套餐（扣流量池，开通记录 kind = assign，Ruling-103）。与用户自己下单同一规则（Ruling-108）：
+// 与当前套餐相同 = 续期，未到期的从原到期日顺延；不同套餐或没有套餐 = 换购，立即生效、原剩余时长作废。
 // 先锁配额行再锁用户行，顺序固定防死锁。错误：CodeInvalidArgument、CodeNotFound、CodeConflict（用户已停用）、CodeAgentPoolInsufficient。
 func (s *AgentService) AssignPlan(ctx context.Context, p *AdminPrincipal, id, planID int64, ip *netip.Addr) (*AgentUser, error) {
 	agentID, err := agentScope(p)
@@ -546,7 +549,9 @@ func (s *AgentService) AssignPlan(ctx context.Context, p *AdminPrincipal, id, pl
 		if err := recordAllocation(ctx, q, agentID, id, row.Username, plan, cost, AgentAllocationAssign); err != nil {
 			return err
 		}
-		return s.users.assignPlanTx(ctx, q, p, row, plan, now, ip)
+		// 与用户自己下单同一规则（Ruling-108）：同一套餐才是续期顺延，不同套餐或没有套餐按换购立即生效
+		renewal := row.PlanID.Valid && row.PlanID.Int64 == plan.ID
+		return s.users.assignPlanTx(ctx, q, p, row, plan, !renewal, now, ip)
 	})
 	if err != nil {
 		return nil, err

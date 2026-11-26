@@ -458,3 +458,31 @@ func TestAgentSessionAndStaffViews(t *testing.T) {
 	expectStatus(t, w.agentA.do(http.MethodGet, "/api/admin/agent/summary", nil), http.StatusUnauthorized, string(service.CodeUnauthenticated))
 	w.ok(w.agentB, http.MethodGet, "/api/admin/agent/summary", nil)
 }
+
+// 代理改名下用户：契约里 remark 与 isDisabled 都必填，缺任一项（含 null）400 且不改任何东西，
+// 不能把没给的 isDisabled 当成 false 而启用停用的用户（docs/03 §5.23 改用户资料）。
+func TestAgentUpdateUserRequiresAllFields(t *testing.T) {
+	w := newAgentWorld(t)
+	path := fmt.Sprintf("/api/admin/agent/users/%d", w.userA)
+	w.ok(w.agentA, http.MethodPut, path, map[string]any{"remark": "keep", "isDisabled": true})
+	before := w.snapshot()
+	for _, body := range []map[string]any{
+		{"remark": "only remark"},
+		{"isDisabled": false},
+		{"remark": "x", "isDisabled": nil},
+		{},
+	} {
+		res := w.agentA.do(http.MethodPut, path, body)
+		expectStatus(t, res, http.StatusBadRequest, string(service.CodeInvalidArgument))
+	}
+	if after := w.snapshot(); after != before {
+		t.Fatalf("rejected updates changed data:\nbefore %s\nafter  %s", before, after)
+	}
+	var u struct {
+		Remark     string `json:"remark"`
+		IsDisabled bool   `json:"isDisabled"`
+	}
+	if err := json.Unmarshal(w.ok(w.agentA, http.MethodGet, path, nil).Data, &u); err != nil || u.Remark != "keep" || !u.IsDisabled {
+		t.Fatalf("user after rejected updates = %+v, %v", u, err)
+	}
+}

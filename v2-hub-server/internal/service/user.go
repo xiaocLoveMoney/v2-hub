@@ -36,6 +36,7 @@ const (
 	maxUserPageSize         = 100
 	defaultUserPage         = 20
 	msgUserNotFound         = "用户不存在"
+	msgEmailChangeReauth    = "修改用户邮箱需要重新验证身份；如果页面没有弹出验证框，请退出后重新登录，再在几分钟内重试"
 	msgPlanNotFound         = "套餐不存在"
 	emailCodeAlphabet       = "abcdefghijklmnopqrstuvwxyz0123456789"
 	ActionPlanCreate        = "plan.create"
@@ -853,7 +854,8 @@ func setUserEmailTx(ctx context.Context, q *sqlcgen.Queries, id int64, email str
 	return nil
 }
 
-// UpdateUser 修改备注、启停与邮箱。
+// UpdateUser 修改备注、启停与邮箱。邮箱确有变化（含清空）而操作者的二次验证已过期时返回 CodeReauthRequired，
+// 不做任何修改（Ruling-106）；改备注、启停与原样提交当前邮箱不要求二次验证。
 func (s *UserService) UpdateUser(ctx context.Context, actor *AdminPrincipal, id int64, in UserUpdateInput, ip *netip.Addr) (*User, error) {
 	if utf8.RuneCountInString(in.Remark) > maxUserRemarkLen {
 		return nil, newError(CodeInvalidArgument, msgRemarkTooLong)
@@ -871,6 +873,9 @@ func (s *UserService) UpdateUser(ctx context.Context, actor *AdminPrincipal, id 
 			return err
 		}
 		if in.Email != nil {
+			if err := requireFreshForEmailChange(ctx, q, actor, id, email); err != nil {
+				return err
+			}
 			if err := setUserEmailTx(ctx, q, id, email, now); err != nil {
 				return err
 			}
@@ -881,6 +886,22 @@ func (s *UserService) UpdateUser(ctx context.Context, actor *AdminPrincipal, id 
 		return nil, err
 	}
 	return s.GetUser(ctx, id)
+}
+
+// requireFreshForEmailChange 按内容判定改邮箱是否须二次验证（Ruling-106，docs/03 §4.4）：email（已规整，空串 = 清除）
+// 与用户当前邮箱不同、而 actor 的二次验证已过期时返回 CodeReauthRequired。调用方须已在同一事务里锁住用户行。
+func requireFreshForEmailChange(ctx context.Context, q *sqlcgen.Queries, actor *AdminPrincipal, id int64, email string) error {
+	if actor.ReauthFresh {
+		return nil
+	}
+	cur, err := q.GetEndUserEmail(ctx, id)
+	if err != nil {
+		return fmt.Errorf("get email of user %d: %w", id, err)
+	}
+	if cur.String == email {
+		return nil
+	}
+	return newError(CodeReauthRequired, msgEmailChangeReauth)
 }
 
 // updateUserTx 改备注与启停并记审计（员工与代理共用，Ruling-101）；调用方须已在同一事务里锁住用户行（row）。
@@ -924,7 +945,7 @@ func (s *UserService) AssignPlan(ctx context.Context, actor *AdminPrincipal, id,
 		if err != nil {
 			return err
 		}
-		return s.assignPlanTx(ctx, q, actor, row, p, now, ip)
+		return s.assignPlanTx(ctx, q, actor, row, p, false, now, ip)
 	})
 	if err != nil {
 		return nil, err
@@ -933,15 +954,21 @@ func (s *UserService) AssignPlan(ctx context.Context, actor *AdminPrincipal, id,
 }
 
 // assignPlanTx 按套餐写入额度（未到期的顺延、已到期的从 now 起算、已用清零，U6）并记审计；员工与代理共用（Ruling-101）。
+// replace 为真时按换购处理：原剩余时长与待生效天数作废、立即生效（代理换套餐，Ruling-108；员工分配恒为假）。
 // 调用方须已在同一事务里锁住用户行（row）并确认未停用。
 func (s *UserService) assignPlanTx(ctx context.Context, q *sqlcgen.Queries, actor *AdminPrincipal, row sqlcgen.GetUserQuotaRow,
-	p sqlcgen.GetPlanRow, now time.Time, ip *netip.Addr) error {
+	p sqlcgen.GetPlanRow, replace bool, now time.Time, ip *netip.Addr) error {
 	qt := quotaFromRow(row)
+	detail := map[string]any{"planId": p.ID, "planName": p.Name}
+	if replace {
+		qt.ExpiresAt, qt.PendingDays = nil, 0
+		detail["replaced"] = true
+	}
 	qt.ApplyPlan(planQuotaFromRow(p), now)
 	if err := saveQuota(ctx, q, row.ID, pgtype.Int8{Int64: p.ID, Valid: true}, qt, qt.Status(now)); err != nil {
 		return err
 	}
-	return s.afterQuotaChange(ctx, q, actor, row.ID, ActionUserPlan, ip, map[string]any{"planId": p.ID, "planName": p.Name}, true)
+	return s.afterQuotaChange(ctx, q, actor, row.ID, ActionUserPlan, ip, detail, true)
 }
 
 // UserQuotaInput 是管理员直接改配额的输入（U7），整体替换。

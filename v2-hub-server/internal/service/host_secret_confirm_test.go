@@ -3,6 +3,8 @@ package service
 import (
 	"bytes"
 	"context"
+	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -60,10 +62,12 @@ func TestCredentialSecretConfirmation(t *testing.T) {
 	host := list[0]
 	wantTask(t, f.runNext(t), HostTaskSucceeded, deploy.ReasonNone)
 
-	// 用过的目标：连接测试不再要求
+	// 用过的目标：连接测试仍一律要求（Ruling-107）
 	f.clock.advance(time.Minute + time.Second) // 越过连接测试的频控窗口
-	if _, err := f.hosts.TestHost(ctx, f.actor, HostTestInput{Address: hostAddrA, CredentialID: pc, ProviderType: fakeType}); err != nil {
-		t.Fatalf("TestHost on a used target: %v", err)
+	_, err = f.hosts.TestHost(ctx, f.actor, HostTestInput{Address: hostAddrA, CredentialID: pc, ProviderType: fakeType})
+	wantCode(t, err, CodeInvalidArgument)
+	if _, err := f.hosts.TestHost(ctx, f.actor, HostTestInput{Address: hostAddrA, CredentialID: pc, ProviderType: fakeType, CredentialSecret: pwSSH}); err != nil {
+		t.Fatalf("TestHost on a used target with confirmed password: %v", err)
 	}
 
 	// 修改主机：只改名不要求；改端口要求
@@ -141,5 +145,47 @@ func TestCredentialSecretConfirmationRateLimited(t *testing.T) {
 	f.clock.advance(defaultConfirmWindow + time.Second)
 	if _, err := f.hosts.TestHost(ctx, f.actor, in); err != nil {
 		t.Fatalf("TestHost after lockout: %v", err)
+	}
+}
+
+// 连接测试按目标已固定的主机密钥校验（Ruling-107）：同一地址换成冒充主机后，私钥与密码凭据的连接测试都失败（host_key_changed），
+// 密码凭据缺密码时根本不拨号；没有主机行的目标照旧首次信任。
+func TestTestHostUsesPinnedHostKey(t *testing.T) {
+	f := newHostFixture(t)
+	ctx := context.Background()
+	pc := newPasswordCredential(t, f)
+	f.createHost(t, hostAddrA, "pinned-a")
+	wantTask(t, f.runNext(t), HostTaskSucceeded, deploy.ReasonNone)
+
+	// 冒充主机：同一地址，主机密钥变了
+	f.runner.HostKey = "SHA256:impostorimpostorimpostorimpostorimpostorimpo"
+	dialed := len(f.dialer.Targets())
+	_, err := f.hosts.TestHost(ctx, f.actor, HostTestInput{Address: hostAddrA, CredentialID: pc, ProviderType: fakeType})
+	wantCode(t, err, CodeInvalidArgument)
+	if n := len(f.dialer.Targets()); n != dialed {
+		t.Fatalf("must not dial without the password, dialed %d more", n-dialed)
+	}
+	for _, in := range []HostTestInput{
+		{Address: hostAddrA, CredentialID: pc, ProviderType: fakeType, CredentialSecret: pwSSH},
+		{Address: hostAddrA, CredentialID: f.credID, ProviderType: fakeType},
+	} {
+		_, err = f.hosts.TestHost(ctx, f.actor, in)
+		var se *Error
+		if !errors.As(err, &se) || se.Code != CodeUpstream || !strings.Contains(se.Message, "主机密钥") {
+			t.Fatalf("TestHost on an impostor = %v, want upstream host_key_changed", err)
+		}
+		targets := f.dialer.Targets()
+		if got := targets[len(targets)-1].HostKeySHA256; got != hostKeyFP {
+			t.Fatalf("test dial pinned %q, want %q", got, hostKeyFP)
+		}
+		f.clock.advance(time.Minute + time.Second) // 越过连接测试的频控窗口
+	}
+	// 没有主机行的目标：不带固定密钥
+	if _, err := f.hosts.TestHost(ctx, f.actor, HostTestInput{Address: hostAddrB, CredentialID: f.credID, ProviderType: fakeType}); err != nil {
+		t.Fatalf("TestHost on a new target: %v", err)
+	}
+	targets := f.dialer.Targets()
+	if got := targets[len(targets)-1].HostKeySHA256; got != "" {
+		t.Fatalf("new target pinned %q, want none", got)
 	}
 }

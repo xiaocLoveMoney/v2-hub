@@ -322,6 +322,8 @@ type Querier interface {
 	GetOwnerAdminID(ctx context.Context) (int64, error)
 	// 入账前锁住充值单，重复通知只入账一次
 	GetPaymentByTradeNoForUpdate(ctx context.Context, tradeNo string) (GetPaymentByTradeNoForUpdateRow, error)
+	// 连接测试按目标（地址，端口）已固定的主机密钥校验（Ruling-107）；没有主机行时返回空串，空串 = 还没固定。
+	GetPinnedHostKeyByTarget(ctx context.Context, arg GetPinnedHostKeyByTargetParams) (string, error)
 	GetPlan(ctx context.Context, id int64) (GetPlanRow, error)
 	// 一个时长选项连同它的套餐；是否上架由调用方判断（自动续费也用这条）
 	GetPlanPriceForSale(ctx context.Context, id int64) (GetPlanPriceForSaleRow, error)

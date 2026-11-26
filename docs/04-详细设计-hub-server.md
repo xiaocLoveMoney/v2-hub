@@ -77,9 +77,14 @@ type CoreLiveApplier interface { AppliesCoreTemplateLive(ctx) (bool, error) }
   `api/router_policy_test.go` 从 `router.go` 源码取出全部管理端路由，核对“只需登录 / 权限码 / 权限码 + 二次验证 / R10 豁免”的归类，并与 `hub-api.yaml`（全部管理端路径、403 引用 `ReauthRequired` 的 38 个接口）逐条比对；运行时再确认未登录一律 401、过期的超管调高危接口一律 `reauth_required`、无权限者只得到 `permission_denied`。
 - 二次验证：`AuthService.Reauth`（已开两步验证的只认验证码、走 `consumeTOTP` 防重放，否则验密码；失败 400、计入频控 key `reauth:<id>`、审计 `admin.reauth_failed`），登录与 `EnableTOTP` 成功都把当前会话的 `reauth_until` 设为 now + `auth.reauthWindow`（默认 5m）。
 - 本人改密码：`AuthService.ChangeOwnPassword`（频控 key `admin-password:<id>`，成功后 `DeleteOtherAdminSessions` 保留当前会话）；`ResetAdminPassword` 对自己 409。
+- 失败名额先占后撤（Ruling-105）：`ratelimit.FailureGuard.Acquire(keys...)` 在校验口令之前原子地为每个 key 占一个名额（任一 key 锁定中、或窗口内已确认的失败 + 在途占用已达上限即判为锁定、什么都不占），返回的 `Attempt` 校验不通过调 `Fail`（转为一次失败，满额即锁定）、通过或与口令无关的提前返回调 `Release`（只撤回自己那份，两者只有第一次生效；调用处占用后立即 `defer Release`）。
+  在途占用大于 0 的条目不被淘汰，`Reset` 只清计数与锁定。用在：管理端登录（用户名 + IP 两个 key 一次占）、`Reauth`、`ChangeOwnPassword`、两端 `EnableTOTP` / `DisableTOTP`、用户端登录、`confirmSecret`（改密码、换绑邮箱、注销）、`confirmTOTP`、SSH 凭据密码确认。`IsLocked` / `RecordFailure` / `Allow` 保留给纯计次的限速（订阅、下单、充值码等）。
 - 所有者：`admin.is_owner`；`UpdateAdmin` / `ResetAdminPassword` / `ResetAdminTOTP` 遇所有者 403；`BootstrapSuperAdmin` 在没有所有者时设所有者；命令行的三件事在 `service/admin_cli.go`，转移所有者与 `BootstrapSuperAdmin` 都先锁 `super_admin` 角色行。
-- 已存密钥不外借：`PanelService.UpdateServer` 在解密已存 token 之前比较面板类型与规范化后的面板地址（与保存时同一个 `panel.ParseBaseURL`），变了而没带新 token 即 400，与是否停用无关；主机任务内部的 `ReplaceServerConn` 不受影响。
-  `service/host_secret_confirm.go` 做密码凭据的确认：凭据是 `password` 类型且（凭据，地址，端口）在 `server_host` 里没有时（修改主机为“三元组与本行原值不同”，重置主机密钥为“一律”）须带 `credentialSecret`，解密后 `subtle.ConstantTimeCompare`，输错按管理员计入频控（参数同登录频控），审计只记 `secretConfirmed`。
+- 已存密钥不外借：`PanelService.UpdateServer` 在解密已存 token 之前比较面板类型、规范化后的面板地址（与保存时同一个 `panel.ParseBaseURL`）、TLS 校验方式与指定的证书指纹（Ruling-107），任一变了而没带新 token 即 400，与是否停用无关；主机任务内部的 `ReplaceServerConn` 不受影响。
+  `service/host_secret_confirm.go` 做密码凭据的确认：凭据是 `password` 类型且（凭据，地址，端口）在 `server_host` 里没有时（修改主机为“三元组与本行原值不同”，重置主机密钥与连接测试为“一律”，Ruling-107）须带 `credentialSecret`，解密后 `subtle.ConstantTimeCompare`，输错按管理员计入频控（参数同登录频控、先占后撤），审计只记 `secretConfirmed`。
+  连接测试 `TestHost` 另用 `GetPinnedHostKeyByTarget` 取目标（地址，端口）已有主机行的主机密钥，非空就带着它拨号，不符即 502（SSH 层 `host_key_changed`），私钥凭据同样适用。
+- 按内容判定的高危操作（Ruling-106）：`UserService.UpdateUser` 在同一事务里锁住用户行后，邮箱（规整后，空串 = 清除）与当前值不同而 `ReauthFresh` 为假即 403 `reauth_required`，什么都不改；路由不挂 `withFresh`（契约里这条的 403 不引用 `ReauthRequired`）。
+  系统设置项定义 `settingDef.superOnly`（目前 `site.portalUrl`、`subscription.baseUrl`）：`SettingsService.Update` 在套用补丁后比较这些项规整后的值，非超管改成别的值即 403 `permission_denied`、整体不保存，值没变照常。
 
 二级代理（docs/03 §5.23，Ruling-101 – Ruling-104）的分工：
 - 账号与鉴权：`admin.kind`（`staff` / `agent`）。`loadPrincipal` 遇到非 `staff` 一律按代理处理：权限集合为空、`IsSuperAdmin` 为假，不读 `admin_role`；`AdminPrincipal.IsAgent()`、`Can()` 对代理恒假。
@@ -91,7 +96,8 @@ type CoreLiveApplier interface { AppliesCoreTemplateLive(ctx) (bool, error) }
   `UserService.updateUserTx`、`assignPlanTx`、`deleteUserTx`、`resetUserPasswordTx`、`clearUserTOTPTx`、`rotateSubscriptionTx`（从原方法里拆出，员工接口行为不变）。
   `AgentLockUser`、`AgentLockPlan`、`AgentListOrders` 的列与 `GetUserQuota`、`GetPlan`、`ListOrders` 逐字段相同，service 层直接做类型转换复用现有的转换函数。
 - 配额：`agent_profile` 行是配额的锁，开通 / 续期 / 新建 / 经邀请码注册都先 `LockAgentProfile`（`FOR UPDATE`）再锁用户行，顺序固定；注册时锁顺序是邀请码 → 配额行。
-  扣减量 `agentPoolCost`（纯函数，周 7 天、月 30 天向上取整，溢出视为算不出、按 400 拒绝）；白名单套餐用 `AgentLockPlan`（`FOR SHARE`）取，流量或时长为 0 即 400；`chargePool` 判断剩余并以带条件的 `UPDATE` 扣减（兜底不超卖），不够返回 `agent_pool_insufficient`，`data` 为 `{poolCost, poolRemaining}`；每次扣减写一条 `agent_allocation`。
+  扣减量 `agentPoolCost`（纯函数，按时长内最多能用到的周期数：never 1、hourly 天数 × 24 + 1、daily 天数 + 1、weekly ⌈天数 / 7⌉ + 1、monthly ⌈天数 / 28⌉ + 1，Ruling-108；溢出视为算不出、按 400 拒绝；`/agent/plans` 的 `poolCost` 也用它）；
+  代理分配套餐与用户下单同一规则：与当前套餐相同才顺延，否则 `assignPlanTx(replace = true)` 先清掉到期时间与待生效天数再套用（换购）；员工分配恒为顺延。代理改用户的请求体两项必填，handler 用指针区分缺省；白名单套餐用 `AgentLockPlan`（`FOR SHARE`）取，流量或时长为 0 即 400；`chargePool` 判断剩余并以带条件的 `UPDATE` 扣减（兜底不超卖），不够返回 `agent_pool_insufficient`，`data` 为 `{poolCost, poolRemaining}`；每次扣减写一条 `agent_allocation`。
   用户数上限按 `CountAgentUsers`（名下未删除）判断：代理新建 409 `agent_user_limit`，注册时按邀请码无效处理；超管划转不看上限。
 - 注册：`useInviteCode` 返回 `inviteUse{CodeID, InviterID, AgentID}`；代理码 `AgentID` 取码上的 `agent_id`、邀请人置 0（不返利），个人码 `AgentID` 取邀请人的 `agent_id`；有归属时 `checkAgentAcceptsSignup` 锁配额行判上限（代理码另判启用）。`Register` 有归属时不送 `register.planId`。
 - 超管侧：`service/agent_admin.go`（新建 / 修改 / 列表 / 详情 / 开通记录 / 划转），白名单 `checkWhitelist` 只收流量与时长都有限的套餐；停用代理即 `DeleteAdminSessionsByAdmin`。

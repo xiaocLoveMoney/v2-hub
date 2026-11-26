@@ -18,7 +18,9 @@ import (
 const (
 	msgAgentQuotaNull = "expiresAt 不能为 null"
 	msgBadAgentID     = "agentId 须为正整数"
-	queryAgentID      = "agentId"
+	// msgAgentUserFields：契约里两项都必填，缺一项不能当成“启用”或“清空备注”（docs/03 §5.23 改用户资料）
+	msgAgentUserFields = "remark 与 isDisabled 都必须给出"
+	queryAgentID       = "agentId"
 )
 
 // jsonNull 是 JSON 的 null 字面量。
@@ -145,9 +147,10 @@ type agentUserCreateBody struct {
 }
 
 // agentUserUpdateBody 对应 hub-api.yaml AgentUserUpdateInput：只收备注与启停，其余字段因 DisallowUnknownFields 一律 400。
+// 两项都必填，用指针区分“没给”（含 null）与零值。
 type agentUserUpdateBody struct {
-	Remark     string `json:"remark"`
-	IsDisabled bool   `json:"isDisabled"`
+	Remark     *string `json:"remark"`
+	IsDisabled *bool   `json:"isDisabled"`
 }
 
 // agentQuotaBody 对应 hub-api.yaml AgentUserQuotaInput；ExpiresAt 保留原文以区分“省略”与“显式 null”。
@@ -242,7 +245,11 @@ func (h *handlers) agentUpdateUser(w http.ResponseWriter, r *http.Request, p *se
 		writeError(w, r, err)
 		return
 	}
-	u, err := h.agents.UpdateUser(r.Context(), p, id, service.AgentUserUpdateInput{Remark: req.Remark, IsDisabled: req.IsDisabled}, clientIP(r, h.trustedProxies))
+	if req.Remark == nil || req.IsDisabled == nil {
+		writeError(w, r, badRequest(msgAgentUserFields))
+		return
+	}
+	u, err := h.agents.UpdateUser(r.Context(), p, id, service.AgentUserUpdateInput{Remark: *req.Remark, IsDisabled: *req.IsDisabled}, clientIP(r, h.trustedProxies))
 	writeAgentUser(w, r, u, err)
 }
 

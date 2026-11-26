@@ -17,7 +17,7 @@ import (
 // 这只是知情证明，不改已存的凭据；私钥类型的凭据不受影响（私钥不会发给对端）。
 
 const (
-	msgCredentialSecretRequired = "这份密码凭据还没用在这个地址上，请再输入一次该凭据的密码"
+	msgCredentialSecretRequired = "请再输入一次该凭据的密码"
 	msgCredentialSecretMismatch = "凭据密码不正确"
 	msgCredentialSecretTooMany  = "凭据密码输错次数过多，请稍后再试"
 )
@@ -44,7 +44,7 @@ func (s *HostService) confirmCredentialForNewTargets(ctx context.Context, actor 
 	return true, s.compareCredentialSecret(actor, row, secret)
 }
 
-// confirmCredential 在凭据是密码类型时无条件要求确认（修改主机的目标变了、重置主机密钥），返回是否做过确认。
+// confirmCredential 在凭据是密码类型时无条件要求确认（修改主机的目标变了、重置主机密钥、连接测试——Ruling-107），返回是否做过确认。
 // 错误同 confirmCredentialForNewTargets。
 func (s *HostService) confirmCredential(ctx context.Context, actor *AdminPrincipal, credentialID int64, secret string) (bool, error) {
 	row, err := s.credentialAuthRow(ctx, credentialID)
@@ -82,9 +82,12 @@ func (s *HostService) hasUnusedTarget(ctx context.Context, credentialID int64, s
 // compareCredentialSecret 解密已存密码并与 secret 做常量时间比较；不一致按管理员计入频控。密码不进日志与错误信息。
 func (s *HostService) compareCredentialSecret(actor *AdminPrincipal, row sqlcgen.GetSSHCredentialSecretRow, secret string) error {
 	key := strconv.FormatInt(actor.AdminID, 10)
-	if s.confirms.IsLocked(key) {
+	attempt, ok := s.confirms.Acquire(key)
+	if !ok {
 		return newError(CodeRateLimited, msgCredentialSecretTooMany)
 	}
+	// 校验前先占用失败名额，比对一致再撤回（Ruling-105）；缺密码、解密失败不计失败
+	defer attempt.Release()
 	if secret == "" {
 		return newError(CodeInvalidArgument, msgCredentialSecretRequired)
 	}
@@ -93,9 +96,10 @@ func (s *HostService) compareCredentialSecret(actor *AdminPrincipal, row sqlcgen
 		return fmt.Errorf("open ssh secret %d: %w", row.ID, err)
 	}
 	if subtle.ConstantTimeCompare([]byte(secret), stored) != 1 {
-		s.confirms.RecordFailure(key)
+		attempt.Fail()
 		return newError(CodeInvalidArgument, msgCredentialSecretMismatch)
 	}
+	attempt.Release()
 	s.confirms.Reset(key)
 	return nil
 }

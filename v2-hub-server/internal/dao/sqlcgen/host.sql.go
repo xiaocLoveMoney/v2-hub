@@ -417,6 +417,23 @@ func (q *Queries) GetHostTaskPayload(ctx context.Context, id int64) ([]byte, err
 	return payload, err
 }
 
+const getPinnedHostKeyByTarget = `-- name: GetPinnedHostKeyByTarget :one
+SELECT COALESCE((SELECT host_key_sha256 FROM server_host WHERE address = $1 AND ssh_port = $2::integer), '')::text AS host_key_sha256
+`
+
+type GetPinnedHostKeyByTargetParams struct {
+	Address string
+	SshPort int32
+}
+
+// 连接测试按目标（地址，端口）已固定的主机密钥校验（Ruling-107）；没有主机行时返回空串，空串 = 还没固定。
+func (q *Queries) GetPinnedHostKeyByTarget(ctx context.Context, arg GetPinnedHostKeyByTargetParams) (string, error) {
+	row := q.db.QueryRow(ctx, getPinnedHostKeyByTarget, arg.Address, arg.SshPort)
+	var host_key_sha256 string
+	err := row.Scan(&host_key_sha256)
+	return host_key_sha256, err
+}
+
 const getSSHCredential = `-- name: GetSSHCredential :one
 SELECT c.id, c.name, c.username, c.auth_type, c.key_fingerprint, c.remark, c.created_at, c.updated_at,
        (SELECT COUNT(*) FROM server_host h WHERE h.credential_id = c.id)::int AS host_count

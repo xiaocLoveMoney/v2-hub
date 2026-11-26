@@ -98,9 +98,11 @@ func (s *AuthService) EnableTOTP(ctx context.Context, p *AdminPrincipal, code st
 		return newError(CodeInvalidArgument, msgTOTPCodeMalformed)
 	}
 	guardKey := guardKeyTOTPPrefix + fmt.Sprint(p.AdminID)
-	if s.guard.IsLocked(guardKey) {
+	attempt, ok := s.guard.Acquire(guardKey)
+	if !ok {
 		return newError(CodeRateLimited, msgTooManyLogin)
 	}
+	defer attempt.Release()
 	return s.inTx(ctx, func(q *sqlcgen.Queries) error {
 		row, err := q.GetAdminTOTP(ctx, p.AdminID)
 		if err != nil {
@@ -118,9 +120,10 @@ func (s *AuthService) EnableTOTP(ctx context.Context, p *AdminPrincipal, code st
 		}
 		step, ok := totp.Verify(secret, code, s.now(), 0)
 		if !ok {
-			s.guard.RecordFailure(guardKey)
+			attempt.Fail()
 			return newError(CodeInvalidArgument, msgTOTPInvalid)
 		}
+		attempt.Release()
 		s.guard.Reset(guardKey)
 		sealed, err := s.sealer.Seal(secret, totpAAD(p.AdminID, false))
 		if err != nil {
@@ -146,9 +149,11 @@ func (s *AuthService) DisableTOTP(ctx context.Context, p *AdminPrincipal, code s
 		return newError(CodeInvalidArgument, msgTOTPCodeMalformed)
 	}
 	guardKey := guardKeyTOTPPrefix + fmt.Sprint(p.AdminID)
-	if s.guard.IsLocked(guardKey) {
+	attempt, ok := s.guard.Acquire(guardKey)
+	if !ok {
 		return newError(CodeRateLimited, msgTooManyLogin)
 	}
+	defer attempt.Release()
 	row, err := s.q.GetAdminTOTP(ctx, p.AdminID)
 	if err != nil {
 		return fmt.Errorf("get totp of admin %d: %w", p.AdminID, err)
@@ -156,14 +161,15 @@ func (s *AuthService) DisableTOTP(ctx context.Context, p *AdminPrincipal, code s
 	if row.TotpSecretEnc == nil {
 		return newError(CodeConflict, msgTOTPNotOn)
 	}
-	ok, err := s.consumeTOTP(ctx, p.AdminID, row.TotpSecretEnc, row.TotpLastStep, code)
+	ok, err = s.consumeTOTP(ctx, p.AdminID, row.TotpSecretEnc, row.TotpLastStep, code)
 	if err != nil {
 		return err
 	}
 	if !ok {
-		s.guard.RecordFailure(guardKey)
+		attempt.Fail()
 		return newError(CodeInvalidArgument, msgTOTPInvalid)
 	}
+	attempt.Release()
 	s.guard.Reset(guardKey)
 	return s.inTx(ctx, func(q *sqlcgen.Queries) error {
 		if _, err := q.ClearAdminTOTP(ctx, p.AdminID); err != nil {

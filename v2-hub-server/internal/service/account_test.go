@@ -541,3 +541,39 @@ func TestAdminSetsAndClearsUserEmail(t *testing.T) {
 		t.Fatalf("reuse a cleared email = %+v, %v", got, err)
 	}
 }
+
+// 员工改用户邮箱按内容判定二次验证（Ruling-106）：邮箱确有变化（含清空）而二次验证已过期时 403 reauth_required、
+// 什么都不改；改备注、启停、原样提交当前邮箱照常。
+func TestUpdateUserEmailRequiresFreshReauth(t *testing.T) {
+	f := newAccountFixture(t)
+	ctx := context.Background()
+	in := UserCreateInput{Username: "alice", Email: "alice@example.com"}
+	in.Password = cred
+	u, err := f.users.CreateUser(ctx, f.actor, in, nil)
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	stale := *f.actor
+	stale.ReauthFresh = false
+
+	other, empty, same := "mallory@example.com", "", " Alice@Example.com "
+	for _, email := range []*string{&other, &empty} {
+		_, err := f.users.UpdateUser(ctx, &stale, u.ID, UserUpdateInput{Remark: "changed", IsDisabled: true, Email: email}, nil)
+		wantCode(t, err, CodeReauthRequired)
+	}
+	got, err := f.users.GetUser(ctx, u.ID)
+	if err != nil || got.Email != "alice@example.com" || got.Remark != "" || got.Quota.Disabled {
+		t.Fatalf("rejected update must change nothing: %+v, %v", got, err)
+	}
+	// 不改邮箱：备注、启停与原样提交当前邮箱都不要求二次验证
+	if got, err = f.users.UpdateUser(ctx, &stale, u.ID, UserUpdateInput{Remark: "vip", IsDisabled: true}, nil); err != nil || got.Remark != "vip" || !got.Quota.Disabled {
+		t.Fatalf("update without email = %+v, %v", got, err)
+	}
+	if got, err = f.users.UpdateUser(ctx, &stale, u.ID, UserUpdateInput{Remark: "vip", Email: &same}, nil); err != nil || got.Email != "alice@example.com" {
+		t.Fatalf("resubmit the current email = %+v, %v", got, err)
+	}
+	// 二次验证有效时可以改
+	if got, err = f.users.UpdateUser(ctx, f.actor, u.ID, UserUpdateInput{Remark: "vip", Email: &other}, nil); err != nil || got.Email != other {
+		t.Fatalf("fresh actor changes email = %+v, %v", got, err)
+	}
+}

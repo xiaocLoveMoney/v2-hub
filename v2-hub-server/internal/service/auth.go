@@ -104,19 +104,19 @@ func (s *AuthService) Login(ctx context.Context, in LoginInput) (*LoginResult, e
 	if in.ClientIP != nil {
 		ipKey = guardKeyIPPrefix + in.ClientIP.String()
 	}
-	if s.guard.IsLocked(userKey) || (ipKey != "" && s.guard.IsLocked(ipKey)) {
+	// 校验前先占用失败名额，校验通过再撤回（Ruling-105）；没走到 Fail 的提前返回一律撤回
+	attempt, ok := s.guard.Acquire(userKey, ipKey)
+	if !ok {
 		return nil, newError(CodeRateLimited, msgTooManyLogin)
 	}
+	defer attempt.Release()
 
 	admin, verified, err := s.verifyCredentials(ctx, in.Username, in.Password)
 	if err != nil {
 		return nil, err
 	}
 	failure := func(reason, message string) error {
-		s.guard.RecordFailure(userKey)
-		if ipKey != "" {
-			s.guard.RecordFailure(ipKey)
-		}
+		attempt.Fail()
 		s.auditLoginFailure(ctx, in, admin, reason)
 		return newError(CodeUnauthenticated, message)
 	}
@@ -136,6 +136,7 @@ func (s *AuthService) Login(ctx context.Context, in LoginInput) (*LoginResult, e
 			return nil, failure("totp", msgTOTPInvalid)
 		}
 	}
+	attempt.Release()
 	s.guard.Reset(userKey)
 	if ipKey != "" {
 		s.guard.Reset(ipKey)
@@ -332,9 +333,11 @@ func loadPrincipal(ctx context.Context, q *sqlcgen.Queries, adminID int64, usern
 // 错误：CodeInvalidArgument（验证失败或缺字段，失败计入频控）、CodeRateLimited。
 func (s *AuthService) Reauth(ctx context.Context, p *AdminPrincipal, password, totpCode string, ip *netip.Addr) (time.Time, error) {
 	guardKey := guardKeyReauthPrefix + fmt.Sprint(p.AdminID)
-	if s.guard.IsLocked(guardKey) {
+	attempt, ok := s.guard.Acquire(guardKey)
+	if !ok {
 		return time.Time{}, newError(CodeRateLimited, msgReauthTooMany)
 	}
+	defer attempt.Release()
 	row, err := s.q.GetAdminSecrets(ctx, p.AdminID)
 	if err != nil {
 		return time.Time{}, fmt.Errorf("get secrets of admin %d: %w", p.AdminID, err)
@@ -344,7 +347,7 @@ func (s *AuthService) Reauth(ctx context.Context, p *AdminPrincipal, password, t
 		return time.Time{}, err
 	}
 	if !ok {
-		s.guard.RecordFailure(guardKey)
+		attempt.Fail()
 		entry := adminAudit(p, ActionAdminReauthFailed, targetAdmin, p.AdminID, ip, map[string]any{"method": method})
 		// 审计写失败不影响验证结果，但必须留痕
 		if aerr := writeAudit(ctx, s.q, entry); aerr != nil {
@@ -355,6 +358,7 @@ func (s *AuthService) Reauth(ctx context.Context, p *AdminPrincipal, password, t
 		}
 		return time.Time{}, newError(CodeInvalidArgument, msgReauthPassInvalid)
 	}
+	attempt.Release()
 	s.guard.Reset(guardKey)
 	var until time.Time
 	err = s.inTx(ctx, func(q *sqlcgen.Queries) error {
@@ -409,21 +413,24 @@ func (s *AuthService) ChangeOwnPassword(ctx context.Context, p *AdminPrincipal, 
 		return err
 	}
 	guardKey := guardKeyPasswordPrefix + fmt.Sprint(p.AdminID)
-	if s.guard.IsLocked(guardKey) {
+	attempt, ok := s.guard.Acquire(guardKey)
+	if !ok {
 		return newError(CodeRateLimited, msgTooManyLogin)
 	}
+	defer attempt.Release()
 	row, err := s.q.GetAdminSecrets(ctx, p.AdminID)
 	if err != nil {
 		return fmt.Errorf("get secrets of admin %d: %w", p.AdminID, err)
 	}
-	ok, err := crypto.VerifyPassword(oldPassword, row.PasswordHash)
+	ok, err = crypto.VerifyPassword(oldPassword, row.PasswordHash)
 	if err != nil {
 		return fmt.Errorf("verify password of admin %d: %w", p.AdminID, err)
 	}
 	if !ok {
-		s.guard.RecordFailure(guardKey)
+		attempt.Fail()
 		return newError(CodeInvalidArgument, msgOldPasswordInvalid)
 	}
+	attempt.Release()
 	s.guard.Reset(guardKey)
 	hash, err := crypto.HashPassword(newPassword)
 	if err != nil {
