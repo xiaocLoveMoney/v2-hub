@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { PERMISSIONS } from '../../menu'
-import { TEST_CSRF, mockServer, ok, renderWith } from '../../test/harness'
+import { CONFIRM, TEST_CSRF, mockServer, ok, renderWith } from '../../test/harness'
 import { MailOutboxPage } from '../system/MailOutboxPage'
 import { SettingsPage } from '../system/SettingsPage'
 import { InviteCodesPage } from '../users/InviteCodesPage'
@@ -11,8 +11,6 @@ import { TicketsPage } from './TicketsPage'
 import { TutorialsPage } from './TutorialsPage'
 
 const NOW = '2026-11-13T00:00:00Z'
-// Popconfirm 的确认按钮：测试里没配语言包时是 OK，配了中文是“确定”
-const CONFIRM = /^(OK|确\s*定)$/
 
 afterEach(() => {
   cleanup()

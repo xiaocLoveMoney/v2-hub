@@ -1,30 +1,8 @@
 import type { TrafficReset, UserStatus } from '../../api/client'
 import { formatTime } from '../system/format'
 
-/** 1 GB 的字节数；额度在界面上按 GB 填写，接口按字节传（hub-api PlanInput.trafficLimit）。 */
-export const BYTES_PER_GB = 1024 ** 3
-const BYTE_UNITS = ['B', 'KB', 'MB', 'GB', 'TB'] as const
-const BYTE_STEP = 1024
-const DECIMALS = 2
-
-/** 字节数格式化为人读的大小。 */
-export function formatBytes(bytes: number): string {
-  let value = bytes
-  let unit = 0
-  while (value >= BYTE_STEP && unit < BYTE_UNITS.length - 1) {
-    value /= BYTE_STEP
-    unit++
-  }
-  return `${unit === 0 ? value : value.toFixed(DECIMALS)} ${BYTE_UNITS[unit]}`
-}
-
-export function gbToBytes(gb: number | null | undefined): number {
-  return Math.round((gb ?? 0) * BYTES_PER_GB)
-}
-
-export function bytesToGb(bytes: number): number {
-  return Number((bytes / BYTES_PER_GB).toFixed(DECIMALS))
-}
+// 字节 / GB 换算与格式化在 src/bytes.ts（api/ 也要用），这里转出保持原有引用不变
+export { BYTES_PER_GB, bytesToGb, formatBytes, gbToBytes } from '../../bytes'
 
 /** 用户状态（docs/03 §2）的标签与颜色。 */
 export const USER_STATUS: Record<UserStatus, { label: string; color: string }> = {

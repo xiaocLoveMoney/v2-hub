@@ -1,5 +1,8 @@
 import createClient, { type Middleware } from 'openapi-fetch'
+import { describeErrorMessage } from './error-text'
 import type { components, paths } from './generated/schema'
+
+export { CODE_AGENT_POOL_INSUFFICIENT } from './error-text'
 
 /** 契约里的数据结构（hub-api.yaml components.schemas）。 */
 export type Session = components['schemas']['Session']
@@ -76,7 +79,6 @@ export type AdminKind = components['schemas']['AdminKind']
 export type Agent = components['schemas']['Agent']
 export type AgentCreateInput = components['schemas']['AgentCreateInput']
 export type AgentUpdateInput = components['schemas']['AgentUpdateInput']
-export type AgentBrief = components['schemas']['AgentBrief']
 export type AgentAllocation = components['schemas']['AgentAllocation']
 export type AgentAllocationKind = components['schemas']['AgentAllocationKind']
 export type AgentSummary = components['schemas']['AgentSummary']
@@ -94,6 +96,8 @@ export interface PageData<T> {
 export interface ApiError {
   code: string
   message: string
+  /** 信封里的 data（个别错误码带补充数据，如流量池不足的 poolCost / poolRemaining）；没有则不出现。 */
+  data?: unknown
 }
 
 const HEADER_CSRF = 'X-CSRF-Token'
@@ -107,13 +111,13 @@ export const CODE_REAUTH_REQUIRED = 'reauth_required'
 export const CODE_TOTP_SETUP_REQUIRED = 'totp_setup_required'
 /** 频控触发（docs/03 §5）。 */
 export const CODE_RATE_LIMITED = 'rate_limited'
-/** 代理的流量池不够本次开通，信封 data 带 poolCost / poolRemaining（docs/03 §5.23）。 */
-export const CODE_AGENT_POOL_INSUFFICIENT = 'agent_pool_insufficient'
-/** 代理名下用户数已达上限（docs/03 §5.23）。 */
-export const CODE_AGENT_USER_LIMIT = 'agent_user_limit'
+/** 参数不合法；前端本地校验没过时也用它，与后端同码。 */
+export const CODE_INVALID_ARGUMENT = 'invalid_argument'
 const HTTP_FORBIDDEN = 403
 /** 会话与验证类接口：本身不会要求二次验证，也不能被拦截（否则验证请求会递归弹框）。 */
 const AUTH_PATH_PREFIX = '/api/admin/auth/'
+/** 文件上传的请求类型：上传接口不要求二次验证，不为它留副本（否则整份上传内容多缓冲一份）。 */
+const MULTIPART_CONTENT_TYPE = 'multipart/form-data'
 
 let csrfToken = ''
 
@@ -203,12 +207,14 @@ function requestReauth(handler: ReauthHandler): Promise<boolean> {
  * 所有接口请求的唯一出口：403 reauth_required 时弹验证框，通过后用发请求前留底的副本原样重发一次
  * （方法、URL、请求体、CSRF 头都不变；重发结果直接交还，不再拦截，避免循环）；取消则把原 403 交还调用方（Ruling-100）。
  * 403 totp_setup_required 时通知会话层刷新（Ruling-98）。/api/admin/auth/ 下的请求不拦截。
+ * multipart 上传不留副本，遇到 reauth_required 也不重发，原 403 交还调用方。
  */
 async function guardedFetch(request: Request): Promise<Response> {
   if (new URL(request.url).pathname.startsWith(AUTH_PATH_PREFIX)) {
     return globalThis.fetch(request)
   }
-  const replica = request.clone()
+  const isMultipart = (request.headers.get('Content-Type') ?? '').startsWith(MULTIPART_CONTENT_TYPE)
+  const replica = isMultipart ? null : request.clone()
   const response = await globalThis.fetch(request)
   if (response.status !== HTTP_FORBIDDEN) {
     return response
@@ -219,7 +225,7 @@ async function guardedFetch(request: Request): Promise<Response> {
     return response
   }
   const handler = reauthHandler
-  if (code !== CODE_REAUTH_REQUIRED || handler === null) {
+  if (code !== CODE_REAUTH_REQUIRED || handler === null || replica === null) {
     return response
   }
   const isPassed = await requestReauth(handler)
@@ -237,12 +243,16 @@ export const api = createClient<paths>({
 })
 api.use(csrfMiddleware)
 
-/** 把 openapi-fetch 返回的 error 规整为 ApiError。 */
+/**
+ * 把 openapi-fetch 返回的 error 规整为 ApiError：所有读写的错误都经这里（useRemote、mutate），
+ * 保留信封的 data，需要 data 才能说清楚的错误码在这里换成具体提示（error-text.ts）。
+ */
 export function toApiError(error: unknown): ApiError {
   if (typeof error === 'object' && error !== null && 'code' in error && 'message' in error) {
-    const { code, message } = error as { code: unknown; message: unknown }
+    const { code, message, data } = error as { code: unknown; message: unknown; data?: unknown }
     if (typeof code === 'string' && typeof message === 'string') {
-      return { code, message }
+      const text = describeErrorMessage(code, message, data)
+      return data === undefined ? { code, message: text } : { code, message: text, data }
     }
   }
   return { code: 'network', message: FALLBACK_MESSAGE }

@@ -3,7 +3,7 @@ import type { ReactNode } from 'react'
 import { MemoryRouter } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { PERMISSIONS } from '../../menu'
-import { TEST_CSRF, mockServer, ok, renderWith } from '../../test/harness'
+import { CONFIRM, TEST_CSRF, mockServer, ok, renderWith } from '../../test/harness'
 import { CREDENTIAL, CREDENTIAL_OPTION, PASSWORD_CREDENTIAL, PASSWORD_CREDENTIAL_OPTION, hostOf, serverOf } from '../../test/host-fixtures'
 import { HostBindModal } from './HostBindModal'
 import { HostsPage } from './HostsPage'
@@ -15,7 +15,6 @@ const HOSTS_PATH = '/api/admin/server-hosts'
 const CREDENTIALS_PATH = '/api/admin/ssh-credentials'
 const SECRET_LABEL = '再次输入该凭据的密码'
 const SECRET_REQUIRED = '请输入该凭据的密码'
-const CONFIRM = /^(OK|确\s*定)$/
 /** 再次输入的密码（仅测试用）。 */
 const typed = 'typed-again'
 const DETECTION = { hostKeySha256: 'SHA256:probe-example', osId: 'debian', arch: 'amd64', isPrivileged: true, panelState: 'none', panelVersion: '', plan: 'install', reason: '' }

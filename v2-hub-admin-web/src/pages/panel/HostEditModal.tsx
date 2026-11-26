@@ -1,13 +1,12 @@
 import { Alert, Button, Form, Input, InputNumber, Select } from 'antd'
-import { useState } from 'react'
-import { api, csrfHeader, type ServerHost, type SshAuthType } from '../../api/client'
+import { api, csrfHeader, type ServerHost } from '../../api/client'
 import { ErrorAlert } from '../../components/ErrorAlert'
 import { FormModal } from '../../components/FormModal'
 import { useSubmit } from '../../hooks/use-submit'
 import { MAX_NAME_LEN, MAX_PORT, MIN_PORT } from '../form-limits'
 import { COUNTRY_OPTIONS } from './countries'
 import { CredentialSecretField } from './CredentialSecretField'
-import { CREDENTIAL_SECRET_FIELD, PASSWORD_AUTH_TYPE, credentialSecretPart } from './credential-secret'
+import { useCredentialSecret } from './credential-secret'
 import { DnsAccountSelect } from './DnsAccountSelect'
 import { MAX_HOST_ADDRESS_LEN, SAME_MACHINE_ADDRESS_HINT, validateHostAddressField } from './host-list'
 import { SshCredentialSelect } from './SshCredentialSelect'
@@ -50,16 +49,11 @@ function HostEditBody({ host, onSaved }: { host: ServerHost; onSaved: () => void
   const submit = useSubmit('已保存', onSaved)
   const dnsAccountId = Form.useWatch('dnsAccountId', form) ?? null
   const hasDnsAccount = dnsAccountId !== null
-  const [authType, setAuthType] = useState<SshAuthType | null>(null)
-  const credentialId = Form.useWatch('credentialId', form) ?? host.credentialId
-  const address = Form.useWatch('address', form) ?? host.address
-  const sshPort = Form.useWatch('sshPort', form) ?? host.sshPort
   // Ruling-97：密码凭据改后的（凭据，地址，端口）与原来不同才要再输一次密码
-  const isTargetChanged = credentialId !== host.credentialId || address.trim() !== host.address || sshPort !== host.sshPort
-  const isSecretNeeded = authType === PASSWORD_AUTH_TYPE && isTargetChanged
+  const secret = useCredentialSecret(form, host)
 
   const handleFinish = async (v: HostEditForm) => {
-    form.setFieldValue(CREDENTIAL_SECRET_FIELD, undefined)
+    secret.clear()
     await submit.run(() =>
       api.PUT('/api/admin/server-hosts/{id}', {
         params: { ...csrfHeader(), path: { id: host.id } },
@@ -73,7 +67,7 @@ function HostEditBody({ host, onSaved }: { host: ServerHost; onSaved: () => void
           dnsAccountId: v.dnsAccountId ?? null,
           // 没选 DNS 账号时域名必须为空（docs/03 §5.22 域名）
           domain: (v.dnsAccountId ?? null) === null ? '' : (v.domain ?? '').trim(),
-          ...credentialSecretPart(isSecretNeeded, v.credentialSecret),
+          ...secret.bodyPart(v.credentialSecret),
         },
       }),
     )
@@ -108,9 +102,9 @@ function HostEditBody({ host, onSaved }: { host: ServerHost; onSaved: () => void
           <InputNumber min={MIN_PORT} max={MAX_PORT} precision={0} className="full-width" />
         </Form.Item>
         <Form.Item name="credentialId" label="SSH 凭据" rules={[{ required: true, message: '请选择 SSH 凭据' }]}>
-          <SshCredentialSelect onAuthTypeChange={setAuthType} />
+          <SshCredentialSelect onAuthTypeChange={secret.onAuthTypeChange} />
         </Form.Item>
-        {isSecretNeeded && <CredentialSecretField extra="所选凭据是密码登录，改了凭据、地址或端口时须再输入一次密码，与已保存的一致才继续" />}
+        {secret.isNeeded && <CredentialSecretField extra="所选凭据是密码登录，改了凭据、地址或端口时须再输入一次密码，与已保存的一致才继续" />}
         <Form.Item name="region" label="位置">
           <Select
             showSearch={{ optionFilterProp: 'label' }}

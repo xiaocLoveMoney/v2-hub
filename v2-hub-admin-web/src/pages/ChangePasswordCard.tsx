@@ -3,7 +3,8 @@ import { useState } from 'react'
 import { api, csrfHeader, type ApiError } from '../api/client'
 import { ErrorAlert } from '../components/ErrorAlert'
 import { mutate } from '../hooks/use-remote'
-import { MAX_ADMIN_PASSWORD_LEN, MIN_ADMIN_PASSWORD_LEN } from './form-limits'
+import { MAX_ADMIN_PASSWORD_LEN } from './form-limits'
+import { ADMIN_CREDENTIAL_LENGTH_RULE } from './system/admin-form-rules'
 
 interface ChangePasswordForm {
   current: string
@@ -11,10 +12,7 @@ interface ChangePasswordForm {
   confirm: string
 }
 
-const nextRules = [
-  { required: true, message: '请输入新密码' },
-  { min: MIN_ADMIN_PASSWORD_LEN, max: MAX_ADMIN_PASSWORD_LEN, message: `密码长度须为 ${MIN_ADMIN_PASSWORD_LEN}–${MAX_ADMIN_PASSWORD_LEN} 个字符` },
-]
+const nextRules = [{ required: true, message: '请输入新密码' }, ADMIN_CREDENTIAL_LENGTH_RULE]
 
 /** 账号安全页的“修改密码”卡片（R9）：须填旧密码；成功后当前会话保留、其它设备下线（R7）。旧密码错误就地提示。 */
 export function ChangePasswordCard() {

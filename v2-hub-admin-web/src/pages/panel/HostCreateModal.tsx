@@ -1,12 +1,12 @@
 import { App, Button, Form, Input, InputNumber, Select, Space, Typography } from 'antd'
 import { useState } from 'react'
-import { api, csrfHeader, toApiError, type ApiError, type HostDetection, type ServerHostBatchInput, type SshAuthType } from '../../api/client'
+import { api, csrfHeader, toApiError, type ApiError, type HostDetection, type ServerHostBatchInput } from '../../api/client'
 import { ErrorAlert } from '../../components/ErrorAlert'
 import { FormModal } from '../../components/FormModal'
 import { mutate } from '../../hooks/use-remote'
 import { MAX_PORT, MIN_PORT } from '../form-limits'
 import { CredentialSecretField } from './CredentialSecretField'
-import { CREDENTIAL_SECRET_FIELD, PASSWORD_AUTH_TYPE, credentialSecretPart } from './credential-secret'
+import { CREDENTIAL_SECRET_FIELD, useCredentialSecret } from './credential-secret'
 import { DnsAccountSelect } from './DnsAccountSelect'
 import { HostDetectionResult } from './HostDetectionResult'
 import { DEFAULT_SSH_PORT, MAX_HOST_BATCH, SAME_MACHINE_ADDRESS_HINT, formatHostListErrors, parseHostList } from './host-list'
@@ -69,10 +69,8 @@ function HostCreateBody({ onSaved }: { onSaved: () => void }) {
   const [error, setError] = useState<ApiError | null>(null)
   const [isBusy, setIsBusy] = useState(false)
   const [outcome, setOutcome] = useState<TestOutcome | null>(null)
-  const [authType, setAuthType] = useState<SshAuthType | null>(null)
   // 密码凭据：批量新建总要再输一次密码（整批一次）；连接测试与之共用这一栏，同样总是要求（Ruling-97）
-  const isSecretNeeded = authType === PASSWORD_AUTH_TYPE
-  const clearSecret = () => form.setFieldValue(CREDENTIAL_SECRET_FIELD, undefined)
+  const secret = useCredentialSecret(form)
 
   /** 测试连接：用清单第一行连一次并检测，不落库（docs/03 §5.22 连接测试）。 */
   const handleTest = async () => {
@@ -98,7 +96,7 @@ function HostCreateBody({ onSaved }: { onSaved: () => void }) {
           sshPort: v.sshPort,
           credentialId: v.credentialId,
           providerType: v.providerType,
-          ...credentialSecretPart(isSecretNeeded, v.credentialSecret),
+          ...secret.bodyPart(v.credentialSecret),
         },
       })
       if (apiError !== undefined || data?.data === undefined) {
@@ -110,7 +108,7 @@ function HostCreateBody({ onSaved }: { onSaved: () => void }) {
       reportError(err)
       setError(toApiError(err))
     } finally {
-      clearSecret()
+      secret.clear()
       setIsBusy(false)
     }
   }
@@ -129,11 +127,11 @@ function HostCreateBody({ onSaved }: { onSaved: () => void }) {
           panelPort: v.panelPort ?? null,
           dnsAccountId: v.dnsAccountId ?? null,
           hosts,
-          ...credentialSecretPart(isSecretNeeded, v.credentialSecret),
+          ...secret.bodyPart(v.credentialSecret),
         },
       }),
     )
-    clearSecret()
+    secret.clear()
     setIsBusy(false)
     if (err !== null) {
       setError(err)
@@ -153,9 +151,9 @@ function HostCreateBody({ onSaved }: { onSaved: () => void }) {
         initialValues={{ providerType: DEFAULT_PROVIDER, sshPort: DEFAULT_SSH_PORT, hostsText: '' }}
       >
         <Form.Item name="credentialId" label="SSH 凭据" extra="登录用户须是 root 或能免密 sudo" rules={[{ required: true, message: '请选择 SSH 凭据' }]}>
-          <SshCredentialSelect onAuthTypeChange={setAuthType} />
+          <SshCredentialSelect onAuthTypeChange={secret.onAuthTypeChange} />
         </Form.Item>
-        {isSecretNeeded && <CredentialSecretField extra="所选凭据是密码登录，新建与测试连接都须再输入一次密码（整批一次），与已保存的一致才继续" />}
+        {secret.isNeeded && <CredentialSecretField extra="所选凭据是密码登录，新建与测试连接都须再输入一次密码（整批一次），与已保存的一致才继续" />}
         <Form.Item name="providerType" label="面板类型" rules={[{ required: true }]}>
           <Select options={PROVIDER_OPTIONS} />
         </Form.Item>

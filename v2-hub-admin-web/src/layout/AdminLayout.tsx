@@ -1,5 +1,5 @@
 import { LogoutOutlined } from '@ant-design/icons'
-import { Alert, Button, Layout, Menu, Space, Spin, Tag, Typography, type MenuProps } from 'antd'
+import { Alert, Button, Layout, Menu, Space, Tag, Typography, type MenuProps } from 'antd'
 import { useMemo, type ReactNode } from 'react'
 import { Navigate, Outlet, useLocation, useNavigate } from 'react-router'
 import { useSession } from '../auth/session-context'
@@ -8,6 +8,7 @@ import { revealChildren } from '../components/motion'
 import { AGENT_MENU, AGENT_ROUTES } from '../agent-menu'
 import { MENU, ROUTES, visibleMenu, type MenuEntry } from '../menu'
 import { ForbiddenPage } from '../pages/Placeholders'
+import { SessionGuard } from './SessionGuard'
 
 type MenuItem = Required<MenuProps>['items'][number]
 
@@ -44,38 +45,24 @@ function toMenuItems(entries: MenuEntry[]): MenuItem[] {
 const AGENT_FORBIDDEN_TEXT = '代理账号只能使用代理界面'
 
 /**
- * 员工的布局：未登录跳到登录页；代理账号不渲染任何员工页面（根路径转到代理首页，其余员工路径显示 403，Ruling-101）；
- * 超管未开启两步验证时只能停在账号安全页（Ruling-98）。
+ * 员工的布局：会话判断见 SessionGuard；代理账号不渲染任何员工页面（根路径转到代理首页，其余员工路径显示 403，Ruling-101）。
  */
 export function AdminLayout() {
-  const { status, session } = useSession()
   const location = useLocation()
-  const isTotpSetupRequired = session?.totpSetupRequired ?? false
-
-  if (status === 'loading') {
-    return <Spin fullscreen />
-  }
-  if (status === 'anonymous') {
-    return <Navigate to={ROUTES.LOGIN} replace state={{ from: location.pathname }} />
-  }
-  if (session?.kind === 'agent') {
-    if (location.pathname === ROUTES.DASHBOARD) {
-      return <Navigate to={AGENT_ROUTES.HOME} replace />
-    }
-    return (
+  const wrongKind =
+    location.pathname === ROUTES.DASHBOARD ? (
+      <Navigate to={AGENT_ROUTES.HOME} replace />
+    ) : (
       <AgentShell>
         <ForbiddenPage subTitle={AGENT_FORBIDDEN_TEXT} homePath={AGENT_ROUTES.HOME} homeLabel="返回配额概览" />
       </AgentShell>
     )
-  }
-  // 超管须先开启两步验证（Ruling-98）：其它页面一律停到账号安全页，开启后刷新会话即恢复
-  if (isTotpSetupRequired && location.pathname !== ROUTES.SECURITY) {
-    return <Navigate to={ROUTES.SECURITY} replace />
-  }
   return (
-    <AdminShell>
-      <Outlet />
-    </AdminShell>
+    <SessionGuard kind="staff" wrongKind={wrongKind}>
+      <AdminShell>
+        <Outlet />
+      </AdminShell>
+    </SessionGuard>
   )
 }
 

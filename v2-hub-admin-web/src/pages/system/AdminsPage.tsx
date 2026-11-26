@@ -6,13 +6,11 @@ import { api, csrfHeader, type Admin, type ApiError, type Role } from '../../api
 import { useSession } from '../../auth/session-context'
 import { mutate, useRemote } from '../../hooks/use-remote'
 import { PERMISSIONS, ROUTES } from '../../menu'
-import { MAX_ADMIN_PASSWORD_LEN, MIN_ADMIN_PASSWORD_LEN } from '../form-limits'
+import { adminCredentialRules, adminUsernameRules } from './admin-form-rules'
 import { formatTime } from './format'
 import { ErrorAlert } from '../../components/ErrorAlert'
 import { PagedTable } from '../../components/PagedTable'
 import { PageHeader } from '../../components/PageHeader'
-
-const USERNAME_PATTERN = /^[a-zA-Z0-9_.-]{3,64}$/
 
 interface CreateForm {
   username: string
@@ -31,11 +29,6 @@ interface ResetForm {
 
 /** 角色列表请求与组件状态无关，提到模块级保持引用稳定。 */
 const loadRoles = (signal: AbortSignal) => api.GET('/api/admin/roles', { signal })
-
-const credentialRules = [
-  { required: true, message: '请输入密码' },
-  { min: MIN_ADMIN_PASSWORD_LEN, max: MAX_ADMIN_PASSWORD_LEN, message: `密码长度须为 ${MIN_ADMIN_PASSWORD_LEN}–${MAX_ADMIN_PASSWORD_LEN} 个字符` },
-]
 
 /** 管理员管理（admin:read 查看，admin:write 增改；越权规则由后端按 docs/03 R3–R5、R11 执行，前端只做显隐）。 */
 export function AdminsPage() {
@@ -187,10 +180,10 @@ export function AdminsPage() {
       <Modal title="新建管理员" open={creating} onCancel={closeModals} footer={null} destroyOnHidden>
         <ErrorAlert error={formError} />
         <Form<CreateForm> layout="vertical" onFinish={handleCreate} initialValues={{ roles: [] }}>
-          <Form.Item name="username" label="用户名" rules={[{ required: true, pattern: USERNAME_PATTERN, message: '3–64 位字母、数字或 _ . -' }]}>
+          <Form.Item name="username" label="用户名" rules={adminUsernameRules}>
             <Input autoComplete="off" />
           </Form.Item>
-          <Form.Item name="credential" label="初始密码" rules={credentialRules}>
+          <Form.Item name="credential" label="初始密码" rules={adminCredentialRules}>
             <Input.Password autoComplete="new-password" />
           </Form.Item>
           <Form.Item name="roles" label="角色">
@@ -220,7 +213,7 @@ export function AdminsPage() {
       <Modal title={`重置密码：${resetting?.username ?? ''}`} open={resetting !== null} onCancel={closeModals} footer={null} destroyOnHidden>
         <ErrorAlert error={formError} />
         <Form<ResetForm> layout="vertical" onFinish={handleReset}>
-          <Form.Item name="credential" label="新密码" rules={credentialRules}>
+          <Form.Item name="credential" label="新密码" rules={adminCredentialRules}>
             <Input.Password autoComplete="new-password" />
           </Form.Item>
           <Button type="primary" htmlType="submit" block>

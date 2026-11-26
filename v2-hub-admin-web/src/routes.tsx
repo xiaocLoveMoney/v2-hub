@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 import type { RouteObject } from 'react-router'
-import { AGENT_ROUTES } from './agent-menu'
+import { AGENT_MENU, AGENT_ROUTES } from './agent-menu'
 import { AdminLayout } from './layout/AdminLayout'
 import { AgentLayout } from './layout/AgentLayout'
 import { MENU, PERMISSIONS, ROUTES } from './menu'
@@ -82,15 +82,23 @@ const menuRoutes: RouteObject[] = MENU.filter((entry) => entry.path !== ROUTES.D
   }
 })
 
-/** 代理界面的子路由（docs/03 §5.23）：固定菜单，不看权限码；员工进来由 AgentLayout 显示 403（Ruling-101）。 */
+/** 代理界面已实现的页面，按 AGENT_MENU 的路径登记；首页（AGENT_ROUTES.HOME）作为 /agent 的 index 路由。 */
+const AGENT_PAGE_BY_PATH: Record<string, ReactNode> = {
+  [AGENT_ROUTES.HOME]: <AgentSummaryPage />,
+  [AGENT_ROUTES.USERS]: <AgentUsersPage />,
+  [AGENT_ROUTES.INVITE_CODES]: <AgentInviteCodesPage />,
+  [AGENT_ROUTES.TICKETS]: <AgentTicketsPage />,
+  [AGENT_ROUTES.ORDERS]: <AgentOrdersPage />,
+  [AGENT_ROUTES.WALLET_LEDGER]: <AgentLedgerPage />,
+  [AGENT_ROUTES.SECURITY]: <SecurityPage />,
+}
+
+/** 由代理菜单生成的子路由（docs/03 §5.23）：固定菜单，不看权限码；员工进来由 AgentLayout 显示 403（Ruling-101）。 */
 const agentRoutes: RouteObject[] = [
-  { index: true, element: <AgentSummaryPage /> },
-  { path: AGENT_ROUTES.USERS, element: <AgentUsersPage /> },
-  { path: AGENT_ROUTES.INVITE_CODES, element: <AgentInviteCodesPage /> },
-  { path: AGENT_ROUTES.TICKETS, element: <AgentTicketsPage /> },
-  { path: AGENT_ROUTES.ORDERS, element: <AgentOrdersPage /> },
-  { path: AGENT_ROUTES.WALLET_LEDGER, element: <AgentLedgerPage /> },
-  { path: AGENT_ROUTES.SECURITY, element: <SecurityPage /> },
+  ...AGENT_MENU.map((entry): RouteObject => {
+    const page = AGENT_PAGE_BY_PATH[entry.path] ?? <NotFoundPage />
+    return entry.path === AGENT_ROUTES.HOME ? { index: true, element: page } : { path: entry.path, element: page }
+  }),
   { path: '*', element: <NotFoundPage /> },
 ]
 

@@ -1,14 +1,12 @@
 import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { PERMISSIONS } from '../../menu'
-import { TEST_CSRF, mockServer, ok, renderWith } from '../../test/harness'
+import { CONFIRM, TEST_CSRF, mockServer, ok, renderWith } from '../../test/harness'
 import { BYTES_PER_GB } from '../users/quota'
 import { UsersPage } from '../users/UsersPage'
 import { AgentsPage } from './AgentsPage'
 
 const NOW = '2026-11-25T00:00:00Z'
-// Popconfirm 的确认按钮：测试里没配语言包时是 OK，配了中文是“确定”
-const CONFIRM = /^(OK|确\s*定)$/
 /** 表单里输入的初始密码（仅测试用）。 */
 const typed = 'long-enough-value'
 /** 不是整 GB 的总量：没改流量池时要原样提交，不能被两位小数的回显舍入改掉。 */
@@ -159,6 +157,21 @@ describe('UsersPage 的归属（docs/03 §5.23）', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: /保\s*存/ }))
     await waitFor(() => expect(calls.some((c) => c.method === 'PUT')).toBe(true))
     expect(calls.find((c) => c.method === 'PUT')).toMatchObject({ path: '/api/admin/users/10/agent', body: { agentId: null } })
+  })
+
+  it('代理筛选下拉展开时才请求代理列表', async () => {
+    const calls = mockServer({
+      'GET /api/admin/users': () => ok({ items: [baseUser], total: 1 }),
+      'GET /api/admin/plans': () => ok(plans),
+      'GET /api/admin/agents': () => ok({ items: [agent], total: 1 }),
+    })
+    renderWith(SUPER, <UsersPage />)
+    expect(await screen.findByText('alice')).toBeDefined()
+    expect(calls.some((c) => c.path === '/api/admin/agents')).toBe(false)
+
+    fireEvent.mouseDown(screen.getByRole('combobox', { name: '按代理过滤' }))
+    expect((await screen.findAllByTitle('reseller')).length).toBeGreaterThan(0)
+    expect(calls.filter((c) => c.path === '/api/admin/agents')).toHaveLength(1)
   })
 
   it('没有 admin:read / admin:write 时不列代理、不出现划转，也不请求代理列表', async () => {

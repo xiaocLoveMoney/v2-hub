@@ -1,6 +1,6 @@
 import { Alert, Button, Form, Input, Radio, Segmented, Select, Space, Switch, Typography } from 'antd'
 import { useState } from 'react'
-import { api, csrfHeader, toApiError, type AdminChainExit, type AdminChainExitInput, type ApiError, type ChainExitAssignMode, type NodeGroup } from '../../api/client'
+import { CODE_INVALID_ARGUMENT, api, csrfHeader, toApiError, type AdminChainExit, type AdminChainExitInput, type ApiError, type ChainExitAssignMode, type NodeGroup } from '../../api/client'
 import { ErrorAlert } from '../../components/ErrorAlert'
 import { useSubmit } from '../../hooks/use-submit'
 import { ChainExitFieldsForm } from './ChainExitFieldsForm'
@@ -26,7 +26,6 @@ const MODE_OPTIONS: { value: FillMode; label: string }[] = [
 const MSG_UNPARSABLE = '这条链接转不成表单（协议或参数不在表单的范围内），请直接用链接保存。'
 const MSG_LINK_REQUIRED = '请粘贴链接'
 const MSG_LINK_TOO_LONG = `链接不能超过 ${MAX_LINK_LEN} 个字符`
-const CODE_INVALID = 'invalid_argument'
 
 /** 分配方式二选一（Ruling-64）。 */
 const ASSIGN_GROUP: ChainExitAssignMode = 'group'
@@ -156,7 +155,7 @@ function ExitForm({ exit, groups, onSaved }: Pick<ChainExitModalProps, 'exit' | 
     }
     const text = mode === MODE_FORM ? buildExitLink(fields, name) : link.trim()
     if (text === '' || text.length > MAX_LINK_LEN) {
-      setLocalError({ code: CODE_INVALID, message: text === '' ? MSG_LINK_REQUIRED : MSG_LINK_TOO_LONG })
+      setLocalError({ code: CODE_INVALID_ARGUMENT, message: text === '' ? MSG_LINK_REQUIRED : MSG_LINK_TOO_LONG })
       return null
     }
     return text

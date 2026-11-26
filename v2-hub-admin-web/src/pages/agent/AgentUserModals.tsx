@@ -1,22 +1,22 @@
 import { Alert, Button, DatePicker, Descriptions, Form, Input, InputNumber, Select, Switch } from 'antd'
 import dayjs, { type Dayjs } from 'dayjs'
 import { useState } from 'react'
-import { api, csrfHeader, type AgentPlan, type AgentSummary, type AgentUser, type ApiError } from '../../api/client'
+import { CODE_INVALID_ARGUMENT, api, csrfHeader, type AgentPlan, type AgentSummary, type AgentUser, type ApiError } from '../../api/client'
+import { GB_PRECISION } from '../../bytes'
 import { ErrorAlert } from '../../components/ErrorAlert'
 import { FormModal } from '../../components/FormModal'
+import { ResetCredentialModal, type ResetCredentialSave } from '../../components/ResetCredentialModal'
 import { useSubmit } from '../../hooks/use-submit'
 import { MAX_REMARK_LEN } from '../form-limits'
 import { formatTime } from '../system/format'
 import { bytesToGb, describeExpiry, formatBytes, gbToBytes } from '../users/quota'
 import { USERNAME_PATTERN, credentialRules, emailRules } from '../users/user-form-rules'
-import { describeAgentPlan, withAgentErrors } from './agent-format'
+import { describeAgentPlan } from './agent-format'
 import { PoolDeduction } from './PoolDeduction'
 import { checkQuotaLowering } from './quota-lowering'
 
 // 代理对名下用户的弹窗（docs/03 §5.23 代理能做的）；只调 /api/admin/agent/users/*（Ruling-101）
 
-/** 额度输入框的步长与小数位（GB）。 */
-const GB_PRECISION = 2
 const MIN_TRAFFIC_GB = 0.01
 
 function planOptions(plans: AgentPlan[]) {
@@ -65,7 +65,7 @@ function CreateForm({ plans, summary, onSaved }: PlanContext & { onSaved: () => 
       return
     }
     const body = { username: v.username, password: pw, email: v.email || undefined, remark: v.remark ?? '', planId: v.planId }
-    return run(withAgentErrors(() => api.POST('/api/admin/agent/users', { params: csrfHeader(), body })))
+    return run(() => api.POST('/api/admin/agent/users', { params: csrfHeader(), body }))
   }
   return (
     <>
@@ -122,7 +122,7 @@ function AssignForm({ user, plans, summary, onSaved }: PlanContext & { user: Age
       return
     }
     const body = { planId: v.planId }
-    return run(withAgentErrors(() => api.POST('/api/admin/agent/users/{id}/plan', { params: { ...csrfHeader(), path: { id: user.id } }, body })))
+    return run(() => api.POST('/api/admin/agent/users/{id}/plan', { params: { ...csrfHeader(), path: { id: user.id } }, body }))
   }
   return (
     <>
@@ -165,7 +165,7 @@ function EditForm({ user, onSaved }: { user: AgentUser; onSaved: () => void }) {
   const { error, isBusy, run } = useSubmit('已保存', onSaved)
   const submit = (v: EditForm) => {
     const body = { remark: v.remark ?? '', isDisabled: v.isDisabled }
-    return run(withAgentErrors(() => api.PUT('/api/admin/agent/users/{id}', { params: { ...csrfHeader(), path: { id: user.id } }, body })))
+    return run(() => api.PUT('/api/admin/agent/users/{id}', { params: { ...csrfHeader(), path: { id: user.id } }, body }))
   }
   return (
     <>
@@ -227,12 +227,12 @@ function LowerForm({ user, onSaved }: { user: AgentUser; onSaved: () => void }) 
       expiresAt: isExpiryTouched ? expiresAt.toISOString() : null,
     })
     if (result.error !== null) {
-      setCheckError({ code: 'invalid_argument', message: result.error })
+      setCheckError({ code: CODE_INVALID_ARGUMENT, message: result.error })
       return
     }
     setCheckError(null)
     const body = result.body
-    return run(withAgentErrors(() => api.PUT('/api/admin/agent/users/{id}/quota', { params: { ...csrfHeader(), path: { id: user.id } }, body })))
+    return run(() => api.PUT('/api/admin/agent/users/{id}/quota', { params: { ...csrfHeader(), path: { id: user.id } }, body }))
   }
   return (
     <>
@@ -263,32 +263,11 @@ function LowerForm({ user, onSaved }: { user: AgentUser; onSaved: () => void }) 
 
 // ---- 重置密码 -----------------------------------------------------------------------
 
+/** 代理重置名下用户的密码。 */
+const saveAgentUserCredential: ResetCredentialSave<AgentUser> = (user, credential) =>
+  api.PUT('/api/admin/agent/users/{id}/password', { params: { ...csrfHeader(), path: { id: user.id } }, body: { password: credential } })
+
 /** 重置名下用户的客户后台登录密码（高危，后端要求二次验证，由 api 客户端统一弹框）。 */
 export function ResetAgentUserCredentialModal({ user, onClose, onSaved }: UserModalProps) {
-  return (
-    <FormModal title={`重置密码：${user?.username ?? ''}`} isOpen={user !== null} onClose={onClose}>
-      {(generation) => user !== null && <ResetCredentialForm key={generation} user={user} onSaved={onSaved} />}
-    </FormModal>
-  )
-}
-
-function ResetCredentialForm({ user, onSaved }: { user: AgentUser; onSaved: () => void }) {
-  const { error, isBusy, run } = useSubmit('密码已重置', onSaved)
-  const submit = (v: { credential: string }) => {
-    const pw = v.credential
-    return run(withAgentErrors(() => api.PUT('/api/admin/agent/users/{id}/password', { params: { ...csrfHeader(), path: { id: user.id } }, body: { password: pw } })))
-  }
-  return (
-    <>
-      <ErrorAlert error={error} />
-      <Form layout="vertical" onFinish={(v) => void submit(v)}>
-        <Form.Item name="credential" label="新密码" rules={credentialRules}>
-          <Input.Password autoComplete="new-password" />
-        </Form.Item>
-        <Button type="primary" htmlType="submit" block loading={isBusy}>
-          重置
-        </Button>
-      </Form>
-    </>
-  )
+  return <ResetCredentialModal target={user} rules={credentialRules} okText="密码已重置" save={saveAgentUserCredential} onClose={onClose} onSaved={onSaved} />
 }

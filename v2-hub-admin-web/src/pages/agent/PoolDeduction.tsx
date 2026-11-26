@@ -1,7 +1,8 @@
 import { Alert } from 'antd'
 import type { AgentPlan, AgentSummary } from '../../api/client'
+import { poolInsufficientText } from '../../api/error-text'
 import { formatBytes } from '../users/quota'
-import { poolInsufficientText, poolRemainingOf } from './agent-format'
+import { poolRemainingOf } from './agent-format'
 
 interface PoolDeductionProps {
   /** 选中的套餐；没选时不显示。 */

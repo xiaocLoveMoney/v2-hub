@@ -4,7 +4,7 @@ import { MemoryRouter, Route, Routes } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { Pollable } from '../../hooks/use-polling'
 import { PERMISSIONS } from '../../menu'
-import { TEST_CSRF, mockServer, ok, openTab, renderWith } from '../../test/harness'
+import { CONFIRM, TEST_CSRF, mockServer, ok, openTab, renderWith } from '../../test/harness'
 import { CREDENTIAL, CREDENTIAL_OPTION, hostOf, serverOf, taskOf } from '../../test/host-fixtures'
 import { HostOpsCard } from './HostOpsCard'
 import { ServerDetailPage } from './ServerDetailPage'
@@ -19,8 +19,6 @@ vi.mock('../../hooks/use-polling', async (importOriginal) => {
 
 const READ_ONLY = [PERMISSIONS.HOST_READ]
 const READ_WRITE = [PERMISSIONS.HOST_READ, PERMISSIONS.HOST_WRITE]
-// Popconfirm 的确认按钮：测试里没配语言包时是 OK，配了中文是“确定”
-const CONFIRM = /^(OK|确\s*定)$/
 const HOST_PATH = '/api/admin/server-hosts/5'
 const WRITE_BUTTONS = ['重启面板', '重启内核', '升级 / 修复', '重签令牌', '查看状态与日志', '重置面板登录口令']
 const HTTP_URL = 'http://203.0.113.10:2053/p'

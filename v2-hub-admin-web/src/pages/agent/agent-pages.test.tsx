@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { TEST_CSRF, mockServer, ok, renderWith } from '../../test/harness'
+import { CONFIRM, TEST_CSRF, mockServer, ok, renderWith } from '../../test/harness'
 import { BYTES_PER_GB } from '../users/quota'
 import { AgentInviteCodesPage, AgentLedgerPage, AgentOrdersPage, AgentTicketsPage } from './AgentRecordPages'
 import { AgentSummaryPage } from './AgentSummaryPage'
@@ -9,8 +9,6 @@ import { checkQuotaLowering } from './quota-lowering'
 
 const AGENT = { kind: 'agent' as const, admin: { id: 40, username: 'reseller' } }
 const NOW = '2026-11-25T00:00:00Z'
-// Popconfirm 的确认按钮：测试里没配语言包时是 OK，配了中文是“确定”
-const CONFIRM = /^(OK|确\s*定)$/
 /** 表单里输入的初始密码（仅测试用）。 */
 const typed = 'long-enough-value'
 
@@ -22,7 +20,10 @@ const user = {
   totpEnabled: false, createdAt: NOW, lastUsedAt: null,
 }
 
-const conflict = (code: string, data?: unknown) => () => Response.json({ code, message: 'raw', data }, { status: 409 })
+const conflict = (code: string, data?: unknown, message = 'raw') => () => Response.json({ code, message, data }, { status: 409 })
+/** 后端在这两种错误里直接给出完整文案，前端原样显示。 */
+const USER_LIMIT_MESSAGE = '名下用户数已达上限，不能再新建；请联系平台调整上限'
+const RATE_LIMITED_MESSAGE = '操作过于频繁，请稍后再试'
 
 /** 名下用户页的基础应答；extra 覆盖或追加。 */
 function usersServer(extra: Record<string, () => Response> = {}) {
@@ -118,7 +119,7 @@ describe('AgentUsersPage', () => {
   })
 
   it('后端回 agent_user_limit 时提示已达名下用户数上限', async () => {
-    usersServer({ 'POST /api/admin/agent/users': conflict('agent_user_limit') })
+    usersServer({ 'POST /api/admin/agent/users': conflict('agent_user_limit', undefined, USER_LIMIT_MESSAGE) })
     renderWith([], <AgentUsersPage />, AGENT)
     await screen.findByText('carol')
     const dialog = await openCreate()
@@ -128,7 +129,7 @@ describe('AgentUsersPage', () => {
   })
 
   it('分配套餐提交所选套餐并显示扣减量；429 提示操作过于频繁', async () => {
-    const calls = usersServer({ 'POST /api/admin/agent/users/21/plan': () => Response.json({ code: 'rate_limited', message: 'raw' }, { status: 429 }) })
+    const calls = usersServer({ 'POST /api/admin/agent/users/21/plan': () => Response.json({ code: 'rate_limited', message: RATE_LIMITED_MESSAGE }, { status: 429 }) })
     renderWith([], <AgentUsersPage />, AGENT)
     fireEvent.click(await screen.findByRole('button', { name: /分配套餐/ }))
     const dialog = await screen.findByRole('dialog')

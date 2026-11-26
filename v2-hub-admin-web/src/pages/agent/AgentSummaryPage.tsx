@@ -1,13 +1,13 @@
 import { CloudOutlined, DatabaseOutlined, TeamOutlined } from '@ant-design/icons'
-import { Card, DatePicker, Table, Typography, type TableProps } from 'antd'
-import type { Dayjs } from 'dayjs'
-import { useCallback, useState } from 'react'
+import { Card, Table, Typography, type TableProps } from 'antd'
+import { useCallback } from 'react'
 import { api, type AgentAllocation, type AgentPlan, type AgentSummary } from '../../api/client'
 import { useSession } from '../../auth/session-context'
 import { CardPage } from '../../components/CardPage'
 import { ErrorAlert } from '../../components/ErrorAlert'
 import { PagedTable } from '../../components/PagedTable'
 import { StatTile } from '../../components/StatTile'
+import { useDateRangeFilter } from '../../hooks/use-date-range-filter'
 import { useRemote } from '../../hooks/use-remote'
 import { TABLE_SCROLL } from '../system/format'
 import { TRAFFIC_RESET_OPTIONS, formatBytes } from '../users/quota'
@@ -25,17 +25,13 @@ const planColumns: TableProps<AgentPlan>['columns'] = [
   { title: '开通一次扣减', dataIndex: 'poolCost', render: (v: number) => <Typography.Text strong>{formatBytes(v)}</Typography.Text> },
 ]
 
-/** 开通记录的时间范围：[起, 止)，接口按创建时间过滤。 */
-type Range = [Dayjs | null, Dayjs | null] | null
-
 /** 代理的配额概览（docs/03 §5.23）：流量池、名下用户数、白名单套餐与自己的开通记录。 */
 export function AgentSummaryPage() {
   const { session } = useSession()
   const summary = useRemote<AgentSummary>(loadAgentSummary)
   const plans = useRemote<AgentPlan[]>(loadAgentPlans)
-  const [range, setRange] = useState<Range>(null)
-  const from = range?.[0]?.startOf('day').toISOString()
-  const to = range?.[1]?.add(1, 'day').startOf('day').toISOString()
+  // 开通记录按创建时间过滤
+  const { from, to, picker } = useDateRangeFilter()
   const loadAllocations = useCallback(
     (page: number, pageSize: number, signal: AbortSignal) => api.GET('/api/admin/agent/allocations', { params: { query: { page, pageSize, from, to } }, signal }),
     [from, to],
@@ -83,7 +79,7 @@ export function AgentSummaryPage() {
         <PagedTable<AgentAllocation>
           load={loadAllocations}
           columns={allocationColumns()}
-          filters={<DatePicker.RangePicker allowClear aria-label="按时间范围过滤" value={range} onChange={(v) => setRange(v)} />}
+          filters={picker}
         />
       </Card>
     </CardPage>

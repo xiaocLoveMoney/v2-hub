@@ -12,6 +12,7 @@ import { MAX_LIMIT_IP, MAX_REMARK_LEN } from '../form-limits'
 import { USERNAME_PATTERN, credentialRules, emailRules } from './user-form-rules'
 import { PageHeader } from '../../components/PageHeader'
 import { FormModal } from '../../components/FormModal'
+import { ResetCredentialModal, type ResetCredentialSave } from '../../components/ResetCredentialModal'
 
 const MAX_PENDING_DAYS = 36500
 
@@ -239,34 +240,13 @@ function QuotaForm({ user, onSaved }: { user: EndUser; onSaved: () => void }) {
 
 // ---- 重置密码 -----------------------------------------------------------------------
 
+/** 员工重置终端用户的密码。 */
+const saveUserCredential: ResetCredentialSave<EndUser> = (user, credential) =>
+  api.PUT('/api/admin/users/{id}/password', { params: { ...csrfHeader(), path: { id: user.id } }, body: { password: credential } })
+
 /** 重置客户后台登录密码。 */
 export function ResetUserCredentialModal({ user, onClose, onSaved }: UserModalProps) {
-  return (
-    <FormModal title={`重置密码：${user?.username ?? ''}`} isOpen={user !== null} onClose={onClose}>
-      {(generation) => user !== null && <ResetCredentialForm key={generation} user={user} onSaved={onSaved} />}
-    </FormModal>
-  )
-}
-
-function ResetCredentialForm({ user, onSaved }: { user: EndUser; onSaved: () => void }) {
-  const { error, isBusy, run } = useSubmit('密码已重置', onSaved)
-  const submit = (v: { credential: string }) => {
-    const pw = v.credential
-    return run(() => api.PUT('/api/admin/users/{id}/password', { params: { ...csrfHeader(), path: { id: user.id } }, body: { password: pw } }))
-  }
-  return (
-    <>
-      <ErrorAlert error={error} />
-      <Form layout="vertical" onFinish={(v) => void submit(v)}>
-        <Form.Item name="credential" label="新密码" rules={credentialRules}>
-          <Input.Password autoComplete="new-password" />
-        </Form.Item>
-        <Button type="primary" htmlType="submit" block loading={isBusy}>
-          重置
-        </Button>
-      </Form>
-    </>
-  )
+  return <ResetCredentialModal target={user} rules={credentialRules} okText="密码已重置" save={saveUserCredential} onClose={onClose} onSaved={onSaved} />
 }
 
 // ---- 下发详情 -----------------------------------------------------------------------

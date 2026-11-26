@@ -1,5 +1,5 @@
 import { Button, Descriptions, Form, Radio, Select } from 'antd'
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { api, csrfHeader, type Agent, type EndUser, type PageData } from '../../api/client'
 import { ErrorAlert } from '../../components/ErrorAlert'
 import { FormModal } from '../../components/FormModal'
@@ -11,6 +11,8 @@ import { MAX_KEYWORD_LEN } from '../form-limits'
 
 /** 代理下拉一次取的条数；更多的靠输入用户名搜索。 */
 const AGENT_OPTION_LIMIT = 20
+/** 搜索输入停顿多久才发请求（毫秒），避免每敲一个字符就请求一次。 */
+const AGENT_SEARCH_DEBOUNCE_MS = 300
 
 interface AgentSelectProps {
   value?: number
@@ -19,19 +21,28 @@ interface AgentSelectProps {
   className?: string
 }
 
-/** 代理下拉：按用户名远程搜索（/api/admin/agents 的 keyword），停用的代理也列出并标明。 */
+/**
+ * 代理下拉：按用户名远程搜索（/api/admin/agents 的 keyword，输入停顿后才请求），停用的代理也列出并标明。
+ * 第一次展开下拉才拉列表；已有选中值（如划转弹窗预填当前代理）时挂载就拉，好显示代理名而不是 id。
+ */
 export function AgentSelect({ value, onChange, placeholder, className }: AgentSelectProps) {
+  const [searchText, setSearchText] = useState('')
   const [keyword, setKeyword] = useState('')
+  const [hasOpened, setHasOpened] = useState(false)
+  useEffect(() => {
+    const timer = setTimeout(() => setKeyword(searchText), AGENT_SEARCH_DEBOUNCE_MS)
+    return () => clearTimeout(timer)
+  }, [searchText])
   const load = useCallback(
     (signal: AbortSignal) => api.GET('/api/admin/agents', { params: { query: { page: 1, pageSize: AGENT_OPTION_LIMIT, keyword: keyword === '' ? undefined : keyword } }, signal }),
     [keyword],
   )
-  const agents = useRemote<PageData<Agent>>(load)
+  const agents = useRemote<PageData<Agent>>(load, hasOpened || value !== undefined)
   const options = (agents.data?.items ?? []).map((a) => ({ value: a.id, label: a.isDisabled ? `${a.username}（已停用）` : a.username }))
   return (
     <Select
       allowClear
-      showSearch={{ filterOption: false, onSearch: (v) => setKeyword(v.trim().slice(0, MAX_KEYWORD_LEN)) }}
+      showSearch={{ filterOption: false, onSearch: (v) => setSearchText(v.trim().slice(0, MAX_KEYWORD_LEN)) }}
       placeholder={placeholder}
       aria-label={placeholder}
       className={className}
@@ -39,6 +50,11 @@ export function AgentSelect({ value, onChange, placeholder, className }: AgentSe
       value={value}
       options={options}
       onChange={(v: number | undefined) => onChange?.(v)}
+      onOpenChange={(isOpen) => {
+        if (isOpen) {
+          setHasOpened(true)
+        }
+      }}
     />
   )
 }

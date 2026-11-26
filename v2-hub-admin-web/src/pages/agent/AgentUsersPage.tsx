@@ -1,21 +1,19 @@
 import { PlusOutlined } from '@ant-design/icons'
-import { App, Button, Input, Popconfirm, Select, Space, Table, Tag, Typography, type TableProps } from 'antd'
+import { App, Button, Input, Popconfirm, Select, Space, Tag, Typography, type TableProps } from 'antd'
 import { useCallback, useState } from 'react'
-import { api, csrfHeader, type AgentPlan, type AgentSummary, type AgentUser, type PageData, type UserStatus } from '../../api/client'
+import { api, csrfHeader, type AgentPlan, type AgentSummary, type AgentUser, type UserStatus } from '../../api/client'
 import { ErrorAlert } from '../../components/ErrorAlert'
+import { PagedTable } from '../../components/PagedTable'
 import { PageHeader } from '../../components/PageHeader'
-import { mutate, useRemote } from '../../hooks/use-remote'
+import { useRemote } from '../../hooks/use-remote'
+import { useRowAction } from '../../hooks/use-submit'
 import { formatMoney } from '../../money'
 import { MAX_KEYWORD_LEN } from '../form-limits'
-import { TABLE_SCROLL } from '../system/format'
 import { USER_STATUS } from '../users/quota'
 import { UserStatusTag } from '../users/quota-fields'
 import { ExpiryCell, UsageCell } from '../users/user-cells'
 import { loadAgentPlans, loadAgentSummary } from './agent-api'
-import { withAgentErrors } from './agent-format'
 import { AssignAgentPlanModal, CreateAgentUserModal, EditAgentUserModal, LowerQuotaModal, ResetAgentUserCredentialModal } from './AgentUserModals'
-
-const DEFAULT_PAGE_SIZE = 20
 
 type Dialog = 'create' | 'edit' | 'plan' | 'quota' | 'credential' | null
 
@@ -26,21 +24,19 @@ const STATUS_OPTIONS = (Object.keys(USER_STATUS) as UserStatus[]).map((s) => ({ 
  * 调低额度 / 提前到期、重置密码、清除两步验证、重置订阅、删除。只调 /api/admin/agent/*（Ruling-101）。
  */
 export function AgentUsersPage() {
-  const { message, modal } = App.useApp()
-  const [page, setPage] = useState(1)
-  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE)
+  const { modal } = App.useApp()
   const [keyword, setKeyword] = useState('')
   const [status, setStatus] = useState<UserStatus | undefined>(undefined)
   const [planId, setPlanId] = useState<number | undefined>(undefined)
   const [dialog, setDialog] = useState<Dialog>(null)
   const [current, setCurrent] = useState<AgentUser | null>(null)
+  const [refreshKey, setRefreshKey] = useState(0)
 
   const loadUsers = useCallback(
-    (signal: AbortSignal) =>
+    (page: number, pageSize: number, signal: AbortSignal) =>
       api.GET('/api/admin/agent/users', { params: { query: { page, pageSize, keyword: keyword === '' ? undefined : keyword, status, planId } }, signal }),
-    [page, pageSize, keyword, status, planId],
+    [keyword, status, planId],
   )
-  const users = useRemote<PageData<AgentUser>>(loadUsers)
   const plans = useRemote<AgentPlan[]>(loadAgentPlans)
   const summary = useRemote<AgentSummary>(loadAgentSummary)
 
@@ -49,28 +45,25 @@ export function AgentUsersPage() {
     setDialog(d)
   }
   const close = () => setDialog(null)
-  /** 写操作之后：用户列表与配额（池余量、用户数）都可能变了。 */
-  const refresh = () => {
-    users.reload()
+  const reloadUsers = () => setRefreshKey((k) => k + 1)
+  /** 新建、分配 / 续期、删除会改流量池或用户数，配额概览要跟着重拉；其余写操作只刷新列表。 */
+  const reloadUsersAndQuota = () => {
+    reloadUsers()
     summary.reload()
   }
   const saved = () => {
     setDialog(null)
-    refresh()
+    reloadUsers()
   }
-
-  const runRow = async (action: () => Promise<{ error?: unknown }>, okText: string) => {
-    const err = await mutate(withAgentErrors(action))
-    if (err !== null) {
-      void message.error(err.message)
-      return
-    }
-    void message.success(okText)
-    refresh()
+  const savedWithQuota = () => {
+    setDialog(null)
+    reloadUsersAndQuota()
   }
+  const act = useRowAction(reloadUsers)
+  const actWithQuota = useRowAction(reloadUsersAndQuota)
 
   const remove = (u: AgentUser) =>
-    runRow(() => api.DELETE('/api/admin/agent/users/{id}', { params: { ...csrfHeader(), path: { id: u.id } } }), '已删除；面板不可达时会在恢复后删掉 client')
+    actWithQuota(() => api.DELETE('/api/admin/agent/users/{id}', { params: { ...csrfHeader(), path: { id: u.id } } }), '已删除；面板不可达时会在恢复后删掉 client')
 
   const resetSubscription = (u: AgentUser) => {
     modal.confirm({
@@ -78,7 +71,7 @@ export function AgentUsersPage() {
       content: '旧订阅地址与旧连接凭据立即失效，用户需要重新导入订阅',
       okText: '重置',
       okButtonProps: { danger: true },
-      onOk: () => runRow(() => api.POST('/api/admin/agent/users/{id}/subscription/reset', { params: { ...csrfHeader(), path: { id: u.id } } }), '已重置，正在同步到各面板'),
+      onOk: () => act(() => api.POST('/api/admin/agent/users/{id}/subscription/reset', { params: { ...csrfHeader(), path: { id: u.id } } }), '已重置，正在同步到各面板'),
     })
   }
 
@@ -88,7 +81,7 @@ export function AgentUsersPage() {
       content: '该用户的全部登录会话会失效，之后登录不再需要验证码',
       okText: '清除',
       okButtonProps: { danger: true },
-      onOk: () => runRow(() => api.DELETE('/api/admin/agent/users/{id}/totp', { params: { ...csrfHeader(), path: { id: u.id } } }), '已清除两步验证'),
+      onOk: () => act(() => api.DELETE('/api/admin/agent/users/{id}/totp', { params: { ...csrfHeader(), path: { id: u.id } } }), '已清除两步验证'),
     })
   }
 
@@ -156,61 +149,43 @@ export function AgentUsersPage() {
           </Button>
         }
       />
-      <Space wrap className="page-alert">
-        <Input.Search
-          allowClear
-          maxLength={MAX_KEYWORD_LEN}
-          placeholder="用户名、邮箱或备注"
-          aria-label="按关键字搜索"
-          onSearch={(v) => {
-            setPage(1)
-            setKeyword(v.trim())
-          }}
-        />
-        <Select
-          allowClear
-          placeholder="按状态过滤"
-          aria-label="按状态过滤"
-          className="filter-select"
-          value={status}
-          options={STATUS_OPTIONS}
-          onChange={(v: UserStatus | undefined) => {
-            setPage(1)
-            setStatus(v)
-          }}
-        />
-        <Select
-          allowClear
-          placeholder="按套餐过滤"
-          aria-label="按套餐过滤"
-          className="filter-select"
-          value={planId}
-          options={planList.map((p) => ({ value: p.id, label: p.name }))}
-          onChange={(v: number | undefined) => {
-            setPage(1)
-            setPlanId(v)
-          }}
-        />
-      </Space>
-      <ErrorAlert error={users.error ?? plans.error} />
-      <Table<AgentUser>
-        rowKey="id"
-        scroll={TABLE_SCROLL}
-        loading={users.isLoading}
+      <ErrorAlert error={plans.error} />
+      <PagedTable<AgentUser>
+        load={loadUsers}
         columns={columns}
-        dataSource={users.data?.items ?? []}
-        pagination={{
-          current: page,
-          pageSize,
-          total: users.data?.total ?? 0,
-          onChange: (p, size) => {
-            setPage(p)
-            setPageSize(size)
-          },
-        }}
+        refreshKey={refreshKey}
+        filters={
+          <>
+            <Input.Search
+              allowClear
+              maxLength={MAX_KEYWORD_LEN}
+              placeholder="用户名、邮箱或备注"
+              aria-label="按关键字搜索"
+              onSearch={(v) => setKeyword(v.trim())}
+            />
+            <Select
+              allowClear
+              placeholder="按状态过滤"
+              aria-label="按状态过滤"
+              className="filter-select"
+              value={status}
+              options={STATUS_OPTIONS}
+              onChange={(v: UserStatus | undefined) => setStatus(v)}
+            />
+            <Select
+              allowClear
+              placeholder="按套餐过滤"
+              aria-label="按套餐过滤"
+              className="filter-select"
+              value={planId}
+              options={planList.map((p) => ({ value: p.id, label: p.name }))}
+              onChange={(v: number | undefined) => setPlanId(v)}
+            />
+          </>
+        }
       />
-      <CreateAgentUserModal isOpen={dialog === 'create'} plans={planList} summary={summary.data} onClose={close} onSaved={saved} />
-      <AssignAgentPlanModal user={dialog === 'plan' ? current : null} plans={planList} summary={summary.data} onClose={close} onSaved={saved} />
+      <CreateAgentUserModal isOpen={dialog === 'create'} plans={planList} summary={summary.data} onClose={close} onSaved={savedWithQuota} />
+      <AssignAgentPlanModal user={dialog === 'plan' ? current : null} plans={planList} summary={summary.data} onClose={close} onSaved={savedWithQuota} />
       <EditAgentUserModal user={dialog === 'edit' ? current : null} onClose={close} onSaved={saved} />
       <LowerQuotaModal user={dialog === 'quota' ? current : null} onClose={close} onSaved={saved} />
       <ResetAgentUserCredentialModal user={dialog === 'credential' ? current : null} onClose={close} onSaved={saved} />

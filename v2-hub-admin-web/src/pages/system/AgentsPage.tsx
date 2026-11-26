@@ -1,33 +1,33 @@
 import { PlusOutlined } from '@ant-design/icons'
-import { App, Button, DatePicker, Drawer, Form, Input, InputNumber, Popconfirm, Progress, Select, Space, Switch, Tag, Tooltip, Typography, type TableProps } from 'antd'
-import type { Dayjs } from 'dayjs'
+import { Button, Drawer, Form, Input, InputNumber, Popconfirm, Progress, Select, Space, Switch, Tag, Tooltip, Typography, type TableProps } from 'antd'
 import { useCallback, useState } from 'react'
 import { api, csrfHeader, type Agent, type AgentAllocation, type AgentCreateInput, type AgentUpdateInput, type Plan } from '../../api/client'
+import { GB_PRECISION } from '../../bytes'
 import { useSession } from '../../auth/session-context'
 import { ErrorAlert } from '../../components/ErrorAlert'
 import { FormModal } from '../../components/FormModal'
 import { PagedTable } from '../../components/PagedTable'
 import { PageHeader } from '../../components/PageHeader'
-import { mutate, useRemote } from '../../hooks/use-remote'
-import { useSubmit } from '../../hooks/use-submit'
+import { ResetCredentialModal, type ResetCredentialSave } from '../../components/ResetCredentialModal'
+import { useDateRangeFilter } from '../../hooks/use-date-range-filter'
+import { useRemote } from '../../hooks/use-remote'
+import { useRowAction, useSubmit } from '../../hooks/use-submit'
 import { PERMISSIONS } from '../../menu'
-import { allocationColumns, isWhitelistable } from '../agent/agent-format'
-import { MAX_ADMIN_PASSWORD_LEN, MAX_KEYWORD_LEN, MAX_REMARK_LEN, MIN_ADMIN_PASSWORD_LEN } from '../form-limits'
+import { allocationColumns, describeAgentPlan, isWhitelistable } from '../agent/agent-format'
+import { MAX_KEYWORD_LEN, MAX_REMARK_LEN } from '../form-limits'
 import { bytesToGb, formatBytes, gbToBytes } from '../users/quota'
+import { adminCredentialRules, adminUsernameRules } from './admin-form-rules'
 import { formatTime } from './format'
 
 // 超管侧的代理管理（docs/03 §5.23 超管侧管理，Ruling-103、Ruling-104）：读 admin:read，写 admin:write（写操作须二次验证，由 api 客户端统一弹框）
 
-const USERNAME_PATTERN = /^[a-zA-Z0-9_.-]{3,64}$/
 const MAX_AGENT_USERS = 1000000
 const MAX_WHITELIST_PLANS = 200
-const GB_PRECISION = 2
 const PERCENT_FULL = 100
 
-const credentialRules = [
-  { required: true, message: '请输入密码' },
-  { min: MIN_ADMIN_PASSWORD_LEN, max: MAX_ADMIN_PASSWORD_LEN, message: `密码长度须为 ${MIN_ADMIN_PASSWORD_LEN}–${MAX_ADMIN_PASSWORD_LEN} 个字符` },
-]
+/** 重置代理的登录密码：沿用管理员的重置密码接口（docs/03 §5.23）。 */
+const saveAgentCredential: ResetCredentialSave<Agent> = (agent, credential) =>
+  api.PUT('/api/admin/admins/{id}/password', { params: { ...csrfHeader(), path: { id: agent.id } }, body: { password: credential } })
 
 /** 套餐列表请求与组件状态无关，提到模块级保持引用稳定。 */
 const loadPlans = (signal: AbortSignal) => api.GET('/api/admin/plans', { signal })
@@ -48,7 +48,6 @@ function PoolCell({ agent }: { agent: Agent }) {
 /** 代理管理页：列表、新建、改配额与白名单、停用、开通记录、重置密码与清除两步验证（后两项沿用管理员接口）。 */
 export function AgentsPage() {
   const { can } = useSession()
-  const { message } = App.useApp()
   const canWrite = can(PERMISSIONS.ADMIN_WRITE)
   const canReadPlans = can(PERMISSIONS.PLAN_READ)
   const [keyword, setKeyword] = useState('')
@@ -70,15 +69,8 @@ export function AgentsPage() {
     setIsFormOpen(true)
   }
 
-  const clearTotp = async (agent: Agent) => {
-    const err = await mutate(() => api.DELETE('/api/admin/admins/{id}/totp', { params: { ...csrfHeader(), path: { id: agent.id } } }))
-    if (err !== null) {
-      void message.error(err.message)
-      return
-    }
-    void message.success('已清除两步验证')
-    reload()
-  }
+  const act = useRowAction(reload)
+  const clearTotp = (agent: Agent) => act(() => api.DELETE('/api/admin/admins/{id}/totp', { params: { ...csrfHeader(), path: { id: agent.id } } }), '已清除两步验证')
 
   const columns: TableProps<Agent>['columns'] = [
     {
@@ -167,7 +159,14 @@ export function AgentsPage() {
           reload()
         }}
       />
-      <ResetAgentCredentialModal agent={resetting} onClose={() => setResetting(null)} onSaved={() => setResetting(null)} />
+      <ResetCredentialModal
+        target={resetting}
+        rules={adminCredentialRules}
+        okText="密码已重置，对方需重新登录"
+        save={saveAgentCredential}
+        onClose={() => setResetting(null)}
+        onSaved={() => setResetting(null)}
+      />
       <Drawer title={`开通记录：${viewing?.username ?? ''}`} open={viewing !== null} onClose={() => setViewing(null)} size="large" destroyOnHidden>
         {viewing !== null && <AllocationList agentId={viewing.id} />}
       </Drawer>
@@ -217,7 +216,7 @@ function AgentFormBody({ agent, plans, canReadPlans, onSaved }: Omit<AgentFormMo
   const initial = formOf(agent)
   // 只列流量与时长都有限的套餐；已在白名单里但后来改成不限的，标出来让超管移除（否则保存 400）
   const finitePlans = plans.filter(isWhitelistable)
-  const planOptions = finitePlans.map((p) => ({ value: p.id, label: `${p.name}（${formatBytes(p.trafficLimit)} · ${p.durationDays} 天）` }))
+  const planOptions = finitePlans.map((p) => ({ value: p.id, label: `${p.name}（${describeAgentPlan(p)}）` }))
   for (const id of initial.planIds) {
     if (!finitePlans.some((p) => p.id === id)) {
       const name = plans.find((p) => p.id === id)?.name ?? `#${id}`
@@ -253,10 +252,10 @@ function AgentFormBody({ agent, plans, canReadPlans, onSaved }: Omit<AgentFormMo
       <Form<AgentForm> layout="vertical" initialValues={initial} onFinish={(v) => void submit(v)}>
         {agent === null && (
           <>
-            <Form.Item name="username" label="用户名" extra="与管理员共用一个命名空间" rules={[{ required: true, pattern: USERNAME_PATTERN, message: '3–64 位字母、数字或 _ . -' }]}>
+            <Form.Item name="username" label="用户名" extra="与管理员共用一个命名空间" rules={adminUsernameRules}>
               <Input autoComplete="off" />
             </Form.Item>
-            <Form.Item name="credential" label="初始密码" rules={credentialRules}>
+            <Form.Item name="credential" label="初始密码" rules={adminCredentialRules}>
               <Input.Password autoComplete="new-password" />
             </Form.Item>
           </>
@@ -301,53 +300,11 @@ function AgentFormBody({ agent, plans, canReadPlans, onSaved }: Omit<AgentFormMo
   )
 }
 
-// ---- 重置密码 -----------------------------------------------------------------------
-
-interface ResetModalProps {
-  agent: Agent | null
-  onClose: () => void
-  onSaved: () => void
-}
-
-/** 重置代理的登录密码：沿用管理员的重置密码接口（docs/03 §5.23）。 */
-function ResetAgentCredentialModal({ agent, onClose, onSaved }: ResetModalProps) {
-  return (
-    <FormModal title={`重置密码：${agent?.username ?? ''}`} isOpen={agent !== null} onClose={onClose}>
-      {(generation) => agent !== null && <ResetCredentialForm key={generation} agent={agent} onSaved={onSaved} />}
-    </FormModal>
-  )
-}
-
-function ResetCredentialForm({ agent, onSaved }: { agent: Agent; onSaved: () => void }) {
-  const { error, isBusy, run } = useSubmit('密码已重置，对方需重新登录', onSaved)
-  const submit = (v: { credential: string }) => {
-    const pw = v.credential
-    return run(() => api.PUT('/api/admin/admins/{id}/password', { params: { ...csrfHeader(), path: { id: agent.id } }, body: { password: pw } }))
-  }
-  return (
-    <>
-      <ErrorAlert error={error} />
-      <Form layout="vertical" onFinish={(v) => void submit(v)}>
-        <Form.Item name="credential" label="新密码" rules={credentialRules}>
-          <Input.Password autoComplete="new-password" />
-        </Form.Item>
-        <Button type="primary" htmlType="submit" block loading={isBusy}>
-          重置
-        </Button>
-      </Form>
-    </>
-  )
-}
-
 // ---- 开通记录 -----------------------------------------------------------------------
-
-type Range = [Dayjs | null, Dayjs | null] | null
 
 /** 某个代理的开通记录（分页、按时间范围），线下结算的依据（Ruling-103）。 */
 function AllocationList({ agentId }: { agentId: number }) {
-  const [range, setRange] = useState<Range>(null)
-  const from = range?.[0]?.startOf('day').toISOString()
-  const to = range?.[1]?.add(1, 'day').startOf('day').toISOString()
+  const { from, to, picker } = useDateRangeFilter()
   const load = useCallback(
     (page: number, pageSize: number, signal: AbortSignal) =>
       api.GET('/api/admin/agents/{id}/allocations', { params: { path: { id: agentId }, query: { page, pageSize, from, to } }, signal }),
@@ -357,7 +314,7 @@ function AllocationList({ agentId }: { agentId: number }) {
     <PagedTable<AgentAllocation>
       load={load}
       columns={allocationColumns()}
-      filters={<DatePicker.RangePicker allowClear aria-label="按时间范围过滤" value={range} onChange={(v) => setRange(v)} />}
+      filters={picker}
     />
   )
 }

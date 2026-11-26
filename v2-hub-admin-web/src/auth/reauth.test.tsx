@@ -10,6 +10,7 @@ const ADMIN_PATH = '/api/admin/admins/2'
 const HOSTS_PATH = '/api/admin/server-hosts'
 const REAUTH_PATH = '/api/admin/auth/reauth'
 const ME_PATH = '/api/admin/auth/me'
+const UPLOAD_PATH = '/api/admin/uploads'
 /** 验证框里输入的密码（仅测试用）。 */
 const typed = 'typed-in-dialog'
 const reauthRequired = () => Response.json({ code: 'reauth_required', message: '请先验证身份' }, { status: 403 })
@@ -190,6 +191,28 @@ describe('api 客户端的拦截边界', () => {
       expect(toApiError(result.error).code).toBe('reauth_required')
       expect(handler).toHaveBeenCalledTimes(1)
       expect(calls.filter((c) => c.method === 'PUT')).toHaveLength(2)
+    } finally {
+      unregister()
+    }
+  })
+
+  it('multipart 上传不留副本、不走重发：遇到 reauth_required 不弹框，原 403 交还调用方', async () => {
+    const calls = mockServer({ [`POST ${UPLOAD_PATH}`]: reauthRequired })
+    const handler = vi.fn(async () => true)
+    const unregister = registerReauthHandler(handler)
+    try {
+      const result = await api.POST('/api/admin/uploads', {
+        params: csrfHeader(),
+        body: { file: '' },
+        bodySerializer: () => {
+          const form = new FormData()
+          form.append('file', new Blob(['png']), 'a.png')
+          return form
+        },
+      })
+      expect(toApiError(result.error).code).toBe('reauth_required')
+      expect(handler).not.toHaveBeenCalled()
+      expect(calls.filter((c) => c.path === UPLOAD_PATH)).toHaveLength(1)
     } finally {
       unregister()
     }

@@ -9,6 +9,9 @@ import { SessionContext, type SessionContextValue } from '../auth/session-contex
 export const TEST_CSRF = 'csrf-test-token'
 const SELF_ID = 1
 
+/** Popconfirm / Modal.confirm 的确认按钮：测试里没配语言包时是 OK，配了中文是“确定”。 */
+export const CONFIRM = /^(OK|确\s*定)$/
+
 /** 成功响应信封。 */
 export const ok = (data: unknown) => Response.json({ code: '0', message: 'ok', data })
 
