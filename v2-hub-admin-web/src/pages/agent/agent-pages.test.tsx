@@ -140,6 +140,41 @@ describe('AgentUsersPage', () => {
     expect(await within(dialog).findByText('操作过于频繁，请稍后再试')).toBeDefined()
   })
 
+  describe('换成不同套餐的提示（Ruling-108）', () => {
+    // 扣减量取自接口的 poolCost（这里故意与“流量 × 周期数”的任何估算都不同），前端不自己算
+    const weekly = { id: 6, name: 'weekly-10g', trafficLimit: 10 * BYTES_PER_GB, durationDays: 30, trafficReset: 'weekly', limitIp: 0, poolCost: 61 * BYTES_PER_GB }
+    const WEEKLY_OPTION = 'weekly-10g（10.00 GB · 30 天，扣减 61.00 GB）'
+    const SWITCH_WARNING = '换成不同套餐后立即生效，原套餐剩余时长作废'
+
+    async function openAssign(expiresAt: string) {
+      usersServer({
+        'GET /api/admin/agent/users': () => ok({ items: [{ ...user, expiresAt }], total: 1 }),
+        'GET /api/admin/agent/plans': () => ok([plan, weekly]),
+      })
+      renderWith([], <AgentUsersPage />, AGENT)
+      fireEvent.click(await screen.findByRole('button', { name: /分配套餐/ }))
+      return screen.findByRole('dialog')
+    }
+
+    it('未到期：选同一套餐是续期、不提示；换成别的套餐提示剩余时长作废，扣减量用接口给的值', async () => {
+      const dialog = await openAssign('2099-01-01T00:00:00Z')
+      expect(await within(dialog).findByText(/与当前套餐相同为续期/)).toBeDefined()
+      expect(within(dialog).queryByText(SWITCH_WARNING)).toBeNull()
+      await pickOption(dialog, '套餐', WEEKLY_OPTION)
+      expect(await within(dialog).findByText(SWITCH_WARNING)).toBeDefined()
+      expect(await within(dialog).findByText('本次从流量池扣减 61.00 GB，流量池剩余 500.00 GB')).toBeDefined()
+      await pickOption(dialog, '套餐', PLAN_OPTION)
+      await waitFor(() => expect(within(dialog).queryByText(SWITCH_WARNING)).toBeNull())
+    })
+
+    it('已到期：换套餐没有剩余时长可作废，不提示', async () => {
+      const dialog = await openAssign('2000-01-01T00:00:00Z')
+      await pickOption(dialog, '套餐', WEEKLY_OPTION)
+      expect(await within(dialog).findByText('本次从流量池扣减 61.00 GB，流量池剩余 500.00 GB')).toBeDefined()
+      expect(within(dialog).queryByText(SWITCH_WARNING)).toBeNull()
+    })
+  })
+
   it('调低额度：调高被前端拦下不提交；调低只提交改了的额度（GB 换算成字节）', async () => {
     const calls = usersServer({ 'PUT /api/admin/agent/users/21/quota': () => ok({ ...user, trafficLimit: 50 * BYTES_PER_GB }) })
     renderWith([], <AgentUsersPage />, AGENT)

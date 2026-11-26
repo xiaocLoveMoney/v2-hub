@@ -23,15 +23,41 @@ interface ServerForm {
   isDisabled?: boolean
 }
 
-/** API token 输入框下的说明：新建、编辑且地址未变、编辑且面板类型或地址已变三种情况。 */
+/** API token 输入框下的说明：新建、编辑且接入信息未变、编辑且接入信息已变三种情况。 */
 function tokenHint(isEdit: boolean, isEndpointChanged: boolean): string {
   if (!isEdit) {
     return '在 3x-ui「设置 → 安全 → API Token」中创建，范围选 admin'
   }
   if (isEndpointChanged) {
-    return '面板类型或面板地址已修改，须重新填写 API token：平台不会拿已保存的 token 去连新地址'
+    return '面板类型、面板地址、TLS 校验方式或证书指纹已修改，须重新填写 API token：平台不会拿已保存的 token 去连新地址或放宽校验后的连接'
   }
   return '留空表示沿用原 token'
+}
+
+/** 表单里与 token 去向有关的接入信息（Ruling-97、Ruling-107）。 */
+interface EndpointFields {
+  providerType: ProviderType
+  baseUrl: string
+  tlsMode: TlsMode
+  certPinSha256: string
+}
+
+/** 实际生效的证书指纹：只有 pin 模式才有意义，其余模式按空串比较（提交时也是空串）。 */
+function effectivePin(tlsMode: TlsMode, pin: string | null | undefined): string {
+  return tlsMode === TLS_PIN ? (pin ?? '').trim() : ''
+}
+
+/**
+ * 编辑时接入信息是否与原值不同：面板类型、面板地址、TLS 校验方式、指定的证书指纹任一变化即算（docs/03 §5.1 接入信息）。
+ * 地址与指纹都 trim 后比较，与提交前的校验口径一致。
+ */
+function isEndpointChangedFrom(server: Server, current: EndpointFields): boolean {
+  return (
+    current.providerType !== server.providerType ||
+    current.baseUrl.trim() !== server.baseUrl ||
+    current.tlsMode !== server.tlsMode ||
+    effectivePin(current.tlsMode, current.certPinSha256) !== effectivePin(server.tlsMode, server.certPinSha256)
+  )
 }
 
 interface ServerFormModalProps {
@@ -60,7 +86,7 @@ interface ServerFormBodyProps {
   onSaved: () => void
 }
 
-/** 服务器表单本体。API token 只写不读：编辑时留空表示沿用原值，面板类型或地址变了则必填（docs/03 §5.1，Ruling-97）。 */
+/** 服务器表单本体。API token 只写不读：编辑时留空表示沿用原值，接入信息变了则必填（docs/03 §5.1，Ruling-97、Ruling-107）。 */
 function ServerFormBody({ server, onSaved }: ServerFormBodyProps) {
   const [form] = Form.useForm<ServerForm>()
   const { message } = App.useApp()
@@ -69,10 +95,17 @@ function ServerFormBody({ server, onSaved }: ServerFormBodyProps) {
   const tlsMode = Form.useWatch('tlsMode', form)
   const providerType = Form.useWatch('providerType', form)
   const baseUrl = Form.useWatch('baseUrl', form)
+  const certPinSha256 = Form.useWatch('certPinSha256', form)
   const isEdit = server !== null
-  // Ruling-97：编辑时面板类型或面板地址变了，必须重新填 token
+  // Ruling-97、Ruling-107：编辑时接入信息变了，必须重新填 token；字段还没挂上时按原值算
   const isEndpointChanged =
-    server !== null && ((providerType ?? server.providerType) !== server.providerType || (baseUrl ?? server.baseUrl).trim() !== server.baseUrl)
+    server !== null &&
+    isEndpointChangedFrom(server, {
+      providerType: providerType ?? server.providerType,
+      baseUrl: baseUrl ?? server.baseUrl,
+      tlsMode: tlsMode ?? server.tlsMode,
+      certPinSha256: certPinSha256 ?? server.certPinSha256 ?? '',
+    })
   const isTokenRequired = !isEdit || isEndpointChanged
 
   const body = (v: ServerForm) => ({

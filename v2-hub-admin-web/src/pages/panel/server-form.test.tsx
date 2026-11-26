@@ -8,7 +8,10 @@ import { ServerFormModal } from './ServerFormModal'
 const WRITE = [PERMISSIONS.SERVER_READ, PERMISSIONS.SERVER_WRITE]
 const SERVER_PATH = '/api/admin/servers/1'
 const TOKEN_REQUIRED = '请输入 API token'
-const ENDPOINT_CHANGED_HINT = /面板类型或面板地址已修改，须重新填写 API token/
+const ENDPOINT_CHANGED_HINT = /面板类型、面板地址、TLS 校验方式或证书指纹已修改，须重新填写 API token/
+/** 44 个字符的 Base64 证书指纹（仅测试用）。 */
+const PIN_A = 'A'.repeat(43) + '='
+const PIN_B = 'B'.repeat(43) + '='
 /** 表单里输入的 token（仅测试用）。 */
 const typed = 'typed-token'
 const noop = () => undefined
@@ -18,13 +21,13 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-async function openEdit() {
+async function openEdit(over: Parameters<typeof serverOf>[0] = {}) {
   const onSaved = vi.fn()
-  renderWith(WRITE, <ServerFormModal server={serverOf()} isOpen onClose={noop} onSaved={onSaved} />)
+  renderWith(WRITE, <ServerFormModal server={serverOf(over)} isOpen onClose={noop} onSaved={onSaved} />)
   return { dialog: await screen.findByRole('dialog'), onSaved }
 }
 
-describe('ServerFormModal：API token 的必填条件（Ruling-97）', () => {
+describe('ServerFormModal：API token 的必填条件（Ruling-97、Ruling-107）', () => {
   it('编辑时地址与面板类型都没变：token 可留空，提交空串表示沿用', async () => {
     const calls = mockServer({ [`PUT ${SERVER_PATH}`]: () => ok(serverOf()) })
     const { dialog, onSaved } = await openEdit()
@@ -59,6 +62,37 @@ describe('ServerFormModal：API token 的必填条件（Ruling-97）', () => {
     expect(await within(dialog).findByText(ENDPOINT_CHANGED_HINT)).toBeDefined()
     fireEvent.change(input, { target: { value: 'https://panel.example.com:2053/p' } })
     expect(await within(dialog).findByText('留空表示沿用原 token')).toBeDefined()
+  })
+
+  it('编辑时把 TLS 校验改成不校验：token 变为必填，不填不提交；改回原方式又可留空', async () => {
+    const calls = mockServer({ [`PUT ${SERVER_PATH}`]: () => ok(serverOf()) })
+    const { dialog } = await openEdit()
+    fireEvent.click(within(dialog).getByLabelText('不校验（仅调试）'))
+    expect(await within(dialog).findByText(ENDPOINT_CHANGED_HINT)).toBeDefined()
+    fireEvent.click(within(dialog).getByRole('button', { name: /保\s*存/ }))
+    expect(await within(dialog).findByText(TOKEN_REQUIRED)).toBeDefined()
+    expect(calls.some((c) => c.method === 'PUT')).toBe(false)
+
+    fireEvent.click(within(dialog).getByLabelText('校验证书'))
+    expect(await within(dialog).findByText('留空表示沿用原 token')).toBeDefined()
+  })
+
+  it('固定指纹的服务器：指纹不变可留空；换了指纹 token 必填，改回原指纹又可留空', async () => {
+    const calls = mockServer({ [`PUT ${SERVER_PATH}`]: () => ok(serverOf()) })
+    const { dialog, onSaved } = await openEdit({ tlsMode: 'pin', certPinSha256: PIN_A })
+    expect(within(dialog).getByText('留空表示沿用原 token')).toBeDefined()
+    const pinInput = within(dialog).getByDisplayValue(PIN_A)
+    fireEvent.change(pinInput, { target: { value: PIN_B } })
+    expect(await within(dialog).findByText(ENDPOINT_CHANGED_HINT)).toBeDefined()
+    fireEvent.click(within(dialog).getByRole('button', { name: /保\s*存/ }))
+    expect(await within(dialog).findByText(TOKEN_REQUIRED)).toBeDefined()
+    expect(calls.some((c) => c.method === 'PUT')).toBe(false)
+
+    fireEvent.change(pinInput, { target: { value: PIN_A } })
+    expect(await within(dialog).findByText('留空表示沿用原 token')).toBeDefined()
+    fireEvent.click(within(dialog).getByRole('button', { name: /保\s*存/ }))
+    await waitFor(() => expect(onSaved).toHaveBeenCalledTimes(1))
+    expect(calls.find((c) => c.method === 'PUT')?.body).toMatchObject({ tlsMode: 'pin', certPinSha256: PIN_A, apiToken: '' })
   })
 
   it('新建时 token 始终必填', async () => {

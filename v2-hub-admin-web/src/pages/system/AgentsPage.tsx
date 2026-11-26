@@ -274,7 +274,7 @@ function AgentFormBody({ agent, plans, canReadPlans, onSaved }: Omit<AgentFormMo
         <Form.Item
           name="poolGb"
           label="流量池总量（GB）"
-          extra={agent === null ? '累计制：每次开通按“套餐流量 × 重置周期数”扣减，扣完不能再开' : `已用 ${formatBytes(agent.trafficPoolUsed)}，总量不能低于已用`}
+          extra={agent === null ? '累计制：每次开通或续期按“套餐流量 × 时长内最多能用到的重置周期数”扣减，扣完不能再开' : `已用 ${formatBytes(agent.trafficPoolUsed)}，总量不能低于已用`}
           rules={poolRules}
         >
           <InputNumber min={0} precision={GB_PRECISION} className="full-width" aria-label="流量池总量（GB）" />

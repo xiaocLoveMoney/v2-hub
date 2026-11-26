@@ -103,7 +103,10 @@ interface UserModalProps {
   onSaved: () => void
 }
 
-/** 分配或续期白名单套餐：未到期的顺延、已到期的从当时起算、已用流量清零；每次都扣流量池（Ruling-103）。 */
+/**
+ * 分配或续期白名单套餐（与用户自己下单同一规则，Ruling-108）：与当前套餐相同是续期，未到期的从原到期日顺延、已到期的从当时起算；
+ * 换成不同套餐立即生效、原剩余时长作废；已用流量清零；每次都扣流量池（扣减量直接用接口给的 poolCost）。
+ */
 export function AssignAgentPlanModal({ user, plans, summary, onClose, onSaved }: UserModalProps & PlanContext) {
   return (
     <FormModal title={`分配套餐：${user?.username ?? ''}`} isOpen={user !== null} onClose={onClose}>
@@ -112,11 +115,20 @@ export function AssignAgentPlanModal({ user, plans, summary, onClose, onSaved }:
   )
 }
 
+/** 用户还有剩余时长：有套餐，且没有到期时间（不过期或等待首次使用）或到期时间在未来。 */
+function hasRemainingTime(user: AgentUser): boolean {
+  if (user.planId === null) {
+    return false
+  }
+  return user.expiresAt === null || Date.parse(user.expiresAt) > Date.now()
+}
+
 function AssignForm({ user, plans, summary, onSaved }: PlanContext & { user: AgentUser; onSaved: () => void }) {
   const [form] = Form.useForm<{ planId?: number }>()
   const planId = Form.useWatch('planId', form)
   const { error, isBusy, run } = useSubmit('已分配套餐', onSaved)
   const isWhitelisted = plans.some((p) => p.id === user.planId)
+  const isSwitchDiscardingTime = planId !== undefined && planId !== user.planId && hasRemainingTime(user)
   const submit = (v: { planId?: number }) => {
     if (v.planId === undefined) {
       return
@@ -133,9 +145,15 @@ function AssignForm({ user, plans, summary, onSaved }: PlanContext & { user: Age
         <Descriptions.Item label="已用">{formatBytes(user.trafficUsed)}</Descriptions.Item>
       </Descriptions>
       <Form form={form} layout="vertical" initialValues={{ planId: isWhitelisted ? (user.planId ?? undefined) : undefined }} onFinish={(v) => void submit(v)}>
-        <Form.Item name="planId" label="套餐" extra="未到期从原到期日顺延，已到期从现在起算；已用流量清零" rules={[{ required: true, message: '请选择套餐' }]}>
+        <Form.Item
+          name="planId"
+          label="套餐"
+          extra="与当前套餐相同为续期：未到期从原到期日顺延，已到期从现在起算；换成不同套餐立即生效，原剩余时长作废。已用流量都清零"
+          rules={[{ required: true, message: '请选择套餐' }]}
+        >
           <Select options={planOptions(plans)} notFoundContent="平台还没有给你分配套餐" />
         </Form.Item>
+        {isSwitchDiscardingTime && <Alert type="warning" showIcon className="page-alert" title="换成不同套餐后立即生效，原套餐剩余时长作废" />}
         <PoolDeduction plan={plans.find((p) => p.id === planId)} summary={summary} />
         <Button type="primary" htmlType="submit" block loading={isBusy}>
           分配

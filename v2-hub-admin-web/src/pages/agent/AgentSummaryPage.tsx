@@ -73,7 +73,7 @@ export function AgentSummaryPage() {
           dataSource={plans.data ?? []}
           locale={{ emptyText: '平台还没有给你分配套餐' }}
         />
-        <Typography.Paragraph type="secondary">扣减量 = 套餐流量 × 套餐时长内的重置周期数；删除用户、调低额度、套餐到期都不退回。</Typography.Paragraph>
+        <Typography.Paragraph type="secondary">扣减量 = 套餐流量 × 套餐时长内最多能用到的重置周期数（不重置按 1 期；按小时 = 天数 × 24 + 1，按天 = 天数 + 1，按周 = ⌈天数 / 7⌉ + 1，按月 = ⌈天数 / 28⌉ + 1），以表中“开通一次扣减”为准；删除用户、调低额度、套餐到期都不退回。</Typography.Paragraph>
       </Card>
       <Card title="我的开通记录">
         <PagedTable<AgentAllocation>
