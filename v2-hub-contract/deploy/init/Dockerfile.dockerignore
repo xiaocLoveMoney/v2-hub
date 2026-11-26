@@ -1,0 +1,12 @@
+# 构建上下文是仓库根目录（Ruling-109），只放行 init 镜像用到的路径
+*
+!v2-hub-admin-web/
+!v2-hub-user-web/
+!v2-hub-contract/deploy/init.sql
+!v2-hub-contract/deploy/migrations/
+!v2-hub-contract/deploy/init/init.sh
+**/node_modules
+**/dist
+**/coverage
+**/.env
+**/.env.*
