@@ -904,7 +904,7 @@ paths:
       operationId: agentAssignUserPlan
       summary: 给名下用户分配或续期白名单套餐（扣流量池，写开通记录 kind = assign）
       description: |
-        规则同管理端分配套餐：未到期的顺延、已到期的从当时起算、已用流量清零。
+        与用户自己下单同一规则（Ruling-108）：与用户当前套餐相同 = 续期，未到期的从原到期日顺延；不同套餐或用户没有套餐 = 换购，立即生效、原剩余时长作废；已用流量清零。
         planId 不在白名单 400 invalid_argument；流量池不够 409 agent_pool_insufficient（不部分开通）。
       parameters:
         - $ref: "#/components/parameters/CsrfHeader"
@@ -3130,7 +3130,8 @@ paths:
     put:
       tags: [admin-users]
       operationId: updateUser
-      summary: 修改备注、停用 / 启用（docs/03 U8；user:write）
+      summary: 修改备注、停用 / 启用、邮箱（docs/03 U8；user:write）
+      description: 改备注与启停不要求二次验证；请求里的邮箱与当前值不同时须在二次验证有效期内，否则 403 reauth_required（按内容判定，Ruling-106）。
       parameters:
         - $ref: "#/components/parameters/CsrfHeader"
       requestBody:
@@ -3385,6 +3386,7 @@ paths:
       tags: [admin-settings]
       operationId: updateSettings
       summary: 修改系统设置：只改请求里出现的键，任一项不合法则整体不保存（setting:write）
+      description: site.portalUrl 与 subscription.baseUrl 只有超级管理员能改；非超管提交的这两项与当前值不同时 403 permission_denied、整体不保存（Ruling-106）。
       parameters:
         - $ref: "#/components/parameters/CsrfHeader"
       requestBody:
@@ -6323,7 +6325,7 @@ components:
         poolCost:
           type: integer
           format: int64
-          description: 开通或续期一次从流量池扣减的字节数 = 流量 × 时长内的重置周期数（never 按 1 期；周按 7 天、月按 30 天，向上取整）
+          description: 开通或续期一次从流量池扣减的字节数 = 流量 × 时长内最多能用到的重置周期数（Ruling-108：never 按 1 期；hourly = 天数 × 24 + 1，daily = 天数 + 1，weekly = ⌈天数 / 7⌉ + 1，monthly = ⌈天数 / 28⌉ + 1）
     AgentPlanAssignInput:
       type: object
       required: [planId]
@@ -6410,7 +6412,7 @@ components:
       properties:
         providerType: { type: string, enum: [xui] }
         baseUrl: { $ref: "#/components/schemas/PanelBaseUrl" }
-        apiToken: { type: string, maxLength: 512, description: 只写；更新时留空表示沿用原值，但面板类型或面板地址有变化时必填（Ruling-97） }
+        apiToken: { type: string, maxLength: 512, description: 只写；更新时留空表示沿用原值，但面板类型、面板地址、TLS 校验方式或证书指纹有变化时必填（Ruling-97、Ruling-107） }
         tlsMode: { $ref: "#/components/schemas/TlsMode" }
         certPinSha256: { type: string, maxLength: 128 }
     ServerInput:
@@ -6874,7 +6876,7 @@ components:
         sshPort: { type: integer, minimum: 1, maximum: 65535, default: 22 }
         credentialId: { type: integer, format: int64, minimum: 1 }
         providerType: { type: string, enum: [xui] }
-        credentialSecret: { type: string, maxLength: 255, writeOnly: true, description: "所选凭据的密码，再输入一次用于比对；凭据是 password 类型、且这个（地址，端口）还没用过该凭据时必填（Ruling-97）" }
+        credentialSecret: { type: string, maxLength: 255, writeOnly: true, description: "所选凭据的密码，再输入一次用于比对；凭据是 password 类型时一律必填，不看目标用没用过（Ruling-107）" }
     ServerHostBindInput:
       type: object
       required: [address, credentialId]
@@ -7212,7 +7214,7 @@ components:
       properties:
         remark: { type: string, maxLength: 255 }
         isDisabled: { type: boolean }
-        email: { type: string, maxLength: 254, description: 省略不改；空串清除；其余按邮箱校验并视为已验证（0.3.0） }
+        email: { type: string, maxLength: 254, description: 省略不改；空串清除；其余按邮箱校验并视为已验证（0.3.0）。邮箱有变化时属于高危操作，须在二次验证有效期内，否则 403 reauth_required（Ruling-106） }
     Provision:
       type: object
       required: [serverId, serverName, email, status, lastError, retryCount, syncedAt, updatedAt]
