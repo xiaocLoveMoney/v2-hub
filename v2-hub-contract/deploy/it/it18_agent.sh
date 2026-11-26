@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
-# IT-18 二级代理（docs/08，docs/03 §5.23，Ruling-101 – Ruling-104）：
+# IT-18 二级代理（docs/08，docs/03 §5.23，Ruling-101 – Ruling-104、Ruling-108）：
 # → 超管建套餐（有限 / 按周重置 / 不限流量 / 注册赠送）与代理 A、B：白名单含不限套餐 400；代理不进管理员列表、PUT /admins/{id} 409、不能设为所有者
 # → 隔离：代理的会话 kind=agent、无权限码；员工接口一律 403；超管调代理接口 403；未登录 401
-# → 配额：白名单与 poolCost；新建用户（不带套餐 / 白名单外 400）、分配与续期各扣一次；池不足 409 agent_pool_insufficient 带 poolCost / poolRemaining
-#   且用户与池都不变；达到用户数上限 409 agent_user_limit；调额只能收紧；改备注、停用 / 启用、重置订阅；删除用户后池不退回
+# → 配额：白名单与 poolCost（按时长内最多能用到的周期数，Ruling-108）；新建用户（不带套餐 / 白名单外 400）、分配与续期各扣一次；
+#   同一套餐续期顺延、换套餐从当时起算；池不足 409 agent_pool_insufficient 带 poolCost / poolRemaining 且用户与池都不变；
+#   达到用户数上限 409 agent_user_limit；调额只能收紧；改备注、停用 / 启用（两项缺一 400）、重置订阅；删除用户后池不退回
 # → 邀请码与注册：代理码注册的用户归 A、无邀请人、不送注册套餐；名下用户的个人码拉来的也归 A；达到上限时两种码都不能注册
 # → 用户自助下单不动池；订单、流水、工单列表只有名下的；工单的员工回复不带账号名；代理回复与关闭
 # → 水平越权：B 名下、平台用户的 id 调每个按 id 的接口 404 且超管侧看不出任何变化；改 / 删 B 的邀请码 404
@@ -28,9 +29,15 @@ GIB=1073741824
 MIB=1048576
 DAY_SECONDS=86400
 PLAN_DAYS=30
-WEEKLY_PERIODS=5           # 30 天按周重置：ceil(30 / 7) = 5 期
+# poolCost 的周期数（Ruling-108：时长内最多能用到的周期数）
+WEEKLY_PERIODS=6           # 30 天按周重置：ceil(30 / 7) + 1 = 6 期
+HOURLY_DAYS=1
+HOURLY_PERIODS=25          # 1 天按小时重置：1 × 24 + 1 = 25 期
+DAILY_PERIODS=31           # 30 天按天重置：30 + 1 = 31 期
+MONTHLY_PERIODS=3          # 30 天按月重置：ceil(30 / 28) + 1 = 3 期
+CLOCK_SLACK_SECONDS=2      # 比对“从当时起算”的到期时间时容许的秒级误差
 A_MAX_USERS=3
-A_POOL=$((8 * GIB))
+A_POOL=$((9 * GIB))        # 1（新建）+ 1（续期）+ 6（换按周套餐）后剩 1 GiB，正好够再建一个有限套餐的用户
 A_POOL_RAISED=$((20 * GIB))
 A_MAX_USERS_RAISED=4
 B_MAX_USERS=5
@@ -88,6 +95,10 @@ new_plan() {  # new_plan <名称> <流量> <天数> <重置周期> [附加 JSON]
 PLAN_ONCE="$(new_plan it18-once "$GIB" "$PLAN_DAYS" never)"; expect_code 200 "新建有限套餐"
 PLAN_WEEKLY="$(new_plan it18-weekly "$GIB" "$PLAN_DAYS" weekly)"; expect_code 200 "新建按周重置套餐"
 PLAN_UNLIMITED="$(new_plan it18-unlimited 0 "$PLAN_DAYS" never)"; expect_code 200 "新建不限流量套餐"
+# 下面三个只放进 B 的白名单，用来核对 poolCost 的公式（Ruling-108）
+PLAN_HOURLY="$(new_plan it18-hourly "$GIB" "$HOURLY_DAYS" hourly)"; expect_code 200 "新建按小时重置套餐"
+PLAN_DAILY="$(new_plan it18-daily "$GIB" "$PLAN_DAYS" daily)"; expect_code 200 "新建按天重置套餐"
+PLAN_MONTHLY="$(new_plan it18-monthly "$GIB" "$PLAN_DAYS" monthly)"; expect_code 200 "新建按月重置套餐"
 PLAN_GIFT="$(new_plan it18-gift $((2 * GIB)) "$PLAN_DAYS" never \
   "$(jq -nc --argjson d "$PLAN_DAYS" --argjson p "$GIFT_PRICE" '{isOnSale:true,prices:[{durationDays:$d,price:$p}]}')")"
 expect_code 200 "新建注册赠送与在售套餐"
@@ -112,7 +123,7 @@ jq -e --argjson m "$A_MAX_USERS" --argjson t "$A_POOL" '.data | .maxUsers == $m 
   "$WORK/body" >/dev/null || fail "新建的代理配额不对：$(cat "$WORK/body")"
 hub POST /api/admin/agents "$(agent_create_body "$AGENT_A" 1 "$GIB" "[$PLAN_ONCE]")" >/dev/null; expect_error 409 conflict "代理重名"
 hub POST /api/admin/agents "$(agent_create_body "$ROOT_USER" 1 "$GIB" "[$PLAN_ONCE]")" >/dev/null; expect_error 409 conflict "代理与管理员重名"
-B_ID="$(hub POST /api/admin/agents "$(agent_create_body "$AGENT_B" "$B_MAX_USERS" "$B_POOL" "[$PLAN_ONCE]")" | jq -r '.data.id // empty')"
+B_ID="$(hub POST /api/admin/agents "$(agent_create_body "$AGENT_B" "$B_MAX_USERS" "$B_POOL" "[$PLAN_ONCE,$PLAN_HOURLY,$PLAN_DAILY,$PLAN_MONTHLY]")" | jq -r '.data.id // empty')"
 expect_code 200 "新建代理 B"
 hub GET "/api/admin/admins?pageSize=100" | jq -e --arg a "$AGENT_A" --arg b "$AGENT_B" '[.data.items[] | select(.username == $a or .username == $b)] | length == 0' >/dev/null \
   || fail "管理员列表不应含代理：$(cat "$WORK/body")"
@@ -154,13 +165,18 @@ expect_error 403 permission_denied "超管调代理的新建用户"
 call "$WORK/anon.jar" "" GET /api/admin/agent/summary >/dev/null; expect_error 401 unauthenticated "未登录调代理接口"
 call "$WORK/anon.jar" "" GET /api/admin/agents >/dev/null; expect_error 401 unauthenticated "未登录调代理管理"
 
-# ---- 5. 配额概览与白名单（poolCost = 流量 × 时长内的重置期数）----
+# ---- 5. 配额概览与白名单（poolCost = 流量 × 时长内最多能用到的重置周期数，Ruling-108）----
 summary_a() { agent_a GET /api/admin/agent/summary | jq -c '.data | [.userCount, .trafficPoolUsed, .trafficPoolTotal, .maxUsers]'; }
 [ "$(summary_a)" = "[0,0,$A_POOL,$A_MAX_USERS]" ] || fail "初始配额概览不对：$(cat "$WORK/body")"
 [ "$(agent_a GET /api/admin/agent/plans | jq -c '[.data[] | [.id, .poolCost, .trafficReset]] | sort')" \
   = "$(jq -nc --argjson o "$PLAN_ONCE" --argjson w "$PLAN_WEEKLY" --argjson g "$GIB" --argjson n "$WEEKLY_PERIODS" '[[$o, $g, "never"], [$w, $g * $n, "weekly"]] | sort')" ] \
   || fail "白名单与 poolCost 不对：$(cat "$WORK/body")"
 jq -e '.data | all(has("price") | not) and all(has("nodeGroupIds") | not)' "$WORK/body" >/dev/null || fail "代理看到的套餐不应带价格与节点组：$(cat "$WORK/body")"
+[ "$(agent_b GET /api/admin/agent/plans | jq -c '[.data[] | [.id, .poolCost, .trafficReset]] | sort')" \
+  = "$(jq -nc --argjson o "$PLAN_ONCE" --argjson h "$PLAN_HOURLY" --argjson d "$PLAN_DAILY" --argjson m "$PLAN_MONTHLY" --argjson g "$GIB" \
+    --argjson hp "$HOURLY_PERIODS" --argjson dp "$DAILY_PERIODS" --argjson mp "$MONTHLY_PERIODS" \
+    '[[$o, $g, "never"], [$h, $g * $hp, "hourly"], [$d, $g * $dp, "daily"], [$m, $g * $mp, "monthly"]] | sort')" ] \
+  || fail "按小时 / 天 / 月重置的 poolCost 应为 ${HOURLY_PERIODS} / ${DAILY_PERIODS} / ${MONTHLY_PERIODS} 期：$(cat "$WORK/body")"
 
 # ---- 6. 新建、分配、续期各扣一次池；池不足 409 且什么都不变；用户数上限 409 ----
 agent_user_body() {  # agent_user_body <用户名> [套餐 id]
@@ -185,13 +201,23 @@ EXP_RENEWED="$(a1_view | jq -r .expiresAt)"
 [ $(( $(iso_epoch "$EXP_RENEWED") - $(iso_epoch "$EXP_FIRST") )) -eq $((PLAN_DAYS * DAY_SECONDS)) ] || fail "未到期续期应从原到期日顺延 ${PLAN_DAYS} 天：$EXP_FIRST → $EXP_RENEWED"
 [ "$(summary_a)" = "[1,$((2 * GIB)),$A_POOL,$A_MAX_USERS]" ] || fail "续期应再扣 1 GiB：$(cat "$WORK/body")"
 agent_a POST "/api/admin/agent/users/$A1/plan" "$(jq -nc --argjson p "$PLAN_GIFT" '{planId:$p}')" >/dev/null; expect_error 400 invalid_argument "分配白名单外的套餐"
-agent_a POST "/api/admin/agent/users/$A1/plan" "$(jq -nc --argjson p "$PLAN_WEEKLY" '{planId:$p}')" >/dev/null; expect_code 200 "分配按周重置的套餐"
+# 换成另一个白名单套餐 = 换购（Ruling-108）：立即生效，到期时间从当时起算，原剩余的约 60 天作废、不顺延
+SWITCH_FROM=$(date +%s)
+agent_a POST "/api/admin/agent/users/$A1/plan" "$(jq -nc --argjson p "$PLAN_WEEKLY" '{planId:$p}')" >/dev/null; expect_code 200 "分配按周重置的套餐（换购）"
+SWITCH_TO=$(date +%s)
+[ "$(jq -c --argjson p "$PLAN_WEEKLY" --argjson g "$GIB" '.data | [.planId == $p, .trafficLimit == $g, .trafficUsed, .pendingDays]' "$WORK/body")" = '[true,true,0,0]' ] \
+  || fail "换购后套餐、额度或已用流量不对：$(cat "$WORK/body")"
+EXP_SWITCHED="$(iso_epoch "$(jq -r .data.expiresAt "$WORK/body")")"
+[ "$EXP_SWITCHED" -ge $((SWITCH_FROM + PLAN_DAYS * DAY_SECONDS - CLOCK_SLACK_SECONDS)) ] && [ "$EXP_SWITCHED" -le $((SWITCH_TO + PLAN_DAYS * DAY_SECONDS + CLOCK_SLACK_SECONDS)) ] \
+  || fail "换套餐应从当时起算 ${PLAN_DAYS} 天、不从原到期日 $EXP_RENEWED 顺延：$(cat "$WORK/body")"
 USED_AFTER_WEEKLY=$((2 * GIB + WEEKLY_PERIODS * GIB))
 [ "$(summary_a)" = "[1,$USED_AFTER_WEEKLY,$A_POOL,$A_MAX_USERS]" ] || fail "按周重置的套餐应扣 ${WEEKLY_PERIODS} GiB：$(cat "$WORK/body")"
 A1_BEFORE="$(a1_view)"
 agent_a POST "/api/admin/agent/users/$A1/plan" "$(jq -nc --argjson p "$PLAN_WEEKLY" '{planId:$p}')" >/dev/null; expect_error 409 agent_pool_insufficient "池不够再续一期"
 [ "$(jq -c '.data | [.poolCost, .poolRemaining]' "$WORK/body")" = "[$((WEEKLY_PERIODS * GIB)),$((A_POOL - USED_AFTER_WEEKLY))]" ] \
   || fail "池不足应带本次扣减与剩余：$(cat "$WORK/body")"
+allocations_a | jq -e --argjson u "$A1" --argjson p "$PLAN_WEEKLY" --argjson b $((WEEKLY_PERIODS * GIB)) 'any(.[]; . == ["assign", $u, $p, $b])' >/dev/null \
+  || fail "换购的开通记录应扣 ${WEEKLY_PERIODS} GiB：$(allocations_a)"
 [ "$(a1_view)" = "$A1_BEFORE" ] || fail "池不足时用户不应变化：$A1_BEFORE → $(a1_view)"
 [ "$(summary_a)" = "[1,$USED_AFTER_WEEKLY,$A_POOL,$A_MAX_USERS]" ] || fail "池不足时不应扣池：$(cat "$WORK/body")"
 A2="$(agent_a POST /api/admin/agent/users "$(agent_user_body it18-a2 "$PLAN_ONCE")" | jq -r '.data.id // empty')"; expect_code 200 "代理新建用户 a2（用尽流量池）"
@@ -205,6 +231,7 @@ A3="$(agent_a POST /api/admin/agent/users "$(agent_user_body it18-a3 "$PLAN_ONCE
 USED_A=$((A_POOL + GIB))
 [ "$(summary_a)" = "[3,$USED_A,$A_POOL_RAISED,$A_MAX_USERS]" ] || fail "a3 之后配额不对：$(cat "$WORK/body")"
 agent_a POST /api/admin/agent/users "$(agent_user_body it18-a4 "$PLAN_ONCE")" >/dev/null; expect_error 409 agent_user_limit "达到用户数上限时新建"
+[ "$(jq -r .message "$WORK/body")" = "名下用户数已达上限，不能再新建；请联系平台调整上限" ] || fail "达到上限的提示语不对：$(cat "$WORK/body")"
 [ "$(summary_a)" = "[3,$USED_A,$A_POOL_RAISED,$A_MAX_USERS]" ] || fail "达到上限的新建不应扣池：$(cat "$WORK/body")"
 agent_a POST /api/admin/agent/users "$(agent_user_body it18-a1 "$PLAN_ONCE")" >/dev/null; expect_code 409 "达到上限时新建重名用户（任一 409 都可）"
 
@@ -231,6 +258,11 @@ quota_a1 "$(jq -nc --arg t "$EARLIER" '{expiresAt:$t}')"; expect_code 200 "到�
 # ---- 8. 改备注与停用 / 启用；重置订阅（a1 自己看到订阅地址变化）----
 agent_a PUT "/api/admin/agent/users/$A1" '{"remark":"it18 vip","isDisabled":true}' >/dev/null; expect_code 200 "停用名下用户"
 [ "$(jq -c '.data | [.remark, .isDisabled, .status]' "$WORK/body")" = '["it18 vip",true,"disabled"]' ] || fail "停用后状态不对：$(cat "$WORK/body")"
+# remark 与 isDisabled 都必填（Ruling-108 同批修订）：缺 isDisabled 不能当成“启用”，缺 remark 不能当成“清空备注”
+agent_a PUT "/api/admin/agent/users/$A1" '{"remark":"it18 vip"}' >/dev/null; expect_error 400 invalid_argument "改用户缺 isDisabled"
+agent_a PUT "/api/admin/agent/users/$A1" '{"isDisabled":true}' >/dev/null; expect_error 400 invalid_argument "改用户缺 remark"
+agent_a PUT "/api/admin/agent/users/$A1" '{"remark":"it18 vip","isDisabled":null}' >/dev/null; expect_error 400 invalid_argument "改用户 isDisabled 为 null"
+[ "$(a1_view | jq -c '[.remark, .isDisabled, .status]')" = '["it18 vip",true,"disabled"]' ] || fail "被拒的修改不应改动停用状态与备注：$(a1_view)"
 agent_a PUT "/api/admin/agent/users/$A1" '{"remark":"it18 vip","isDisabled":false,"trafficLimit":1}' >/dev/null; expect_error 400 invalid_argument "改用户时夹带额度字段"
 agent_a PUT "/api/admin/agent/users/$A1" '{"remark":"it18 vip","isDisabled":false}' >/dev/null; expect_code 200 "启用名下用户"
 [ "$(jq -c '.data | [.isDisabled, .status]' "$WORK/body")" = '[false,"active"]' ] || fail "启用后状态应回到 active：$(cat "$WORK/body")"

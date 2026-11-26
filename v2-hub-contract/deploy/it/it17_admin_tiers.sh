@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# IT-17 管理员分级加固（docs/08，docs/03 §4 – §4.4、§5.1、§5.22，Ruling-95 – Ruling-100）：
+# IT-17 管理员分级加固（docs/08，docs/03 §4 – §4.4、§5.1、§5.6、§5.22，Ruling-95 – Ruling-100、Ruling-105 – Ruling-107）：
 # → 超管强制两步验证：新建的超管未绑定时业务接口 403 totp_setup_required，豁免接口（me、登出、TOTP 生成 / 确认、改自己密码）可用；
 #   绑定后正常；超管关闭两步验证 409
 # → 超管专属与预设角色：含 admin:* / host:* 的角色 400；四个预设角色在、内置、不可改不可删；持预设“财务”的管理员碰管理员与 SSH 托管 403；
@@ -7,9 +7,13 @@
 # → 本人改密码：旧密码错 400；成功后另一个会话 401、当前会话照常；对自己调重置密码接口 409
 # → 所有者：别的超管对所有者禁用 / 重置密码 / 清两步验证都 403；命令行 admin-owner-set 转移后规则对调；
 #   admin-totp-reset 后该超管重新被强制绑定
-# → 改面板地址不带 token 400（启用中、停用后都一样），带 token 通过
-# → 密码凭据用到新的（地址，端口）：不带 credentialSecret 400、带错 400、带对通过；私钥凭据不受影响
-# → 短 reauthWindow：过期后高危接口 403 reauth_required，验证失败 400，reauth 后成功；没有权限码的人只得到 permission_denied
+# → 改面板地址不带 token 400（启用中、停用后都一样），带 token 通过；改 TLS 校验方式不带 token 同样 400（Ruling-107）
+# → 密码凭据用到新的（地址，端口）：不带 credentialSecret 400、带错 400、带对通过；私钥凭据不受影响；
+#   连接测试用密码凭据一律要 credentialSecret，目标已有主机也一样（Ruling-107）
+# → 门户地址与订阅地址只有超管能改：持预设“合伙人”的管理员改这两项 403 且整体不保存，改别的设置项照常（Ruling-106）
+# → 短 reauthWindow：过期后高危接口 403 reauth_required，验证失败 400，reauth 后成功；没有权限码的人只得到 permission_denied；
+#   员工改用户邮箱过期时 403 reauth_required 且邮箱不变，只改备注照常，验证后可改（Ruling-106）
+# → 并发错密码登录：被真正校验（401）的次数不超过 auth.loginMaxFailures，其余 429（Ruling-105；专用账号 + X-Forwarded-For 区分来源）
 # 黑盒，只用 curl / jq / docker / ssh-keygen / python3（TOTP）。主机只建到落库与排队这一层：地址用本机未监听的端口，
 # 部署任务连不上就失败，不需要真实 SSH 目标，密码也不会发出去。
 # 注意：会重建 xui-a 容器；hub-server 中途换一份短有效期的配置重启一次。
@@ -23,6 +27,14 @@ BASE=http://127.0.0.1:8080
 OWNER=it17-owner     # 与前面用例的超管区分（run_all 只在开头重置一次库）
 SECOND=it17-second
 FINANCE=it17-finance
+PARTNER=it17-partner  # 持预设“合伙人”：有 setting:write、user:write，但不是超管
+BRUTE=it17-brute      # 并发错密码登录专用，会被锁住，后面不再用
+END_USER=it17-mailuser
+MAIL_DOMAIN=it17.example.com
+PORTAL_URL_NEW=https://it17-portal.example.com
+SUB_BASE_URL_NEW=https://it17-sub.example.com
+BRUTE_IP=198.51.100.17    # TEST-NET-2：经 X-Forwarded-For 给并发登录一个独立来源（etc/hub-server.yaml 采信 127.0.0.1 的转发头）
+BRUTE_TRIES=20
 CRED="it-$(openssl rand -hex 12)"
 CRED_NEW="it-$(openssl rand -hex 12)"
 SSH_CRED_PW="it-$(openssl rand -hex 12)"
@@ -193,8 +205,8 @@ it_admin_totp_bind "$SJAR" "$SCSRF" "$SECOND" || fail "admin-totp-reset 后重�
 second GET /api/admin/servers >/dev/null; expect_code 200 "admin-totp-reset 后重新绑定再看服务器"
 
 # ---- 7. 改面板地址必须重填 token（Ruling-97）----
-server_body() {  # server_body <面板地址> <token> <是否停用>
-  jq -nc --arg u "$1" --arg t "$2" --argjson d "$3" '{name:"it17-xui-a",providerType:"xui",baseUrl:$u,apiToken:$t,tlsMode:"verify",region:"",isDisabled:$d}'
+server_body() {  # server_body <面板地址> <token> <是否停用> [TLS 校验方式，默认 verify]
+  jq -nc --arg u "$1" --arg t "$2" --argjson d "$3" --arg m "${4:-verify}" '{name:"it17-xui-a",providerType:"xui",baseUrl:$u,apiToken:$t,tlsMode:$m,region:"",isDisabled:$d}'
 }
 SERVER_ID="$(owner POST /api/admin/servers "$(server_body "$XUI_URL" "$XUI_TOKEN" false)" | jq -r '.data.id // empty')"
 expect_code 200 "接入服务器"
@@ -204,6 +216,13 @@ owner PUT "/api/admin/servers/$SERVER_ID" "$(server_body "$XUI_URL_MOVED" "" tru
 [ "$(owner GET "/api/admin/servers/$SERVER_ID" | jq -r .data.baseUrl)" = "$XUI_URL" ] || fail "被拒的修改不应改动面板地址：$(cat "$WORK/body")"
 owner PUT "/api/admin/servers/$SERVER_ID" "$(server_body "$XUI_URL_MOVED" "$XUI_TOKEN" true)" >/dev/null; expect_code 200 "停用后改面板地址并带 token"
 [ "$(owner GET "/api/admin/servers/$SERVER_ID" | jq -r .data.baseUrl)" = "$XUI_URL_MOVED" ] || fail "面板地址应已更新：$(cat "$WORK/body")"
+# Ruling-107：TLS 校验方式变了同样须重填 token（与是否停用无关），被拒不改；带 token 通过，再改回 verify 也要带
+owner PUT "/api/admin/servers/$SERVER_ID" "$(server_body "$XUI_URL_MOVED" "" true skip)" >/dev/null; expect_error 400 invalid_argument "改 TLS 校验方式不带 token"
+[ "$(owner GET "/api/admin/servers/$SERVER_ID" | jq -r .data.tlsMode)" = "verify" ] || fail "被拒的修改不应改动 TLS 校验方式：$(cat "$WORK/body")"
+owner PUT "/api/admin/servers/$SERVER_ID" "$(server_body "$XUI_URL_MOVED" "$XUI_TOKEN" true skip)" >/dev/null; expect_code 200 "改 TLS 校验方式并带 token"
+[ "$(jq -r .data.tlsMode "$WORK/body")" = "skip" ] || fail "TLS 校验方式应已更新：$(cat "$WORK/body")"
+owner PUT "/api/admin/servers/$SERVER_ID" "$(server_body "$XUI_URL_MOVED" "" true)" >/dev/null; expect_error 400 invalid_argument "改回 verify 不带 token"
+owner PUT "/api/admin/servers/$SERVER_ID" "$(server_body "$XUI_URL_MOVED" "$XUI_TOKEN" true)" >/dev/null; expect_code 200 "改回 verify 并带 token"
 
 # ---- 8. 密码凭据用到新的（地址，端口）须再输一次密码（Ruling-97，§5.22）；私钥凭据不受影响 ----
 PW_CRED_ID="$(owner POST /api/admin/ssh-credentials "$(jq -nc --arg s "$SSH_CRED_PW" '{name:"it17-password",username:"root",authType:"password",secret:$s}')" | jq -r '.data.id // empty')"
@@ -222,11 +241,46 @@ expect_error 400 invalid_argument "密码凭据建主机 credentialSecret 不对
 # 只看本用例的主机名（run_all 里 IT-14 留下的主机还在）
 [ "$(owner GET /api/admin/server-hosts | jq '[.data[] | select(.name == "it17-pw")] | length')" = "0" ] || fail "被拒的请求不应落库主机：$(cat "$WORK/body")"
 owner POST /api/admin/server-hosts "$(batch_body "$PW_CRED_ID" "$HOST_PORT_PW" it17-pw "$SSH_CRED_PW")" >/dev/null; expect_code 200 "密码凭据建主机 credentialSecret 正确"
+# Ruling-107：连接测试用密码凭据一律要 credentialSecret——目标（地址，端口）已有用这份凭据的主机也一样
+owner POST /api/admin/server-hosts/test "$(jq -nc --argjson c "$PW_CRED_ID" --argjson p "$HOST_PORT_PW" --arg a "$HOST_ADDR" '{address:$a,sshPort:$p,credentialId:$c,providerType:"xui"}')" >/dev/null
+expect_error 400 invalid_argument "已用过的目标做连接测试不带 credentialSecret"
 ssh-keygen -q -t ed25519 -N '' -C it17 -f "$WORK/id" || fail "生成密钥对失败"
 KEY_CRED_ID="$(owner POST /api/admin/ssh-credentials "$(jq -nc --rawfile k "$WORK/id" '{name:"it17-key",username:"root",authType:"key",secret:$k}')" | jq -r '.data.id // empty')"
 expect_code 200 "建私钥凭据"
 owner POST /api/admin/server-hosts "$(batch_body "$KEY_CRED_ID" "$HOST_PORT_KEY" it17-key)" >/dev/null; expect_code 200 "私钥凭据建主机不需要 credentialSecret"
 grep -qF -- "$SSH_CRED_PW" "/tmp/it-v2-hub-server.log" && fail "hub-server 日志里出现了凭据密码"
+
+# ---- 8.5 门户地址与订阅地址只有超管能改（Ruling-106）；顺带建好后面用的合伙人、终端用户与并发登录专用账号 ----
+owner POST /api/admin/admins "$(jq -nc --arg u "$PARTNER" --arg p "$CRED" '{username:$u,password:$p,roles:["partner"]}')" >/dev/null
+expect_code 200 "建合伙人管理员"
+owner POST /api/admin/admins "$(jq -nc --arg u "$BRUTE" --arg p "$CRED" '{username:$u,password:$p,roles:["finance"]}')" >/dev/null
+expect_code 200 "建并发登录专用的管理员"
+END_USER_ID="$(owner POST /api/admin/users "$(jq -nc --arg u "$END_USER" --arg p "$CRED" --arg e "$END_USER@$MAIL_DOMAIN" '{username:$u,password:$p,email:$e}')" | jq -r '.data.id // empty')"
+expect_code 200 "建终端用户"
+PJAR="$WORK/partner.jar"
+call "$PJAR" "" POST /api/admin/auth/login "$(login_body_of "$PARTNER" "$CRED")" >/dev/null; expect_code 200 "合伙人登录"
+PCSRF="$(csrf_of_body)"
+partner() { call "$PJAR" "$PCSRF" "$@"; }
+settings_brief() { owner GET /api/admin/settings | jq -c '.data | [.site.name, .site.portalUrl, .subscription.baseUrl]'; }
+SETTINGS_BEFORE="$(settings_brief)"
+SITE_NAME="$(printf '%s' "$SETTINGS_BEFORE" | jq -r '.[0]')"
+PORTAL_URL="$(printf '%s' "$SETTINGS_BEFORE" | jq -r '.[1]')"
+SUB_BASE_URL="$(printf '%s' "$SETTINGS_BEFORE" | jq -r '.[2]')"
+partner PUT /api/admin/settings "$(jq -nc --arg u "$PORTAL_URL_NEW" '{site:{portalUrl:$u}}')" >/dev/null; expect_error 403 permission_denied "非超管改门户地址"
+partner PUT /api/admin/settings "$(jq -nc --arg u "$SUB_BASE_URL_NEW" '{subscription:{baseUrl:$u}}')" >/dev/null; expect_error 403 permission_denied "非超管改订阅地址"
+partner PUT /api/admin/settings "$(jq -nc --arg n "$SITE_NAME-it17" --arg u "$PORTAL_URL_NEW" '{site:{name:$n,portalUrl:$u}}')" >/dev/null
+expect_error 403 permission_denied "非超管改站点名时夹带门户地址"
+[ "$(settings_brief)" = "$SETTINGS_BEFORE" ] || fail "被拒的保存不应改动任何设置项：$SETTINGS_BEFORE → $(settings_brief)"
+partner PUT /api/admin/settings "$(jq -nc --arg n "$SITE_NAME-it17" --arg u "$PORTAL_URL" '{site:{name:$n,portalUrl:$u}}')" >/dev/null
+expect_code 200 "非超管改站点名、门户地址原样提交"
+[ "$(settings_brief)" = "$(jq -nc --arg n "$SITE_NAME-it17" --arg p "$PORTAL_URL" --arg b "$SUB_BASE_URL" '[$n, $p, $b]')" ] || fail "非超管改站点名应生效：$(settings_brief)"
+owner PUT /api/admin/settings "$(jq -nc --arg u "$PORTAL_URL_NEW" --arg b "$SUB_BASE_URL_NEW" '{site:{portalUrl:$u},subscription:{baseUrl:$b}}')" >/dev/null
+expect_code 200 "超管改门户地址与订阅地址"
+[ "$(settings_brief)" = "$(jq -nc --arg n "$SITE_NAME-it17" --arg p "$PORTAL_URL_NEW" --arg b "$SUB_BASE_URL_NEW" '[$n, $p, $b]')" ] || fail "超管的修改应生效：$(settings_brief)"
+# 复原：后面的用例（IT-18 取订阅地址再 curl）依赖订阅地址指向本机
+owner PUT /api/admin/settings "$(jq -nc --arg n "$SITE_NAME" --arg u "$PORTAL_URL" --arg b "$SUB_BASE_URL" '{site:{name:$n,portalUrl:$u},subscription:{baseUrl:$b}}')" >/dev/null
+expect_code 200 "超管复原设置"
+[ "$(settings_brief)" = "$SETTINGS_BEFORE" ] || fail "设置应已复原：$SETTINGS_BEFORE → $(settings_brief)"
 
 # ---- 9. 短有效期（R12）：换一份 reauthWindow=$SHORT_WINDOW 的配置重启 hub-server，会话在库里、Cookie 照用 ----
 stop_modules
@@ -235,6 +289,9 @@ start_module v2-hub-server 8080 CONFIG="$WORK/hub-server-short.yaml"
 OCSRF="$(it_admin_login "$OJAR" "$OWNER" "$CRED_OWNER")" || fail "短有效期下所有者登录失败"
 call "$FJAR" "" POST /api/admin/auth/login "$(login_body_of "$FINANCE" "$CRED")" >/dev/null; expect_code 200 "短有效期下财务登录"
 FCSRF="$(csrf_of_body)"
+# 合伙人在长有效期下登录时记下的验证有效期还没到，换配置后要重新登录才按短有效期算
+call "$PJAR" "" POST /api/admin/auth/login "$(login_body_of "$PARTNER" "$CRED")" >/dev/null; expect_code 200 "短有效期下合伙人登录"
+PCSRF="$(csrf_of_body)"
 sleep "$SHORT_WINDOW_WAIT"
 TMP_ROLE='{"code":"it17_tmp","name":"IT17 临时","permissions":["node:read"]}'
 call "$FJAR" "$FCSRF" POST /api/admin/roles "$TMP_ROLE" >/dev/null; expect_error 403 permission_denied "过期后没有权限码的人调高危接口（先判权限码）"
@@ -247,4 +304,35 @@ owner POST /api/admin/roles "$TMP_ROLE" >/dev/null; expect_error 403 reauth_requ
 out="$(it_admin_reauth "$OJAR" "$OCSRF" "$OWNER")" || fail "二次验证失败：$out"
 printf '%s' "${out#* }" | jq -e '.data.reauthUntil | length > 0' >/dev/null || fail "二次验证应返回有效期：$out"
 owner POST /api/admin/roles "$TMP_ROLE" >/dev/null; expect_code 200 "二次验证后调高危接口"
+
+# ---- 10. 员工改用户邮箱按内容判定是否须二次验证（Ruling-106）：合伙人的验证已过期 ----
+END_EMAIL="$END_USER@$MAIL_DOMAIN"
+END_EMAIL_NEW="$END_USER-new@$MAIL_DOMAIN"
+user_brief() { owner GET "/api/admin/users/$END_USER_ID" | jq -c '.data | [.email, .remark]'; }
+user_update_body() { jq -nc --arg r "$1" --arg e "${2:-}" '{remark:$r,isDisabled:false} + (if $e == "" then {} else {email:$e} end)'; }
+partner PUT "/api/admin/users/$END_USER_ID" "$(user_update_body "" "$END_EMAIL_NEW")" >/dev/null; expect_error 403 reauth_required "验证过期后改用户邮箱"
+partner PUT "/api/admin/users/$END_USER_ID" "$(jq -nc '{remark:"",isDisabled:false,email:""}')" >/dev/null; expect_error 403 reauth_required "验证过期后清空用户邮箱"
+[ "$(user_brief)" = "$(jq -nc --arg e "$END_EMAIL" '[$e, ""]')" ] || fail "被拒的修改不应改动邮箱：$(user_brief)"
+partner PUT "/api/admin/users/$END_USER_ID" "$(user_update_body "it17 note")" >/dev/null; expect_code 200 "验证过期后只改备注"
+partner PUT "/api/admin/users/$END_USER_ID" "$(user_update_body "it17 note 2" "$END_EMAIL")" >/dev/null; expect_code 200 "验证过期后邮箱原样提交、改备注"
+[ "$(user_brief)" = "$(jq -nc --arg e "$END_EMAIL" '[$e, "it17 note 2"]')" ] || fail "只改备注应生效且邮箱不变：$(user_brief)"
+out="$(it_admin_reauth "$PJAR" "$PCSRF" "$PARTNER" "$CRED")" || fail "合伙人二次验证失败：$out"
+partner PUT "/api/admin/users/$END_USER_ID" "$(user_update_body "it17 note 2" "$END_EMAIL_NEW")" >/dev/null; expect_code 200 "二次验证后改用户邮箱"
+[ "$(user_brief)" = "$(jq -nc --arg e "$END_EMAIL_NEW" '[$e, "it17 note 2"]')" ] || fail "验证后邮箱应已更新：$(user_brief)"
+
+# ---- 11. 并发错密码登录（Ruling-105）：失败名额在校验口令之前先占用，同时发出的一批请求也只有上限次被真正校验 ----
+# 用专用账号与独立来源 IP，锁住的是它们，不影响别的用例；最后用正确密码确认已被锁定
+LOGIN_MAX_FAILURES="$(sed -n 's/^  loginMaxFailures: //p' "$WORK/hub-server-short.yaml")"
+[ -n "$LOGIN_MAX_FAILURES" ] || fail "没有在联调配置里读到 auth.loginMaxFailures"
+BRUTE_BODY="$(login_body_of "$BRUTE" "wrong-$CRED")"
+seq 1 "$BRUTE_TRIES" | xargs -P "$BRUTE_TRIES" -I{} curl -s -o /dev/null -w '%{http_code}\n' -X POST -H 'Content-Type: application/json' \
+  -H "X-Forwarded-For: $BRUTE_IP" --data "$BRUTE_BODY" "$BASE/api/admin/auth/login" > "$WORK/brute.codes"
+n401="$(grep -cx 401 "$WORK/brute.codes" || true)"
+n429="$(grep -cx 429 "$WORK/brute.codes" || true)"
+echo "IT-17: ${BRUTE_TRIES} 个并发错密码登录：401 × ${n401}，429 × ${n429}"
+[ $((n401 + n429)) -eq "$BRUTE_TRIES" ] || fail "并发登录应只返回 401 或 429：$(sort "$WORK/brute.codes" | uniq -c | tr '\n' ' ')"
+[ "$n401" -ge 1 ] && [ "$n401" -le "$LOGIN_MAX_FAILURES" ] || fail "被真正校验的次数应在 1 – ${LOGIN_MAX_FAILURES}，实际 ${n401}"
+curl -s -o "$WORK/body" -w '%{http_code}' -X POST -H 'Content-Type: application/json' -H "X-Forwarded-For: $BRUTE_IP" \
+  --data "$(login_body_of "$BRUTE" "$CRED")" "$BASE/api/admin/auth/login" > "$WORK/code"
+expect_error 429 rate_limited "并发错密码之后用正确密码登录（已锁定）"
 echo "IT-17 PASS"
