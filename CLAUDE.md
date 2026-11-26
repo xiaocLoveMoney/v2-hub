@@ -127,6 +127,11 @@ GitHub 仓库设置见 `docs/github-仓库设置清单.md`。
   代理只能调低额度、提前到期，写操作限速（`agent.writeRatePerHour`）。实现在 `service/agent*.go`、`api/agent.go`、`api/admin_agents.go`、`dao/queries/agent.sql`；
   越权矩阵 `api/agent_test.go` 随路由清单自动扩展。管理端：代理走独立布局（`src/layout/AgentLayout.tsx`、`src/pages/agent/`），超管侧“代理”页与用户归属划转。IT-18 通过。
   已知缺口：代理读不到站点币种（金额按 CNY 显示）、员工侧分不出工单回复来自代理。代理端与超管侧代理页登录后的浏览器实测待人工验证。
+  修订（Ruling-105 – Ruling-108）：本机越权实测后的修复——隔离本身未被打穿（代理 × 全部员工接口、代理间水平越权、普通管理员垂直越权、参数夹带、配额并发均通过），另修六项：
+  失败频控在校验口令前先占名额（`ratelimit.FailureGuard.Acquire`，并发不再多猜）；员工改用户邮箱须二次验证（按内容判定，在 `service/user.go`）；
+  `site.portalUrl` 与 `subscription.baseUrl` 仅超管可改；SSH 连接测试用密码凭据一律确认并按已固定主机密钥校验；改 TLS 校验方式或证书指纹须重填 token；
+  代理分配套餐与用户下单同一规则（不同套餐按换购、剩余时长作废），流量池按最多能用到的周期数扣减。IT-17、IT-18 已补对应断言，IT-1 至 IT-18 在最终代码上回归通过。
+  实测未覆盖：二次验证过期后各类密文查看接口的逐条检查、真实面板入站详情是否带密钥。遗留：频控是进程内的（单实例前提），跟踪表满时新 key 不受限，优惠码兑换仍是先查后记。
 - 路线图 M3–M8、M9（链式改造）、M10（出口补全与入站预填）与 M11（SSH 托管与面板部署）已完成；后续工作待定。
 - 路线（2026-11-13，Ruling-17 – Ruling-22）：参考 SSPanel-Uim Malio 的功能与界面，自行实现；里程碑为
   M3 订阅与用户端基础 → M4 自助运营 → M5 商店与钱包 → M6 / M7 两种链式 → M8 运营，见 docs/07。
