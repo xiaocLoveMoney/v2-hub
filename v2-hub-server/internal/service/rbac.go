@@ -39,6 +39,8 @@ const (
 	msgRoleCodeTaken  = "角色编码已存在"
 	msgOwnerNotSuper  = "所有者必须是启用状态的超级管理员"
 	msgAgentNotAdmin  = "该账号是代理，请在代理管理里修改"
+	// msgAdminNameInvalid 是管理端账号（员工与代理共用一个命名空间）的用户名规则
+	msgAdminNameInvalid = "用户名须为 3–64 位字母、数字或 _ . -"
 )
 
 // RBACService 负责管理员、角色、权限码与审计日志查询（授权规则 R1–R7、R11 见 docs/03 §4.1）。
@@ -158,7 +160,7 @@ func rolePermissions(code string, isBuiltin bool, stored []string) PermissionSet
 		// 代码不认识的内置角色（不该出现）一律无权限，不回退到库里的行
 		return PermissionSet{}
 	}
-	return effectivePermissions(false, stored)
+	return withoutSuperOnly(stored)
 }
 
 // RoleInput 是新建 / 修改角色的输入；Code 只在新建时使用。
@@ -344,10 +346,18 @@ func resolveAssignableRolesCached(ctx context.Context, q *sqlcgen.Queries, actor
 
 // checkCanAssign 是 R3 的纵深防御：管理员管理接口本身只有超管能进（admin:* 超管专属），这里仍挡住非超管分配或收回 super_admin。
 func checkCanAssign(actor *AdminPrincipal, role Role) error {
-	if role.IsBuiltin && role.Code == RoleSuperAdmin && !actor.IsSuperAdmin {
+	if isSuperAdminRole(role.IsBuiltin, role.Code) && !actor.IsSuperAdmin {
 		return newError(CodePermissionDenied, "只有超级管理员能分配或收回超级管理员角色")
 	}
 	return nil
+}
+
+// validateAdminCredentials 校验新建管理端账号（员工与代理）的用户名与密码。错误：CodeInvalidArgument。
+func validateAdminCredentials(username, password string) error {
+	if !usernamePattern.MatchString(username) {
+		return newError(CodeInvalidArgument, msgAdminNameInvalid)
+	}
+	return validatePassword(password)
 }
 
 func validatePassword(password string) error {
@@ -366,10 +376,7 @@ type AdminCreateInput struct {
 
 // CreateAdmin 新建管理员（R3）。
 func (s *RBACService) CreateAdmin(ctx context.Context, actor *AdminPrincipal, in AdminCreateInput, ip *netip.Addr) (*Admin, error) {
-	if !usernamePattern.MatchString(in.Username) {
-		return nil, newError(CodeInvalidArgument, "用户名须为 3–64 位字母、数字或 _ . -")
-	}
-	if err := validatePassword(in.Password); err != nil {
+	if err := validateAdminCredentials(in.Username, in.Password); err != nil {
 		return nil, err
 	}
 	hash, err := crypto.HashPassword(in.Password)
@@ -382,7 +389,7 @@ func (s *RBACService) CreateAdmin(ctx context.Context, actor *AdminPrincipal, in
 		if err != nil {
 			return err
 		}
-		created, err = insertAdmin(ctx, q, in.Username, hash, roleIDs)
+		created, err = insertAdmin(ctx, q, AdminKindStaff, in.Username, hash, roleIDs)
 		if err != nil {
 			return err
 		}
@@ -396,10 +403,12 @@ func (s *RBACService) CreateAdmin(ctx context.Context, actor *AdminPrincipal, in
 	return created, nil
 }
 
-func insertAdmin(ctx context.Context, q *sqlcgen.Queries, username, hash string, roleIDs []int64) (*Admin, error) {
-	row, err := q.CreateAdmin(ctx, sqlcgen.CreateAdminParams{Username: username, PasswordHash: hash})
+// insertAdmin 插入一个管理端账号（kind 为 AdminKindStaff 或 AdminKindAgent，创建后不可改）并关联角色；代理不持角色，roleIDs 须为空（Ruling-101）。
+// 用户名与员工、代理共用命名空间，重名返回 CodeConflict。
+func insertAdmin(ctx context.Context, q *sqlcgen.Queries, kind, username, hash string, roleIDs []int64) (*Admin, error) {
+	row, err := q.CreateAdmin(ctx, sqlcgen.CreateAdminParams{Username: username, PasswordHash: hash, Kind: kind})
 	if isUniqueViolation(err) {
-		return nil, newError(CodeConflict, "用户名已存在")
+		return nil, newError(CodeConflict, msgUsernameTaken)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("create admin %s: %w", username, err)
@@ -414,10 +423,7 @@ func insertAdmin(ctx context.Context, q *sqlcgen.Queries, username, hash string,
 
 // BootstrapSuperAdmin 由运维命令行创建超级管理员（无操作者，审计记为 system）；库里还没有所有者时新建的超管即所有者（Ruling-99）。
 func (s *RBACService) BootstrapSuperAdmin(ctx context.Context, username, password string) (*Admin, error) {
-	if !usernamePattern.MatchString(username) {
-		return nil, newError(CodeInvalidArgument, "用户名须为 3–64 位字母、数字或 _ . -")
-	}
-	if err := validatePassword(password); err != nil {
+	if err := validateAdminCredentials(username, password); err != nil {
 		return nil, err
 	}
 	hash, err := crypto.HashPassword(password)
@@ -434,7 +440,7 @@ func (s *RBACService) BootstrapSuperAdmin(ctx context.Context, username, passwor
 		if err != nil {
 			return fmt.Errorf("get super_admin role: %w", err)
 		}
-		created, err = insertAdmin(ctx, q, username, hash, []int64{role.ID})
+		created, err = insertAdmin(ctx, q, AdminKindStaff, username, hash, []int64{role.ID})
 		if err != nil {
 			return err
 		}
@@ -597,14 +603,20 @@ func (s *RBACService) ResetAdminPassword(ctx context.Context, actor *AdminPrinci
 		if _, err := resolveAssignableRoles(ctx, q, actor, currentRoles); err != nil {
 			return err
 		}
-		if _, err := q.UpdateAdminPasswordHash(ctx, sqlcgen.UpdateAdminPasswordHashParams{ID: id, PasswordHash: hash}); err != nil {
-			return fmt.Errorf("update password of admin %d: %w", id, err)
-		}
-		if err := q.DeleteAdminSessionsByAdmin(ctx, id); err != nil {
-			return fmt.Errorf("revoke sessions of admin %d: %w", id, err)
-		}
-		return writeAudit(ctx, q, adminAudit(actor, ActionAdminPasswordReset, targetAdmin, id, ip, nil))
+		return resetAdminPasswordTx(ctx, q, id, hash, adminAudit(actor, ActionAdminPasswordReset, targetAdmin, id, ip, nil))
 	})
+}
+
+// resetAdminPasswordTx 在调用方的事务里改写管理员的密码哈希、吊销其全部会话并写审计（R7）；
+// 管理端重置与命令行重置共用，审计项（操作者不同）由调用方给出。
+func resetAdminPasswordTx(ctx context.Context, q *sqlcgen.Queries, id int64, hash string, audit AuditEntry) error {
+	if _, err := q.UpdateAdminPasswordHash(ctx, sqlcgen.UpdateAdminPasswordHashParams{ID: id, PasswordHash: hash}); err != nil {
+		return fmt.Errorf("update password of admin %d: %w", id, err)
+	}
+	if err := q.DeleteAdminSessionsByAdmin(ctx, id); err != nil {
+		return fmt.Errorf("revoke sessions of admin %d: %w", id, err)
+	}
+	return writeAudit(ctx, q, audit)
 }
 
 func getAdminWithRoles(ctx context.Context, q *sqlcgen.Queries, id int64) (*Admin, []string, error) {

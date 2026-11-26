@@ -7,7 +7,6 @@ import (
 	"math"
 	"net/netip"
 	"strconv"
-	"strings"
 	"time"
 	"unicode/utf8"
 
@@ -44,14 +43,13 @@ const (
 	msgAgentPlanUnlimited  = "该套餐的流量或时长为不限，不能由代理分配"
 	msgAgentPlanTooLarge   = "该套餐的流量过大，无法计算流量池扣减量"
 	msgAgentPoolShort      = "流量池剩余不足，不能开通该套餐"
-	msgAgentUserLimit      = "名下用户数已达上限，不能再新建"
+	msgAgentUserLimit      = "名下用户数已达上限，不能再新建；请联系平台调整上限"
 	msgAgentQuotaEmpty     = "请至少修改一项：流量额度或到期时间"
 	msgAgentLimitNotLower  = "流量额度只能调低，且须大于 0"
 	msgAgentExpiryNotEarly = "到期时间只能提前，不能推后"
 	msgAgentExpiryPending  = "该用户还在等待首次使用，尚未开始计时，不能修改到期时间"
 	msgAgentBadStatus      = "状态取值不合法"
 	msgAgentKeywordLong    = "关键字过长"
-	msgRemarkTooLong       = "备注过长"
 )
 
 // AgentServiceConfig 是代理侧的运行参数。
@@ -71,7 +69,7 @@ type AgentService struct {
 	now     func() time.Time
 }
 
-// NewAgentService 创建代理服务；users 提供与员工共用的用户事务内逻辑，tickets 提供工单提醒邮件。
+// NewAgentService 创建代理服务；users 提供与员工共用的用户事务内逻辑，tickets 提供与员工共用的工单回复事务（含提醒邮件）。
 func NewAgentService(pool *pgxpool.Pool, users *UserService, tickets *TicketService, cfg AgentServiceConfig) *AgentService {
 	now := cfg.Now
 	if now == nil {
@@ -102,11 +100,9 @@ func (s *AgentService) AllowWrite(p *AdminPrincipal) error {
 	if err != nil {
 		return err
 	}
-	key := strconv.FormatInt(agentID, 10)
-	if s.writes.IsLocked(key) {
+	if !s.writes.Allow(strconv.FormatInt(agentID, 10)) {
 		return newError(CodeRateLimited, msgAgentWriteTooOften)
 	}
-	s.writes.RecordFailure(key)
 	return nil
 }
 
@@ -305,16 +301,12 @@ type AgentUser struct {
 }
 
 func agentUserFromRow(r sqlcgen.AgentListUsersRow) AgentUser {
-	u := AgentUser{
+	return AgentUser{
 		ID: r.ID, Username: r.Username, Email: r.Email.String, Remark: r.Remark, Status: r.Status, IsDisabled: r.IsDisabled,
 		PlanName: r.PlanName, TrafficLimit: r.TrafficLimit, TrafficUsed: r.TrafficUsed, ExpiresAt: timePtr(r.ExpiresAt),
 		PendingDays: int(r.PendingDays), Balance: r.Balance, TOTPEnabled: r.TotpEnabled, CreatedAt: r.CreatedAt.Time, LastUsedAt: timePtr(r.LastUsedAt),
+		PlanID: int8Ptr(r.PlanID),
 	}
-	if r.PlanID.Valid {
-		id := r.PlanID.Int64
-		u.PlanID = &id
-	}
-	return u
 }
 
 // AgentUserFilter 是名下用户列表的筛选；零值表示不限。
@@ -416,29 +408,15 @@ func (s *AgentService) CreateUser(ctx context.Context, p *AdminPrincipal, in Age
 	if err != nil {
 		return nil, err
 	}
-	in.Username = strings.TrimSpace(in.Username)
-	if !endUserNamePattern.MatchString(in.Username) {
-		return nil, newError(CodeInvalidArgument, msgBadUsername)
-	}
-	if err := validateUserLoginSecret(in.Password); err != nil {
-		return nil, err
-	}
-	if utf8.RuneCountInString(in.Remark) > maxUserRemarkLen {
-		return nil, newError(CodeInvalidArgument, msgRemarkTooLong)
-	}
 	if in.PlanID < 1 {
 		return nil, newError(CodeInvalidArgument, msgAgentPlanNotAllowed)
 	}
-	email := ""
-	if strings.TrimSpace(in.Email) != "" {
-		if email = normalizeEmail(in.Email); email == "" {
-			return nil, newError(CodeInvalidArgument, msgMailBadAddress)
-		}
-	}
-	hash, err := crypto.HashPassword(in.Password)
+	// 校验与密码哈希都在事务与行锁之外
+	spec, err := prepareNewUser(in.Username, in.Password, in.Remark, in.Email)
 	if err != nil {
-		return nil, fmt.Errorf("hash user password: %w", err)
+		return nil, err
 	}
+	spec.AgentID = agentID
 	now := s.now()
 	var id int64
 	err = s.inTx(ctx, func(q *sqlcgen.Queries) error {
@@ -464,15 +442,15 @@ func (s *AgentService) CreateUser(ctx context.Context, p *AdminPrincipal, in Age
 		if err := chargePool(ctx, q, profile, cost); err != nil {
 			return err
 		}
-		spec := newUserSpec{Username: in.Username, LoginHash: hash, Remark: in.Remark, Email: email, EmailVerified: true, PlanID: plan.ID, AgentID: agentID}
+		spec.PlanID = plan.ID
 		if id, err = s.users.createUserTx(ctx, q, spec, now); err != nil {
 			return err
 		}
-		if err := recordAllocation(ctx, q, agentID, id, in.Username, plan, cost, AgentAllocationCreate); err != nil {
+		if err := recordAllocation(ctx, q, agentID, id, spec.Username, plan, cost, AgentAllocationCreate); err != nil {
 			return err
 		}
 		return writeAudit(ctx, q, adminAudit(p, ActionUserCreate, targetUser, id, ip,
-			map[string]any{"username": in.Username, "planId": plan.ID, "poolCost": cost}))
+			map[string]any{"username": spec.Username, "planId": plan.ID, "poolCost": cost}))
 	})
 	if err != nil {
 		return nil, err

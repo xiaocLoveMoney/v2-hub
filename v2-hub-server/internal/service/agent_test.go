@@ -65,14 +65,6 @@ func (f *agentFixture) poolUsed(t *testing.T, agentID int64) int64 {
 	return used
 }
 
-func expectCode(t *testing.T, err error, want Code) {
-	t.Helper()
-	var se *Error
-	if !errors.As(err, &se) || se.Code != want {
-		t.Fatalf("err = %v, want %s", err, want)
-	}
-}
-
 func TestAgentPoolCost(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -141,7 +133,7 @@ func TestApplyAgentQuota(t *testing.T) {
 			qt := c.cur
 			err := applyAgentQuota(&qt, c.in)
 			if c.wantErr {
-				expectCode(t, err, CodeInvalidArgument)
+				wantCode(t, err, CodeInvalidArgument)
 				return
 			}
 			if err != nil {
@@ -561,11 +553,11 @@ func TestAgentWriteRateLimit(t *testing.T) {
 			t.Fatalf("AllowWrite: %v", err)
 		}
 	}
-	expectCode(t, svc.AllowWrite(p), CodeRateLimited)
+	wantCode(t, svc.AllowWrite(p), CodeRateLimited)
 	if err := svc.AllowWrite(other); err != nil {
 		t.Fatalf("other agent limited: %v", err)
 	}
-	expectCode(t, svc.AllowWrite(f.actor), CodePermissionDenied)
+	wantCode(t, svc.AllowWrite(f.actor), CodePermissionDenied)
 	f.clock.advance(time.Hour + time.Second)
 	if err := svc.AllowWrite(p); err != nil {
 		t.Fatalf("AllowWrite after window: %v", err)

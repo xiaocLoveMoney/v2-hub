@@ -265,11 +265,11 @@ func (s *HostService) CreateHosts(ctx context.Context, actor *AdminPrincipal, in
 	if err != nil {
 		return nil, err
 	}
-	targets := make([]hostTarget, 0, len(in.Hosts))
+	addresses := make([]string, 0, len(in.Hosts))
 	for _, item := range in.Hosts {
-		targets = append(targets, hostTarget{address: item.Address, port: in.SSHPort})
+		addresses = append(addresses, item.Address)
 	}
-	confirmed, err := s.confirmCredentialForNewTargets(ctx, actor, in.CredentialID, targets, in.CredentialSecret)
+	confirmed, err := s.confirmCredentialForNewTargets(ctx, actor, in.CredentialID, in.SSHPort, addresses, in.CredentialSecret)
 	if err != nil {
 		return nil, err
 	}
@@ -504,7 +504,7 @@ func (s *HostService) BindServer(ctx context.Context, actor *AdminPrincipal, ser
 	if err := s.checkProviderType(srv.ProviderType); err != nil {
 		return nil, err
 	}
-	confirmed, err := s.confirmCredentialForNewTargets(ctx, actor, in.CredentialID, []hostTarget{{address: address, port: sshPort}}, in.CredentialSecret)
+	confirmed, err := s.confirmCredentialForNewTargets(ctx, actor, in.CredentialID, sshPort, []string{address}, in.CredentialSecret)
 	if err != nil {
 		return nil, err
 	}
@@ -570,7 +570,7 @@ func (s *HostService) TestHost(ctx context.Context, actor *AdminPrincipal, in Ho
 	if !ok {
 		return nil, newError(CodeInvalidArgument, msgBadProviderType+in.ProviderType)
 	}
-	if _, err := s.confirmCredentialForNewTargets(ctx, actor, in.CredentialID, []hostTarget{{address: address, port: sshPort}}, in.CredentialSecret); err != nil {
+	if _, err := s.confirmCredentialForNewTargets(ctx, actor, in.CredentialID, sshPort, []string{address}, in.CredentialSecret); err != nil {
 		return nil, err
 	}
 	if err := allow(s.tests, actor.AdminID); err != nil {

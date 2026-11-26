@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"slices"
 
 	"github.com/jackc/pgx/v5"
 
@@ -62,10 +61,7 @@ func (s *RBACService) TransferOwner(ctx context.Context, username string) (previ
 		if err != nil {
 			return fmt.Errorf("list roles of admin %d: %w", target.ID, err)
 		}
-		isSuper := slices.ContainsFunc(roles, func(r sqlcgen.ListRolesForAdminRow) bool {
-			return r.IsBuiltin && r.Code == RoleSuperAdmin
-		})
-		if !isSuper || target.IsDisabled {
+		if !hasSuperAdminRole(roles) || target.IsDisabled {
 			return newError(CodeConflict, msgOwnerNotSuper)
 		}
 		previousID, err = q.GetOwnerAdminID(ctx)
@@ -101,13 +97,7 @@ func (s *RBACService) ResetAdminTOTPByUsername(ctx context.Context, username str
 		if err != nil {
 			return err
 		}
-		if _, err := q.ClearAdminTOTP(ctx, target.ID); err != nil {
-			return fmt.Errorf("clear totp of admin %d: %w", target.ID, err)
-		}
-		if err := q.DeleteAdminSessionsByAdmin(ctx, target.ID); err != nil {
-			return fmt.Errorf("revoke sessions of admin %d: %w", target.ID, err)
-		}
-		return writeAudit(ctx, q, AuditEntry{
+		return clearAdminTOTPTx(ctx, q, target.ID, AuditEntry{
 			ActorType: ActorSystem, Action: ActionAdminTOTPReset, TargetType: targetAdmin, TargetID: fmt.Sprint(target.ID),
 			Detail: map[string]any{"source": detailSourceCLI},
 		})
@@ -129,13 +119,7 @@ func (s *RBACService) ResetAdminPasswordByUsername(ctx context.Context, username
 		if err != nil {
 			return err
 		}
-		if _, err := q.UpdateAdminPasswordHash(ctx, sqlcgen.UpdateAdminPasswordHashParams{ID: target.ID, PasswordHash: hash}); err != nil {
-			return fmt.Errorf("update password of admin %d: %w", target.ID, err)
-		}
-		if err := q.DeleteAdminSessionsByAdmin(ctx, target.ID); err != nil {
-			return fmt.Errorf("revoke sessions of admin %d: %w", target.ID, err)
-		}
-		return writeAudit(ctx, q, AuditEntry{
+		return resetAdminPasswordTx(ctx, q, target.ID, hash, AuditEntry{
 			ActorType: ActorSystem, Action: ActionAdminPasswordReset, TargetType: targetAdmin, TargetID: fmt.Sprint(target.ID),
 			Detail: map[string]any{"source": detailSourceCLI},
 		})

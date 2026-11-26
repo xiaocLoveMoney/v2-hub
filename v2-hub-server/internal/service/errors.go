@@ -51,18 +51,16 @@ func (e *Error) Is(target error) bool {
 
 // 供 errors.Is 判定的哨兵值。
 var (
-	ErrInvalidArgument   = &Error{Code: CodeInvalidArgument}
-	ErrUnauthenticated   = &Error{Code: CodeUnauthenticated}
-	ErrPermissionDenied  = &Error{Code: CodePermissionDenied}
-	ErrNotFound          = &Error{Code: CodeNotFound}
-	ErrConflict          = &Error{Code: CodeConflict}
-	ErrRateLimited       = &Error{Code: CodeRateLimited}
-	ErrTOTPRequired      = &Error{Code: CodeTOTPRequired}
-	ErrTOTPSetupRequired = &Error{Code: CodeTOTPSetupRequired}
-	ErrReauthRequired    = &Error{Code: CodeReauthRequired}
-	ErrUpstream          = &Error{Code: CodeUpstream}
-	ErrFeatureDisabled   = &Error{Code: CodeFeatureDisabled}
-	ErrInsufficient      = &Error{Code: CodeInsufficientBalance}
+	ErrInvalidArgument  = &Error{Code: CodeInvalidArgument}
+	ErrUnauthenticated  = &Error{Code: CodeUnauthenticated}
+	ErrPermissionDenied = &Error{Code: CodePermissionDenied}
+	ErrNotFound         = &Error{Code: CodeNotFound}
+	ErrConflict         = &Error{Code: CodeConflict}
+	ErrRateLimited      = &Error{Code: CodeRateLimited}
+	ErrTOTPRequired     = &Error{Code: CodeTOTPRequired}
+	ErrUpstream         = &Error{Code: CodeUpstream}
+	ErrFeatureDisabled  = &Error{Code: CodeFeatureDisabled}
+	ErrInsufficient     = &Error{Code: CodeInsufficientBalance}
 )
 
 func newError(code Code, message string) *Error {

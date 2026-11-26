@@ -34,7 +34,6 @@ const (
 	msgAgentPlanLimited   = "白名单只收流量与时长都有限的套餐"
 	msgAgentPoolBelowUsed = "流量池总量不能低于已用量"
 	msgAgentTransferBad   = "目标不是代理账号"
-	msgAdminNameInvalid   = "用户名须为 3–64 位字母、数字或 _ . -"
 )
 
 // Agent 是超管看到的一个代理：账号、配额、白名单与名下未删除用户数。
@@ -128,10 +127,7 @@ func replaceAgentPlans(ctx context.Context, q *sqlcgen.Queries, agentID int64, i
 // CreateAgent 新建代理账号，与配额、白名单同一事务建出（Ruling-103、Ruling-104）。
 // 错误：CodeInvalidArgument、CodeConflict（用户名与管理员共用命名空间，重名）。
 func (s *AgentService) CreateAgent(ctx context.Context, actor *AdminPrincipal, in AgentCreateInput, ip *netip.Addr) (*Agent, error) {
-	if !usernamePattern.MatchString(in.Username) {
-		return nil, newError(CodeInvalidArgument, msgAdminNameInvalid)
-	}
-	if err := validatePassword(in.Password); err != nil {
+	if err := validateAdminCredentials(in.Username, in.Password); err != nil {
 		return nil, err
 	}
 	if err := in.validate(); err != nil {
@@ -147,14 +143,11 @@ func (s *AgentService) CreateAgent(ctx context.Context, actor *AdminPrincipal, i
 		if err != nil {
 			return err
 		}
-		row, err := q.CreateAgentAdmin(ctx, sqlcgen.CreateAgentAdminParams{Username: in.Username, PasswordHash: hash})
-		if isUniqueViolation(err) {
-			return newError(CodeConflict, "用户名已存在")
-		}
+		created, err := insertAdmin(ctx, q, AdminKindAgent, in.Username, hash, nil)
 		if err != nil {
-			return fmt.Errorf("create agent %s: %w", in.Username, err)
+			return err
 		}
-		id = row.ID
+		id = created.ID
 		if err := q.CreateAgentProfile(ctx, sqlcgen.CreateAgentProfileParams{
 			AdminID: id, MaxUsers: int32(in.MaxUsers), TrafficPoolTotal: in.TrafficPoolTotal, Remark: in.Remark,
 		}); err != nil {
@@ -356,24 +349,13 @@ func (s *AgentService) TransferUser(ctx context.Context, actor *AdminPrincipal, 
 				return newError(CodeInvalidArgument, msgAgentTransferBad)
 			}
 		}
-		// 行已锁，读到的就是划转前的归属
-		current, err := q.ListUsers(ctx, sqlcgen.ListUsersParams{UserID: int8Arg(userID), RowLimit: 1})
-		if err != nil {
-			return fmt.Errorf("get user %d: %w", userID, err)
-		}
-		if len(current) == 0 {
-			return newError(CodeNotFound, msgUserNotFound)
-		}
-		before := userFromRow(current[0])
-		n, err := q.SetUserAgent(ctx, sqlcgen.SetUserAgentParams{ID: userID, AgentID: int8Arg(target)})
+		// 行已锁（未删除），更新必中且带回的就是划转前的归属
+		previous, err := q.SetUserAgent(ctx, sqlcgen.SetUserAgentParams{ID: userID, AgentID: int8Arg(target)})
 		if err != nil {
 			return fmt.Errorf("transfer user %d: %w", userID, err)
 		}
-		if n == 0 {
-			return newError(CodeNotFound, msgUserNotFound)
-		}
 		return writeAudit(ctx, q, adminAudit(actor, ActionUserAgentTransfer, targetUser, userID, ip,
-			map[string]any{"fromAgentId": before.AgentID, "toAgentId": agentID}))
+			map[string]any{"fromAgentId": int8Ptr(previous), "toAgentId": agentID}))
 	})
 	if err != nil {
 		return nil, err

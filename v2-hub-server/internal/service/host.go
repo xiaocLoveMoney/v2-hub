@@ -176,11 +176,9 @@ func (s *HostService) kickRunner() {
 }
 
 func allow(guard *ratelimit.FailureGuard, adminID int64) error {
-	key := strconv.FormatInt(adminID, 10)
-	if guard.IsLocked(key) {
+	if !guard.Allow(strconv.FormatInt(adminID, 10)) {
 		return newError(CodeRateLimited, msgHostRateLimited)
 	}
-	guard.RecordFailure(key)
 	return nil
 }
 

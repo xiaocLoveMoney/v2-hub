@@ -93,9 +93,15 @@ INSERT INTO end_user (username, password_hash, remark, email_code, client_cred_e
 VALUES ($1, $2, $3, $4, ''::bytea, sqlc.narg(email), sqlc.narg(email_verified_at), sqlc.narg(invited_by), sqlc.narg(invite_code_id), sqlc.narg(agent_id))
 RETURNING id;
 
--- name: SetUserAgent :execrows
--- 超管划转或收回（Ruling-102）：只改归属
-UPDATE end_user SET agent_id = sqlc.narg(agent_id), updated_at = now() WHERE id = sqlc.arg(id) AND deleted_at IS NULL;
+-- name: SetUserAgent :one
+-- 超管划转或收回（Ruling-102）：只改归属，带回划转前的 agent_id 供审计（CTE 读的是更新前的快照）
+WITH before AS (
+    SELECT e.id, e.agent_id FROM end_user e WHERE e.id = sqlc.arg(id)::bigint AND e.deleted_at IS NULL
+)
+UPDATE end_user u SET agent_id = sqlc.narg(agent_id), updated_at = now()
+FROM before
+WHERE u.id = before.id
+RETURNING before.agent_id AS previous_agent_id;
 
 -- name: SetUserCredential :exec
 UPDATE end_user SET client_cred_enc = $2 WHERE id = $1;

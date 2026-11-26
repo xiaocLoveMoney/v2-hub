@@ -58,6 +58,7 @@ var endUserNamePattern = regexp.MustCompile(`^[A-Za-z0-9_.-]{3,64}$`)
 const (
 	msgBadUsername    = "用户名须为 3–64 位字母、数字或 _ . -"
 	msgUsernameTaken  = "用户名已存在"
+	msgRemarkTooLong  = "备注过长"
 	msgBadAgentFilter = "agentId 须为正整数"
 	msgUserDisabled   = "用户已停用，请先启用"
 )
@@ -656,35 +657,46 @@ func (s *UserService) createUserTx(ctx context.Context, q *sqlcgen.Queries, spec
 	return id, nil
 }
 
-// CreateUser 新建用户（U1），可同时分配套餐（U6）；面板凭据在此生成并加密保存。
-func (s *UserService) CreateUser(ctx context.Context, actor *AdminPrincipal, in UserCreateInput, ip *netip.Addr) (*User, error) {
-	in.Username = strings.TrimSpace(in.Username)
-	if !endUserNamePattern.MatchString(in.Username) {
-		return nil, newError(CodeInvalidArgument, msgBadUsername)
+// prepareNewUser 校验并规范化管理端（员工与代理）新建用户的公共字段并算出密码哈希：用户名去首尾空白后须合规 → 密码 →
+// 备注长度 → 邮箱（可空，非空须合法并规范化）。返回的 spec 已填用户名、哈希、备注、邮箱（视为已验证），套餐与归属由调用方补。
+// 哈希较慢，调用方须在事务与行锁之外调用。错误：CodeInvalidArgument。
+func prepareNewUser(username, password, remark, email string) (newUserSpec, error) {
+	username = strings.TrimSpace(username)
+	if !endUserNamePattern.MatchString(username) {
+		return newUserSpec{}, newError(CodeInvalidArgument, msgBadUsername)
 	}
-	if err := validateUserLoginSecret(in.Password); err != nil {
-		return nil, err
+	if err := validateUserLoginSecret(password); err != nil {
+		return newUserSpec{}, err
 	}
-	if utf8.RuneCountInString(in.Remark) > maxUserRemarkLen {
-		return nil, newError(CodeInvalidArgument, "备注过长")
+	if utf8.RuneCountInString(remark) > maxUserRemarkLen {
+		return newUserSpec{}, newError(CodeInvalidArgument, msgRemarkTooLong)
 	}
-	email := ""
-	if strings.TrimSpace(in.Email) != "" {
-		if email = normalizeEmail(in.Email); email == "" {
-			return nil, newError(CodeInvalidArgument, msgMailBadAddress)
+	normalized := ""
+	if strings.TrimSpace(email) != "" {
+		if normalized = normalizeEmail(email); normalized == "" {
+			return newUserSpec{}, newError(CodeInvalidArgument, msgMailBadAddress)
 		}
 	}
-	hash, err := crypto.HashPassword(in.Password)
+	hash, err := crypto.HashPassword(password)
 	if err != nil {
-		return nil, fmt.Errorf("hash user password: %w", err)
+		return newUserSpec{}, fmt.Errorf("hash user password: %w", err)
 	}
+	return newUserSpec{Username: username, LoginHash: hash, Remark: remark, Email: normalized, EmailVerified: true}, nil
+}
+
+// CreateUser 新建用户（U1），可同时分配套餐（U6）；面板凭据在此生成并加密保存。
+func (s *UserService) CreateUser(ctx context.Context, actor *AdminPrincipal, in UserCreateInput, ip *netip.Addr) (*User, error) {
+	spec, err := prepareNewUser(in.Username, in.Password, in.Remark, in.Email)
+	if err != nil {
+		return nil, err
+	}
+	spec.PlanID = in.PlanID
 	var id int64
 	err = s.inTx(ctx, func(q *sqlcgen.Queries) error {
-		spec := newUserSpec{Username: in.Username, LoginHash: hash, Remark: in.Remark, Email: email, EmailVerified: true, PlanID: in.PlanID}
 		if id, err = s.createUserTx(ctx, q, spec, s.now()); err != nil {
 			return err
 		}
-		return writeAudit(ctx, q, adminAudit(actor, ActionUserCreate, targetUser, id, ip, map[string]any{"username": in.Username, "planId": in.PlanID}))
+		return writeAudit(ctx, q, adminAudit(actor, ActionUserCreate, targetUser, id, ip, map[string]any{"username": spec.Username, "planId": in.PlanID}))
 	})
 	if err != nil {
 		return nil, err
@@ -844,7 +856,7 @@ func setUserEmailTx(ctx context.Context, q *sqlcgen.Queries, id int64, email str
 // UpdateUser 修改备注、启停与邮箱。
 func (s *UserService) UpdateUser(ctx context.Context, actor *AdminPrincipal, id int64, in UserUpdateInput, ip *netip.Addr) (*User, error) {
 	if utf8.RuneCountInString(in.Remark) > maxUserRemarkLen {
-		return nil, newError(CodeInvalidArgument, "备注过长")
+		return nil, newError(CodeInvalidArgument, msgRemarkTooLong)
 	}
 	email := ""
 	if in.Email != nil && strings.TrimSpace(*in.Email) != "" {

@@ -240,69 +240,91 @@ func (h *handlers) authenticateAdmin(w http.ResponseWriter, r *http.Request) *se
 	return p
 }
 
-// requireAdmin 校验会话、CSRF（非 GET/HEAD）与权限码（perm 为空表示只需登录），见 docs/03 §4.1 R1、§4.2。
-// 判定顺序：认证 → CSRF → 代理账号（只放行 withSelf 的本人接口，Ruling-101）→ 超管未开启两步验证（R10）→ 权限码 → 二次验证（R12）；
-// 没有权限的人不会被要求二次验证。
-func (h *handlers) requireAdmin(perm string, next adminHandler, opts ...routeOption) http.HandlerFunc {
-	var policy routePolicy
-	for _, opt := range opts {
-		opt(&policy)
-	}
+// 管理端鉴权的固定错误；只读共享，不要修改字段。
+var (
+	errNoPermission      = &service.Error{Code: service.CodePermissionDenied, Message: msgNoPermission}
+	errTOTPSetupRequired = &service.Error{Code: service.CodeTOTPSetupRequired, Message: msgTOTPSetupRequired}
+	errReauthRequired    = &service.Error{Code: service.CodeReauthRequired, Message: msgReauthRequired}
+)
+
+// adminCheck 是认证通过后的一条路由的鉴权判定：返回 nil 放行，否则返回要写出的错误。
+type adminCheck func(r *http.Request, p *service.AdminPrincipal) error
+
+// guardAdmin 是 requireAdmin / requireAgent 共用的外壳：认证（会话 + CSRF）→ check → 写出错误或放行到 next。
+func (h *handlers) guardAdmin(check adminCheck, next adminHandler) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		p := h.authenticateAdmin(w, r)
 		if p == nil {
 			return
 		}
-		// 默认拒绝：代理只能用本人接口与 /api/admin/agent/*（Ruling-101）
-		if p.IsAgent() && !policy.self {
-			writeError(w, r, &service.Error{Code: service.CodePermissionDenied, Message: msgNoPermission})
-			return
-		}
-		if p.TOTPSetupRequired() && !policy.setupExempt {
-			writeError(w, r, &service.Error{Code: service.CodeTOTPSetupRequired, Message: msgTOTPSetupRequired})
-			return
-		}
-		lacksPerm := (perm != "" && !p.Can(perm)) || (policy.extraPerm != "" && !p.Can(policy.extraPerm))
-		if lacksPerm {
-			writeError(w, r, &service.Error{Code: service.CodePermissionDenied, Message: msgNoPermission})
-			return
-		}
-		if policy.fresh && !p.ReauthFresh {
-			writeError(w, r, &service.Error{Code: service.CodeReauthRequired, Message: msgReauthRequired})
+		if err := check(r, p); err != nil {
+			writeError(w, r, err)
 			return
 		}
 		next(w, r, p)
 	}
 }
 
-// requireAgent 是代理专用接口 /api/admin/agent/* 的鉴权（Ruling-101）：只放行代理会话，员工（含超管）一律 403，不看权限码。
-// 判定顺序：认证 → CSRF → 账号类型 → 二次验证（带 withFresh 时，R12）→ 写操作频控（非 GET/HEAD，Ruling-104）。
-func (h *handlers) requireAgent(next adminHandler, opts ...routeOption) http.HandlerFunc {
+// buildPolicy 依次应用路由选项得到 routePolicy。
+func buildPolicy(opts []routeOption) routePolicy {
 	var policy routePolicy
 	for _, opt := range opts {
 		opt(&policy)
 	}
-	return func(w http.ResponseWriter, r *http.Request) {
-		p := h.authenticateAdmin(w, r)
-		if p == nil {
-			return
-		}
-		if !p.IsAgent() {
-			writeError(w, r, &service.Error{Code: service.CodePermissionDenied, Message: msgNoPermission})
-			return
-		}
-		if policy.fresh && !p.ReauthFresh {
-			writeError(w, r, &service.Error{Code: service.CodeReauthRequired, Message: msgReauthRequired})
-			return
-		}
-		if isUnsafeMethod(r.Method) {
-			if err := h.agents.AllowWrite(p); err != nil {
-				writeError(w, r, err)
-				return
-			}
-		}
-		next(w, r, p)
+	return policy
+}
+
+// requireAdmin 校验会话、CSRF（非 GET/HEAD）与权限码（perm 为空表示只需登录），见 docs/03 §4.1 R1、§4.2。
+// 判定顺序见 checkAdmin。
+func (h *handlers) requireAdmin(perm string, next adminHandler, opts ...routeOption) http.HandlerFunc {
+	policy := buildPolicy(opts)
+	return h.guardAdmin(func(_ *http.Request, p *service.AdminPrincipal) error {
+		return checkAdmin(p, perm, policy)
+	}, next)
+}
+
+// checkAdmin 是员工管理端路由的判定，顺序：代理账号（只放行 withSelf 的本人接口，Ruling-101）→ 超管未开启两步验证（R10）→
+// 权限码 → 二次验证（R12）；没有权限的人不会被要求二次验证。认证与 CSRF 已由外壳先做。
+func checkAdmin(p *service.AdminPrincipal, perm string, policy routePolicy) error {
+	// 默认拒绝：代理只能用本人接口与 /api/admin/agent/*（Ruling-101）
+	if p.IsAgent() && !policy.self {
+		return errNoPermission
 	}
+	if p.TOTPSetupRequired() && !policy.setupExempt {
+		return errTOTPSetupRequired
+	}
+	lacksPerm := (perm != "" && !p.Can(perm)) || (policy.extraPerm != "" && !p.Can(policy.extraPerm))
+	if lacksPerm {
+		return errNoPermission
+	}
+	if policy.fresh && !p.ReauthFresh {
+		return errReauthRequired
+	}
+	return nil
+}
+
+// requireAgent 是代理专用接口 /api/admin/agent/* 的鉴权（Ruling-101）：只放行代理会话，员工（含超管）一律 403，不看权限码。
+// 判定顺序见 checkAgent。
+func (h *handlers) requireAgent(next adminHandler, opts ...routeOption) http.HandlerFunc {
+	policy := buildPolicy(opts)
+	return h.guardAdmin(func(r *http.Request, p *service.AdminPrincipal) error {
+		return h.checkAgent(r, p, policy)
+	}, next)
+}
+
+// checkAgent 是代理专用路由的判定，顺序：账号类型 → 二次验证（带 withFresh 时，R12）→ 写操作频控（非 GET/HEAD，Ruling-104）。
+// 认证与 CSRF 已由外壳先做。
+func (h *handlers) checkAgent(r *http.Request, p *service.AdminPrincipal, policy routePolicy) error {
+	if !p.IsAgent() {
+		return errNoPermission
+	}
+	if policy.fresh && !p.ReauthFresh {
+		return errReauthRequired
+	}
+	if isUnsafeMethod(r.Method) {
+		return h.agents.AllowWrite(p)
+	}
+	return nil
 }
 
 func isUnsafeMethod(method string) bool {

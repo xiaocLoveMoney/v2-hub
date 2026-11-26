@@ -10,14 +10,9 @@ FROM admin
 WHERE id = $1;
 
 -- name: CreateAdmin :one
-INSERT INTO admin (username, password_hash)
-VALUES ($1, $2)
-RETURNING id, created_at;
-
--- name: CreateAgentAdmin :one
--- 代理账号（Ruling-101）：kind 创建后不可改，不持角色
+-- kind 为 staff（员工）或 agent（代理，不持角色，Ruling-101），创建后不可改
 INSERT INTO admin (username, password_hash, kind)
-VALUES ($1, $2, 'agent')
+VALUES (sqlc.arg(username), sqlc.arg(password_hash), sqlc.arg(kind))
 RETURNING id, created_at;
 
 -- name: UpdateAdminDisabled :exec

@@ -222,11 +222,7 @@ func (h *handlers) agentCreateUser(w http.ResponseWriter, r *http.Request, p *se
 	pw := req.Credential
 	in.Password = pw
 	u, err := h.agents.CreateUser(r.Context(), p, in, clientIP(r, h.trustedProxies))
-	if err != nil {
-		writeError(w, r, err)
-		return
-	}
-	writeOK(w, toAgentUserVO(*u))
+	writeAgentUser(w, r, u, err)
 }
 
 func (h *handlers) agentGetUser(w http.ResponseWriter, r *http.Request, p *service.AdminPrincipal) {
@@ -236,11 +232,7 @@ func (h *handlers) agentGetUser(w http.ResponseWriter, r *http.Request, p *servi
 		return
 	}
 	u, err := h.agents.GetUser(r.Context(), p, id)
-	if err != nil {
-		writeError(w, r, err)
-		return
-	}
-	writeOK(w, toAgentUserVO(*u))
+	writeAgentUser(w, r, u, err)
 }
 
 func (h *handlers) agentUpdateUser(w http.ResponseWriter, r *http.Request, p *service.AdminPrincipal) {
@@ -251,11 +243,7 @@ func (h *handlers) agentUpdateUser(w http.ResponseWriter, r *http.Request, p *se
 		return
 	}
 	u, err := h.agents.UpdateUser(r.Context(), p, id, service.AgentUserUpdateInput{Remark: req.Remark, IsDisabled: req.IsDisabled}, clientIP(r, h.trustedProxies))
-	if err != nil {
-		writeError(w, r, err)
-		return
-	}
-	writeOK(w, toAgentUserVO(*u))
+	writeAgentUser(w, r, u, err)
 }
 
 func (h *handlers) agentDeleteUser(w http.ResponseWriter, r *http.Request, p *service.AdminPrincipal) {
@@ -278,16 +266,8 @@ func (h *handlers) agentAssignUserPlan(w http.ResponseWriter, r *http.Request, p
 		writeError(w, r, err)
 		return
 	}
-	if req.PlanID < 1 {
-		writeError(w, r, badRequest(msgPickPlan))
-		return
-	}
 	u, err := h.agents.AssignPlan(r.Context(), p, id, req.PlanID, clientIP(r, h.trustedProxies))
-	if err != nil {
-		writeError(w, r, err)
-		return
-	}
-	writeOK(w, toAgentUserVO(*u))
+	writeAgentUser(w, r, u, err)
 }
 
 func (h *handlers) agentUpdateUserQuota(w http.ResponseWriter, r *http.Request, p *service.AdminPrincipal) {
@@ -303,11 +283,7 @@ func (h *handlers) agentUpdateUserQuota(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 	u, err := h.agents.UpdateQuota(r.Context(), p, id, in, clientIP(r, h.trustedProxies))
-	if err != nil {
-		writeError(w, r, err)
-		return
-	}
-	writeOK(w, toAgentUserVO(*u))
+	writeAgentUser(w, r, u, err)
 }
 
 func (h *handlers) agentResetUserPassword(w http.ResponseWriter, r *http.Request, p *service.AdminPrincipal) {
@@ -432,11 +408,7 @@ func (h *handlers) agentGetTicket(w http.ResponseWriter, r *http.Request, p *ser
 		return
 	}
 	d, err := h.agents.GetTicket(r.Context(), p, id)
-	if err != nil {
-		writeError(w, r, err)
-		return
-	}
-	writeOK(w, toTicketDetailVO(d, true))
+	writeAgentTicket(w, r, d, err)
 }
 
 func (h *handlers) agentReplyTicket(w http.ResponseWriter, r *http.Request, p *service.AdminPrincipal) {
@@ -447,11 +419,7 @@ func (h *handlers) agentReplyTicket(w http.ResponseWriter, r *http.Request, p *s
 		return
 	}
 	d, err := h.agents.ReplyTicket(r.Context(), p, id, req.Content, clientIP(r, h.trustedProxies))
-	if err != nil {
-		writeError(w, r, err)
-		return
-	}
-	writeOK(w, toTicketDetailVO(d, true))
+	writeAgentTicket(w, r, d, err)
 }
 
 func (h *handlers) agentCloseTicket(w http.ResponseWriter, r *http.Request, p *service.AdminPrincipal) {
@@ -461,6 +429,20 @@ func (h *handlers) agentCloseTicket(w http.ResponseWriter, r *http.Request, p *s
 		return
 	}
 	d, err := h.agents.CloseTicket(r.Context(), p, id, clientIP(r, h.trustedProxies))
+	writeAgentTicket(w, r, d, err)
+}
+
+// writeAgentUser 输出一个名下用户；err 非空时输出错误。
+func writeAgentUser(w http.ResponseWriter, r *http.Request, u *service.AgentUser, err error) {
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeOK(w, toAgentUserVO(*u))
+}
+
+// writeAgentTicket 输出代理看到的一张工单详情；err 非空时输出错误。
+func writeAgentTicket(w http.ResponseWriter, r *http.Request, d *service.TicketDetail, err error) {
 	if err != nil {
 		writeError(w, r, err)
 		return

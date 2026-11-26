@@ -390,29 +390,44 @@ func (s *AccountService) CreateInviteCode(ctx context.Context, actor *AdminPrinc
 	if err := in.validate(); err != nil {
 		return nil, err
 	}
+	id, err := s.insertWithFreshInviteCode(ctx, "create invite code", func(q *sqlcgen.Queries, code string) (int64, error) {
+		id, err := q.CreateAdminInviteCode(ctx, sqlcgen.CreateAdminInviteCodeParams{
+			Code: code, MaxUses: int32(in.MaxUses), ExpiresAt: optionalTime(in.ExpiresAt), IsDisabled: in.IsDisabled, Remark: in.Remark,
+			CreatedBy: int8Arg(actor.AdminID),
+		})
+		if err != nil {
+			return 0, err
+		}
+		return id, writeAudit(ctx, q, adminAudit(actor, ActionInviteCreate, targetInvite, id, ip, map[string]any{"maxUses": in.MaxUses}))
+	})
+	if err != nil {
+		return nil, err
+	}
+	return s.getInviteCode(ctx, id)
+}
+
+// insertWithFreshInviteCode 生成随机邀请码并在一个事务里调用 insert（插入并写审计，返回新码 id）；撞上唯一约束就换码重试，
+// 最多 inviteGenRetries 次。op 是错误上下文。管理员码与代理码共用，各自的插入语句留在调用方。
+func (s store) insertWithFreshInviteCode(ctx context.Context, op string, insert func(q *sqlcgen.Queries, code string) (int64, error)) (int64, error) {
 	for range inviteGenRetries {
 		code, err := randomInviteCode()
 		if err != nil {
-			return nil, err
+			return 0, err
 		}
 		var id int64
 		err = s.inTx(ctx, func(q *sqlcgen.Queries) error {
-			if id, err = q.CreateAdminInviteCode(ctx, sqlcgen.CreateAdminInviteCodeParams{
-				Code: code, MaxUses: int32(in.MaxUses), ExpiresAt: optionalTime(in.ExpiresAt), IsDisabled: in.IsDisabled, Remark: in.Remark,
-				CreatedBy: int8Arg(actor.AdminID),
-			}); err != nil {
-				return err
-			}
-			return writeAudit(ctx, q, adminAudit(actor, ActionInviteCreate, targetInvite, id, ip, map[string]any{"maxUses": in.MaxUses}))
+			var insertErr error
+			id, insertErr = insert(q, code)
+			return insertErr
 		})
 		if err == nil {
-			return s.getInviteCode(ctx, id)
+			return id, nil
 		}
 		if !isUniqueViolation(err) {
-			return nil, fmt.Errorf("create invite code: %w", err)
+			return 0, fmt.Errorf("%s: %w", op, err)
 		}
 	}
-	return nil, fmt.Errorf("create invite code: gave up after %d collisions", inviteGenRetries)
+	return 0, fmt.Errorf("%s: gave up after %d collisions", op, inviteGenRetries)
 }
 
 // UpdateInviteCode 修改邀请码：管理员码改次数、到期、备注与停用；个人码只改停用。错误：CodeNotFound、CodeInvalidArgument。

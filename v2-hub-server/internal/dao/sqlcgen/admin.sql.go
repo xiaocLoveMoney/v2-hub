@@ -87,14 +87,15 @@ func (q *Queries) CountEnabledAdminsWithRoleExcluding(ctx context.Context, arg C
 }
 
 const createAdmin = `-- name: CreateAdmin :one
-INSERT INTO admin (username, password_hash)
-VALUES ($1, $2)
+INSERT INTO admin (username, password_hash, kind)
+VALUES ($1, $2, $3)
 RETURNING id, created_at
 `
 
 type CreateAdminParams struct {
 	Username     string
 	PasswordHash string
+	Kind         string
 }
 
 type CreateAdminRow struct {
@@ -102,33 +103,10 @@ type CreateAdminRow struct {
 	CreatedAt pgtype.Timestamptz
 }
 
+// kind 为 staff（员工）或 agent（代理，不持角色，Ruling-101），创建后不可改
 func (q *Queries) CreateAdmin(ctx context.Context, arg CreateAdminParams) (CreateAdminRow, error) {
-	row := q.db.QueryRow(ctx, createAdmin, arg.Username, arg.PasswordHash)
+	row := q.db.QueryRow(ctx, createAdmin, arg.Username, arg.PasswordHash, arg.Kind)
 	var i CreateAdminRow
-	err := row.Scan(&i.ID, &i.CreatedAt)
-	return i, err
-}
-
-const createAgentAdmin = `-- name: CreateAgentAdmin :one
-INSERT INTO admin (username, password_hash, kind)
-VALUES ($1, $2, 'agent')
-RETURNING id, created_at
-`
-
-type CreateAgentAdminParams struct {
-	Username     string
-	PasswordHash string
-}
-
-type CreateAgentAdminRow struct {
-	ID        int64
-	CreatedAt pgtype.Timestamptz
-}
-
-// 代理账号（Ruling-101）：kind 创建后不可改，不持角色
-func (q *Queries) CreateAgentAdmin(ctx context.Context, arg CreateAgentAdminParams) (CreateAgentAdminRow, error) {
-	row := q.db.QueryRow(ctx, createAgentAdmin, arg.Username, arg.PasswordHash)
-	var i CreateAgentAdminRow
 	err := row.Scan(&i.ID, &i.CreatedAt)
 	return i, err
 }

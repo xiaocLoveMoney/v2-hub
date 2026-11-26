@@ -83,24 +83,6 @@ func (q *Queries) CountActiveHostTasks(ctx context.Context, hostID int64) (int64
 	return count, err
 }
 
-const countServerHostsByTarget = `-- name: CountServerHostsByTarget :one
-SELECT COUNT(*) FROM server_host WHERE credential_id = $1 AND address = $2 AND ssh_port = $3
-`
-
-type CountServerHostsByTargetParams struct {
-	CredentialID int64
-	Address      string
-	SshPort      int32
-}
-
-// 密码凭据的确认（Ruling-97）：这份凭据是否已用在这个（地址，端口）上
-func (q *Queries) CountServerHostsByTarget(ctx context.Context, arg CountServerHostsByTargetParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countServerHostsByTarget, arg.CredentialID, arg.Address, arg.SshPort)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
-}
-
 const countServersByName = `-- name: CountServersByName :one
 SELECT COUNT(*) FROM server WHERE name = $1
 `
@@ -557,6 +539,31 @@ func (q *Queries) GetServerHost(ctx context.Context, id int64) (GetServerHostRow
 		&i.DnsAccountName,
 	)
 	return i, err
+}
+
+const hasUnusedHostTarget = `-- name: HasUnusedHostTarget :one
+SELECT EXISTS (
+    SELECT 1
+    FROM unnest($1::text[]) AS t(address)
+    WHERE NOT EXISTS (
+        SELECT 1 FROM server_host h
+        WHERE h.credential_id = $2 AND h.address = t.address AND h.ssh_port = $3::integer
+    )
+)::boolean
+`
+
+type HasUnusedHostTargetParams struct {
+	Addresses    []string
+	CredentialID int64
+	SshPort      int32
+}
+
+// 密码凭据的确认（Ruling-97）：同一端口下的这批地址里，是否有这份凭据还没用过的（地址，端口）
+func (q *Queries) HasUnusedHostTarget(ctx context.Context, arg HasUnusedHostTargetParams) (bool, error) {
+	row := q.db.QueryRow(ctx, hasUnusedHostTarget, arg.Addresses, arg.CredentialID, arg.SshPort)
+	var column_1 bool
+	err := row.Scan(&column_1)
+	return column_1, err
 }
 
 const listDNSAccounts = `-- name: ListDNSAccounts :many

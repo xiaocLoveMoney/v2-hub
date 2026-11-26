@@ -225,13 +225,21 @@ type LedgerFilter struct {
 	Kind   string
 }
 
+// validate 校验流水筛选的 kind 是已知的流水类型；管理端与代理侧共用。错误：CodeInvalidArgument。
+func (f LedgerFilter) validate() error {
+	if f.Kind != "" && !ledgerKinds[f.Kind] {
+		return newError(CodeInvalidArgument, msgLedgerBadKind)
+	}
+	return nil
+}
+
 func (s *WalletService) listLedger(ctx context.Context, f LedgerFilter, pq PageQuery) (*Page[LedgerEntry], error) {
 	limit, offset, err := pq.normalize()
 	if err != nil {
 		return nil, err
 	}
-	if f.Kind != "" && !ledgerKinds[f.Kind] {
-		return nil, newError(CodeInvalidArgument, msgLedgerBadKind)
+	if err := f.validate(); err != nil {
+		return nil, err
 	}
 	if f.UserID < 0 {
 		return nil, newError(CodeInvalidArgument, msgUserNotFound)

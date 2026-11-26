@@ -1026,8 +1026,14 @@ func (q *Queries) SetServerProvisionsOnline(ctx context.Context, arg SetServerPr
 	return err
 }
 
-const setUserAgent = `-- name: SetUserAgent :execrows
-UPDATE end_user SET agent_id = $1, updated_at = now() WHERE id = $2 AND deleted_at IS NULL
+const setUserAgent = `-- name: SetUserAgent :one
+WITH before AS (
+    SELECT e.id, e.agent_id FROM end_user e WHERE e.id = $2::bigint AND e.deleted_at IS NULL
+)
+UPDATE end_user u SET agent_id = $1, updated_at = now()
+FROM before
+WHERE u.id = before.id
+RETURNING before.agent_id AS previous_agent_id
 `
 
 type SetUserAgentParams struct {
@@ -1035,13 +1041,12 @@ type SetUserAgentParams struct {
 	ID      int64
 }
 
-// 超管划转或收回（Ruling-102）：只改归属
-func (q *Queries) SetUserAgent(ctx context.Context, arg SetUserAgentParams) (int64, error) {
-	result, err := q.db.Exec(ctx, setUserAgent, arg.AgentID, arg.ID)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
+// 超管划转或收回（Ruling-102）：只改归属，带回划转前的 agent_id 供审计（CTE 读的是更新前的快照）
+func (q *Queries) SetUserAgent(ctx context.Context, arg SetUserAgentParams) (pgtype.Int8, error) {
+	row := q.db.QueryRow(ctx, setUserAgent, arg.AgentID, arg.ID)
+	var previous_agent_id pgtype.Int8
+	err := row.Scan(&previous_agent_id)
+	return previous_agent_id, err
 }
 
 const setUserCredential = `-- name: SetUserCredential :exec

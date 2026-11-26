@@ -130,7 +130,7 @@ func (s *AuthService) EnableTOTP(ctx context.Context, p *AdminPrincipal, code st
 			return fmt.Errorf("enable totp of admin %d: %w", p.AdminID, err)
 		}
 		// 开启成功视为刚做过二次验证（R12）：刚用掉的步长不能再拿来验一次
-		if err := s.refreshReauth(ctx, q, p.SessionID); err != nil {
+		if _, err := s.refreshReauth(ctx, q, p.SessionID); err != nil {
 			return err
 		}
 		return writeAudit(ctx, q, adminAudit(p, ActionAdminTOTPEnable, targetAdmin, p.AdminID, ip, nil))
@@ -189,12 +189,18 @@ func (s *RBACService) ResetAdminTOTP(ctx context.Context, actor *AdminPrincipal,
 		if _, err := resolveAssignableRoles(ctx, q, actor, currentRoles); err != nil {
 			return err
 		}
-		if _, err := q.ClearAdminTOTP(ctx, id); err != nil {
-			return fmt.Errorf("clear totp of admin %d: %w", id, err)
-		}
-		if err := q.DeleteAdminSessionsByAdmin(ctx, id); err != nil {
-			return fmt.Errorf("revoke sessions of admin %d: %w", id, err)
-		}
-		return writeAudit(ctx, q, adminAudit(actor, ActionAdminTOTPReset, targetAdmin, id, ip, nil))
+		return clearAdminTOTPTx(ctx, q, id, adminAudit(actor, ActionAdminTOTPReset, targetAdmin, id, ip, nil))
 	})
+}
+
+// clearAdminTOTPTx 在调用方的事务里清除管理员的两步验证、吊销其全部会话并写审计（R7）；
+// 管理端重置与命令行重置共用，审计项（操作者不同）由调用方给出。
+func clearAdminTOTPTx(ctx context.Context, q *sqlcgen.Queries, id int64, audit AuditEntry) error {
+	if _, err := q.ClearAdminTOTP(ctx, id); err != nil {
+		return fmt.Errorf("clear totp of admin %d: %w", id, err)
+	}
+	if err := q.DeleteAdminSessionsByAdmin(ctx, id); err != nil {
+		return fmt.Errorf("revoke sessions of admin %d: %w", id, err)
+	}
+	return writeAudit(ctx, q, audit)
 }

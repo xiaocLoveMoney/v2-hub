@@ -22,16 +22,11 @@ const (
 	msgCredentialSecretTooMany  = "凭据密码输错次数过多，请稍后再试"
 )
 
-// hostTarget 是一次连接的（地址，端口）；地址须已规范化，与 server_host 里存的形式一致。
-type hostTarget struct {
-	address string
-	port    int
-}
-
-// confirmCredentialForNewTargets 在凭据是密码类型、且 targets 里有（凭据，地址，端口）还没出现在 server_host 时要求确认，
-// 整批只比对一次。返回是否做过确认。
-// 错误：CodeNotFound（凭据不存在）、CodeInvalidArgument（缺密码或不一致）、CodeRateLimited。
-func (s *HostService) confirmCredentialForNewTargets(ctx context.Context, actor *AdminPrincipal, credentialID int64, targets []hostTarget, secret string) (bool, error) {
+// confirmCredentialForNewTargets 在凭据是密码类型、且这批目标里有（凭据，地址，端口）还没出现在 server_host 时要求确认，
+// 整批只比对一次。一批目标共用一个 SSH 端口（批量建主机的端口是整批的）；地址须已规范化，与 server_host 里存的形式一致。
+// 返回是否做过确认。错误：CodeNotFound（凭据不存在）、CodeInvalidArgument（缺密码或不一致）、CodeRateLimited。
+func (s *HostService) confirmCredentialForNewTargets(ctx context.Context, actor *AdminPrincipal, credentialID int64, sshPort int, addresses []string,
+	secret string) (bool, error) {
 	row, err := s.credentialAuthRow(ctx, credentialID)
 	if err != nil {
 		return false, err
@@ -39,7 +34,7 @@ func (s *HostService) confirmCredentialForNewTargets(ctx context.Context, actor 
 	if row.AuthType != SSHAuthPassword {
 		return false, nil
 	}
-	isNew, err := s.hasUnusedTarget(ctx, credentialID, targets)
+	isNew, err := s.hasUnusedTarget(ctx, credentialID, sshPort, addresses)
 	if err != nil {
 		return false, err
 	}
@@ -73,20 +68,15 @@ func (s *HostService) credentialAuthRow(ctx context.Context, credentialID int64)
 	return row, nil
 }
 
-// hasUnusedTarget 报告 targets 里是否有这份凭据还没用过的（地址，端口）。
-func (s *HostService) hasUnusedTarget(ctx context.Context, credentialID int64, targets []hostTarget) (bool, error) {
-	for _, t := range targets {
-		n, err := s.q.CountServerHostsByTarget(ctx, sqlcgen.CountServerHostsByTargetParams{
-			CredentialID: credentialID, Address: t.address, SshPort: int32(t.port), //nolint:gosec // 端口已校验在 1–65535
-		})
-		if err != nil {
-			return false, fmt.Errorf("count hosts of credential %d: %w", credentialID, err)
-		}
-		if n == 0 {
-			return true, nil
-		}
+// hasUnusedTarget 报告（地址，sshPort）里是否有这份凭据还没用过的，一条查询判断整批；addresses 为空时为假。
+func (s *HostService) hasUnusedTarget(ctx context.Context, credentialID int64, sshPort int, addresses []string) (bool, error) {
+	unused, err := s.q.HasUnusedHostTarget(ctx, sqlcgen.HasUnusedHostTargetParams{
+		Addresses: addresses, CredentialID: credentialID, SshPort: int32(sshPort), //nolint:gosec // 端口已校验在 1–65535
+	})
+	if err != nil {
+		return false, fmt.Errorf("check hosts of credential %d: %w", credentialID, err)
 	}
-	return false, nil
+	return unused, nil
 }
 
 // compareCredentialSecret 解密已存密码并与 secret 做常量时间比较；不一致按管理员计入频控。密码不进日志与错误信息。

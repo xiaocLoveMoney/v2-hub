@@ -61,6 +61,7 @@ const (
 	msgAutoRenewOffSale  = "该套餐已下架或时长选项已不存在，无法自动续费"
 	msgAutoRenewOther    = "当前套餐不是上次购买的套餐，请重新购买后再开启"
 	msgOrderBadTime      = "from 须早于 to"
+	msgOrderFilterKind   = "kind 只能是 plan、traffic_pack、renew"
 )
 
 // errCouponInvalid 是优惠码不可用的统一错误（提示不区分原因，docs/03 §5.15 防猜）；按指针比较，用来给防猜计数。
@@ -514,16 +515,29 @@ type OrderFilter struct {
 	To     *time.Time // 创建时间上限（不含）
 }
 
+// validate 校验订单筛选：kind 只能是已知的订单类型，时间范围见 validateTimeRange。管理端与代理侧共用。错误：CodeInvalidArgument。
+func (f OrderFilter) validate() error {
+	if f.Kind != "" && f.Kind != OrderPlan && f.Kind != OrderTrafficPack && f.Kind != OrderRenew {
+		return newError(CodeInvalidArgument, msgOrderFilterKind)
+	}
+	return validateTimeRange(f.From, f.To)
+}
+
+// validateTimeRange 在 from 与 to 都给出时要求 from 早于 to（按创建时间筛选的列表共用）。错误：CodeInvalidArgument。
+func validateTimeRange(from, to *time.Time) error {
+	if from != nil && to != nil && !from.Before(*to) {
+		return newError(CodeInvalidArgument, msgOrderBadTime)
+	}
+	return nil
+}
+
 func (s *ShopService) listOrders(ctx context.Context, f OrderFilter, pq PageQuery) (*Page[Order], error) {
 	limit, offset, err := pq.normalize()
 	if err != nil {
 		return nil, err
 	}
-	if f.Kind != "" && f.Kind != OrderPlan && f.Kind != OrderTrafficPack && f.Kind != OrderRenew {
-		return nil, newError(CodeInvalidArgument, "kind 只能是 plan、traffic_pack、renew")
-	}
-	if f.From != nil && f.To != nil && !f.From.Before(*f.To) {
-		return nil, newError(CodeInvalidArgument, msgOrderBadTime)
+	if err := f.validate(); err != nil {
+		return nil, err
 	}
 	from, to := optionalTime(f.From), optionalTime(f.To)
 	rows, err := s.q.ListOrders(ctx, sqlcgen.ListOrdersParams{UserID: f.UserID, Kind: f.Kind, FromTime: from, ToTime: to, RowLimit: limit, RowOffset: offset})

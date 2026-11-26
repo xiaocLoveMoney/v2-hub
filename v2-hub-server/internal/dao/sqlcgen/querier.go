@@ -160,8 +160,6 @@ type Querier interface {
 	CountPlansByIDs(ctx context.Context, ids []int64) (int64, error)
 	CountPublishedAnnouncements(ctx context.Context) (int64, error)
 	CountRebates(ctx context.Context, inviterID int64) (int64, error)
-	// 密码凭据的确认（Ruling-97）：这份凭据是否已用在这个（地址，端口）上
-	CountServerHostsByTarget(ctx context.Context, arg CountServerHostsByTargetParams) (int64, error)
 	CountServerRoutesByExit(ctx context.Context, exitID pgtype.Int8) (int64, error)
 	// 新建主机时名称不能与已有服务器重名（部署成功后主机名就是服务器名）
 	CountServersByName(ctx context.Context, name string) (int64, error)
@@ -176,12 +174,11 @@ type Querier interface {
 	CountUsersCreatedBetween(ctx context.Context, arg CountUsersCreatedBetweenParams) (int32, error)
 	CouponCoversPlan(ctx context.Context, arg CouponCoversPlanParams) (bool, error)
 	CouponExists(ctx context.Context, id int64) (bool, error)
+	// kind 为 staff（员工）或 agent（代理，不持角色，Ruling-101），创建后不可改
 	CreateAdmin(ctx context.Context, arg CreateAdminParams) (CreateAdminRow, error)
 	CreateAdminInviteCode(ctx context.Context, arg CreateAdminInviteCodeParams) (int64, error)
 	// reauth_until：登录成功视为刚做过二次验证（Ruling-100）
 	CreateAdminSession(ctx context.Context, arg CreateAdminSessionParams) (int64, error)
-	// 代理账号（Ruling-101）：kind 创建后不可改，不持角色
-	CreateAgentAdmin(ctx context.Context, arg CreateAgentAdminParams) (CreateAgentAdminRow, error)
 	// 二级代理（docs/03 §5.23，Ruling-101 – Ruling-104）-------------------------------------
 	// 代理侧（Agent 前缀）的每个查询都必须带 agent_id = 当前代理 的条件，agent_id 只取自会话，不接受请求里的值。
 	// ---- 超管侧：代理账号与配额 ----
@@ -382,6 +379,8 @@ type Querier interface {
 	// 与 ListVisibleSharedAccounts 同样的可见性条件，防止凭 id 读到不可见的条目
 	GetVisibleSharedAccountCredential(ctx context.Context, arg GetVisibleSharedAccountCredentialParams) ([]byte, error)
 	HasTrialOrder(ctx context.Context, userID pgtype.Int8) (bool, error)
+	// 密码凭据的确认（Ruling-97）：同一端口下的这批地址里，是否有这份凭据还没用过的（地址，端口）
+	HasUnusedHostTarget(ctx context.Context, arg HasUnusedHostTargetParams) (bool, error)
 	InsertAdminRoles(ctx context.Context, arg InsertAdminRolesParams) error
 	// 开通记录只追加（Ruling-103）
 	InsertAgentAllocation(ctx context.Context, arg InsertAgentAllocationParams) error
@@ -696,8 +695,8 @@ type Querier interface {
 	SetTicketStatus(ctx context.Context, arg SetTicketStatusParams) error
 	SetTopupCodeDisabled(ctx context.Context, arg SetTopupCodeDisabledParams) error
 	SetTrafficNotified(ctx context.Context, id int64) error
-	// 超管划转或收回（Ruling-102）：只改归属
-	SetUserAgent(ctx context.Context, arg SetUserAgentParams) (int64, error)
+	// 超管划转或收回（Ruling-102）：只改归属，带回划转前的 agent_id 供审计（CTE 读的是更新前的快照）
+	SetUserAgent(ctx context.Context, arg SetUserAgentParams) (pgtype.Int8, error)
 	SetUserAutoRenew(ctx context.Context, arg SetUserAutoRenewParams) error
 	SetUserBalance(ctx context.Context, arg SetUserBalanceParams) error
 	SetUserCredential(ctx context.Context, arg SetUserCredentialParams) error

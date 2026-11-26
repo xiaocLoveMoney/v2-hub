@@ -52,7 +52,24 @@ func (g *FailureGuard) IsLocked(key string) bool {
 func (g *FailureGuard) RecordFailure(key string) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
+	g.recordLocked(key, g.now())
+}
+
+// Allow 把频控当作“每窗口最多 MaxFailures 次”的限速器用：key 处于锁定期时返回 false 且不计数；
+// 否则记一次并返回 true（这一次正好用满上限时，之后的调用在 Lockout 内都被拒）。判断与计数在同一把锁内完成。
+func (g *FailureGuard) Allow(key string) bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
 	now := g.now()
+	if e, ok := g.entries[key]; ok && now.Before(e.lockedUntil) {
+		return false
+	}
+	g.recordLocked(key, now)
+	return true
+}
+
+// recordLocked 记 key 的一次失败，调用方须持有 g.mu。
+func (g *FailureGuard) recordLocked(key string, now time.Time) {
 	e, ok := g.entries[key]
 	if !ok {
 		if len(g.entries) >= g.cfg.MaxKeys {

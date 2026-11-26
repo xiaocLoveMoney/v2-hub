@@ -70,29 +70,21 @@ func (s *AgentService) CreateInviteCode(ctx context.Context, p *AdminPrincipal, 
 	if err := in.validate(); err != nil {
 		return nil, err
 	}
-	for range inviteGenRetries {
-		code, err := randomInviteCode()
-		if err != nil {
-			return nil, err
-		}
-		var id int64
-		err = s.inTx(ctx, func(q *sqlcgen.Queries) error {
-			if id, err = q.AgentCreateInviteCode(ctx, sqlcgen.AgentCreateInviteCodeParams{
-				Code: code, MaxUses: int32(in.MaxUses), ExpiresAt: optionalTime(in.ExpiresAt), IsDisabled: in.IsDisabled, Remark: in.Remark,
-				AgentID: agentKey(agentID),
-			}); err != nil {
-				return err
-			}
-			return writeAudit(ctx, q, adminAudit(p, ActionInviteCreate, targetInvite, id, ip, map[string]any{"maxUses": in.MaxUses}))
+	op := fmt.Sprintf("create invite code of agent %d", agentID)
+	id, err := s.insertWithFreshInviteCode(ctx, op, func(q *sqlcgen.Queries, code string) (int64, error) {
+		id, err := q.AgentCreateInviteCode(ctx, sqlcgen.AgentCreateInviteCodeParams{
+			Code: code, MaxUses: int32(in.MaxUses), ExpiresAt: optionalTime(in.ExpiresAt), IsDisabled: in.IsDisabled, Remark: in.Remark,
+			AgentID: agentKey(agentID),
 		})
-		if err == nil {
-			return s.getInviteCode(ctx, agentID, id)
+		if err != nil {
+			return 0, err
 		}
-		if !isUniqueViolation(err) {
-			return nil, fmt.Errorf("create invite code of agent %d: %w", agentID, err)
-		}
+		return id, writeAudit(ctx, q, adminAudit(p, ActionInviteCreate, targetInvite, id, ip, map[string]any{"maxUses": in.MaxUses}))
+	})
+	if err != nil {
+		return nil, err
 	}
-	return nil, fmt.Errorf("create invite code of agent %d: gave up after %d collisions", agentID, inviteGenRetries)
+	return s.getInviteCode(ctx, agentID, id)
 }
 
 // lockAgentInviteCode 锁住当前代理自己的一条邀请码；不是他的码一律 CodeNotFound。
@@ -153,12 +145,12 @@ func (s *AgentService) DeleteInviteCode(ctx context.Context, p *AdminPrincipal, 
 // ---- 工单 ------------------------------------------------------------------------
 
 func agentTicketsFromRows(rows []sqlcgen.AgentListTicketsRow) []Ticket {
-	out := make([]Ticket, 0, len(rows))
+	converted := make([]sqlcgen.ListTicketsRow, 0, len(rows))
 	for _, r := range rows {
-		out = append(out, Ticket{ID: r.ID, UserID: r.UserID, Username: r.Username, Subject: r.Subject, Status: r.Status,
-			LastReplyAt: r.LastReplyAt.Time, CreatedAt: r.CreatedAt.Time})
+		// 两条查询的行结构逐字段相同，可直接转换
+		converted = append(converted, sqlcgen.ListTicketsRow(r))
 	}
-	return out
+	return ticketsFromRows(converted)
 }
 
 // ListTickets 分页列出名下用户的工单，按最近回复倒序；UserID 不在名下时返回空列表。错误：CodeInvalidArgument。
@@ -208,23 +200,25 @@ func (s *AgentService) ticketDetail(ctx context.Context, agentID, id int64) (*Ti
 	if err != nil {
 		return nil, fmt.Errorf("list messages of ticket %d: %w", id, err)
 	}
-	d := &TicketDetail{Ticket: agentTicketsFromRows(rows)[0], Messages: make([]TicketMessage, 0, len(msgs))}
+	converted := make([]sqlcgen.ListTicketMessagesRow, 0, len(msgs))
 	for _, m := range msgs {
-		d.Messages = append(d.Messages, TicketMessage{ID: m.ID, AuthorKind: m.AuthorKind, AuthorName: m.AdminUsername, Content: m.Content, CreatedAt: m.CreatedAt.Time})
+		// 两条查询的行结构逐字段相同，可直接转换
+		converted = append(converted, sqlcgen.ListTicketMessagesRow(m))
 	}
-	return d, nil
+	return &TicketDetail{Ticket: agentTicketsFromRows(rows)[0], Messages: ticketMessagesFromRows(converted)}, nil
 }
 
 // lockAgentTicket 锁住名下用户的一张工单；不是名下用户的工单一律 CodeNotFound。
-func lockAgentTicket(ctx context.Context, q *sqlcgen.Queries, agentID, id int64) (sqlcgen.AgentLockTicketRow, error) {
+func lockAgentTicket(ctx context.Context, q *sqlcgen.Queries, agentID, id int64) (sqlcgen.GetTicketForUpdateRow, error) {
 	row, err := q.AgentLockTicket(ctx, sqlcgen.AgentLockTicketParams{ID: id, AgentID: agentKey(agentID)})
 	if errors.Is(err, pgx.ErrNoRows) {
-		return row, newError(CodeNotFound, msgTicketNotFound)
+		return sqlcgen.GetTicketForUpdateRow{}, newError(CodeNotFound, msgTicketNotFound)
 	}
 	if err != nil {
-		return row, fmt.Errorf("lock ticket %d of agent %d: %w", id, agentID, err)
+		return sqlcgen.GetTicketForUpdateRow{}, fmt.Errorf("lock ticket %d of agent %d: %w", id, agentID, err)
 	}
-	return row, nil
+	// 两条查询的行结构逐字段相同，可直接转换
+	return sqlcgen.GetTicketForUpdateRow(row), nil
 }
 
 // ReplyTicket 代理回复名下用户的工单：状态变为 answered，并给用户的已验证邮箱发不含正文的提醒（同员工回复）。
@@ -244,21 +238,7 @@ func (s *AgentService) ReplyTicket(ctx context.Context, p *AdminPrincipal, id in
 		if err != nil {
 			return err
 		}
-		if err := q.InsertTicketMessage(ctx, sqlcgen.InsertTicketMessageParams{
-			TicketID: id, AuthorKind: TicketAuthorAdmin, AdminID: int8Arg(agentID), Content: content, CreatedAt: timestamptz(now),
-		}); err != nil {
-			return fmt.Errorf("insert message of ticket %d: %w", id, err)
-		}
-		if err := q.SetTicketStatus(ctx, sqlcgen.SetTicketStatusParams{ID: id, Status: TicketAnswered, TouchReply: true, Now: timestamptz(now)}); err != nil {
-			return fmt.Errorf("mark ticket %d answered: %w", id, err)
-		}
-		to, err := q.GetUserNotifyEmail(ctx, row.UserID)
-		if err != nil {
-			return fmt.Errorf("get notify email of user %d: %w", row.UserID, err)
-		}
-		s.tickets.notify(ctx, q, to, mailTplTicketReply, row.Subject)
-		// 审计不记回复正文
-		return writeAudit(ctx, q, adminAudit(p, ActionTicketReply, targetTicket, id, ip, nil))
+		return s.tickets.staffReplyTx(ctx, q, p, row, content, now, ip)
 	})
 	if err != nil {
 		return nil, err
@@ -276,10 +256,7 @@ func (s *AgentService) CloseTicket(ctx context.Context, p *AdminPrincipal, id in
 		if _, err := lockAgentTicket(ctx, q, agentID, id); err != nil {
 			return err
 		}
-		if err := q.SetTicketStatus(ctx, sqlcgen.SetTicketStatusParams{ID: id, Status: TicketClosed, Now: timestamptz(s.now())}); err != nil {
-			return fmt.Errorf("close ticket %d: %w", id, err)
-		}
-		return writeAudit(ctx, q, adminAudit(p, ActionTicketClose, targetTicket, id, ip, nil))
+		return staffCloseTx(ctx, q, p, id, s.now(), ip)
 	})
 	if err != nil {
 		return nil, err
@@ -299,11 +276,8 @@ func (s *AgentService) ListOrders(ctx context.Context, p *AdminPrincipal, f Orde
 	if err != nil {
 		return nil, err
 	}
-	if f.Kind != "" && f.Kind != OrderPlan && f.Kind != OrderTrafficPack && f.Kind != OrderRenew {
-		return nil, newError(CodeInvalidArgument, "kind 只能是 plan、traffic_pack、renew")
-	}
-	if f.From != nil && f.To != nil && !f.From.Before(*f.To) {
-		return nil, newError(CodeInvalidArgument, msgOrderBadTime)
+	if err := f.validate(); err != nil {
+		return nil, err
 	}
 	from, to := optionalTime(f.From), optionalTime(f.To)
 	total, err := s.q.AgentCountOrders(ctx, sqlcgen.AgentCountOrdersParams{
@@ -340,8 +314,8 @@ func (s *AgentService) ListLedger(ctx context.Context, p *AdminPrincipal, f Ledg
 	if err != nil {
 		return nil, err
 	}
-	if f.Kind != "" && !ledgerKinds[f.Kind] {
-		return nil, newError(CodeInvalidArgument, msgLedgerBadKind)
+	if err := f.validate(); err != nil {
+		return nil, err
 	}
 	total, err := s.q.AgentCountLedger(ctx, sqlcgen.AgentCountLedgerParams{AgentID: agentKey(agentID), UserID: int8Arg(f.UserID), Kind: textArg(f.Kind)})
 	if err != nil {
@@ -385,8 +359,8 @@ func (s *AgentService) listAllocations(ctx context.Context, agentID int64, from,
 	if err != nil {
 		return nil, err
 	}
-	if from != nil && to != nil && !from.Before(*to) {
-		return nil, newError(CodeInvalidArgument, msgOrderBadTime)
+	if err := validateTimeRange(from, to); err != nil {
+		return nil, err
 	}
 	fromArg, toArg := optionalTime(from), optionalTime(to)
 	total, err := s.q.CountAgentAllocations(ctx, sqlcgen.CountAgentAllocationsParams{AgentID: agentID, FromTime: fromArg, ToTime: toArg})
@@ -401,19 +375,10 @@ func (s *AgentService) listAllocations(ctx context.Context, agentID int64, from,
 	}
 	items := make([]AgentAllocation, 0, len(rows))
 	for _, r := range rows {
-		a := AgentAllocation{
-			ID: r.ID, AgentID: r.AgentID, Username: r.Username, PlanName: r.PlanName, TrafficBytes: r.TrafficBytes,
-			DurationDays: int(r.DurationDays), Kind: r.Kind, CreatedAt: r.CreatedAt.Time,
-		}
-		if r.UserID.Valid {
-			id := r.UserID.Int64
-			a.UserID = &id
-		}
-		if r.PlanID.Valid {
-			id := r.PlanID.Int64
-			a.PlanID = &id
-		}
-		items = append(items, a)
+		items = append(items, AgentAllocation{
+			ID: r.ID, AgentID: r.AgentID, UserID: int8Ptr(r.UserID), Username: r.Username, PlanID: int8Ptr(r.PlanID), PlanName: r.PlanName,
+			TrafficBytes: r.TrafficBytes, DurationDays: int(r.DurationDays), Kind: r.Kind, CreatedAt: r.CreatedAt.Time,
+		})
 	}
 	return &Page[AgentAllocation]{Items: items, Total: total}, nil
 }

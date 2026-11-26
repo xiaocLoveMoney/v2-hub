@@ -3,6 +3,8 @@ package service
 import (
 	"slices"
 	"sort"
+
+	"v2-hub-server/internal/dao/sqlcgen"
 )
 
 // 权限码与 docs/03 §4 权限码表、contract/deploy/init.sql 种子逐行对应。
@@ -184,12 +186,16 @@ func (p *AdminPrincipal) TOTPSetupRequired() bool {
 	return p.IsSuperAdmin && !p.TOTPEnabled
 }
 
-// effectivePermissions 算出有效权限：超管为全集；其余剔除超管专属码（R1，运行时兜底，覆盖手工改库）。
-func effectivePermissions(isSuper bool, codes []string) PermissionSet {
-	if isSuper {
-		return NewPermissionSet(AllPermissions)
-	}
-	return withoutSuperOnly(codes)
+// isSuperAdminRole 报告一个角色是不是超级管理员：只认 is_builtin 为真且编码为 super_admin 的角色行，不能只凭编码（Ruling-95）。
+func isSuperAdminRole(isBuiltin bool, code string) bool {
+	return isBuiltin && code == RoleSuperAdmin
+}
+
+// hasSuperAdminRole 报告管理员持有的角色里有没有超级管理员角色（判定见 isSuperAdminRole）。
+func hasSuperAdminRole(roles []sqlcgen.ListRolesForAdminRow) bool {
+	return slices.ContainsFunc(roles, func(r sqlcgen.ListRolesForAdminRow) bool {
+		return isSuperAdminRole(r.IsBuiltin, r.Code)
+	})
 }
 
 func isKnownPermission(code string) bool {

@@ -17,9 +17,16 @@ SELECT id, username, auth_type, secret_enc, passphrase_enc
 FROM ssh_credential
 WHERE id = $1;
 
--- name: CountServerHostsByTarget :one
--- 密码凭据的确认（Ruling-97）：这份凭据是否已用在这个（地址，端口）上
-SELECT COUNT(*) FROM server_host WHERE credential_id = $1 AND address = $2 AND ssh_port = $3;
+-- name: HasUnusedHostTarget :one
+-- 密码凭据的确认（Ruling-97）：同一端口下的这批地址里，是否有这份凭据还没用过的（地址，端口）
+SELECT EXISTS (
+    SELECT 1
+    FROM unnest(sqlc.arg(addresses)::text[]) AS t(address)
+    WHERE NOT EXISTS (
+        SELECT 1 FROM server_host h
+        WHERE h.credential_id = sqlc.arg(credential_id) AND h.address = t.address AND h.ssh_port = sqlc.arg(ssh_port)::integer
+    )
+)::boolean;
 
 -- name: CreateSSHCredential :one
 -- 密文依赖 id 作关联数据，先写占位，同一事务内再 SetSSHCredentialSecret
