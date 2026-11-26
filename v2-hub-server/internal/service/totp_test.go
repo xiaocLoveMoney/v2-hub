@@ -67,11 +67,29 @@ func TestTOTPLoginFlow(t *testing.T) {
 		t.Fatalf("bad credential err = %v", err)
 	}
 
+	// 超管不能关闭两步验证（R10）
 	f.clock.advance(totp.Period)
-	if err := f.auth.DisableTOTP(ctx, res.Principal, codeFor(t, secret, f.clock.now()), nil); err != nil {
+	if err := f.auth.DisableTOTP(ctx, res.Principal, codeFor(t, secret, f.clock.now()), nil); !errors.Is(err, ErrConflict) {
+		t.Fatalf("super admin DisableTOTP err = %v, want conflict (R10)", err)
+	}
+}
+
+// 非超管可以凭当前验证码关闭自己的两步验证（docs/03 §4.3）。
+func TestDisableTOTPByNonSuper(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	f.bootstrap(t, "root")
+	root := f.login(t, "root").Principal
+	if _, err := f.rbac.CreateAdmin(ctx, root, AdminCreateInput{Username: "agent", Password: cred, Roles: []string{RoleOperator}}, nil); err != nil {
+		t.Fatalf("CreateAdmin: %v", err)
+	}
+	p := f.login(t, "agent").Principal
+	secret := enableTOTP(t, f, p)
+	f.clock.advance(totp.Period)
+	if err := f.auth.DisableTOTP(ctx, p, codeFor(t, secret, f.clock.now()), nil); err != nil {
 		t.Fatalf("DisableTOTP: %v", err)
 	}
-	if _, err := f.auth.Login(ctx, LoginInput{Username: "root", Password: cred}); err != nil {
+	if _, err := f.auth.Login(ctx, LoginInput{Username: "agent", Password: cred}); err != nil {
 		t.Fatalf("login after disable: %v", err)
 	}
 }

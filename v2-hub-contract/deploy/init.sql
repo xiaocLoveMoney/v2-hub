@@ -15,14 +15,20 @@ CREATE TABLE admin (
     last_login_at   TIMESTAMPTZ,
     created_at      TIMESTAMPTZ  NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ  NOT NULL DEFAULT now(),
-    CONSTRAINT uk_admin_username UNIQUE (username)
+    is_owner        BOOLEAN      NOT NULL DEFAULT FALSE, -- 所有者（Ruling-99）：至多一个、须为启用的 super_admin，只能在服务器上指定
+    kind            VARCHAR(8)   NOT NULL DEFAULT 'staff', -- 账号类型（Ruling-101）：staff 员工 / agent 代理，创建后不可改
+    CONSTRAINT uk_admin_username UNIQUE (username),
+    CONSTRAINT ck_admin_owner_enabled CHECK (NOT (is_owner AND is_disabled)),
+    CONSTRAINT ck_admin_kind CHECK (kind IN ('staff', 'agent')),
+    CONSTRAINT ck_admin_owner_staff CHECK (NOT (is_owner AND kind = 'agent'))
 );
+CREATE UNIQUE INDEX uk_admin_owner ON admin (is_owner) WHERE is_owner;
 
 CREATE TABLE role (
     id          BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    code        VARCHAR(64)  NOT NULL,               -- 如 super_admin / operator / auditor
+    code        VARCHAR(64)  NOT NULL,               -- 内置角色见种子段；自定义角色由超管创建
     name        VARCHAR(64)  NOT NULL,
-    is_builtin  BOOLEAN      NOT NULL DEFAULT FALSE, -- 内置角色不可删除
+    is_builtin  BOOLEAN      NOT NULL DEFAULT FALSE, -- 内置角色（super_admin 与四个预设，Ruling-95）不可改不可删，权限由代码定义
     created_at  TIMESTAMPTZ  NOT NULL DEFAULT now(),
     updated_at  TIMESTAMPTZ  NOT NULL DEFAULT now(),
     CONSTRAINT uk_role_code UNIQUE (code)
@@ -61,6 +67,7 @@ CREATE TABLE admin_session (
     expires_at    TIMESTAMPTZ  NOT NULL,               -- 绝对过期
     idle_until    TIMESTAMPTZ  NOT NULL,               -- 空闲过期，请求时顺延
     created_at    TIMESTAMPTZ  NOT NULL DEFAULT now(),
+    reauth_until  TIMESTAMPTZ,                         -- 二次验证有效期（Ruling-100）；NULL 或已过期 = 高危操作前须重新验证
     CONSTRAINT uk_admin_session_token_hash UNIQUE (token_hash)
 );
 CREATE INDEX idx_admin_session_admin_id ON admin_session (admin_id);
@@ -317,12 +324,15 @@ CREATE TABLE end_user (
     traffic_notified      BOOLEAN      NOT NULL DEFAULT FALSE, -- 本轮额度是否已发过流量提醒
     created_at            TIMESTAMPTZ  NOT NULL DEFAULT now(),
     updated_at            TIMESTAMPTZ  NOT NULL DEFAULT now(),
+    agent_id              BIGINT       REFERENCES admin (id), -- 所属代理（Ruling-102）；NULL = 平台用户。管理员不物理删除，不带级联
     CONSTRAINT uk_end_user_username UNIQUE (username),
     CONSTRAINT ck_end_user_email_lower CHECK (email IS NULL OR email = lower(email)),
     CONSTRAINT ck_end_user_balance CHECK (balance BETWEEN 0 AND 9999999999)
 );
 CREATE UNIQUE INDEX uk_end_user_email ON end_user (email) WHERE email IS NOT NULL;
 CREATE INDEX idx_end_user_invited_by ON end_user (invited_by) WHERE invited_by IS NOT NULL;
+-- 代理侧的列表、计数都带“未删除”并按创建时间倒序翻页，索引照这个形状建（Ruling-102）
+CREATE INDEX idx_end_user_agent_id ON end_user (agent_id, created_at DESC, id DESC) WHERE agent_id IS NOT NULL AND deleted_at IS NULL;
 CREATE INDEX idx_end_user_plan_id ON end_user (plan_id);
 CREATE UNIQUE INDEX uk_end_user_sub_token_hash ON end_user (sub_token_hash) WHERE sub_token_hash IS NOT NULL;
 
@@ -418,7 +428,8 @@ CREATE TABLE setting (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- 邀请码（docs/03 §5.8）：owner_user_id 非空 = 用户的个人码（每人一行，重置时原地换码，已用次数不清零）；空 = 管理员发的码。
+-- 邀请码（docs/03 §5.8）：owner_user_id 非空 = 用户的个人码（每人一行，重置时原地换码，已用次数不清零）；
+-- agent_id 非空 = 代理的码（docs/03 §5.23，Ruling-102），两者互斥；都为空 = 管理员发的码。
 CREATE TABLE invite_code (
     id            BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     code          VARCHAR(16)  NOT NULL,               -- 10 位大写字母数字（docs/03 §6）
@@ -430,9 +441,12 @@ CREATE TABLE invite_code (
     remark        VARCHAR(255) NOT NULL DEFAULT '',
     created_by    BIGINT       REFERENCES admin (id) ON DELETE SET NULL,
     created_at    TIMESTAMPTZ  NOT NULL DEFAULT now(),
-    CONSTRAINT uk_invite_code_code UNIQUE (code)
+    agent_id      BIGINT       REFERENCES admin (id),  -- 代理的码：经它注册的用户归该代理
+    CONSTRAINT uk_invite_code_code UNIQUE (code),
+    CONSTRAINT ck_invite_code_single_owner CHECK (owner_user_id IS NULL OR agent_id IS NULL)
 );
 CREATE UNIQUE INDEX uk_invite_code_owner ON invite_code (owner_user_id) WHERE owner_user_id IS NOT NULL;
+CREATE INDEX idx_invite_code_agent_id ON invite_code (agent_id) WHERE agent_id IS NOT NULL;
 
 -- 邮箱验证码（docs/03 §5.7）：只存 HMAC-SHA256；同一邮箱同一用途只有最新一条有效。
 CREATE TABLE email_code (
@@ -986,11 +1000,61 @@ CREATE UNIQUE INDEX uk_host_task_active ON host_task (host_id) WHERE status IN (
 CREATE INDEX idx_host_task_host ON host_task (host_id, id DESC);
 CREATE INDEX idx_host_task_queued ON host_task (id) WHERE status = 'queued';
 
+-- 二级代理（docs/03 §5.23，Ruling-101 – Ruling-104）----------------------------------
+-- 代理是 admin.kind = agent 的账号；名下用户见 end_user.agent_id，代理的邀请码见 invite_code.agent_id。
+
+-- 代理配额（Ruling-103）：每个代理一行，与 admin 同时创建。流量池是累计制，已用量只增不减（删除用户、到期都不退回）。
+CREATE TABLE agent_profile (
+    admin_id           BIGINT       PRIMARY KEY REFERENCES admin (id),
+    max_users          INTEGER      NOT NULL DEFAULT 0,  -- 名下未删除用户数上限
+    traffic_pool_total BIGINT       NOT NULL DEFAULT 0,  -- 流量池总量（字节），不能调到低于已用量
+    traffic_pool_used  BIGINT       NOT NULL DEFAULT 0,  -- 已扣减（字节），与开通在同一事务里累加
+    remark             VARCHAR(255) NOT NULL DEFAULT '',
+    created_at         TIMESTAMPTZ  NOT NULL DEFAULT now(),
+    updated_at         TIMESTAMPTZ  NOT NULL DEFAULT now(),
+    CONSTRAINT ck_agent_profile_max_users CHECK (max_users >= 0),
+    CONSTRAINT ck_agent_profile_pool CHECK (traffic_pool_total >= 0 AND traffic_pool_used >= 0 AND traffic_pool_used <= traffic_pool_total)
+);
+
+-- 代理可分配的套餐白名单（Ruling-103）：只收流量与时长都有限的套餐，由 hub-server 校验；套餐删除时一并删除。
+CREATE TABLE agent_plan (
+    admin_id BIGINT NOT NULL REFERENCES agent_profile (admin_id) ON DELETE CASCADE,
+    plan_id  BIGINT NOT NULL REFERENCES plan (id) ON DELETE CASCADE,
+    PRIMARY KEY (admin_id, plan_id)
+);
+CREATE INDEX idx_agent_plan_plan_id ON agent_plan (plan_id);
+
+-- 开通记录（Ruling-103）：代理每次扣减流量池写一行，只追加，线下结算的依据。用户或套餐删除后靠快照列保留。
+CREATE TABLE agent_allocation (
+    id            BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    agent_id      BIGINT       NOT NULL REFERENCES admin (id),
+    user_id       BIGINT       REFERENCES end_user (id) ON DELETE SET NULL,
+    username      VARCHAR(64)  NOT NULL,                 -- 开通时的用户名
+    plan_id       BIGINT       REFERENCES plan (id) ON DELETE SET NULL,
+    plan_name     VARCHAR(64)  NOT NULL,                 -- 开通时的套餐名
+    traffic_bytes BIGINT       NOT NULL,                 -- 本次扣减的流量（字节）= 套餐流量 × 时长内的重置周期数
+    duration_days INTEGER      NOT NULL,                 -- 套餐时长（天）
+    kind          VARCHAR(8)   NOT NULL,                 -- create 新建用户 / assign 分配或续期
+    created_at    TIMESTAMPTZ  NOT NULL DEFAULT now(),
+    CONSTRAINT ck_agent_allocation_kind CHECK (kind IN ('create', 'assign')),
+    CONSTRAINT ck_agent_allocation_amounts CHECK (traffic_bytes > 0 AND duration_days > 0)
+);
+CREATE INDEX idx_agent_allocation_agent ON agent_allocation (agent_id, created_at DESC);
+-- 用户 / 套餐被物理删除时要按这两列找引用行置空，没有索引就是整表顺扫
+CREATE INDEX idx_agent_allocation_user ON agent_allocation (user_id) WHERE user_id IS NOT NULL;
+CREATE INDEX idx_agent_allocation_plan ON agent_allocation (plan_id) WHERE plan_id IS NOT NULL;
+
 -- 种子数据 ---------------------------------------------------------------------
 -- 内置角色 super_admin 隐式拥有全部权限码（docs/03 §4），不写 role_permission。
 INSERT INTO role (code, name, is_builtin) VALUES ('super_admin', '超级管理员', TRUE);
+-- 四个预设角色（Ruling-95）：权限由代码定义（partner = 全部权限码减超管专属），同样不写 role_permission。
+INSERT INTO role (code, name, is_builtin) VALUES
+    ('operator', '客服运营', TRUE),
+    ('finance',  '财务',     TRUE),
+    ('ops',      '运维',     TRUE),
+    ('partner',  '合伙人',   TRUE);
 
--- 权限码清单与 docs/03 §4 权限码表逐行对应。
+-- 权限码清单与 docs/03 §4 权限码表逐行对应。admin:* 与 host:* 超管专属，不能放进其它角色（Ruling-95）。
 INSERT INTO permission (code, name) VALUES
     ('admin:read',   '查看管理员与角色'),
     ('admin:write',  '管理管理员与角色'),

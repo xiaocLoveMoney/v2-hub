@@ -16,7 +16,7 @@ func TestRegisterInviteAndDeleteAccountEndpoints(t *testing.T) {
 		t.Fatalf("bootstrap: %v", err)
 	}
 	root := newClient(t, srv.URL)
-	root.login("root")
+	root.loginSuper("root")
 	created := root.do(http.MethodPost, "/api/admin/invite-codes", map[string]any{"maxUses": 1, "isDisabled": false, "remark": "给朋友"})
 	expectStatus(t, created, http.StatusOK, codeOK)
 	var invite inviteCodeVO

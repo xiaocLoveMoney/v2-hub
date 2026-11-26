@@ -4,7 +4,7 @@ import { MemoryRouter } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { Pollable } from '../../hooks/use-polling'
 import { PERMISSIONS } from '../../menu'
-import { TEST_CSRF, mockServer, ok, renderWith } from '../../test/harness'
+import { CONFIRM, TEST_CSRF, mockServer, ok, renderWith } from '../../test/harness'
 import { CREDENTIAL, CREDENTIAL_OPTION, DNS_ACCOUNT, DNS_ACCOUNT_OPTION, QUIET_MS, hostOf, sleep, taskOf } from '../../test/host-fixtures'
 import { DnsAccountsModal } from './DnsAccountsModal'
 import { HostDetectionResult } from './HostDetectionResult'
@@ -21,8 +21,6 @@ vi.mock('../../hooks/use-polling', async (importOriginal) => {
 
 const READ_ONLY = [PERMISSIONS.HOST_READ]
 const READ_WRITE = [PERMISSIONS.HOST_READ, PERMISSIONS.HOST_WRITE, PERMISSIONS.NODE_READ]
-// Popconfirm 的确认按钮：测试里没配语言包时是 OK，配了中文是“确定”
-const CONFIRM = /^(OK|确\s*定)$/
 const HOSTS_PATH = '/api/admin/server-hosts'
 const CREDENTIALS_PATH = '/api/admin/ssh-credentials'
 const DNS_ACCOUNTS_PATH = '/api/admin/dns-accounts'

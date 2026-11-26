@@ -21,3 +21,11 @@ export const MAX_LIMIT_IP = 1000
 /** 端口号的下限与上限。 */
 export const MIN_PORT = 1
 export const MAX_PORT = 65535
+
+/** 管理员密码的长度下限与上限（docs/03 §4.2 密码）。 */
+export const MIN_ADMIN_PASSWORD_LEN = 12
+export const MAX_ADMIN_PASSWORD_LEN = 128
+
+/** 两步验证码的位数与格式（docs/03 §4.3）。 */
+export const TOTP_CODE_LEN = 6
+export const TOTP_CODE_PATTERN = /^\d{6}$/

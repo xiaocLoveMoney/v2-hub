@@ -17,6 +17,17 @@ SELECT id, username, auth_type, secret_enc, passphrase_enc
 FROM ssh_credential
 WHERE id = $1;
 
+-- name: HasUnusedHostTarget :one
+-- 密码凭据的确认（Ruling-97）：同一端口下的这批地址里，是否有这份凭据还没用过的（地址，端口）
+SELECT EXISTS (
+    SELECT 1
+    FROM unnest(sqlc.arg(addresses)::text[]) AS t(address)
+    WHERE NOT EXISTS (
+        SELECT 1 FROM server_host h
+        WHERE h.credential_id = sqlc.arg(credential_id) AND h.address = t.address AND h.ssh_port = sqlc.arg(ssh_port)::integer
+    )
+)::boolean;
+
 -- name: CreateSSHCredential :one
 -- 密文依赖 id 作关联数据，先写占位，同一事务内再 SetSSHCredentialSecret
 INSERT INTO ssh_credential (name, username, auth_type, secret_enc, remark)
@@ -80,6 +91,10 @@ WHERE id = sqlc.arg(id);
 
 -- name: DeleteServerHost :execrows
 DELETE FROM server_host WHERE id = $1;
+
+-- name: GetPinnedHostKeyByTarget :one
+-- 连接测试按目标（地址，端口）已固定的主机密钥校验（Ruling-107）；没有主机行时返回空串，空串 = 还没固定。
+SELECT COALESCE((SELECT host_key_sha256 FROM server_host WHERE address = sqlc.arg(address) AND ssh_port = sqlc.arg(ssh_port)::integer), '')::text AS host_key_sha256;
 
 -- name: SetServerHostKey :exec
 UPDATE server_host SET host_key_sha256 = $2, updated_at = now() WHERE id = $1;

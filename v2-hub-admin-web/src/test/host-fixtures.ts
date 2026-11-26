@@ -62,6 +62,18 @@ export const CREDENTIAL: SshCredential = {
   updatedAt: NOW,
 }
 
+/** 一份密码凭据（Ruling-97：用到没用过的地址时要再输一次密码）。 */
+export const PASSWORD_CREDENTIAL: SshCredential = {
+  ...CREDENTIAL,
+  id: 4,
+  name: 'root-pass',
+  authType: 'password',
+  keyFingerprint: '',
+}
+
+/** 凭据下拉框里密码凭据的选项文字。 */
+export const PASSWORD_CREDENTIAL_OPTION = 'root-pass（root，密码）'
+
 /** 一个 Cloudflare 的 DNS 账号。 */
 export const DNS_ACCOUNT: DnsAccount = {
   id: 7,

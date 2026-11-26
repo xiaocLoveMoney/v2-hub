@@ -36,6 +36,19 @@ export function RequirePermission({ permission, children }: RequirePermissionPro
   return children
 }
 
+interface ForbiddenPageProps {
+  subTitle: string
+  /** “返回”按钮去的首页。 */
+  homePath: string
+  homeLabel: string
+}
+
+/** 账号类型不对的页面（代理访问员工页面、员工访问代理页面，Ruling-101）：只显示 403，不渲染页面、不发页面的请求。 */
+export function ForbiddenPage({ subTitle, homePath, homeLabel }: ForbiddenPageProps) {
+  const navigate = useNavigate()
+  return <Result status="403" title="没有权限" subTitle={subTitle} extra={<Button onClick={() => void navigate(homePath)}>{homeLabel}</Button>} />
+}
+
 /** 未匹配到路由。 */
 export function NotFoundPage() {
   const navigate = useNavigate()

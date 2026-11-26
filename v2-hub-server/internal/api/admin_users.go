@@ -183,12 +183,19 @@ type userVO struct {
 	InvitedByUsername string  `json:"invitedByUsername"`
 	Balance           int64   `json:"balance"`
 	AutoRenew         bool    `json:"autoRenew"`
+	// Agent 是所属代理，null = 平台用户（0.18.0，Ruling-102）
+	Agent *adminBriefVO `json:"agent"`
 }
 
 func toUserVO(u service.User) userVO {
 	q := u.Quota
+	var agent *adminBriefVO
+	if u.AgentID != nil {
+		agent = &adminBriefVO{ID: *u.AgentID, Username: u.AgentUsername}
+	}
 	return userVO{
-		ID: u.ID, Username: u.Username, Remark: u.Remark, PlanID: u.PlanID, PlanName: u.PlanName, Status: u.Status,
+		Agent: agent,
+		ID:    u.ID, Username: u.Username, Remark: u.Remark, PlanID: u.PlanID, PlanName: u.PlanName, Status: u.Status,
 		IsDisabled: q.Disabled, RenewCount: q.RenewCount, CreatedAt: u.CreatedAt, TOTPEnabled: u.TOTPEnabled, LastUsedAt: u.LastUsedAt,
 		Email: optionalText(u.Email), IsEmailVerified: u.EmailVerified, InvitedBy: u.InvitedBy, InvitedByUsername: u.InvitedByUsername,
 		Balance: u.Balance, AutoRenew: u.AutoRenew,
@@ -275,7 +282,12 @@ func (h *handlers) listUsers(w http.ResponseWriter, r *http.Request, _ *service.
 		writeError(w, r, err)
 		return
 	}
-	f := service.UserFilter{Keyword: r.URL.Query().Get(queryKeyword), Status: r.URL.Query().Get(queryStatus), PlanID: planID}
+	agentID, err := optionalPositiveInt64(r, queryAgentID, msgBadAgentID)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	f := service.UserFilter{Keyword: r.URL.Query().Get(queryKeyword), Status: r.URL.Query().Get(queryStatus), PlanID: planID, AgentID: agentID}
 	list, total, err := h.users.ListUsers(r.Context(), f, pq.Page, pq.PageSize)
 	if err != nil {
 		writeError(w, r, err)

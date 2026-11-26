@@ -117,12 +117,26 @@ func (s *TicketService) list(ctx context.Context, arg sqlcgen.ListTicketsParams)
 	if err != nil {
 		return nil, fmt.Errorf("list tickets: %w", err)
 	}
+	return ticketsFromRows(rows), nil
+}
+
+// ticketsFromRows 把工单行转换为 Ticket；员工侧与代理侧共用（代理侧的行结构逐字段相同，先转换再调用）。
+func ticketsFromRows(rows []sqlcgen.ListTicketsRow) []Ticket {
 	out := make([]Ticket, 0, len(rows))
 	for _, r := range rows {
 		out = append(out, Ticket{ID: r.ID, UserID: r.UserID, Username: r.Username, Subject: r.Subject, Status: r.Status,
 			LastReplyAt: r.LastReplyAt.Time, CreatedAt: r.CreatedAt.Time})
 	}
-	return out, nil
+	return out
+}
+
+// ticketMessagesFromRows 把消息行转换为 TicketMessage；员工侧与代理侧共用（代理侧的行结构逐字段相同，先转换再调用）。
+func ticketMessagesFromRows(rows []sqlcgen.ListTicketMessagesRow) []TicketMessage {
+	out := make([]TicketMessage, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, TicketMessage{ID: r.ID, AuthorKind: r.AuthorKind, AuthorName: r.AdminUsername, Content: r.Content, CreatedAt: r.CreatedAt.Time})
+	}
+	return out
 }
 
 func (s *TicketService) page(ctx context.Context, f TicketFilter, pq PageQuery) (*Page[Ticket], error) {
@@ -157,11 +171,7 @@ func (s *TicketService) detail(ctx context.Context, id, ownerID int64) (*TicketD
 	if err != nil {
 		return nil, fmt.Errorf("list messages of ticket %d: %w", id, err)
 	}
-	d := &TicketDetail{Ticket: tickets[0], Messages: make([]TicketMessage, 0, len(rows))}
-	for _, r := range rows {
-		d.Messages = append(d.Messages, TicketMessage{ID: r.ID, AuthorKind: r.AuthorKind, AuthorName: r.AdminUsername, Content: r.Content, CreatedAt: r.CreatedAt.Time})
-	}
-	return d, nil
+	return &TicketDetail{Ticket: tickets[0], Messages: ticketMessagesFromRows(rows)}, nil
 }
 
 // lockTicket 锁住工单行；ownerID 非 0 时要求属于该用户，否则 CodeNotFound（R8）。
@@ -322,7 +332,7 @@ func (s *TicketService) CloseOwn(ctx context.Context, p *UserPrincipal, id int64
 		if _, err := lockTicket(ctx, q, id, p.UserID); err != nil {
 			return err
 		}
-		return s.close(ctx, q, id)
+		return closeTx(ctx, q, id, s.now())
 	})
 	if err != nil {
 		return nil, err
@@ -330,11 +340,40 @@ func (s *TicketService) CloseOwn(ctx context.Context, p *UserPrincipal, id int64
 	return s.detail(ctx, id, p.UserID)
 }
 
-func (s *TicketService) close(ctx context.Context, q *sqlcgen.Queries, id int64) error {
-	if err := q.SetTicketStatus(ctx, sqlcgen.SetTicketStatusParams{ID: id, Status: TicketClosed, Now: timestamptz(s.now())}); err != nil {
+// closeTx 在调用方的事务里把工单置为已关闭（调用方已锁定工单并确认归属）。
+func closeTx(ctx context.Context, q *sqlcgen.Queries, id int64, now time.Time) error {
+	if err := q.SetTicketStatus(ctx, sqlcgen.SetTicketStatusParams{ID: id, Status: TicketClosed, Now: timestamptz(now)}); err != nil {
 		return fmt.Errorf("close ticket %d: %w", id, err)
 	}
 	return nil
+}
+
+// staffCloseTx 是员工与代理关闭工单的事务体：置为已关闭并写审计（调用方已锁定工单并确认归属）。
+func staffCloseTx(ctx context.Context, q *sqlcgen.Queries, actor *AdminPrincipal, id int64, now time.Time, ip *netip.Addr) error {
+	if err := closeTx(ctx, q, id, now); err != nil {
+		return err
+	}
+	return writeAudit(ctx, q, adminAudit(actor, ActionTicketClose, targetTicket, id, ip, nil))
+}
+
+// staffReplyTx 是员工与代理回复工单的事务体（调用方已锁定工单并确认归属）：插入消息 → 状态变为 answered →
+// 给用户的已验证邮箱发不含正文的提醒 → 写审计（不记回复正文）。消息作者记为 actor。
+func (s *TicketService) staffReplyTx(ctx context.Context, q *sqlcgen.Queries, actor *AdminPrincipal, ticket sqlcgen.GetTicketForUpdateRow,
+	content string, now time.Time, ip *netip.Addr) error {
+	if err := q.InsertTicketMessage(ctx, sqlcgen.InsertTicketMessageParams{
+		TicketID: ticket.ID, AuthorKind: TicketAuthorAdmin, AdminID: int8Arg(actor.AdminID), Content: content, CreatedAt: timestamptz(now),
+	}); err != nil {
+		return fmt.Errorf("insert message of ticket %d: %w", ticket.ID, err)
+	}
+	if err := q.SetTicketStatus(ctx, sqlcgen.SetTicketStatusParams{ID: ticket.ID, Status: TicketAnswered, TouchReply: true, Now: timestamptz(now)}); err != nil {
+		return fmt.Errorf("mark ticket %d answered: %w", ticket.ID, err)
+	}
+	to, err := q.GetUserNotifyEmail(ctx, ticket.UserID)
+	if err != nil {
+		return fmt.Errorf("get notify email of user %d: %w", ticket.UserID, err)
+	}
+	s.notify(ctx, q, to, mailTplTicketReply, ticket.Subject)
+	return writeAudit(ctx, q, adminAudit(actor, ActionTicketReply, targetTicket, ticket.ID, ip, nil))
 }
 
 // ---- 管理端 --------------------------------------------------------------------
@@ -362,21 +401,7 @@ func (s *TicketService) Reply(ctx context.Context, actor *AdminPrincipal, id int
 		if err != nil {
 			return err
 		}
-		if err := q.InsertTicketMessage(ctx, sqlcgen.InsertTicketMessageParams{
-			TicketID: id, AuthorKind: TicketAuthorAdmin, AdminID: int8Arg(actor.AdminID), Content: content, CreatedAt: timestamptz(now),
-		}); err != nil {
-			return fmt.Errorf("insert message of ticket %d: %w", id, err)
-		}
-		if err := q.SetTicketStatus(ctx, sqlcgen.SetTicketStatusParams{ID: id, Status: TicketAnswered, TouchReply: true, Now: timestamptz(now)}); err != nil {
-			return fmt.Errorf("mark ticket %d answered: %w", id, err)
-		}
-		to, err := q.GetUserNotifyEmail(ctx, row.UserID)
-		if err != nil {
-			return fmt.Errorf("get notify email of user %d: %w", row.UserID, err)
-		}
-		s.notify(ctx, q, to, mailTplTicketReply, row.Subject)
-		// 审计不记回复正文
-		return writeAudit(ctx, q, adminAudit(actor, ActionTicketReply, targetTicket, id, ip, nil))
+		return s.staffReplyTx(ctx, q, actor, row, content, now, ip)
 	})
 	if err != nil {
 		return nil, err
@@ -390,10 +415,7 @@ func (s *TicketService) Close(ctx context.Context, actor *AdminPrincipal, id int
 		if _, err := lockTicket(ctx, q, id, 0); err != nil {
 			return err
 		}
-		if err := s.close(ctx, q, id); err != nil {
-			return err
-		}
-		return writeAudit(ctx, q, adminAudit(actor, ActionTicketClose, targetTicket, id, ip, nil))
+		return staffCloseTx(ctx, q, actor, id, s.now(), ip)
 	})
 	if err != nil {
 		return nil, err

@@ -12,23 +12,26 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const createAdminSession = `-- name: CreateAdminSession :exec
-INSERT INTO admin_session (token_hash, admin_id, csrf_token, client_ip, user_agent, expires_at, idle_until)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
+const createAdminSession = `-- name: CreateAdminSession :one
+INSERT INTO admin_session (token_hash, admin_id, csrf_token, client_ip, user_agent, expires_at, idle_until, reauth_until)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+RETURNING id
 `
 
 type CreateAdminSessionParams struct {
-	TokenHash []byte
-	AdminID   int64
-	CsrfToken string
-	ClientIp  *netip.Addr
-	UserAgent pgtype.Text
-	ExpiresAt pgtype.Timestamptz
-	IdleUntil pgtype.Timestamptz
+	TokenHash   []byte
+	AdminID     int64
+	CsrfToken   string
+	ClientIp    *netip.Addr
+	UserAgent   pgtype.Text
+	ExpiresAt   pgtype.Timestamptz
+	IdleUntil   pgtype.Timestamptz
+	ReauthUntil pgtype.Timestamptz
 }
 
-func (q *Queries) CreateAdminSession(ctx context.Context, arg CreateAdminSessionParams) error {
-	_, err := q.db.Exec(ctx, createAdminSession,
+// reauth_until：登录成功视为刚做过二次验证（Ruling-100）
+func (q *Queries) CreateAdminSession(ctx context.Context, arg CreateAdminSessionParams) (int64, error) {
+	row := q.db.QueryRow(ctx, createAdminSession,
 		arg.TokenHash,
 		arg.AdminID,
 		arg.CsrfToken,
@@ -36,8 +39,11 @@ func (q *Queries) CreateAdminSession(ctx context.Context, arg CreateAdminSession
 		arg.UserAgent,
 		arg.ExpiresAt,
 		arg.IdleUntil,
+		arg.ReauthUntil,
 	)
-	return err
+	var id int64
+	err := row.Scan(&id)
+	return id, err
 }
 
 const deleteAdminSessionByID = `-- name: DeleteAdminSessionByID :exec
@@ -70,9 +76,24 @@ func (q *Queries) DeleteExpiredAdminSessions(ctx context.Context, expiresAt pgty
 	return result.RowsAffected(), nil
 }
 
+const deleteOtherAdminSessions = `-- name: DeleteOtherAdminSessions :exec
+DELETE FROM admin_session WHERE admin_id = $1 AND id <> $2
+`
+
+type DeleteOtherAdminSessionsParams struct {
+	AdminID int64
+	KeepID  int64
+}
+
+// 本人改密码：保留当前会话，其余失效（R7）
+func (q *Queries) DeleteOtherAdminSessions(ctx context.Context, arg DeleteOtherAdminSessionsParams) error {
+	_, err := q.db.Exec(ctx, deleteOtherAdminSessions, arg.AdminID, arg.KeepID)
+	return err
+}
+
 const getAdminSessionByTokenHash = `-- name: GetAdminSessionByTokenHash :one
 SELECT s.id, s.admin_id, s.csrf_token, s.expires_at, s.idle_until, a.username, a.is_disabled,
-       (a.totp_secret_enc IS NOT NULL)::boolean AS totp_enabled
+       (a.totp_secret_enc IS NOT NULL)::boolean AS totp_enabled, s.reauth_until, a.is_owner, a.kind
 FROM admin_session s
 JOIN admin a ON a.id = s.admin_id
 WHERE s.token_hash = $1
@@ -87,6 +108,9 @@ type GetAdminSessionByTokenHashRow struct {
 	Username    string
 	IsDisabled  bool
 	TotpEnabled bool
+	ReauthUntil pgtype.Timestamptz
+	IsOwner     bool
+	Kind        string
 }
 
 // 同时取管理员状态：被禁用的管理员会话视为无效（R7）。
@@ -102,8 +126,25 @@ func (q *Queries) GetAdminSessionByTokenHash(ctx context.Context, tokenHash []by
 		&i.Username,
 		&i.IsDisabled,
 		&i.TotpEnabled,
+		&i.ReauthUntil,
+		&i.IsOwner,
+		&i.Kind,
 	)
 	return i, err
+}
+
+const setAdminSessionReauth = `-- name: SetAdminSessionReauth :exec
+UPDATE admin_session SET reauth_until = $2 WHERE id = $1
+`
+
+type SetAdminSessionReauthParams struct {
+	ID          int64
+	ReauthUntil pgtype.Timestamptz
+}
+
+func (q *Queries) SetAdminSessionReauth(ctx context.Context, arg SetAdminSessionReauthParams) error {
+	_, err := q.db.Exec(ctx, setAdminSessionReauth, arg.ID, arg.ReauthUntil)
+	return err
 }
 
 const touchAdminSession = `-- name: TouchAdminSession :exec

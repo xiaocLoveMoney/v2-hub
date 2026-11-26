@@ -11,6 +11,8 @@ import { PageHeader } from '../../components/PageHeader'
 
 const ROLE_CODE_PATTERN = /^[a-z][a-z0-9_]{2,63}$/
 const MAX_ROLE_NAME_LEN = 64
+/** 超管角色的编码：隐式拥有全部权限码，不依赖角色上列出的权限（docs/03 §4）。 */
+const SUPER_ADMIN_ROLE_CODE = 'super_admin'
 
 const loadRoles = (signal: AbortSignal) => api.GET('/api/admin/roles', { signal })
 const loadPermissions = (signal: AbortSignal) => api.GET('/api/admin/permissions', { signal })
@@ -21,7 +23,7 @@ interface RoleForm {
   permissions: string[]
 }
 
-/** 角色与权限（admin:read 查看，admin:write 增删改；只能授予自己拥有的权限，见 docs/03 R2、R6）。 */
+/** 角色与权限（admin:read 查看，admin:write 增删改；超管专属权限码不能放进角色，内置角色不可改，见 docs/03 R2、R6、Ruling-95）。 */
 export function RolesPage() {
   const { can } = useSession()
   const { message } = App.useApp()
@@ -33,8 +35,8 @@ export function RolesPage() {
   const roles = useRemote<Role[]>(loadRoles)
   const permissions = useRemote<Permission[]>(loadPermissions)
   const permissionName = new Map((permissions.data ?? []).map((p) => [p.code, p.name]))
-  // 前端只展示自己拥有的权限供勾选；后端仍按 R2 最终校验
-  const grantable = (permissions.data ?? []).filter((p) => can(p.code))
+  // 超管专属的权限码不列出供勾选（R2）；后端仍做最终校验
+  const grantable = (permissions.data ?? []).filter((p) => !p.superOnly)
 
   const close = () => {
     setEditing(null)
@@ -79,7 +81,8 @@ export function RolesPage() {
     {
       title: '权限',
       dataIndex: 'permissions',
-      render: (codes: string[]) => codes.map((c) => <Tag key={c}>{permissionName.get(c) ?? c}</Tag>),
+      render: (codes: string[], r: Role) =>
+        r.code === SUPER_ADMIN_ROLE_CODE ? <Tag color="gold">全部权限</Tag> : codes.map((c) => <Tag key={c}>{permissionName.get(c) ?? c}</Tag>),
     },
   ]
   if (canWrite) {
@@ -134,7 +137,7 @@ export function RolesPage() {
           <Form.Item name="name" label="名称" rules={[{ required: true, max: MAX_ROLE_NAME_LEN, message: `1–${MAX_ROLE_NAME_LEN} 个字符` }]}>
             <Input autoComplete="off" />
           </Form.Item>
-          <Form.Item name="permissions" label="权限（只列出你拥有的权限）">
+          <Form.Item name="permissions" label="权限" extra="管理员与角色、SSH 托管是超级管理员专属，不能放进角色">
             <Checkbox.Group options={grantable.map((p) => ({ value: p.code, label: `${p.name}（${p.code}）` }))} />
           </Form.Item>
           <Button type="primary" htmlType="submit" block>

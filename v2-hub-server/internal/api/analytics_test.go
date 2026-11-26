@@ -21,7 +21,7 @@ func TestAnalyticsEndpoints(t *testing.T) {
 	expectStatus(t, anon.do(http.MethodGet, "/api/admin/analytics/backlog", nil), http.StatusUnauthorized, string(service.CodeUnauthenticated))
 
 	root := newClient(t, srv.URL)
-	root.login("root")
+	root.loginSuper("root")
 	res := root.do(http.MethodGet, "/api/admin/analytics/users?days=7", nil)
 	expectStatus(t, res, http.StatusOK, codeOK)
 	var users analyticsUsersVO
@@ -91,7 +91,7 @@ func TestReachEndpoints(t *testing.T) {
 		t.Fatalf("bootstrap: %v", err)
 	}
 	root := newClient(t, srv.URL)
-	root.login("root")
+	root.loginSuper("root")
 
 	// 默认关：详情与手动检测 403，节点与服务器列表照常
 	expectStatus(t, root.do(http.MethodGet, "/api/admin/nodes/1/reach", nil), http.StatusForbidden, string(service.CodeFeatureDisabled))

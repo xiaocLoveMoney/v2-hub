@@ -47,11 +47,11 @@ clients_of() { curl -s -H "Authorization: Bearer $2" "$1/panel/api/clients/list"
 
 # ---- 2. hub-server 与超管 ----
 printf '%s\n' "$CRED" | (cd "$REPO_ROOT/v2-hub-server" && make -s admin-create USERNAME="$ROOT_USER") >/tmp/it-admin-create.log 2>&1 || fail "admin-create 失败"
-start_module v2-hub-server 8080
+it_hub_config "$WORK/hub-server.yaml" || fail "派生配置失败"
+start_module v2-hub-server 8080 CONFIG="$WORK/hub-server.yaml"
 HUB_JAR="$WORK/hub.jar"
-hub_login="$(jq -nc --arg u "$ROOT_USER" --arg p "$CRED" '{username:$u,password:$p}')"
-CSRF="$(curl -s -b "$HUB_JAR" -c "$HUB_JAR" -X POST "$BASE/api/admin/auth/login" -H 'Content-Type: application/json' --data "$hub_login" | jq -r '.data.csrfToken // empty')"
-[ -n "$CSRF" ] || fail "hub 登录失败"
+# 超管登录：首次登录当场绑定两步验证（R10）；登录即视为刚做过二次验证，联调配置把有效期拉长（common.sh it_admin_login）
+CSRF="$(it_admin_login "$HUB_JAR" "$ROOT_USER" "$CRED")" || fail "hub 登录失败"
 # hub <method> <path> [json] → 打印响应体；状态码写入 $WORK/code
 hub() {
   local args=(-s -o "$WORK/body" -w '%{http_code}' -b "$HUB_JAR" -c "$HUB_JAR" -X "$1" -H 'Content-Type: application/json' -H "X-CSRF-Token: $CSRF")
@@ -93,7 +93,7 @@ EMAIL="$(printf '%s' "$provs" | jq -r '.data[0].email')"
 for pair in "$URL_A $TOKEN_A $REF_A" "$URL_B $TOKEN_B $REF_B"; do
   read -r url tok ref <<< "$pair"
   clients_of "$url" "$tok" | jq -e --arg e "$EMAIL" --argjson r "$ref" 'any(.[]; .email == $e and .enable and (.inboundIds | index($r)))' >/dev/null \
-    || fail "$url 上没有挂到入站 $ref 的启用 client $EMAIL：$(clients_of "$url" "$tok")"
+    || fail "$url 上没有挂到入站 $ref 的启用 client ${EMAIL}：$(clients_of "$url" "$tok")"
 done
 
 # ---- 5. 已用达到额度 → limited → 两台面板禁用（U2、U7）；清零后恢复 ----

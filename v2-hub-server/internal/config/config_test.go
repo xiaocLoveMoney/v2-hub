@@ -32,6 +32,7 @@ func TestLoad(t *testing.T) {
 		{name: "reject non-positive max conns", content: "database:\n  maxConns: 0\n", wantErr: ErrInvalidConfig},
 		{name: "reject touch interval >= idle", content: "auth:\n  sessionIdleTimeout: 1m\n  sessionTouchInterval: 1m\n", wantErr: ErrInvalidConfig},
 		{name: "reject zero login failures", content: "auth:\n  loginMaxFailures: 0\n", wantErr: ErrInvalidConfig},
+		{name: "reject zero reauth window", content: "auth:\n  reauthWindow: 0s\n", wantErr: ErrInvalidConfig},
 		{name: "reject zero panel concurrency", content: "panel:\n  concurrency: 0\n", wantErr: ErrInvalidConfig},
 	}
 	for _, tt := range tests {
@@ -50,6 +51,18 @@ func TestLoad(t *testing.T) {
 				t.Fatalf("Load() = %+v", cfg.Server)
 			}
 		})
+	}
+}
+
+// 二次验证有效期默认 5 分钟，可配置（docs/03 §4.4）。
+func TestLoadReauthWindow(t *testing.T) {
+	cfg, err := Load(writeConfig(t, ""))
+	if err != nil || cfg.Auth.ReauthWindow != defaultReauthWindow {
+		t.Fatalf("default reauthWindow = %v, %v", cfg.Auth.ReauthWindow, err)
+	}
+	cfg, err = Load(writeConfig(t, "auth:\n  reauthWindow: 10m\n"))
+	if err != nil || cfg.Auth.ReauthWindow != 10*time.Minute {
+		t.Fatalf("reauthWindow = %v, %v", cfg.Auth.ReauthWindow, err)
 	}
 }
 

@@ -19,6 +19,9 @@ const (
 	bad  = "wrong-guess-123"
 )
 
+// testReauthWindow 是测试用的二次验证有效期（同生产默认值）。
+const testReauthWindow = 5 * time.Minute
+
 // testMasterKey 是测试专用主密钥（32 个 0x2a 的 Base64），只用于测试库。
 const testMasterKey = "KioqKioqKioqKioqKioqKioqKioqKioqKioqKioqKio="
 
@@ -45,6 +48,7 @@ func testAuthConfig() AuthConfig {
 		LoginWindow:          15 * time.Minute,
 		LoginLockout:         15 * time.Minute,
 		LoginMaxTrackedKeys:  100,
+		ReauthWindow:         testReauthWindow,
 	}
 }
 
@@ -175,18 +179,19 @@ func TestSessionExpiry(t *testing.T) {
 func TestDisabledAdminCannotLogin(t *testing.T) {
 	f := newFixture(t)
 	ctx := context.Background()
-	root := f.bootstrap(t, "root")
-	f.bootstrap(t, "root2")
-	actor := f.login(t, "root2").Principal
+	// root 是所有者（Ruling-99），由它禁用非所有者 root2
+	f.bootstrap(t, "root")
+	root2 := f.bootstrap(t, "root2")
+	actor := f.login(t, "root").Principal
 
-	victim := f.login(t, "root")
-	if _, err := f.rbac.UpdateAdmin(ctx, actor, root.ID, AdminUpdateInput{Roles: []string{RoleSuperAdmin}, IsDisabled: true}, nil); err != nil {
-		t.Fatalf("disable root: %v", err)
+	victim := f.login(t, "root2")
+	if _, err := f.rbac.UpdateAdmin(ctx, actor, root2.ID, AdminUpdateInput{Roles: []string{RoleSuperAdmin}, IsDisabled: true}, nil); err != nil {
+		t.Fatalf("disable root2: %v", err)
 	}
 	if _, err := f.auth.Authenticate(ctx, victim.Token); !errors.Is(err, ErrUnauthenticated) {
 		t.Fatalf("session of disabled admin err = %v (R7)", err)
 	}
-	if _, err := f.auth.Login(ctx, LoginInput{Username: "root", Password: cred}); !errors.Is(err, ErrUnauthenticated) {
+	if _, err := f.auth.Login(ctx, LoginInput{Username: "root2", Password: cred}); !errors.Is(err, ErrUnauthenticated) {
 		t.Fatalf("disabled login err = %v", err)
 	}
 }

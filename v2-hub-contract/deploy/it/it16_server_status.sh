@@ -6,6 +6,7 @@
 #   趋势与列表近况出现三家的延迟（模拟端让联通全丢）→ 未登录 401。
 # 黑盒，只用 curl / jq / docker / python3（探测服务模拟端）。hub-server 不向真实的探测服务发任何请求（HUB_REACH_API_URL 指向本机）。
 # 注意：会重建 xui-a 容器（不挂数据卷）；hub-server 用缩短了探测与检测周期的临时配置启动。
+# 不依赖执行顺序：开测前经接口关掉连通 / 延迟检测、停用前面用例留下的服务器（run_all 里它们仍启用，会一起被测延迟），并保持停用。
 source "$(dirname "$0")/common.sh"
 set -e
 
@@ -103,8 +104,7 @@ set +m
 wait_port "$REACH_PORT" 10 || fail "探测服务模拟端没起来"
 
 # ---- 3. hub-server（探测 3 秒、检测 2 秒一轮、探测服务指向本机）与超管 ----
-sed -e "s/^  probeInterval: .*/  probeInterval: $PROBE_INTERVAL/" -e "s/^  checkInterval: .*/  checkInterval: $CHECK_INTERVAL/" \
-  "$REPO_ROOT/v2-hub-server/etc/hub-server.yaml" > "$WORK/hub-server.yaml"
+it_hub_config "$WORK/hub-server.yaml" -e "s/^  probeInterval: .*/  probeInterval: $PROBE_INTERVAL/" -e "s/^  checkInterval: .*/  checkInterval: $CHECK_INTERVAL/" || fail "派生配置失败"
 grep -q "checkInterval: $CHECK_INTERVAL" "$WORK/hub-server.yaml" && grep -q "probeInterval: $PROBE_INTERVAL" "$WORK/hub-server.yaml" || fail "临时配置没有改到周期"
 printf '%s\n' "$CRED" | (cd "$REPO_ROOT/v2-hub-server" && make -s admin-create USERNAME="$ROOT_USER") >/tmp/it-admin-create.log 2>&1 || fail "admin-create 失败"
 start_module v2-hub-server 8080 CONFIG="$WORK/hub-server.yaml" HUB_REACH_API_URL="http://127.0.0.1:$REACH_PORT"
@@ -119,9 +119,24 @@ call() {
 }
 expect_code() { [ "$(cat "$WORK/code")" = "$1" ] || fail "$2：期望 HTTP $1，实际 $(cat "$WORK/code") $(cat "$WORK/body")"; }
 expect_error() { expect_code "$1" "$3"; [ "$(jq -r .code "$WORK/body")" = "$2" ] || fail "$3：期望错误码 $2，实际 $(cat "$WORK/body")"; }
-CSRF="$(call "$HUB_JAR" "" POST /api/admin/auth/login "$(jq -nc --arg u "$ROOT_USER" --arg p "$CRED" '{username:$u,password:$p}')" | jq -r '.data.csrfToken // empty')"
-[ -n "$CSRF" ] || fail "hub 登录失败"
+# 超管登录：首次登录当场绑定两步验证（R10）；登录即视为刚做过二次验证，联调配置把有效期拉长（common.sh it_admin_login）
+CSRF="$(it_admin_login "$HUB_JAR" "$ROOT_USER" "$CRED")" || fail "hub 登录失败"
 hub() { call "$HUB_JAR" "$CSRF" "$@"; }
+
+# ---- 3.1 不依赖前面用例留下的数据：run_all 只在开头重置一次库，前面的用例会留下启用中的服务器（同在本机、公网 IP 相同）
+# 与开着的大陆连通检测（IT-13），它们也会被后台测延迟 / 检测、请求同样发到本机模拟端，干扰下面“只测一次”等计数断言。
+# 先关掉两种检测、停用别的服务器（停用的服务器不探测、不测延迟），等在途的一轮结束后清空模拟端记录。
+hub PUT /api/admin/settings '{"reach":{"enabled":false},"latency":{"enabled":false}}' >/dev/null; expect_code 200 "开测前关掉连通与延迟检测"
+hub GET /api/admin/servers > "$WORK/servers.json"; expect_code 200 "列出已有服务器"
+jq -c '.data[] | select(.isDisabled | not) | {id, name, providerType, baseUrl, apiToken: "", tlsMode, certPinSha256: (.certPinSha256 // ""), region, remark, isDisabled: true}' \
+  "$WORK/servers.json" > "$WORK/others.jsonl"
+while read -r other; do
+  [ -n "$other" ] || continue
+  hub PUT "/api/admin/servers/$(printf '%s' "$other" | jq -r .id)" "$(printf '%s' "$other" | jq -c 'del(.id)')" >/dev/null
+  expect_code 200 "停用前面用例留下的服务器 $(printf '%s' "$other" | jq -r .name)"
+done < "$WORK/others.jsonl"
+sleep $((${CHECK_INTERVAL%s} * 2))
+: > "$WORK/probe.log"
 
 # ---- 4. 接入：列表与详情带资源快照、流量周期与默认账单 ----
 SERVER_ID="$(hub POST /api/admin/servers "$(jq -nc --arg n "$SERVER_NAME" --arg u "$XUI_URL" --arg t "$XUI_TOKEN" \
@@ -201,4 +216,4 @@ jq -e --argjson id "$SERVER_ID" '.data[] | select(.serverId == $id) | (.latency.
 call "$WORK/anon.jar" "" GET /api/admin/servers/trends >/dev/null; expect_error 401 unauthenticated "未登录看近况"
 call "$WORK/anon.jar" "" GET "/api/admin/servers/$SERVER_ID/metrics" >/dev/null; expect_error 401 unauthenticated "未登录看趋势"
 
-echo "IT-16 通过"
+echo "IT-16 PASS"

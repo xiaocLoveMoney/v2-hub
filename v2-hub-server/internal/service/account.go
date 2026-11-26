@@ -138,12 +138,17 @@ func (s *AccountService) Register(ctx context.Context, in RegisterInput) (*Porta
 	err = s.inTx(ctx, func(q *sqlcgen.Queries) error {
 		spec := newUserSpec{Username: username, LoginHash: hash, Email: email, EmailVerified: emailCodeID != 0}
 		if invite != "" {
-			if spec.InviteCodeID, spec.InvitedBy, err = s.useInviteCode(ctx, q, cur, invite); err != nil {
+			use, err := s.useInviteCode(ctx, q, cur, invite)
+			if err != nil {
 				return err
 			}
+			spec.InviteCodeID, spec.InvitedBy, spec.AgentID = use.CodeID, use.InviterID, use.AgentID
 		}
-		if spec.PlanID, err = s.registerPlanID(ctx, q, cur); err != nil {
-			return err
+		// 注册时就有归属的用户不送注册赠送套餐，由代理分配（Ruling-102）
+		if spec.AgentID == 0 {
+			if spec.PlanID, err = s.registerPlanID(ctx, q, cur); err != nil {
+				return err
+			}
 		}
 		now := s.now()
 		id, err := s.users.createUserTx(ctx, q, spec, now)
@@ -165,7 +170,7 @@ func (s *AccountService) Register(ctx context.Context, in RegisterInput) (*Porta
 		}
 		return writeAudit(ctx, q, AuditEntry{ActorType: ActorUser, ActorID: id, Action: ActionPortalRegister, TargetType: targetUser,
 			TargetID: fmt.Sprint(id), ClientIP: in.ClientIP,
-			Detail: map[string]any{"username": username, "inviteCodeId": spec.InviteCodeID, "planId": spec.PlanID}})
+			Detail: map[string]any{"username": username, "inviteCodeId": spec.InviteCodeID, "planId": spec.PlanID, "agentId": spec.AgentID}})
 	})
 	if err != nil {
 		return nil, err

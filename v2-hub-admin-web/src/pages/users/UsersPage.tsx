@@ -1,5 +1,5 @@
 import { PlusOutlined } from '@ant-design/icons'
-import { App, Button, Input, Popconfirm, Progress, Select, Space, Table, Tag, Tooltip, Typography, type TableProps } from 'antd'
+import { App, Button, Input, Popconfirm, Select, Space, Table, Tag, Typography, type TableProps } from 'antd'
 import { useCallback, useState } from 'react'
 import { api, csrfHeader, toApiError, type EndUser, type PageData, type Plan, type UserStatus } from '../../api/client'
 import { useSession } from '../../auth/session-context'
@@ -7,41 +7,23 @@ import { useCurrency } from '../../hooks/use-currency'
 import { mutate, useRemote } from '../../hooks/use-remote'
 import { PERMISSIONS } from '../../menu'
 import { formatMoney } from '../../money'
-import { TABLE_SCROLL, formatTime } from '../system/format'
+import { TABLE_SCROLL } from '../system/format'
+import { AgentSelect, TransferAgentModal } from './AgentTransfer'
 import { BalanceModal } from './BalanceModal'
 import { UserStatusTag } from './quota-fields'
-import { USER_STATUS, formatBytes } from './quota'
+import { USER_STATUS } from './quota'
+import { ExpiryCell, UsageCell } from './user-cells'
 import { AssignPlanModal, CreateUserModal, EditUserModal, ProvisionDrawer, QuotaModal, ResetUserCredentialModal } from './UserModals'
 import { ErrorAlert } from '../../components/ErrorAlert'
 import { PageHeader } from '../../components/PageHeader'
 
 const DEFAULT_PAGE_SIZE = 20
-const PERCENT_FULL = 100
 const loadPlans = (signal: AbortSignal) => api.GET('/api/admin/plans', { signal })
 
-type Dialog = 'create' | 'edit' | 'plan' | 'quota' | 'credential' | 'provisions' | 'balance' | null
+type Dialog = 'create' | 'edit' | 'plan' | 'quota' | 'credential' | 'provisions' | 'balance' | 'agent' | null
 
 /** 客户门户里兑换代入票据的页面；票据放在地址的 # 片段里，不会随请求发到服务器（docs/03 §5.17）。 */
 const IMPERSONATE_PATH = '/impersonate#ticket='
-
-function UsageCell({ u }: { u: EndUser }) {
-  if (u.trafficLimit === 0) {
-    return <span>{formatBytes(u.trafficUsed)} / 不限</span>
-  }
-  const percent = Math.min(PERCENT_FULL, Math.round((u.trafficUsed / u.trafficLimit) * PERCENT_FULL))
-  return (
-    <Tooltip title={`${formatBytes(u.trafficUsed)} / ${formatBytes(u.trafficLimit)}`}>
-      <Progress percent={percent} size="small" status={percent >= PERCENT_FULL ? 'exception' : 'normal'} className="usage-bar" />
-    </Tooltip>
-  )
-}
-
-function ExpiryCell({ u }: { u: EndUser }) {
-  if (u.expiresAt !== null && u.expiresAt !== undefined) {
-    return <span>{formatTime(u.expiresAt)}</span>
-  }
-  return u.pendingDays > 0 ? <span>首次使用后 {u.pendingDays} 天</span> : <span>不过期</span>
-}
 
 function ProvisionCell({ u }: { u: EndUser }) {
   const p = u.provisions
@@ -57,7 +39,7 @@ function ProvisionCell({ u }: { u: EndUser }) {
   )
 }
 
-/** 用户管理（user:read 查看，user:write 增改、续费、改用量、停用、删除；docs/03 §5.2）。 */
+/** 用户管理（user:read 查看，user:write 增改、续费、改用量、停用、删除；docs/03 §5.2）。归属列人人可见，按代理筛选要 admin:read、划转要 admin:write（docs/03 §5.23）。 */
 export function UsersPage() {
   const { can } = useSession()
   const { message, modal } = App.useApp()
@@ -65,19 +47,23 @@ export function UsersPage() {
   const canReadPlans = can(PERMISSIONS.PLAN_READ)
   const canAdjustBalance = can(PERMISSIONS.FINANCE_WRITE)
   const canImpersonate = can(PERMISSIONS.IMPERSONATE_WRITE)
+  // 列代理与划转归属是超管的 admin:* 权限（docs/03 §5.23）
+  const canListAgents = can(PERMISSIONS.ADMIN_READ)
+  const canTransfer = can(PERMISSIONS.ADMIN_WRITE)
   const currency = useCurrency()
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE)
   const [keyword, setKeyword] = useState('')
   const [status, setStatus] = useState<UserStatus | undefined>(undefined)
   const [planId, setPlanId] = useState<number | undefined>(undefined)
+  const [agentId, setAgentId] = useState<number | undefined>(undefined)
   const [dialog, setDialog] = useState<Dialog>(null)
   const [current, setCurrent] = useState<EndUser | null>(null)
 
   const loadUsers = useCallback(
     (signal: AbortSignal) =>
-      api.GET('/api/admin/users', { params: { query: { page, pageSize, keyword: keyword === '' ? undefined : keyword, status, planId } }, signal }),
-    [page, pageSize, keyword, status, planId],
+      api.GET('/api/admin/users', { params: { query: { page, pageSize, keyword: keyword === '' ? undefined : keyword, status, planId, agentId } }, signal }),
+    [page, pageSize, keyword, status, planId, agentId],
   )
   const users = useRemote<PageData<EndUser>>(loadUsers)
   const plans = useRemote<Plan[]>(loadPlans, canReadPlans)
@@ -185,6 +171,7 @@ export function UsersPage() {
     },
     { title: '套餐', dataIndex: 'planName', render: (v: string) => v || '—' },
     { title: '邀请人', dataIndex: 'invitedByUsername', render: (v: string | undefined) => v || '—' },
+    { title: '归属', dataIndex: 'agent', render: (a: EndUser['agent']) => (a ? <Tag color="purple">代理 {a.username}</Tag> : '平台') },
     { title: '状态', dataIndex: 'status', render: (s: UserStatus) => <UserStatusTag status={s} /> },
     { title: '余额', dataIndex: 'balance', render: (v: number | undefined) => formatMoney(v ?? 0, currency) },
     { title: '已用 / 额度', key: 'usage', render: (_: unknown, u: EndUser) => <UsageCell u={u} /> },
@@ -201,6 +188,11 @@ export function UsersPage() {
           {canAdjustBalance && (
             <Button size="small" onClick={() => open('balance', u)}>
               调整余额
+            </Button>
+          )}
+          {canTransfer && (
+            <Button size="small" onClick={() => open('agent', u)}>
+              划转
             </Button>
           )}
           {canImpersonate && (
@@ -288,6 +280,17 @@ export function UsersPage() {
             }}
           />
         )}
+        {canListAgents && (
+          <AgentSelect
+            placeholder="按代理过滤"
+            className="filter-select"
+            value={agentId}
+            onChange={(v) => {
+              setPage(1)
+              setAgentId(v)
+            }}
+          />
+        )}
       </Space>
       <ErrorAlert error={users.error} />
       <Table<EndUser>
@@ -312,6 +315,7 @@ export function UsersPage() {
       <QuotaModal user={dialog === 'quota' ? current : null} onClose={close} onSaved={saved} />
       <ResetUserCredentialModal user={dialog === 'credential' ? current : null} onClose={close} onSaved={saved} />
       <BalanceModal user={dialog === 'balance' ? current : null} currency={currency} onClose={close} onSaved={saved} />
+      <TransferAgentModal user={dialog === 'agent' ? current : null} onClose={close} onSaved={saved} />
       <ProvisionDrawer user={dialog === 'provisions' ? current : null} canWrite={canWrite} onClose={close} onChanged={() => users.reload()} />
     </>
   )

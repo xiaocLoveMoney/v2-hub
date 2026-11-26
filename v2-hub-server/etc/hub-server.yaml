@@ -21,6 +21,8 @@ auth:
   loginWindow: 15m
   loginLockout: 15m
   loginMaxTrackedKeys: 10000
+  # 高危操作二次验证的有效期（docs/03 §4.4，Ruling-100）
+  reauthWindow: 5m
 # 面板探测与同步，语义见 docs/03 §5.1
 panel:
   probeInterval: 30s
@@ -101,3 +103,6 @@ upload:
   maxBytes: 5242880
   limit: 60
   window: 1h
+# 二级代理，语义见 docs/03 §5.23（Ruling-104）：每个代理账号的写操作每小时合计上限，超出返回 429
+agent:
+  writeRatePerHour: 120

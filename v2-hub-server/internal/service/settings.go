@@ -8,6 +8,7 @@ import (
 	"net/mail"
 	"net/netip"
 	"net/url"
+	"reflect"
 	"regexp"
 	"slices"
 	"strings"
@@ -107,6 +108,7 @@ const (
 	msgSettingPlanGone   = "注册赠送的套餐不存在"
 	msgSettingBadGroup   = "设置分组必须是对象："
 	msgSettingReadOnly   = "设置项只读："
+	msgSettingSuperOnly  = "只有超级管理员能修改该设置项："
 )
 
 // telegramChatPattern 是 Telegram 会话 id：数字（群组为负数）或 @频道用户名；空串表示不发。
@@ -334,11 +336,13 @@ func loadSiteLocation(name string) *time.Location {
 	return loc
 }
 
-// settingDef 描述一个设置项：怎么取当前值、怎么校验并写入新值。readOnly 的项接口不可改，只由后端写入。
+// settingDef 描述一个设置项：怎么取当前值、怎么校验并写入新值。readOnly 的项接口不可改，只由后端写入；
+// superOnly 的项只有超级管理员能改成别的值，其他人提交与当前值相同的值照常（Ruling-106）。
 type settingDef struct {
-	get      func(s *Settings) any
-	set      func(s *Settings, raw json.RawMessage) error
-	readOnly bool
+	get       func(s *Settings) any
+	set       func(s *Settings, raw json.RawMessage) error
+	readOnly  bool
+	superOnly bool
 }
 
 func decodeSetting[T any](raw json.RawMessage, check func(v T) bool, assign func(v T)) error {
@@ -493,7 +497,9 @@ var settingDefs = map[string]settingDef{
 		},
 	},
 	"site.portalUrl": {
-		get: func(s *Settings) any { return s.Site.PortalURL },
+		// 改了它就能把别人签发的切换身份票据引到外面（Ruling-106）
+		superOnly: true,
+		get:       func(s *Settings) any { return s.Site.PortalURL },
 		set: func(s *Settings, raw json.RawMessage) error {
 			return decodeSetting(raw, validBaseURL, func(v string) { s.Site.PortalURL = strings.TrimRight(v, "/") })
 		},
@@ -622,7 +628,9 @@ var settingDefs = map[string]settingDef{
 		},
 	},
 	"subscription.baseUrl": {
-		get: func(s *Settings) any { return s.Subscription.BaseURL },
+		// 决定全站用户的订阅地址指向哪里（Ruling-106）
+		superOnly: true,
+		get:       func(s *Settings) any { return s.Subscription.BaseURL },
 		set: func(s *Settings, raw json.RawMessage) error {
 			return decodeSetting(raw, validBaseURL, func(v string) { s.Subscription.BaseURL = strings.TrimRight(v, "/") })
 		},
@@ -906,7 +914,8 @@ func (s *SettingsService) fromRows(rows []sqlcgen.ListSettingsRow) (Settings, er
 }
 
 // Update 修改设置：patch 的键是“分组.键”（如 register.mode），只改出现的键；任一项不合法则整体不保存。
-// 返回修改后的全部设置。错误：CodeInvalidArgument。
+// 非超管把 superOnly 的项改成与当前不同的值时整体不保存（Ruling-106）。
+// 返回修改后的全部设置。错误：CodeInvalidArgument、CodePermissionDenied。
 func (s *SettingsService) Update(ctx context.Context, actor *AdminPrincipal, patch map[string]json.RawMessage, ip *netip.Addr) (Settings, error) {
 	keys := make([]string, 0, len(patch)+2)
 	for k := range patch {
@@ -934,6 +943,9 @@ func (s *SettingsService) Update(ctx context.Context, actor *AdminPrincipal, pat
 				return newError(CodeInvalidArgument, msgSettingBadValue+k)
 			}
 		}
+		if err := checkSuperOnly(actor, keys, &cur, &next); err != nil {
+			return err
+		}
 		if err := s.checkCrossFields(ctx, q, next); err != nil {
 			return err
 		}
@@ -956,6 +968,20 @@ func (s *SettingsService) Update(ctx context.Context, actor *AdminPrincipal, pat
 	s.cached, s.cachedAt = next, s.now()
 	s.mu.Unlock()
 	return next, nil
+}
+
+// checkSuperOnly 在操作者不是超管、而 keys 里有 superOnly 的项的值（规整后）与当前不同时返回 CodePermissionDenied（Ruling-106）。
+func checkSuperOnly(actor *AdminPrincipal, keys []string, cur, next *Settings) error {
+	if actor.IsSuperAdmin {
+		return nil
+	}
+	for _, k := range keys {
+		def := settingDefs[k]
+		if def.superOnly && !reflect.DeepEqual(def.get(cur), def.get(next)) {
+			return newError(CodePermissionDenied, msgSettingSuperOnly+k)
+		}
+	}
+	return nil
 }
 
 // writeSettings 把 next 里 keys 对应的值逐个序列化并写库；updatedBy 无效（零值）表示由后端写入、没有操作人。

@@ -120,11 +120,13 @@ func (q *Queries) InsertRolePermissions(ctx context.Context, arg InsertRolePermi
 const listPermissionCodesForAdmin = `-- name: ListPermissionCodesForAdmin :many
 SELECT DISTINCT p.code
 FROM admin_role ar
+JOIN role r ON r.id = ar.role_id AND r.is_builtin = FALSE
 JOIN role_permission rp ON rp.role_id = ar.role_id
 JOIN permission p ON p.id = rp.permission_id
 WHERE ar.admin_id = $1
 `
 
+// 只取自定义角色的 role_permission 行；内置角色的权限由代码定义，库里即使有行也不算（Ruling-95）。
 func (q *Queries) ListPermissionCodesForAdmin(ctx context.Context, adminID int64) ([]string, error) {
 	rows, err := q.db.Query(ctx, listPermissionCodesForAdmin, adminID)
 	if err != nil {
@@ -259,6 +261,39 @@ func (q *Queries) ListRoles(ctx context.Context) ([]ListRolesRow, error) {
 			&i.Name,
 			&i.IsBuiltin,
 		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRolesForAdmin = `-- name: ListRolesForAdmin :many
+SELECT r.code, r.is_builtin
+FROM admin_role ar
+JOIN role r ON r.id = ar.role_id
+WHERE ar.admin_id = $1
+`
+
+type ListRolesForAdminRow struct {
+	Code      string
+	IsBuiltin bool
+}
+
+// 鉴权用：内置角色只在 is_builtin 为真时按编码取代码定义的权限（Ruling-95）。
+func (q *Queries) ListRolesForAdmin(ctx context.Context, adminID int64) ([]ListRolesForAdminRow, error) {
+	rows, err := q.db.Query(ctx, listRolesForAdmin, adminID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListRolesForAdminRow{}
+	for rows.Next() {
+		var i ListRolesForAdminRow
+		if err := rows.Scan(&i.Code, &i.IsBuiltin); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

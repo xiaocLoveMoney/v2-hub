@@ -81,17 +81,16 @@ wait_tags() {
 }
 
 # ---- 2. hub-server（下发检查 2 秒一次、同一服务器两次下发至少隔 5 秒、写操作上限放宽）与超管 ----
-sed -e 's/^  applyInterval: .*/  applyInterval: 2s/' -e 's/^  minApplyInterval: .*/  minApplyInterval: 5s/' \
-  -e "s/^  userWriteLimit: .*/  userWriteLimit: $WRITE_LIMIT/" "$REPO_ROOT/v2-hub-server/etc/hub-server.yaml" > "$WORK/hub-server.yaml"
+it_hub_config "$WORK/hub-server.yaml" -e 's/^  applyInterval: .*/  applyInterval: 2s/' -e 's/^  minApplyInterval: .*/  minApplyInterval: 5s/' \
+  -e "s/^  userWriteLimit: .*/  userWriteLimit: $WRITE_LIMIT/" || fail "派生配置失败"
 grep -q 'applyInterval: 2s' "$WORK/hub-server.yaml" || fail "临时配置没有改到下发间隔"
 grep -q "userWriteLimit: $WRITE_LIMIT" "$WORK/hub-server.yaml" || fail "临时配置没有改到写操作上限"
 printf '%s\n' "$CRED" | (cd "$REPO_ROOT/v2-hub-server" && make -s admin-create USERNAME="$ROOT_USER") >/tmp/it-admin-create.log 2>&1 || fail "admin-create 失败"
 start_module v2-hub-server 8080 CONFIG="$WORK/hub-server.yaml"
 HUB_JAR="$WORK/hub.jar"
 login_body_of() { jq -nc --arg u "$1" --arg p "$2" '{username:$u,password:$p}'; }
-CSRF="$(curl -s -b "$HUB_JAR" -c "$HUB_JAR" -X POST "$BASE/api/admin/auth/login" -H 'Content-Type: application/json' --data "$(login_body_of "$ROOT_USER" "$CRED")" \
-  | jq -r '.data.csrfToken // empty')"
-[ -n "$CSRF" ] || fail "hub 登录失败"
+# 超管登录：首次登录当场绑定两步验证（R10）；登录即视为刚做过二次验证，联调配置把有效期拉长（common.sh it_admin_login）
+CSRF="$(it_admin_login "$HUB_JAR" "$ROOT_USER" "$CRED")" || fail "hub 登录失败"
 call() {
   local args=(-s -o "$WORK/body" -w '%{http_code}' -b "$1" -c "$1" -X "$3" -H 'Content-Type: application/json')
   [ -n "$2" ] && args+=(-H "X-CSRF-Token: $2")

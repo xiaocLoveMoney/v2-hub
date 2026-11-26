@@ -12,12 +12,14 @@ import (
 // TOTP 相关业务（docs/03 §4.3）。
 
 const (
-	totpIssuer           = "v2-hub"
-	guardKeyTOTPPrefix   = "totp:"
-	msgTOTPAlreadyOn     = "两步验证已开启"
-	msgTOTPNotOn         = "两步验证未开启"
-	msgTOTPNoPending     = "请先生成密钥再确认"
-	msgTOTPCodeMalformed = "验证码须为 6 位数字"
+	totpIssuer            = "v2-hub"
+	guardKeyTOTPPrefix    = "totp:"
+	msgTOTPAlreadyOn      = "两步验证已开启"
+	msgTOTPNotOn          = "两步验证未开启"
+	msgTOTPNoPending      = "请先生成密钥再确认"
+	msgTOTPCodeMalformed  = "验证码须为 6 位数字"
+	msgTOTPSuperCannotOff = "超级管理员必须保持两步验证开启"
+	msgOwnerProtected     = "所有者只能在服务器上用命令行处理"
 )
 
 // TOTPSetup 是开启流程第一步的结果；Secret 只返回这一次。
@@ -96,9 +98,11 @@ func (s *AuthService) EnableTOTP(ctx context.Context, p *AdminPrincipal, code st
 		return newError(CodeInvalidArgument, msgTOTPCodeMalformed)
 	}
 	guardKey := guardKeyTOTPPrefix + fmt.Sprint(p.AdminID)
-	if s.guard.IsLocked(guardKey) {
+	attempt, ok := s.guard.Acquire(guardKey)
+	if !ok {
 		return newError(CodeRateLimited, msgTooManyLogin)
 	}
+	defer attempt.Release()
 	return s.inTx(ctx, func(q *sqlcgen.Queries) error {
 		row, err := q.GetAdminTOTP(ctx, p.AdminID)
 		if err != nil {
@@ -116,9 +120,10 @@ func (s *AuthService) EnableTOTP(ctx context.Context, p *AdminPrincipal, code st
 		}
 		step, ok := totp.Verify(secret, code, s.now(), 0)
 		if !ok {
-			s.guard.RecordFailure(guardKey)
+			attempt.Fail()
 			return newError(CodeInvalidArgument, msgTOTPInvalid)
 		}
+		attempt.Release()
 		s.guard.Reset(guardKey)
 		sealed, err := s.sealer.Seal(secret, totpAAD(p.AdminID, false))
 		if err != nil {
@@ -127,19 +132,28 @@ func (s *AuthService) EnableTOTP(ctx context.Context, p *AdminPrincipal, code st
 		if err := q.EnableAdminTOTP(ctx, sqlcgen.EnableAdminTOTPParams{ID: p.AdminID, TotpSecretEnc: sealed, TotpLastStep: step}); err != nil {
 			return fmt.Errorf("enable totp of admin %d: %w", p.AdminID, err)
 		}
+		// 开启成功视为刚做过二次验证（R12）：刚用掉的步长不能再拿来验一次
+		if _, err := s.refreshReauth(ctx, q, p.SessionID); err != nil {
+			return err
+		}
 		return writeAudit(ctx, q, adminAudit(p, ActionAdminTOTPEnable, targetAdmin, p.AdminID, ip, nil))
 	})
 }
 
-// DisableTOTP 本人凭当前验证码关闭两步验证。
+// DisableTOTP 本人凭当前验证码关闭两步验证；超管不能关闭（R10，409）。
 func (s *AuthService) DisableTOTP(ctx context.Context, p *AdminPrincipal, code string, ip *netip.Addr) error {
+	if p.IsSuperAdmin {
+		return newError(CodeConflict, msgTOTPSuperCannotOff)
+	}
 	if !validTOTPCode(code) {
 		return newError(CodeInvalidArgument, msgTOTPCodeMalformed)
 	}
 	guardKey := guardKeyTOTPPrefix + fmt.Sprint(p.AdminID)
-	if s.guard.IsLocked(guardKey) {
+	attempt, ok := s.guard.Acquire(guardKey)
+	if !ok {
 		return newError(CodeRateLimited, msgTooManyLogin)
 	}
+	defer attempt.Release()
 	row, err := s.q.GetAdminTOTP(ctx, p.AdminID)
 	if err != nil {
 		return fmt.Errorf("get totp of admin %d: %w", p.AdminID, err)
@@ -147,14 +161,15 @@ func (s *AuthService) DisableTOTP(ctx context.Context, p *AdminPrincipal, code s
 	if row.TotpSecretEnc == nil {
 		return newError(CodeConflict, msgTOTPNotOn)
 	}
-	ok, err := s.consumeTOTP(ctx, p.AdminID, row.TotpSecretEnc, row.TotpLastStep, code)
+	ok, err = s.consumeTOTP(ctx, p.AdminID, row.TotpSecretEnc, row.TotpLastStep, code)
 	if err != nil {
 		return err
 	}
 	if !ok {
-		s.guard.RecordFailure(guardKey)
+		attempt.Fail()
 		return newError(CodeInvalidArgument, msgTOTPInvalid)
 	}
+	attempt.Release()
 	s.guard.Reset(guardKey)
 	return s.inTx(ctx, func(q *sqlcgen.Queries) error {
 		if _, err := q.ClearAdminTOTP(ctx, p.AdminID); err != nil {
@@ -164,25 +179,34 @@ func (s *AuthService) DisableTOTP(ctx context.Context, p *AdminPrincipal, code s
 	})
 }
 
-// ResetAdminTOTP 为遗失设备的管理员清除两步验证（R3、R4），并使其全部会话失效。
+// ResetAdminTOTP 为遗失设备的管理员清除两步验证（R3、R4、R11），并使其全部会话失效（R7）。
 func (s *RBACService) ResetAdminTOTP(ctx context.Context, actor *AdminPrincipal, id int64, ip *netip.Addr) error {
 	if id == actor.AdminID {
 		return newError(CodeConflict, "请在账号安全页用验证码关闭自己的两步验证")
 	}
 	return s.inTx(ctx, func(q *sqlcgen.Queries) error {
-		_, currentRoles, err := getAdminWithRoles(ctx, q, id)
+		target, currentRoles, err := getAdminWithRoles(ctx, q, id)
 		if err != nil {
 			return err
+		}
+		if target.IsOwner {
+			return newError(CodePermissionDenied, msgOwnerProtected)
 		}
 		if _, err := resolveAssignableRoles(ctx, q, actor, currentRoles); err != nil {
 			return err
 		}
-		if _, err := q.ClearAdminTOTP(ctx, id); err != nil {
-			return fmt.Errorf("clear totp of admin %d: %w", id, err)
-		}
-		if err := q.DeleteAdminSessionsByAdmin(ctx, id); err != nil {
-			return fmt.Errorf("revoke sessions of admin %d: %w", id, err)
-		}
-		return writeAudit(ctx, q, adminAudit(actor, ActionAdminTOTPReset, targetAdmin, id, ip, nil))
+		return clearAdminTOTPTx(ctx, q, id, adminAudit(actor, ActionAdminTOTPReset, targetAdmin, id, ip, nil))
 	})
+}
+
+// clearAdminTOTPTx 在调用方的事务里清除管理员的两步验证、吊销其全部会话并写审计（R7）；
+// 管理端重置与命令行重置共用，审计项（操作者不同）由调用方给出。
+func clearAdminTOTPTx(ctx context.Context, q *sqlcgen.Queries, id int64, audit AuditEntry) error {
+	if _, err := q.ClearAdminTOTP(ctx, id); err != nil {
+		return fmt.Errorf("clear totp of admin %d: %w", id, err)
+	}
+	if err := q.DeleteAdminSessionsByAdmin(ctx, id); err != nil {
+		return fmt.Errorf("revoke sessions of admin %d: %w", id, err)
+	}
+	return writeAudit(ctx, q, audit)
 }

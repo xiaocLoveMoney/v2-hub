@@ -43,9 +43,18 @@ FROM admin_role ar
 JOIN role r ON r.id = ar.role_id
 WHERE ar.admin_id = $1;
 
+-- name: ListRolesForAdmin :many
+-- 鉴权用：内置角色只在 is_builtin 为真时按编码取代码定义的权限（Ruling-95）。
+SELECT r.code, r.is_builtin
+FROM admin_role ar
+JOIN role r ON r.id = ar.role_id
+WHERE ar.admin_id = $1;
+
 -- name: ListPermissionCodesForAdmin :many
+-- 只取自定义角色的 role_permission 行；内置角色的权限由代码定义，库里即使有行也不算（Ruling-95）。
 SELECT DISTINCT p.code
 FROM admin_role ar
+JOIN role r ON r.id = ar.role_id AND r.is_builtin = FALSE
 JOIN role_permission rp ON rp.role_id = ar.role_id
 JOIN permission p ON p.id = rp.permission_id
 WHERE ar.admin_id = $1;

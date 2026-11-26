@@ -15,12 +15,20 @@ const (
 	CodeConflict         Code = "conflict"
 	CodeRateLimited      Code = "rate_limited"
 	CodeTOTPRequired     Code = "totp_required"
-	CodeUpstream         Code = "upstream_unavailable"
-	CodeInternal         Code = "internal"
+	// CodeTOTPSetupRequired 表示超管尚未开启两步验证，须先开启（R10）。
+	CodeTOTPSetupRequired Code = "totp_setup_required"
+	// CodeReauthRequired 表示高危操作须先做二次验证（R12，docs/03 §4.4）。
+	CodeReauthRequired Code = "reauth_required"
+	CodeUpstream       Code = "upstream_unavailable"
+	CodeInternal       Code = "internal"
 	// CodeFeatureDisabled 表示功能未开启（注册关闭、邮件未配置等，docs/03 §5）。
 	CodeFeatureDisabled Code = "feature_disabled"
 	// CodeInsufficientBalance 表示余额不足以支付本次下单（docs/03 §5.13）；Error.Data 带差额。
 	CodeInsufficientBalance Code = "insufficient_balance"
+	// CodeAgentPoolInsufficient 表示代理的流量池不够本次开通（docs/03 §5.23）；Error.Data 带 poolCost 与 poolRemaining。
+	CodeAgentPoolInsufficient Code = "agent_pool_insufficient"
+	// CodeAgentUserLimit 表示代理名下用户数已达上限，不能再新建（docs/03 §5.23）。
+	CodeAgentUserLimit Code = "agent_user_limit"
 )
 
 // Error 是业务错误：Code 决定 HTTP 状态，Message 是可直接展示给用户的中文说明（不含内部细节）。

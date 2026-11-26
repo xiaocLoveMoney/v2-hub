@@ -22,6 +22,8 @@ import (
 const (
 	InviteKindAdmin = "admin"
 	InviteKindUser  = "user"
+	// InviteKindAgent 是代理的码，经它注册的用户归该代理（Ruling-102）。
+	InviteKindAgent = "agent"
 )
 
 const (
@@ -45,7 +47,7 @@ const (
 	targetInvite       = "invite_code"
 
 	msgInviteNotFound     = "邀请码不存在"
-	msgInviteBadKind      = "kind 只能是 admin、user"
+	msgInviteBadKind      = "kind 只能是 admin、user、agent"
 	msgInviteBadUses      = "可用次数须在 0–100000 之间"
 	msgInviteRemarkLong   = "备注过长"
 	msgInvitePersonalOnly = "个人邀请码不能删除，只能停用"
@@ -77,15 +79,25 @@ func randomInviteCode() (string, error) {
 	return code, nil
 }
 
-// useInviteCode 在注册事务里校验邀请码并把已用次数加一，返回（邀请码 id，邀请人用户 id；管理员码的邀请人为 0）。
+// inviteUse 是注册时用掉的一个邀请码：CodeID 邀请码 id；InviterID 邀请人用户 id（管理员码与代理码为 0）；
+// AgentID 是新用户应归属的代理（代理码的代理、或个人码主人所属的代理，Ruling-102），0 表示平台用户。
+type inviteUse struct {
+	CodeID    int64
+	InviterID int64
+	AgentID   int64
+}
+
+// useInviteCode 在注册事务里校验邀请码并把已用次数加一（docs/03 §5.8、§5.23）。
 // 行已加锁，计数与上限的判断不会被并发注册穿透。无效、停用、过期、用尽一律 CodeInvalidArgument，提示不区分。
-func (s *AccountService) useInviteCode(ctx context.Context, q *sqlcgen.Queries, cur Settings, code string) (int64, int64, error) {
+// 新用户会归到某个代理时，再锁住该代理的配额行（锁顺序：邀请码 → 代理配额行），名下未删除用户数已达上限即按邀请码不可用处理；
+// 代理码另要求代理处于启用状态（Ruling-102、Ruling-103）。
+func (s *AccountService) useInviteCode(ctx context.Context, q *sqlcgen.Queries, cur Settings, code string) (inviteUse, error) {
 	row, err := q.GetInviteCodeForUpdate(ctx, code)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return 0, 0, newError(CodeInvalidArgument, msgInviteInvalid)
+		return inviteUse{}, newError(CodeInvalidArgument, msgInviteInvalid)
 	}
 	if err != nil {
-		return 0, 0, fmt.Errorf("get invite code: %w", err)
+		return inviteUse{}, fmt.Errorf("get invite code: %w", err)
 	}
 	maxUses := int(row.MaxUses)
 	personal := row.OwnerUserID.Valid
@@ -97,12 +109,50 @@ func (s *AccountService) useInviteCode(ctx context.Context, q *sqlcgen.Queries, 
 		(!row.ExpiresAt.Valid || row.ExpiresAt.Time.After(s.now())) &&
 		(maxUses == 0 || int(row.UsedCount) < maxUses)
 	if !usable {
-		return 0, 0, newError(CodeInvalidArgument, msgInviteInvalid)
+		return inviteUse{}, newError(CodeInvalidArgument, msgInviteInvalid)
+	}
+	use := inviteUse{CodeID: row.ID, InviterID: row.OwnerUserID.Int64}
+	agentCode := row.AgentID.Valid
+	switch {
+	case agentCode:
+		// 经代理码注册的用户没有邀请人、不产生返利（Ruling-102）
+		use.AgentID, use.InviterID = row.AgentID.Int64, 0
+	case row.OwnerAgentID.Valid:
+		use.AgentID = row.OwnerAgentID.Int64
+	default:
+	}
+	if use.AgentID != 0 {
+		if err := checkAgentAcceptsSignup(ctx, q, use.AgentID, agentCode); err != nil {
+			return inviteUse{}, err
+		}
 	}
 	if err := q.BumpInviteCodeUse(ctx, row.ID); err != nil {
-		return 0, 0, fmt.Errorf("bump invite code %d: %w", row.ID, err)
+		return inviteUse{}, fmt.Errorf("bump invite code %d: %w", row.ID, err)
 	}
-	return row.ID, row.OwnerUserID.Int64, nil
+	return use, nil
+}
+
+// checkAgentAcceptsSignup 锁住代理的配额行并判断还能不能经邀请码再多一个名下用户（docs/03 §5.23 注册）：
+// 名下未删除用户数已达上限即不可用；requireEnabled 为真（代理码）时代理还须处于启用状态。不可用一律按邀请码无效处理。
+func checkAgentAcceptsSignup(ctx context.Context, q *sqlcgen.Queries, agentID int64, requireEnabled bool) error {
+	profile, err := q.LockAgentProfile(ctx, agentID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return newError(CodeInvalidArgument, msgInviteInvalid)
+	}
+	if err != nil {
+		return fmt.Errorf("lock agent profile %d: %w", agentID, err)
+	}
+	if requireEnabled && profile.IsDisabled {
+		return newError(CodeInvalidArgument, msgInviteInvalid)
+	}
+	n, err := q.CountAgentUsers(ctx, int8Arg(agentID))
+	if err != nil {
+		return fmt.Errorf("count users of agent %d: %w", agentID, err)
+	}
+	if n >= int64(profile.MaxUsers) {
+		return newError(CodeInvalidArgument, msgInviteInvalid)
+	}
+	return nil
 }
 
 // Invitee 是被邀请人（用户名已打码）。
@@ -245,6 +295,9 @@ type InviteCode struct {
 	Kind          string
 	OwnerUserID   *int64
 	OwnerUsername string
+	// AgentID / AgentUsername 是代理码的代理（Ruling-102），其余为 nil / 空串。
+	AgentID       *int64
+	AgentUsername string
 	MaxUses       int
 	UsedCount     int
 	ExpiresAt     *time.Time
@@ -278,13 +331,20 @@ func (s *AccountService) inviteFromRow(r sqlcgen.ListInviteCodesRow, cur Setting
 		id := r.OwnerUserID.Int64
 		c.Kind, c.OwnerUserID, c.MaxUses = InviteKindUser, &id, cur.Invite.UserMaxUses
 	}
+	if r.AgentID.Valid {
+		id := r.AgentID.Int64
+		c.Kind, c.AgentID, c.AgentUsername = InviteKindAgent, &id, r.AgentUsername
+	}
 	return c
 }
 
-// ListInviteCodes 分页列出邀请码；kind 为空表示全部。
-func (s *AccountService) ListInviteCodes(ctx context.Context, kind string, pq PageQuery) (*Page[InviteCode], error) {
-	if kind != "" && kind != InviteKindAdmin && kind != InviteKindUser {
+// ListInviteCodes 分页列出邀请码；kind 为空表示全部，agentID 非 0 时只看该代理的码（Ruling-102）。
+func (s *AccountService) ListInviteCodes(ctx context.Context, kind string, agentID int64, pq PageQuery) (*Page[InviteCode], error) {
+	if kind != "" && kind != InviteKindAdmin && kind != InviteKindUser && kind != InviteKindAgent {
 		return nil, newError(CodeInvalidArgument, msgInviteBadKind)
+	}
+	if agentID < 0 {
+		return nil, newError(CodeInvalidArgument, msgBadAgentFilter)
 	}
 	limit, offset, err := pq.normalize()
 	if err != nil {
@@ -294,11 +354,11 @@ func (s *AccountService) ListInviteCodes(ctx context.Context, kind string, pq Pa
 	if err != nil {
 		return nil, err
 	}
-	total, err := s.q.CountInviteCodes(ctx, kind)
+	total, err := s.q.CountInviteCodes(ctx, sqlcgen.CountInviteCodesParams{Kind: kind, AgentID: agentID})
 	if err != nil {
 		return nil, fmt.Errorf("count invite codes: %w", err)
 	}
-	rows, err := s.q.ListInviteCodes(ctx, sqlcgen.ListInviteCodesParams{Kind: kind, RowLimit: limit, RowOffset: offset})
+	rows, err := s.q.ListInviteCodes(ctx, sqlcgen.ListInviteCodesParams{Kind: kind, AgentID: agentID, RowLimit: limit, RowOffset: offset})
 	if err != nil {
 		return nil, fmt.Errorf("list invite codes: %w", err)
 	}
@@ -330,29 +390,44 @@ func (s *AccountService) CreateInviteCode(ctx context.Context, actor *AdminPrinc
 	if err := in.validate(); err != nil {
 		return nil, err
 	}
+	id, err := s.insertWithFreshInviteCode(ctx, "create invite code", func(q *sqlcgen.Queries, code string) (int64, error) {
+		id, err := q.CreateAdminInviteCode(ctx, sqlcgen.CreateAdminInviteCodeParams{
+			Code: code, MaxUses: int32(in.MaxUses), ExpiresAt: optionalTime(in.ExpiresAt), IsDisabled: in.IsDisabled, Remark: in.Remark,
+			CreatedBy: int8Arg(actor.AdminID),
+		})
+		if err != nil {
+			return 0, err
+		}
+		return id, writeAudit(ctx, q, adminAudit(actor, ActionInviteCreate, targetInvite, id, ip, map[string]any{"maxUses": in.MaxUses}))
+	})
+	if err != nil {
+		return nil, err
+	}
+	return s.getInviteCode(ctx, id)
+}
+
+// insertWithFreshInviteCode 生成随机邀请码并在一个事务里调用 insert（插入并写审计，返回新码 id）；撞上唯一约束就换码重试，
+// 最多 inviteGenRetries 次。op 是错误上下文。管理员码与代理码共用，各自的插入语句留在调用方。
+func (s store) insertWithFreshInviteCode(ctx context.Context, op string, insert func(q *sqlcgen.Queries, code string) (int64, error)) (int64, error) {
 	for range inviteGenRetries {
 		code, err := randomInviteCode()
 		if err != nil {
-			return nil, err
+			return 0, err
 		}
 		var id int64
 		err = s.inTx(ctx, func(q *sqlcgen.Queries) error {
-			if id, err = q.CreateAdminInviteCode(ctx, sqlcgen.CreateAdminInviteCodeParams{
-				Code: code, MaxUses: int32(in.MaxUses), ExpiresAt: optionalTime(in.ExpiresAt), IsDisabled: in.IsDisabled, Remark: in.Remark,
-				CreatedBy: int8Arg(actor.AdminID),
-			}); err != nil {
-				return err
-			}
-			return writeAudit(ctx, q, adminAudit(actor, ActionInviteCreate, targetInvite, id, ip, map[string]any{"maxUses": in.MaxUses}))
+			var insertErr error
+			id, insertErr = insert(q, code)
+			return insertErr
 		})
 		if err == nil {
-			return s.getInviteCode(ctx, id)
+			return id, nil
 		}
 		if !isUniqueViolation(err) {
-			return nil, fmt.Errorf("create invite code: %w", err)
+			return 0, fmt.Errorf("%s: %w", op, err)
 		}
 	}
-	return nil, fmt.Errorf("create invite code: gave up after %d collisions", inviteGenRetries)
+	return 0, fmt.Errorf("%s: gave up after %d collisions", op, inviteGenRetries)
 }
 
 // UpdateInviteCode 修改邀请码：管理员码改次数、到期、备注与停用；个人码只改停用。错误：CodeNotFound、CodeInvalidArgument。

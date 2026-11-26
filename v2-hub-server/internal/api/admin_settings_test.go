@@ -19,7 +19,7 @@ func TestSettingsEndpoints(t *testing.T) {
 		t.Fatalf("bootstrap: %v", err)
 	}
 	root := newClient(t, srv.URL)
-	root.login("root")
+	root.loginSuper("root")
 
 	got := root.do(http.MethodGet, "/api/admin/settings", nil)
 	expectStatus(t, got, http.StatusOK, codeOK)

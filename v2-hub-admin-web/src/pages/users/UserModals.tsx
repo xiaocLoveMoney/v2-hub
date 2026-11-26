@@ -8,22 +8,13 @@ import { useSubmit } from '../../hooks/use-submit'
 import { TABLE_SCROLL, formatTime } from '../system/format'
 import { RenewResetFields, type RenewResetForm } from './quota-fields'
 import { bytesToGb, describeRenew, describeReset, formatBytes, gbToBytes, renewFieldsOf, renewModeOf, renewValueOf } from './quota'
-import { MAX_EMAIL_LEN, MAX_LIMIT_IP, MAX_REMARK_LEN } from '../form-limits'
+import { MAX_LIMIT_IP, MAX_REMARK_LEN } from '../form-limits'
+import { USERNAME_PATTERN, credentialRules, emailRules } from './user-form-rules'
 import { PageHeader } from '../../components/PageHeader'
 import { FormModal } from '../../components/FormModal'
+import { ResetCredentialModal, type ResetCredentialSave } from '../../components/ResetCredentialModal'
 
-// 终端用户密码 8–128 位（docs/03 §5.3；管理员密码是 12 位起）
-const MIN_CREDENTIAL_LEN = 8
-const MAX_CREDENTIAL_LEN = 128
 const MAX_PENDING_DAYS = 36500
-// 新用户名不含 @，好与邮箱登录区分（docs/03 §5.8）
-const USERNAME_PATTERN = /^[A-Za-z0-9_.-]{3,64}$/
-const emailRules = [{ type: 'email' as const, max: MAX_EMAIL_LEN, message: '邮箱格式不对' }]
-
-const credentialRules = [
-  { required: true, message: '请输入密码' },
-  { min: MIN_CREDENTIAL_LEN, max: MAX_CREDENTIAL_LEN, message: `密码长度须为 ${MIN_CREDENTIAL_LEN}–${MAX_CREDENTIAL_LEN} 个字符` },
-]
 
 // ---- 新建 -------------------------------------------------------------------------
 
@@ -249,34 +240,13 @@ function QuotaForm({ user, onSaved }: { user: EndUser; onSaved: () => void }) {
 
 // ---- 重置密码 -----------------------------------------------------------------------
 
+/** 员工重置终端用户的密码。 */
+const saveUserCredential: ResetCredentialSave<EndUser> = (user, credential) =>
+  api.PUT('/api/admin/users/{id}/password', { params: { ...csrfHeader(), path: { id: user.id } }, body: { password: credential } })
+
 /** 重置客户后台登录密码。 */
 export function ResetUserCredentialModal({ user, onClose, onSaved }: UserModalProps) {
-  return (
-    <FormModal title={`重置密码：${user?.username ?? ''}`} isOpen={user !== null} onClose={onClose}>
-      {(generation) => user !== null && <ResetCredentialForm key={generation} user={user} onSaved={onSaved} />}
-    </FormModal>
-  )
-}
-
-function ResetCredentialForm({ user, onSaved }: { user: EndUser; onSaved: () => void }) {
-  const { error, isBusy, run } = useSubmit('密码已重置', onSaved)
-  const submit = (v: { credential: string }) => {
-    const pw = v.credential
-    return run(() => api.PUT('/api/admin/users/{id}/password', { params: { ...csrfHeader(), path: { id: user.id } }, body: { password: pw } }))
-  }
-  return (
-    <>
-      <ErrorAlert error={error} />
-      <Form layout="vertical" onFinish={(v) => void submit(v)}>
-        <Form.Item name="credential" label="新密码" rules={credentialRules}>
-          <Input.Password autoComplete="new-password" />
-        </Form.Item>
-        <Button type="primary" htmlType="submit" block loading={isBusy}>
-          重置
-        </Button>
-      </Form>
-    </>
-  )
+  return <ResetCredentialModal target={user} rules={credentialRules} okText="密码已重置" save={saveUserCredential} onClose={onClose} onSaved={onSaved} />
 }
 
 // ---- 下发详情 -----------------------------------------------------------------------

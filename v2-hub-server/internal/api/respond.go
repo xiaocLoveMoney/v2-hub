@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/netip"
@@ -38,18 +39,23 @@ type envelope struct {
 
 // statusByCode 把业务错误码映射为 HTTP 状态，与 docs/03 §5 逐行对应。
 var statusByCode = map[service.Code]int{
-	service.CodeInvalidArgument:  http.StatusBadRequest,
-	service.CodeUnauthenticated:  http.StatusUnauthorized,
-	service.CodePermissionDenied: http.StatusForbidden,
-	service.CodeNotFound:         http.StatusNotFound,
-	service.CodeConflict:         http.StatusConflict,
-	service.CodeRateLimited:      http.StatusTooManyRequests,
-	service.CodeTOTPRequired:     http.StatusUnauthorized,
-	service.CodeUpstream:         http.StatusBadGateway,
-	service.CodeAccountDisabled:  http.StatusForbidden,
-	service.CodeFeatureDisabled:  http.StatusForbidden,
+	service.CodeInvalidArgument:   http.StatusBadRequest,
+	service.CodeUnauthenticated:   http.StatusUnauthorized,
+	service.CodePermissionDenied:  http.StatusForbidden,
+	service.CodeNotFound:          http.StatusNotFound,
+	service.CodeConflict:          http.StatusConflict,
+	service.CodeRateLimited:       http.StatusTooManyRequests,
+	service.CodeTOTPRequired:      http.StatusUnauthorized,
+	service.CodeTOTPSetupRequired: http.StatusForbidden,
+	service.CodeReauthRequired:    http.StatusForbidden,
+	service.CodeUpstream:          http.StatusBadGateway,
+	service.CodeAccountDisabled:   http.StatusForbidden,
+	service.CodeFeatureDisabled:   http.StatusForbidden,
 	// 余额不足按“当前状态不允许”处理，前端凭 code 与 data.shortfall 引导充值（docs/03 §5 错误码表）
 	service.CodeInsufficientBalance: http.StatusConflict,
+	// 代理配额不足（docs/03 §5 错误码表、§5.23）
+	service.CodeAgentPoolInsufficient: http.StatusConflict,
+	service.CodeAgentUserLimit:        http.StatusConflict,
 }
 
 // pageVO 是分页列表的统一响应体；Items 恒为非 nil 切片，空列表输出 []。
@@ -136,6 +142,21 @@ func decodeJSON(w http.ResponseWriter, r *http.Request, dst any) error {
 		return badRequest(msgBadJSON)
 	}
 	if dec.More() {
+		return badRequest(msgBadJSON)
+	}
+	return nil
+}
+
+// decodeOptionalJSON 同 decodeJSON，但允许请求体为空（可省略请求体的接口用，如 reset-host-key）。
+func decodeOptionalJSON(w http.ResponseWriter, r *http.Request, dst any) error {
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyLen)
+	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()
+	err := dec.Decode(dst)
+	if errors.Is(err, io.EOF) {
+		return nil
+	}
+	if err != nil || dec.More() {
 		return badRequest(msgBadJSON)
 	}
 	return nil

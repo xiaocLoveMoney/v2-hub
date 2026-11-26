@@ -1,4 +1,4 @@
-.PHONY: run test build lint vuln sqlc gen-upstream admin-create
+.PHONY: run test build lint vuln sqlc gen-upstream admin-create admin-owner-set admin-totp-reset admin-password-reset
 
 REPO_ROOT := $(abspath ..)
 SQLC_IMAGE := sqlc/sqlc:1.31.1
@@ -28,6 +28,22 @@ run:
 admin-create:
 	@test -n "$(USERNAME)" || { echo "用法: make admin-create USERNAME=<用户名>"; exit 1; }
 	@HUB_DATABASE_URL="$${HUB_DATABASE_URL:-$(DEV_DB_URL)}" go run ./cmd/hub admin-create -f $(CONFIG) -username "$(USERNAME)"
+
+# 所有者与恢复（docs/03 §4.3 命令行，Ruling-98、Ruling-99）：只在服务器上执行，审计的操作者记为系统。
+# make admin-owner-set USERNAME=root：指定或转移所有者（目标须是启用状态的超级管理员）
+admin-owner-set:
+	@test -n "$(USERNAME)" || { echo "用法: make admin-owner-set USERNAME=<用户名>"; exit 1; }
+	@HUB_DATABASE_URL="$${HUB_DATABASE_URL:-$(DEV_DB_URL)}" go run ./cmd/hub admin-owner-set -f $(CONFIG) -username "$(USERNAME)"
+
+# make admin-totp-reset USERNAME=root：清除两步验证并使其全部会话失效
+admin-totp-reset:
+	@test -n "$(USERNAME)" || { echo "用法: make admin-totp-reset USERNAME=<用户名>"; exit 1; }
+	@HUB_DATABASE_URL="$${HUB_DATABASE_URL:-$(DEV_DB_URL)}" go run ./cmd/hub admin-totp-reset -f $(CONFIG) -username "$(USERNAME)"
+
+# make admin-password-reset USERNAME=root：重设密码（终端无回显输入，或经管道传入一行）并使其全部会话失效
+admin-password-reset:
+	@test -n "$(USERNAME)" || { echo "用法: make admin-password-reset USERNAME=<用户名>"; exit 1; }
+	@HUB_DATABASE_URL="$${HUB_DATABASE_URL:-$(DEV_DB_URL)}" go run ./cmd/hub admin-password-reset -f $(CONFIG) -username "$(USERNAME)"
 
 # 本机有开发库时顺带跑真实数据库用例（每个用例独立 schema，不影响开发数据）；无库时这些用例自动跳过。
 test:

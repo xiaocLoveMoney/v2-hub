@@ -22,8 +22,8 @@ SERVER_NAME=it10-xui-a
 MAIL_DOMAIN=it10.example.com
 ALERT_MAIL="ops@$MAIL_DOMAIN"
 CHAT_ID=-1001234567890
-SUBJECT_DOWN="【$SITE_NAME】服务器 $SERVER_NAME 不在线"
-SUBJECT_UP="【$SITE_NAME】服务器 $SERVER_NAME 已恢复在线"
+SUBJECT_DOWN="【${SITE_NAME}】服务器 $SERVER_NAME 不在线"
+SUBJECT_UP="【${SITE_NAME}】服务器 $SERVER_NAME 已恢复在线"
 SMTP_HOST=127.0.0.1
 SMTP_DEAD_PORT=1        # 没有服务监听，连接立即被拒
 TG_PORT=18765           # Telegram 模拟端
@@ -94,7 +94,7 @@ tg_count() { jq -s --arg t "$1" --arg c "$CHAT_ID" --arg p "/bot$BOT_TOKEN/sendM
   '[.[] | select(.path == $p and (.body.chat_id | tostring) == $c and (.body.text | contains($t)))] | length' "$WORK/tg.log"; }
 
 # ---- 3. hub-server（探测 3 秒一次，SMTP 与 Telegram 指向本机）与超管 ----
-sed -e "s/^  probeInterval: .*/  probeInterval: $PROBE_INTERVAL/" "$REPO_ROOT/v2-hub-server/etc/hub-server.yaml" > "$WORK/hub-server.yaml"
+it_hub_config "$WORK/hub-server.yaml" -e "s/^  probeInterval: .*/  probeInterval: $PROBE_INTERVAL/" || fail "派生配置失败"
 grep -q "probeInterval: $PROBE_INTERVAL" "$WORK/hub-server.yaml" || fail "临时配置没有改到探测间隔"
 printf '%s\n' "$CRED" | (cd "$REPO_ROOT/v2-hub-server" && make -s admin-create USERNAME="$ROOT_USER") >/tmp/it-admin-create.log 2>&1 || fail "admin-create 失败"
 start_module v2-hub-server 8080 CONFIG="$WORK/hub-server.yaml" \
@@ -111,8 +111,8 @@ call() {
   cat "$WORK/body"
 }
 expect_code() { [ "$(cat "$WORK/code")" = "$1" ] || fail "$2：期望 HTTP $1，实际 $(cat "$WORK/code") $(cat "$WORK/body")"; }
-CSRF="$(call "$HUB_JAR" "" POST /api/admin/auth/login "$(login_body_of "$ROOT_USER" "$CRED")" | jq -r '.data.csrfToken // empty')"
-[ -n "$CSRF" ] || fail "hub 登录失败"
+# 超管登录：首次登录当场绑定两步验证（R10）；登录即视为刚做过二次验证，联调配置把有效期拉长（common.sh it_admin_login）
+CSRF="$(it_admin_login "$HUB_JAR" "$ROOT_USER" "$CRED")" || fail "hub 登录失败"
 hub() { call "$HUB_JAR" "$CSRF" "$@"; }
 # outbox_count <主题>：发件箱里发给告警邮箱的这封信有几封
 outbox_count() {
@@ -178,7 +178,7 @@ today_topup="$(hub GET '/api/admin/finance/stats?granularity=day&days=1' | jq -r
 [ "$today_topup" -ge "$TOPUP_AMOUNT" ] || fail "收支统计里今天的充值应包含这一笔：$(cat "$WORK/body")"
 dash="$(hub GET /api/admin/dashboard)"; expect_code 200 "取仪表盘"
 [ "$(printf '%s' "$dash" | jq -c --arg n "$SERVER_NAME" '[.data.users.total, .data.finance.todayTopup, (.data.traffic.days | length), ([.data.servers.offline[] | select(.name == $n)] | length)]')" \
-  = "[$users_total,$today_topup,7,0]" ] || fail "仪表盘数字与库里不一致（用户 $users_total）：$dash"
+  = "[$users_total,$today_topup,7,0]" ] || fail "仪表盘数字与库里不一致（用户 ${users_total}）：$dash"
 [ "$(dash_servers)" = "$(servers_summary)" ] || fail "恢复后仪表盘服务器数与列表不一致：$(dash_servers) vs $(servers_summary)"
 
 # ---- 9. 落地页与公开套餐 ----

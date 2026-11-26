@@ -40,7 +40,7 @@ function renderWith(node: ReactNode) {
   const granted = new Set<string>(ALL)
   const value: SessionContextValue = {
     status: 'authenticated',
-    session: { admin: { id: 1, username: 'root' }, permissions: ALL, csrfToken: CSRF, totpEnabled: false, menuOrder: [] },
+    session: { admin: { id: 1, username: 'root' }, kind: 'staff', permissions: ALL, csrfToken: CSRF, totpEnabled: false, menuOrder: [], isSuperAdmin: false, isOwner: false, totpSetupRequired: false },
     login: async () => null,
     logout: async () => undefined,
     refresh: async () => undefined,
@@ -75,7 +75,7 @@ const user = {
   id: 9, username: 'alice@example.com', remark: 'vip', planId: 3, planName: 'basic', status: 'limited', isDisabled: false,
   trafficLimit: 100 * BYTES_PER_GB, trafficUsed: 100 * BYTES_PER_GB, expiresAt: '2026-12-12T00:00:00Z', pendingDays: 0, limitIp: 2,
   renewEveryDays: 0, renewMonthDay: 0, renewWeekday: 0, renewMax: 0, renewCount: 0, trafficReset: 'monthly', trafficResetDay: 1,
-  provisions: { synced: 1, pending: 0, failed: 1 }, createdAt: '2026-11-12T00:00:00Z',
+  provisions: { synced: 1, pending: 0, failed: 1 }, agent: null, createdAt: '2026-11-12T00:00:00Z',
 }
 
 describe('quota helpers', () => {

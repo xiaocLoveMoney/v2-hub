@@ -501,7 +501,7 @@ func TestHostKeyIsPinned(t *testing.T) {
 	// 机器的主机密钥变了：之后的任务一律拒绝，直到管理员重置
 	f.runner.HostKey = "SHA256:another"
 	wantTask(t, f.action(t, host.ID, HostTaskDiagnose), HostTaskFailed, deploy.ReasonHostKeyChanged)
-	if _, err := f.hosts.ResetHostKey(ctx, f.actor, host.ID, nil); err != nil {
+	if _, err := f.hosts.ResetHostKey(ctx, f.actor, host.ID, "", nil); err != nil {
 		t.Fatalf("ResetHostKey: %v", err)
 	}
 	wantTask(t, f.action(t, host.ID, HostTaskDiagnose), HostTaskSucceeded, deploy.ReasonNone)

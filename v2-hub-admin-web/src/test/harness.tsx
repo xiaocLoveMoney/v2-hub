@@ -2,21 +2,40 @@ import { fireEvent, render, screen } from '@testing-library/react'
 import { App as AntApp, ConfigProvider } from 'antd'
 import type { ReactNode } from 'react'
 import { vi } from 'vitest'
-import { setCsrfToken } from '../api/client'
+import { setCsrfToken, type Session } from '../api/client'
 import { SessionContext, type SessionContextValue } from '../auth/session-context'
 
 /** 测试里统一使用的 CSRF token，断言写请求是否带头时用。 */
 export const TEST_CSRF = 'csrf-test-token'
 const SELF_ID = 1
 
+/** Popconfirm / Modal.confirm 的确认按钮：测试里没配语言包时是 OK，配了中文是“确定”。 */
+export const CONFIRM = /^(OK|确\s*定)$/
+
 /** 成功响应信封。 */
 export const ok = (data: unknown) => Response.json({ code: '0', message: 'ok', data })
 
-function sessionWith(permissions: string[]): SessionContextValue {
+/**
+ * 以给定权限码构造会话上下文（默认员工账号）；over 覆盖会话里的其它字段（如超管、所有者、强制绑定两步验证、代理账号 kind）。
+ * @param permissions 权限码
+ * @param over 覆盖的会话字段
+ */
+export function sessionWith(permissions: string[], over: Partial<Session> = {}): SessionContextValue {
   const granted = new Set(permissions)
   return {
     status: 'authenticated',
-    session: { admin: { id: SELF_ID, username: 'root' }, permissions, csrfToken: TEST_CSRF, totpEnabled: false, menuOrder: [] },
+    session: {
+      admin: { id: SELF_ID, username: 'root' },
+      kind: 'staff',
+      permissions,
+      csrfToken: TEST_CSRF,
+      totpEnabled: false,
+      menuOrder: [],
+      isSuperAdmin: false,
+      isOwner: false,
+      totpSetupRequired: false,
+      ...over,
+    },
     login: async () => null,
     logout: async () => undefined,
     refresh: async () => undefined,
@@ -24,13 +43,13 @@ function sessionWith(permissions: string[]): SessionContextValue {
   }
 }
 
-/** 以给定权限码渲染页面（带 antd App 与会话上下文）。 */
-export function renderWith(permissions: string[], node: ReactNode) {
+/** 以给定权限码渲染页面（带 antd App 与会话上下文）；over 覆盖会话里的其它字段。 */
+export function renderWith(permissions: string[], node: ReactNode, over: Partial<Session> = {}) {
   setCsrfToken(TEST_CSRF)
   return render(
     <ConfigProvider>
       <AntApp>
-        <SessionContext.Provider value={sessionWith(permissions)}>{node}</SessionContext.Provider>
+        <SessionContext.Provider value={sessionWith(permissions, over)}>{node}</SessionContext.Provider>
       </AntApp>
     </ConfigProvider>,
   )

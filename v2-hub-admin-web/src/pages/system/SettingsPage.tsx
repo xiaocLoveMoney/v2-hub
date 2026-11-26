@@ -1,4 +1,4 @@
-import { Alert, Button, Card, Form, Input, InputNumber, Select, Space, Switch, Tag } from 'antd'
+import { Alert, Button, Card, Form, Input, InputNumber, Select, Space, Switch, Tag, type FormItemProps } from 'antd'
 import { api, csrfHeader, type Plan, type RegisterMode, type Settings } from '../../api/client'
 import { useSession } from '../../auth/session-context'
 import { CardPage } from '../../components/CardPage'
@@ -49,6 +49,7 @@ const REGISTER_MODE_OPTIONS: { value: RegisterMode; label: string }[] = [
 /** 表单值：与 Settings 同形，去掉只读的 mailEnabled、telegramEnabled 与另有页面编辑的菜单顺序。 */
 type SettingsForm = Omit<Settings, 'mailEnabled' | 'telegramEnabled' | 'menu'>
 const PAGE_TITLE = '系统设置'
+const SUPER_ADMIN_ONLY_NOTE = '仅超级管理员可修改'
 
 const loadSettings = (signal: AbortSignal) => api.GET('/api/admin/settings', { signal })
 const loadPlans = (signal: AbortSignal) => api.GET('/api/admin/plans', { signal })
@@ -112,14 +113,13 @@ function SettingsFormBody({ settings, canWrite, canReadPlans, onSaved }: Setting
           >
             <Input autoComplete="off" />
           </Form.Item>
-          <Form.Item
+          <TextSettingItem
             name={['site', 'portalUrl']}
             label="客户门户地址"
             extra="如 https://user.example.com；“切换为用户身份”与支付回调用它。留空 = 与管理端同源"
             rules={[{ max: MAX_BASE_URL_LEN }]}
-          >
-            <Input autoComplete="off" />
-          </Form.Item>
+            isSuperAdminOnly
+          />
         </Card>
 
         <Card title="商店与返利" className="settings-card">
@@ -215,14 +215,13 @@ function SettingsFormBody({ settings, canWrite, canReadPlans, onSaved }: Setting
         </Card>
 
         <Card title="订阅" className="settings-card">
-          <Form.Item
+          <TextSettingItem
             name={['subscription', 'baseUrl']}
             label="订阅地址前缀"
             extra="留空 = 取请求的协议与主机；如 https://sub.example.com"
             rules={[{ max: MAX_BASE_URL_LEN }]}
-          >
-            <Input autoComplete="off" />
-          </Form.Item>
+            isSuperAdminOnly
+          />
           <Form.Item name={['subscription', 'title']} label="订阅名称" rules={[{ required: true, max: MAX_SUB_TITLE_LEN, message: `1–${MAX_SUB_TITLE_LEN} 个字符` }]}>
             <Input autoComplete="off" />
           </Form.Item>
@@ -269,6 +268,40 @@ function SettingsFormBody({ settings, canWrite, canReadPlans, onSaved }: Setting
         </div>
       )}
     </CardPage>
+  )
+}
+
+interface TextSettingItemProps extends Pick<FormItemProps, 'name' | 'label' | 'rules'> {
+  /** 输入框下的说明。 */
+  extra: string
+  /** 只有超级管理员能改（Ruling-106）：其他人看到只读输入框与说明。 */
+  isSuperAdminOnly?: boolean
+}
+
+/**
+ * 文本类设置项。标了 isSuperAdminOnly 的项对非超管只显示、不挂到表单字段上（不给 Form.Item 传 name）：
+ * 表单提交只收集已挂上的字段，这一项的键就不会出现在请求体里。接口只改请求里出现的键（docs/03 §5.6），
+ * 所以非超管保存其余设置时不会因为这一项 403，也不会覆盖别人并发改过的值（Ruling-106）。
+ */
+function TextSettingItem({ isSuperAdminOnly = false, name, extra, rules, label }: TextSettingItemProps) {
+  const { session } = useSession()
+  const form = Form.useFormInstance()
+  const isLocked = isSuperAdminOnly && session?.isSuperAdmin !== true
+  if (isLocked) {
+    // 只读展示加载到的原值（来自表单的 initialValues），不参与校验与提交
+    const loaded = form.getFieldValue(name) as string | undefined
+    // 没有 name 时 antd 不生成 id，自己给一个让标签关联到输入框
+    const inputId = `settings-locked-${[name].flat().join('-')}`
+    return (
+      <Form.Item label={label} htmlFor={inputId} extra={`${extra}（${SUPER_ADMIN_ONLY_NOTE}）`}>
+        <Input id={inputId} autoComplete="off" value={loaded ?? ''} disabled />
+      </Form.Item>
+    )
+  }
+  return (
+    <Form.Item name={name} label={label} extra={extra} rules={rules}>
+      <Input autoComplete="off" />
+    </Form.Item>
   )
 }
 

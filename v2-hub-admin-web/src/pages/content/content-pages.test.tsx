@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { PERMISSIONS } from '../../menu'
-import { TEST_CSRF, mockServer, ok, renderWith } from '../../test/harness'
+import { CONFIRM, TEST_CSRF, mockServer, ok, renderWith } from '../../test/harness'
 import { MailOutboxPage } from '../system/MailOutboxPage'
 import { SettingsPage } from '../system/SettingsPage'
 import { InviteCodesPage } from '../users/InviteCodesPage'
@@ -11,8 +11,6 @@ import { TicketsPage } from './TicketsPage'
 import { TutorialsPage } from './TutorialsPage'
 
 const NOW = '2026-11-13T00:00:00Z'
-// Popconfirm 的确认按钮：测试里没配语言包时是 OK，配了中文是“确定”
-const CONFIRM = /^(OK|确\s*定)$/
 
 afterEach(() => {
   cleanup()
@@ -168,7 +166,7 @@ describe('TicketsPage', () => {
 })
 
 describe('InviteCodesPage', () => {
-  const adminCode = { id: 1, code: 'ABCDEFGH23', kind: 'admin', ownerUserId: null, ownerUsername: '', maxUses: 0, usedCount: 2, expiresAt: null, isDisabled: false, remark: '', createdAt: NOW }
+  const adminCode = { id: 1, code: 'ABCDEFGH23', kind: 'admin', ownerUserId: null, ownerUsername: '', agentId: null, agentUsername: '', maxUses: 0, usedCount: 2, expiresAt: null, isDisabled: false, remark: '', createdAt: NOW }
   const userCode = { ...adminCode, id: 2, code: 'JKMNPQRS45', kind: 'user', ownerUserId: 9, ownerUsername: 'alice', maxUses: 5 }
 
   it('个人码不能删除；新建管理员码提交次数、到期与停用', async () => {
@@ -251,15 +249,59 @@ describe('SettingsPage', () => {
     // 菜单顺序另有页面编辑，系统设置页不提交它（Ruling-57）
     const { mailEnabled: _readOnly, telegramEnabled: _readOnlyToo, menu: _otherPage, ...editable } = settings
     // 旧前缀只读，不随表单提交（Ruling-59）
-    const { oldPath: _oldPath, oldPathUntil: _oldPathUntil, ...subscription } = settings.subscription
+    const { oldPath: _oldPath, oldPathUntil: _oldPathUntil, baseUrl: _superOnly, ...subscription } = settings.subscription
+    // 门户地址与订阅地址前缀仅超管可改：非超管的请求体里不带这两个键（Ruling-106）
+    const { portalUrl: _superOnlyToo, ...site } = settings.site
     expect(put?.body).toEqual({
       ...editable,
-      site: { ...settings.site, name: '新站名' },
+      site: { ...site, name: '新站名' },
       routing: { blockRule: false },
       reach: { enabled: false, intervalMinutes: 30, notify: true },
       latency: { enabled: false, intervalMinutes: 30 },
       subscription,
     })
+  })
+
+  it('非超管：门户地址与订阅地址前缀只读显示原值并注明，保存时请求体不带这两个键、其它键照常（Ruling-106）', async () => {
+    const loaded = { ...settings, site: { ...settings.site, portalUrl: 'https://user.example.com' }, subscription: { ...settings.subscription, baseUrl: 'https://sub.example.com' } }
+    const calls = mockServer({
+      'GET /api/admin/settings': () => ok(loaded),
+      'PUT /api/admin/settings': () => ok(loaded),
+    })
+    renderWith([PERMISSIONS.SETTING_READ, PERMISSIONS.SETTING_WRITE], <SettingsPage />)
+    fireEvent.change(await screen.findByLabelText('站点名称'), { target: { value: '新站名' } })
+    const portal = screen.getByLabelText('客户门户地址') as HTMLInputElement
+    const subBase = screen.getByLabelText('订阅地址前缀') as HTMLInputElement
+    expect(portal.disabled).toBe(true)
+    expect(portal.value).toBe('https://user.example.com')
+    expect(subBase.disabled).toBe(true)
+    expect(subBase.value).toBe('https://sub.example.com')
+    expect(screen.getAllByText(/（仅超级管理员可修改）$/)).toHaveLength(2)
+
+    fireEvent.click(screen.getByRole('button', { name: /保存全部设置/ }))
+    await waitFor(() => expect(calls.some((c) => c.method === 'PUT')).toBe(true))
+    const body = calls.find((c) => c.method === 'PUT')?.body as { site: Record<string, unknown>; subscription: Record<string, unknown> }
+    expect(body.site).toEqual({ name: '新站名', timezone: 'Asia/Shanghai' })
+    expect(body.subscription).not.toHaveProperty('baseUrl')
+    expect(body.subscription).toMatchObject({ title: 'v2-hub', updateIntervalHours: 12, infoNodes: true, logRetentionDays: 30, path: 'abcdefghij12', pathGraceDays: 30 })
+  })
+
+  it('超管：门户地址与订阅地址前缀可改，没有“仅超级管理员可修改”的说明', async () => {
+    const calls = mockServer({
+      'GET /api/admin/settings': () => ok(settings),
+      'PUT /api/admin/settings': () => ok(settings),
+    })
+    renderWith([PERMISSIONS.SETTING_READ, PERMISSIONS.SETTING_WRITE], <SettingsPage />, { isSuperAdmin: true })
+    const portal = await screen.findByLabelText('客户门户地址')
+    expect(portal).toHaveProperty('disabled', false)
+    expect(screen.queryByText(/仅超级管理员可修改/)).toBeNull()
+    fireEvent.change(portal, { target: { value: 'https://portal.example.com' } })
+    fireEvent.change(screen.getByLabelText('订阅地址前缀'), { target: { value: 'https://sub.example.com' } })
+    fireEvent.click(screen.getByRole('button', { name: /保存全部设置/ }))
+    await waitFor(() => expect(calls.some((c) => c.method === 'PUT')).toBe(true))
+    const body = calls.find((c) => c.method === 'PUT')?.body as { site: { portalUrl: string }; subscription: { baseUrl: string } }
+    expect(body.site.portalUrl).toBe('https://portal.example.com')
+    expect(body.subscription.baseUrl).toBe('https://sub.example.com')
   })
 
   it('只有 setting:read 时表单只读、没有保存按钮', async () => {

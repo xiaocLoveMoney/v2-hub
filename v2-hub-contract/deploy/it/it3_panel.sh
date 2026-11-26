@@ -13,7 +13,8 @@ ROOT_USER=it3-root  # 与 IT-2 的 it-root 区分（run_all 只在开头重置�
 CRED="it-$(openssl rand -hex 12)"
 XUI_JAR="$(mktemp)"
 HUB_JAR="$(mktemp)"
-trap 'rm -f "$XUI_JAR" "$HUB_JAR"; stop_all' EXIT
+HUB_CONFIG="$(mktemp)"
+trap 'rm -f "$XUI_JAR" "$HUB_JAR" "$HUB_CONFIG"; stop_all' EXIT
 
 fail() { echo "IT-3: $*"; exit 1; }
 
@@ -38,10 +39,10 @@ xui_api() { curl -s -H "Authorization: Bearer $XUI_TOKEN" "$@"; }
 
 # ---- 2. hub-server 与超管 ----
 printf '%s\n' "$CRED" | (cd "$REPO_ROOT/v2-hub-server" && make -s admin-create USERNAME="$ROOT_USER") >/tmp/it-admin-create.log 2>&1 || fail "admin-create 失败"
-start_module v2-hub-server 8080
-hub_login="$(jq -nc --arg u "$ROOT_USER" --arg p "$CRED" '{username:$u,password:$p}')"
-CSRF="$(curl -s -b "$HUB_JAR" -c "$HUB_JAR" -X POST "$BASE/api/admin/auth/login" -H 'Content-Type: application/json' --data "$hub_login" | jq -r '.data.csrfToken // empty')"
-[ -n "$CSRF" ] || fail "hub 登录失败"
+it_hub_config "$HUB_CONFIG" || fail "派生配置失败"
+start_module v2-hub-server 8080 CONFIG="$HUB_CONFIG"
+# 超管登录：首次登录当场绑定两步验证（R10）；登录即视为刚做过二次验证，联调配置把有效期拉长（common.sh it_admin_login）
+CSRF="$(it_admin_login "$HUB_JAR" "$ROOT_USER" "$CRED")" || fail "hub 登录失败"
 # hub <method> <path> [json] → 打印响应体；状态码写入 /tmp/it3-code
 hub() {
   local args=(-s -o /tmp/it3-body -w '%{http_code}' -b "$HUB_JAR" -c "$HUB_JAR" -X "$1" -H 'Content-Type: application/json' -H "X-CSRF-Token: $CSRF")

@@ -25,7 +25,7 @@ type HostManager interface {
 	CreateHosts(ctx context.Context, actor *service.AdminPrincipal, in service.HostBatchInput, ip *netip.Addr) ([]service.ServerHost, error)
 	UpdateHost(ctx context.Context, actor *service.AdminPrincipal, id int64, in service.ServerHostInput, ip *netip.Addr) (*service.ServerHost, error)
 	DeleteHost(ctx context.Context, actor *service.AdminPrincipal, id int64, ip *netip.Addr) error
-	ResetHostKey(ctx context.Context, actor *service.AdminPrincipal, id int64, ip *netip.Addr) (*service.ServerHost, error)
+	ResetHostKey(ctx context.Context, actor *service.AdminPrincipal, id int64, credentialSecret string, ip *netip.Addr) (*service.ServerHost, error)
 	BindServer(ctx context.Context, actor *service.AdminPrincipal, serverID int64, in service.HostBindInput, ip *netip.Addr) (*service.ServerHost, error)
 	TestHost(ctx context.Context, actor *service.AdminPrincipal, in service.HostTestInput) (*service.HostDetection, error)
 	ListHostTasks(ctx context.Context, hostID int64) ([]service.HostTask, error)
@@ -177,6 +177,8 @@ type serverHostRequest struct {
 	PanelPort    *int   `json:"panelPort"`
 	DNSAccountID *int64 `json:"dnsAccountId"`
 	Domain       string `json:"domain"`
+	// CredentialSecret 只写：密码凭据的确认（Ruling-97）
+	CredentialSecret string `json:"credentialSecret"`
 }
 
 type serverHostBatchItem struct {
@@ -193,11 +195,14 @@ type serverHostBatchRequest struct {
 	PanelPort    *int                  `json:"panelPort"`
 	DNSAccountID *int64                `json:"dnsAccountId"`
 	Hosts        []serverHostBatchItem `json:"hosts"`
+	// CredentialSecret 只写：密码凭据的确认，整批一次（Ruling-97）
+	CredentialSecret string `json:"credentialSecret"`
 }
 
 func (r serverHostBatchRequest) toInput() service.HostBatchInput {
 	return service.HostBatchInput{
 		CredentialID: r.CredentialID, SSHPort: r.SSHPort, ProviderType: r.ProviderType, PanelPort: r.PanelPort, DNSAccountID: r.DNSAccountID,
+		CredentialSecret: r.CredentialSecret,
 		Hosts: mapSlice(r.Hosts, func(i serverHostBatchItem) service.HostBatchItem {
 			return service.HostBatchItem{Address: i.Address, Name: i.Name, Region: i.Region, Domain: i.Domain}
 		}),
@@ -205,16 +210,23 @@ func (r serverHostBatchRequest) toInput() service.HostBatchInput {
 }
 
 type serverHostTestRequest struct {
-	Address      string `json:"address"`
-	SSHPort      int    `json:"sshPort"`
-	CredentialID int64  `json:"credentialId"`
-	ProviderType string `json:"providerType"`
+	Address          string `json:"address"`
+	SSHPort          int    `json:"sshPort"`
+	CredentialID     int64  `json:"credentialId"`
+	ProviderType     string `json:"providerType"`
+	CredentialSecret string `json:"credentialSecret"`
 }
 
 type serverHostBindRequest struct {
-	Address      string `json:"address"`
-	SSHPort      int    `json:"sshPort"`
-	CredentialID int64  `json:"credentialId"`
+	Address          string `json:"address"`
+	SSHPort          int    `json:"sshPort"`
+	CredentialID     int64  `json:"credentialId"`
+	CredentialSecret string `json:"credentialSecret"`
+}
+
+// serverHostResetKeyRequest 对应 hub-api.yaml ServerHostResetKeyInput；请求体可省略。
+type serverHostResetKeyRequest struct {
+	CredentialSecret string `json:"credentialSecret"`
 }
 
 type hostDetectionVO struct {
@@ -371,6 +383,7 @@ func (h *handlers) testServerHost(w http.ResponseWriter, r *http.Request, p *ser
 	}
 	det, err := h.hosts.TestHost(r.Context(), p, service.HostTestInput{
 		Address: req.Address, SSHPort: req.SSHPort, CredentialID: req.CredentialID, ProviderType: req.ProviderType,
+		CredentialSecret: req.CredentialSecret,
 	})
 	if err != nil {
 		writeError(w, r, err)
@@ -419,7 +432,7 @@ func (h *handlers) updateServerHost(w http.ResponseWriter, r *http.Request, p *s
 	}
 	host, err := h.hosts.UpdateHost(r.Context(), p, id, service.ServerHostInput{
 		Name: req.Name, Address: req.Address, SSHPort: req.SSHPort, CredentialID: req.CredentialID, Region: req.Region, PanelPort: req.PanelPort,
-		DNSAccountID: req.DNSAccountID, Domain: req.Domain,
+		DNSAccountID: req.DNSAccountID, Domain: req.Domain, CredentialSecret: req.CredentialSecret,
 	}, clientIP(r, h.trustedProxies))
 	writeHost(w, r, host, err)
 }
@@ -443,7 +456,12 @@ func (h *handlers) resetServerHostKey(w http.ResponseWriter, r *http.Request, p 
 		writeError(w, r, err)
 		return
 	}
-	host, err := h.hosts.ResetHostKey(r.Context(), p, id, clientIP(r, h.trustedProxies))
+	var req serverHostResetKeyRequest
+	if err := decodeOptionalJSON(w, r, &req); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	host, err := h.hosts.ResetHostKey(r.Context(), p, id, req.CredentialSecret, clientIP(r, h.trustedProxies))
 	writeHost(w, r, host, err)
 }
 
@@ -501,20 +519,8 @@ type inboundPresetPreviewVO struct {
 	Items     []inboundPresetOptionVO `json:"items"`
 }
 
-// requireHostWrite 是一键部署在 node:write（路由已查）之外要求的 host:write（Ruling-76）。
-func requireHostWrite(w http.ResponseWriter, r *http.Request, p *service.AdminPrincipal) bool {
-	if p.Can(service.PermHostWrite) {
-		return true
-	}
-	writeError(w, r, service.ErrPermissionDenied)
-	return false
-}
-
 // previewInboundPresets 一键部署入站的预览（docs/03 §5.1，Ruling-76）。
 func (h *handlers) previewInboundPresets(w http.ResponseWriter, r *http.Request, p *service.AdminPrincipal) {
-	if !requireHostWrite(w, r, p) {
-		return
-	}
 	id, err := pathID(r)
 	if err != nil {
 		writeError(w, r, err)
@@ -534,9 +540,6 @@ func (h *handlers) previewInboundPresets(w http.ResponseWriter, r *http.Request,
 
 // deployInboundPresets 一键部署入站，排一条 deploy_inbounds 主机任务（Ruling-76）。
 func (h *handlers) deployInboundPresets(w http.ResponseWriter, r *http.Request, p *service.AdminPrincipal) {
-	if !requireHostWrite(w, r, p) {
-		return
-	}
 	var req service.InboundPresetDeployInput
 	id, err := decodeWithID(w, r, &req)
 	if err != nil {
@@ -578,6 +581,8 @@ func (h *handlers) bindServerHost(w http.ResponseWriter, r *http.Request, p *ser
 		writeError(w, r, err)
 		return
 	}
-	host, err := h.hosts.BindServer(r.Context(), p, id, service.HostBindInput{Address: req.Address, SSHPort: req.SSHPort, CredentialID: req.CredentialID}, clientIP(r, h.trustedProxies))
+	host, err := h.hosts.BindServer(r.Context(), p, id, service.HostBindInput{
+		Address: req.Address, SSHPort: req.SSHPort, CredentialID: req.CredentialID, CredentialSecret: req.CredentialSecret,
+	}, clientIP(r, h.trustedProxies))
 	writeHost(w, r, host, err)
 }

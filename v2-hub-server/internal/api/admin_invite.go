@@ -30,6 +30,8 @@ type inviteCodeVO struct {
 	Kind          string     `json:"kind"`
 	OwnerUserID   *int64     `json:"ownerUserId"`
 	OwnerUsername string     `json:"ownerUsername"`
+	AgentID       *int64     `json:"agentId"`
+	AgentUsername string     `json:"agentUsername"`
 	MaxUses       int        `json:"maxUses"`
 	UsedCount     int        `json:"usedCount"`
 	ExpiresAt     *time.Time `json:"expiresAt"`
@@ -39,7 +41,8 @@ type inviteCodeVO struct {
 }
 
 func toInviteCodeVO(c service.InviteCode) inviteCodeVO {
-	return inviteCodeVO{ID: c.ID, Code: c.Code, Kind: c.Kind, OwnerUserID: c.OwnerUserID, OwnerUsername: c.OwnerUsername, MaxUses: c.MaxUses,
+	return inviteCodeVO{ID: c.ID, Code: c.Code, Kind: c.Kind, OwnerUserID: c.OwnerUserID, OwnerUsername: c.OwnerUsername,
+		AgentID: c.AgentID, AgentUsername: c.AgentUsername, MaxUses: c.MaxUses,
 		UsedCount: c.UsedCount, ExpiresAt: c.ExpiresAt, IsDisabled: c.IsDisabled, Remark: c.Remark, CreatedAt: c.CreatedAt}
 }
 
@@ -49,7 +52,12 @@ func (h *handlers) listInviteCodes(w http.ResponseWriter, r *http.Request, _ *se
 		writeError(w, r, err)
 		return
 	}
-	page, err := h.account.ListInviteCodes(r.Context(), r.URL.Query().Get(queryKind), pq)
+	agentID, err := optionalPositiveInt64(r, queryAgentID, msgBadAgentID)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	page, err := h.account.ListInviteCodes(r.Context(), r.URL.Query().Get(queryKind), agentID, pq)
 	if err != nil {
 		writeError(w, r, err)
 		return

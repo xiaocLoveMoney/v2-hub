@@ -150,18 +150,18 @@ func (s *PortalAuthService) Login(ctx context.Context, in LoginInput) (*PortalLo
 	if in.ClientIP != nil {
 		ipKey = guardKeyPortalIP + in.ClientIP.String()
 	}
-	if s.guard.IsLocked(userKey) || (ipKey != "" && s.guard.IsLocked(ipKey)) {
+	// 校验前先占用失败名额，校验通过再撤回（Ruling-105）
+	attempt, ok := s.guard.Acquire(userKey, ipKey)
+	if !ok {
 		return nil, newError(CodeRateLimited, msgTooManyLogin)
 	}
+	defer attempt.Release()
 	user, verified, err := s.verifyCredentials(ctx, in.Username, in.Password)
 	if err != nil {
 		return nil, err
 	}
 	failure := func(message string) error {
-		s.guard.RecordFailure(userKey)
-		if ipKey != "" {
-			s.guard.RecordFailure(ipKey)
-		}
+		attempt.Fail()
 		if user != nil {
 			s.recordLogin(ctx, user.ID, in.ClientIP, false)
 		}
@@ -183,6 +183,7 @@ func (s *PortalAuthService) Login(ctx context.Context, in LoginInput) (*PortalLo
 			return nil, failure(msgTOTPInvalid)
 		}
 	}
+	attempt.Release()
 	s.guard.Reset(userKey)
 	if ipKey != "" {
 		s.guard.Reset(ipKey)
@@ -354,21 +355,24 @@ func (s *PortalAuthService) ChangeLoginSecret(ctx context.Context, p *UserPrinci
 // 错误：CodeInvalidArgument（密码不对）、CodeRateLimited。
 func (s *PortalAuthService) confirmSecret(ctx context.Context, p *UserPrincipal, secret string) error {
 	guardKey := guardKeyPortalSecret + fmt.Sprint(p.UserID)
-	if s.guard.IsLocked(guardKey) {
+	attempt, ok := s.guard.Acquire(guardKey)
+	if !ok {
 		return newError(CodeRateLimited, msgTooManyLogin)
 	}
+	defer attempt.Release()
 	current, err := s.q.GetEndUserLoginSecretHash(ctx, p.UserID)
 	if err != nil {
 		return fmt.Errorf("get login secret of user %d: %w", p.UserID, err)
 	}
-	ok, err := crypto.VerifyPassword(secret, current)
+	ok, err = crypto.VerifyPassword(secret, current)
 	if err != nil {
 		return fmt.Errorf("verify login secret of user %d: %w", p.UserID, err)
 	}
 	if !ok {
-		s.guard.RecordFailure(guardKey)
+		attempt.Fail()
 		return newError(CodeInvalidArgument, msgOldSecretIncorrect)
 	}
+	attempt.Release()
 	s.guard.Reset(guardKey)
 	return nil
 }
@@ -387,17 +391,20 @@ func (s *PortalAuthService) confirmTOTP(ctx context.Context, p *UserPrincipal, c
 		return newError(CodeTOTPRequired, msgTOTPRequired)
 	}
 	guardKey := guardKeyPortalTOTP + fmt.Sprint(p.UserID)
-	if s.guard.IsLocked(guardKey) {
+	attempt, ok := s.guard.Acquire(guardKey)
+	if !ok {
 		return newError(CodeRateLimited, msgTooManyLogin)
 	}
-	ok, err := s.consumeTOTP(ctx, p.UserID, row.TotpSecretEnc, row.TotpLastStep, code)
+	defer attempt.Release()
+	ok, err = s.consumeTOTP(ctx, p.UserID, row.TotpSecretEnc, row.TotpLastStep, code)
 	if err != nil {
 		return err
 	}
 	if !ok {
-		s.guard.RecordFailure(guardKey)
+		attempt.Fail()
 		return newError(CodeInvalidArgument, msgTOTPInvalid)
 	}
+	attempt.Release()
 	s.guard.Reset(guardKey)
 	return nil
 }
@@ -456,9 +463,11 @@ func (s *PortalAuthService) EnableTOTP(ctx context.Context, p *UserPrincipal, co
 		return newError(CodeInvalidArgument, msgTOTPCodeMalformed)
 	}
 	guardKey := guardKeyPortalTOTP + fmt.Sprint(p.UserID)
-	if s.guard.IsLocked(guardKey) {
+	attempt, ok := s.guard.Acquire(guardKey)
+	if !ok {
 		return newError(CodeRateLimited, msgTooManyLogin)
 	}
+	defer attempt.Release()
 	return s.inTx(ctx, func(q *sqlcgen.Queries) error {
 		row, err := q.GetUserTOTP(ctx, p.UserID)
 		if err != nil {
@@ -476,9 +485,10 @@ func (s *PortalAuthService) EnableTOTP(ctx context.Context, p *UserPrincipal, co
 		}
 		step, ok := totp.Verify(secret, code, s.now(), 0)
 		if !ok {
-			s.guard.RecordFailure(guardKey)
+			attempt.Fail()
 			return newError(CodeInvalidArgument, msgTOTPInvalid)
 		}
+		attempt.Release()
 		s.guard.Reset(guardKey)
 		sealed, err := s.sealer.Seal(secret, userTOTPAAD(p.UserID, false))
 		if err != nil {
@@ -497,9 +507,11 @@ func (s *PortalAuthService) DisableTOTP(ctx context.Context, p *UserPrincipal, c
 		return newError(CodeInvalidArgument, msgTOTPCodeMalformed)
 	}
 	guardKey := guardKeyPortalTOTP + fmt.Sprint(p.UserID)
-	if s.guard.IsLocked(guardKey) {
+	attempt, ok := s.guard.Acquire(guardKey)
+	if !ok {
 		return newError(CodeRateLimited, msgTooManyLogin)
 	}
+	defer attempt.Release()
 	row, err := s.q.GetUserTOTP(ctx, p.UserID)
 	if err != nil {
 		return fmt.Errorf("get totp of user %d: %w", p.UserID, err)
@@ -507,14 +519,15 @@ func (s *PortalAuthService) DisableTOTP(ctx context.Context, p *UserPrincipal, c
 	if row.TotpSecretEnc == nil {
 		return newError(CodeConflict, msgTOTPNotOn)
 	}
-	ok, err := s.consumeTOTP(ctx, p.UserID, row.TotpSecretEnc, row.TotpLastStep, code)
+	ok, err = s.consumeTOTP(ctx, p.UserID, row.TotpSecretEnc, row.TotpLastStep, code)
 	if err != nil {
 		return err
 	}
 	if !ok {
-		s.guard.RecordFailure(guardKey)
+		attempt.Fail()
 		return newError(CodeInvalidArgument, msgTOTPInvalid)
 	}
+	attempt.Release()
 	s.guard.Reset(guardKey)
 	return s.inTx(ctx, func(q *sqlcgen.Queries) error {
 		if _, err := q.ClearUserTOTP(ctx, p.UserID); err != nil {
@@ -561,16 +574,22 @@ func (s *PortalAuthService) PurgeExpiredSessions(ctx context.Context) (int64, er
 // ClearUserTOTP 由管理员为遗失设备的用户清除两步验证，并使其全部会话失效（docs/03 §5.3）。
 func (s *UserService) ClearUserTOTP(ctx context.Context, actor *AdminPrincipal, id int64, ip *netip.Addr) error {
 	return s.inTx(ctx, func(q *sqlcgen.Queries) error {
-		n, err := q.ClearUserTOTP(ctx, id)
-		if err != nil {
-			return fmt.Errorf("clear totp of user %d: %w", id, err)
-		}
-		if n == 0 {
-			return newError(CodeNotFound, msgUserNotFound)
-		}
-		if err := q.DeleteUserSessionsByUser(ctx, id); err != nil {
-			return fmt.Errorf("revoke sessions of user %d: %w", id, err)
-		}
-		return writeAudit(ctx, q, AuditEntry{ActorType: ActorAdmin, ActorID: actor.AdminID, Action: ActionUserTOTPReset, TargetType: targetUser, TargetID: fmt.Sprint(id), ClientIP: ip})
+		return clearUserTOTPTx(ctx, q, actor, id, ip)
 	})
+}
+
+// clearUserTOTPTx 清除用户的两步验证、吊销其全部会话并记审计（员工与代理共用，Ruling-101）。
+// 用户不存在或待删除返回 CodeNotFound。代理侧调用前须已用 AgentLockUser 锁定并确认归属。
+func clearUserTOTPTx(ctx context.Context, q *sqlcgen.Queries, actor *AdminPrincipal, id int64, ip *netip.Addr) error {
+	n, err := q.ClearUserTOTP(ctx, id)
+	if err != nil {
+		return fmt.Errorf("clear totp of user %d: %w", id, err)
+	}
+	if n == 0 {
+		return newError(CodeNotFound, msgUserNotFound)
+	}
+	if err := q.DeleteUserSessionsByUser(ctx, id); err != nil {
+		return fmt.Errorf("revoke sessions of user %d: %w", id, err)
+	}
+	return writeAudit(ctx, q, AuditEntry{ActorType: ActorAdmin, ActorID: actor.AdminID, Action: ActionUserTOTPReset, TargetType: targetUser, TargetID: fmt.Sprint(id), ClientIP: ip})
 }

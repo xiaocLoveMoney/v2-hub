@@ -62,16 +62,14 @@ entry_template() { panel_api "$XUI_A_URL" "$TOKEN_A" POST /xray/ | jq -r '.obj' 
 hub_entries() { entry_template | jq '[.outbounds[] | select(.tag | startswith("hub-r"))] | length'; }
 
 # ---- 2. hub-server（下发检查 2 秒一次、同一服务器两次下发至少隔 5 秒）与超管 ----
-sed -e 's/^  applyInterval: .*/  applyInterval: 2s/' -e 's/^  minApplyInterval: .*/  minApplyInterval: 5s/' \
-  "$REPO_ROOT/v2-hub-server/etc/hub-server.yaml" > "$WORK/hub-server.yaml"
+it_hub_config "$WORK/hub-server.yaml" -e 's/^  applyInterval: .*/  applyInterval: 2s/' -e 's/^  minApplyInterval: .*/  minApplyInterval: 5s/' || fail "派生配置失败"
 grep -q 'applyInterval: 2s' "$WORK/hub-server.yaml" || fail "临时配置没有改到下发间隔"
 printf '%s\n' "$CRED" | (cd "$REPO_ROOT/v2-hub-server" && make -s admin-create USERNAME="$ROOT_USER") >/tmp/it-admin-create.log 2>&1 || fail "admin-create 失败"
 start_module v2-hub-server 8080 CONFIG="$WORK/hub-server.yaml"
 HUB_JAR="$WORK/hub.jar"
 login_body_of() { jq -nc --arg u "$1" --arg p "$2" '{username:$u,password:$p}'; }
-CSRF="$(curl -s -b "$HUB_JAR" -c "$HUB_JAR" -X POST "$BASE/api/admin/auth/login" -H 'Content-Type: application/json' --data "$(login_body_of "$ROOT_USER" "$CRED")" \
-  | jq -r '.data.csrfToken // empty')"
-[ -n "$CSRF" ] || fail "hub 登录失败"
+# 超管登录：首次登录当场绑定两步验证（R10）；登录即视为刚做过二次验证，联调配置把有效期拉长（common.sh it_admin_login）
+CSRF="$(it_admin_login "$HUB_JAR" "$ROOT_USER" "$CRED")" || fail "hub 登录失败"
 call() {
   local args=(-s -o "$WORK/body" -w '%{http_code}' -b "$1" -c "$1" -X "$3" -H 'Content-Type: application/json')
   [ -n "$2" ] && args+=(-H "X-CSRF-Token: $2")
@@ -149,14 +147,14 @@ wait_apply() {
     fi
     sleep 1
   done
-  fail "${APPLY_WAIT_SECONDS}s 内没有达到 $want / $entries 条平台条目：规则 $got，条目 $(hub_entries)，下发 $(hub GET "/api/admin/servers/$SERVER_A/chain-apply")"
+  fail "${APPLY_WAIT_SECONDS}s 内没有达到 $want / $entries 条平台条目：规则 ${got}，条目 $(hub_entries)，下发 $(hub GET "/api/admin/servers/$SERVER_A/chain-apply")"
 }
 
 # ---- 5. 下发：入口模板出现 hub-r{id} 出站（连 xui-b）与按入站 + 用户匹配的路由，Xray 运行 ----
 wait_apply "ok:applied" 1
 tpl="$(entry_template)"
 TAG="hub-r$RULE_ID"
-[ "$(printf '%s' "$tpl" | jq -r --arg t "$TAG" '.outbounds[] | select(.tag == $t) | .settings.vnext[0].address')" = "$EXIT_HOST" ] || fail "平台出站应连到 $EXIT_HOST：$tpl"
+[ "$(printf '%s' "$tpl" | jq -r --arg t "$TAG" '.outbounds[] | select(.tag == $t) | .settings.vnext[0].address')" = "$EXIT_HOST" ] || fail "平台出站应连到 ${EXIT_HOST}：$tpl"
 rule="$(printf '%s' "$tpl" | jq -c --arg t "$TAG" '.routing.rules[] | select(.ruleTag == $t)')"
 [ "$(printf '%s' "$rule" | jq -r '.user[0]')" = "$EMAIL_A" ] || fail "路由应按本人在入口面板的 email 匹配：$rule"
 [ "$(printf '%s' "$rule" | jq -r '.inboundTag | length')" = "1" ] || fail "路由应只匹配入口入站：$rule"
@@ -182,7 +180,7 @@ for _ in $(seq 1 "$TRAFFIC_WAIT_SECONDS"); do
   [ "$(b_traffic)" -gt "$BEFORE" ] && { grown=1; break; }
   sleep 1
 done
-[ -n "$grown" ] || fail "经入口的流量应计入落地面板上本人的用量（之前 $BEFORE，现在 $(b_traffic)）"
+[ -n "$grown" ] || fail "经入口的流量应计入落地面板上本人的用量（之前 ${BEFORE}，现在 $(b_traffic)）"
 
 # ---- 7. 换到不开的套餐：阻断（plan），条目被清掉；换回后恢复 ----
 hub POST "/api/admin/users/$USER_ID/plan" "$(jq -nc --argjson p "$PLAIN_PLAN" '{planId:$p}')" >/dev/null; expect_code 200 "换到不开的套餐"

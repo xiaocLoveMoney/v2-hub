@@ -31,6 +31,8 @@ const (
 	defaultLoginWindow          = 15 * time.Minute
 	defaultLoginLockout         = 15 * time.Minute
 	defaultLoginMaxTrackedKeys  = 10000
+	// defaultReauthWindow 是二次验证的有效期（docs/03 §4.4，Ruling-100）
+	defaultReauthWindow = 5 * time.Minute
 
 	// 面板探测与同步默认值，语义见 docs/03 §5.1
 	defaultPanelProbeInterval  = 30 * time.Second
@@ -97,6 +99,8 @@ const (
 	defaultUploadMaxBytes = 5 << 20
 	defaultUploadLimit    = 60
 	defaultUploadWindow   = time.Hour
+	// defaultAgentWriteRatePerHour 是代理写操作的每小时合计上限（docs/03 §5.23，Ruling-104）
+	defaultAgentWriteRatePerHour = 120
 )
 
 // ErrInvalidConfig 表示配置内容不合法。
@@ -121,6 +125,13 @@ type Config struct {
 	Subscription SubscriptionConfig `yaml:"subscription"`
 	// Upload 是公告 / 教程图片上传（docs/03 §5.9，Ruling-89）。
 	Upload UploadConfig `yaml:"upload"`
+	// Agent 是二级代理（docs/03 §5.23，Ruling-104）。
+	Agent AgentConfig `yaml:"agent"`
+}
+
+// AgentConfig 是二级代理的防护参数：WriteRatePerHour 是每个代理账号的写操作每小时合计上限（Ruling-104）。
+type AgentConfig struct {
+	WriteRatePerHour int `yaml:"writeRatePerHour"`
 }
 
 // UploadConfig 是图片上传：Endpoint / Bucket / Region 指向 S3 兼容存储（生产为同一 compose 里的 MinIO），
@@ -257,6 +268,8 @@ type AuthConfig struct {
 	LoginWindow            time.Duration `yaml:"loginWindow"`
 	LoginLockout           time.Duration `yaml:"loginLockout"`
 	LoginMaxTrackedKeys    int           `yaml:"loginMaxTrackedKeys"`
+	// ReauthWindow 是高危操作二次验证的有效期（R12）；登录、开启两步验证、二次验证成功后从当时起算。
+	ReauthWindow time.Duration `yaml:"reauthWindow"`
 }
 
 // DatabaseConfig 是 PostgreSQL 连接池参数。连接串（含密码）只从环境变量 HUB_DATABASE_URL 读（Ruling-2）。
@@ -316,6 +329,7 @@ func defaults() Config {
 		LoginWindow:            defaultLoginWindow,
 		LoginLockout:           defaultLoginLockout,
 		LoginMaxTrackedKeys:    defaultLoginMaxTrackedKeys,
+		ReauthWindow:           defaultReauthWindow,
 	}, Panel: PanelConfig{
 		ProbeInterval:  defaultPanelProbeInterval,
 		SyncInterval:   defaultPanelSyncInterval,
@@ -369,6 +383,8 @@ func defaults() Config {
 		ACME: ACMEConfig{
 			DirectoryURL: defaultACMEDirectoryURL, Timeout: defaultACMETimeout, RenewInterval: defaultACMERenewInterval,
 		},
+	}, Agent: AgentConfig{
+		WriteRatePerHour: defaultAgentWriteRatePerHour,
 	}, Subscription: SubscriptionConfig{
 		Title:               defaultSubscriptionTitle,
 		UpdateIntervalHours: defaultSubscriptionIntervalHours,
@@ -394,6 +410,9 @@ func (c Config) validate() error {
 	}
 	if a.LoginMaxFailures <= 0 || a.LoginWindow <= 0 || a.LoginLockout <= 0 || a.LoginMaxTrackedKeys <= 0 {
 		return fmt.Errorf("%w: auth login rate limit must be positive", ErrInvalidConfig)
+	}
+	if a.ReauthWindow <= 0 {
+		return fmt.Errorf("%w: auth.reauthWindow must be positive", ErrInvalidConfig)
 	}
 	pc := c.Panel
 	if pc.ProbeInterval <= 0 || pc.SyncInterval <= 0 || pc.RequestTimeout <= 0 || pc.Concurrency <= 0 {
@@ -437,6 +456,9 @@ func (c Config) validate() error {
 	uc := c.Upload
 	if uc.Endpoint == "" || uc.Bucket == "" || uc.Timeout <= 0 || uc.MaxBytes <= 0 || uc.Limit <= 0 || uc.Window <= 0 {
 		return fmt.Errorf("%w: upload endpoint, bucket, timeout, maxBytes, limit and window must be set", ErrInvalidConfig)
+	}
+	if c.Agent.WriteRatePerHour <= 0 {
+		return fmt.Errorf("%w: agent.writeRatePerHour must be positive", ErrInvalidConfig)
 	}
 	po := c.Portal
 	if po.SessionIdleTimeout <= a.SessionTouchInterval || po.SessionMaxAge < po.SessionIdleTimeout || po.LoginLogRetention <= 0 {

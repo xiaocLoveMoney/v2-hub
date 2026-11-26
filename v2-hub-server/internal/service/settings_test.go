@@ -252,3 +252,40 @@ func TestSubscriptionPathSettings(t *testing.T) {
 		}
 	}
 }
+
+// site.portalUrl 与 subscription.baseUrl 只有超管能改（Ruling-106）：非超管改成别的值 403 且整体不保存；
+// 值没变（规整后相同）照常；其余项不受影响。
+func TestSettingsSuperOnlyItems(t *testing.T) {
+	f := newSettingsFixture(t)
+	ctx := context.Background()
+	if _, err := f.update(t, map[string]any{"site.portalUrl": "https://user.example.com", "subscription.baseUrl": "https://sub.example.com"}); err != nil {
+		t.Fatalf("super admin update: %v", err)
+	}
+	staff := *f.actor
+	staff.IsSuperAdmin = false
+	staff.Permissions = PermissionSet{PermSettingWrite: {}}
+	update := func(patch map[string]any) (Settings, error) {
+		raw := make(map[string]json.RawMessage, len(patch))
+		for k, v := range patch {
+			raw[k] = rawJSON(t, v)
+		}
+		return f.settings.Update(ctx, &staff, raw, nil)
+	}
+	for _, patch := range []map[string]any{
+		{"site.name": "renamed", "site.portalUrl": "https://evil.example.net"},
+		{"site.name": "renamed", "subscription.baseUrl": "https://evil.example.net"},
+		{"site.name": "renamed", "site.portalUrl": ""},
+	} {
+		_, err := update(patch)
+		wantCode(t, err, CodePermissionDenied)
+	}
+	cur, err := f.settings.Current(ctx)
+	if err != nil || cur.Site.Name == "renamed" || cur.Site.PortalURL != "https://user.example.com" || cur.Subscription.BaseURL != "https://sub.example.com" {
+		t.Fatalf("rejected patch must save nothing: %+v, %v", cur.Site, err)
+	}
+	// 带上这两个键但值没变（末尾斜杠规整后相同）：照常保存其余项
+	next, err := update(map[string]any{"site.name": "renamed", "site.portalUrl": "https://user.example.com/", "subscription.baseUrl": "https://sub.example.com"})
+	if err != nil || next.Site.Name != "renamed" {
+		t.Fatalf("unchanged super-only values = %+v, %v", next.Site, err)
+	}
+}

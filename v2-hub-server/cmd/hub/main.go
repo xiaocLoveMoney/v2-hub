@@ -2,8 +2,14 @@
 //
 // 用法：
 //
-//	hub [-f 配置文件]                              启动服务
-//	hub admin-create [-f 配置文件] -username 名称   创建超级管理员（密码从终端无回显读取，或从标准输入读一行）
+//	hub [-f 配置文件]                                       启动服务
+//	hub admin-create [-f 配置文件] -username 名称            创建超级管理员（密码从终端无回显读取，或从标准输入读一行）；
+//	                                                         库里还没有所有者时它即所有者
+//	hub admin-owner-set [-f 配置文件] -username 名称         指定或转移所有者（目标须是启用状态的超级管理员）
+//	hub admin-totp-reset [-f 配置文件] -username 名称        清除两步验证并使其全部会话失效
+//	hub admin-password-reset [-f 配置文件] -username 名称    重设密码（读法同 admin-create）并使其全部会话失效
+//
+// admin-* 子命令只能在服务器上执行、不经 HTTP，审计的操作者记为系统（docs/03 §4.3 命令行）。
 package main
 
 import (
@@ -80,17 +86,34 @@ const (
 	panelWaitAttempts = 15
 	panelWaitInterval = 2 * time.Second
 
-	cmdAdminCreate  = "admin-create"
-	flagConfig      = "f"
-	flagConfigUsage = "config file path"
+	cmdAdminCreate        = "admin-create"
+	cmdAdminOwnerSet      = "admin-owner-set"
+	cmdAdminTOTPReset     = "admin-totp-reset"
+	cmdAdminPasswordReset = "admin-password-reset"
+	flagConfig            = "f"
+	flagConfigUsage       = "config file path"
+	flagUsername          = "username"
+	flagUsernameUsage     = "admin username"
 )
+
+// subcommands 是 hub 的子命令；第一个参数不是子命令名时按启动服务处理（参数原样交给 runServer）。
+var subcommands = map[string]func(args []string) error{
+	cmdAdminCreate:        runAdminCreate,
+	cmdAdminOwnerSet:      runAdminOwnerSet,
+	cmdAdminTOTPReset:     runAdminTOTPReset,
+	cmdAdminPasswordReset: runAdminPasswordReset,
+}
 
 func main() {
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)))
 
 	var err error
-	if len(os.Args) > 1 && os.Args[1] == cmdAdminCreate {
-		err = runAdminCreate(os.Args[2:])
+	var run func([]string) error
+	if len(os.Args) > 1 {
+		run = subcommands[os.Args[1]]
+	}
+	if run != nil {
+		err = run(os.Args[2:])
 	} else {
 		err = runServer(os.Args[1:])
 	}
@@ -261,6 +284,8 @@ func runServer(args []string) error {
 			ActionLimit: cfg.Deploy.ActionLimit, ActionWindow: cfg.Deploy.ActionWindow,
 			MaxBatch: cfg.Deploy.MaxBatch, AllowLoopback: cfg.Deploy.AllowLoopback,
 			PanelWaitAttempts: panelWaitAttempts, PanelWaitInterval: panelWaitInterval,
+			// 密码凭据的确认输错频控与登录同一组参数（docs/03 §5.22：15 分钟内 5 次锁 15 分钟）
+			ConfirmMaxFailures: cfg.Auth.LoginMaxFailures, ConfirmWindow: cfg.Auth.LoginWindow, ConfirmLockout: cfg.Auth.LoginLockout,
 		})
 	go job.RunHostTasks(ctx, hosts, cfg.Deploy.PollInterval, cfg.Deploy.Concurrency)
 	go job.RunCertRenewal(ctx, hosts, acmeCfg.RenewInterval)
@@ -272,6 +297,10 @@ func runServer(args []string) error {
 	uploads := service.NewUploadService(pool, objects, service.UploadConfig{
 		MaxBytes: cfg.Upload.MaxBytes, Limit: cfg.Upload.Limit, Window: cfg.Upload.Window,
 	})
+
+	tickets := service.NewTicketService(pool, settings, mails, telegramSvc, nil)
+	// 二级代理（docs/03 §5.23）：写操作频控取配置 agent.writeRatePerHour（Ruling-104）
+	agents := service.NewAgentService(pool, users, tickets, service.AgentServiceConfig{WriteRatePerHour: cfg.Agent.WriteRatePerHour})
 
 	srv := &http.Server{
 		Addr: cfg.Server.ListenAddr,
@@ -288,7 +317,7 @@ func runServer(args []string) error {
 			Mail:           mails,
 			Account:        account,
 			Content:        service.NewContentService(pool, sealer, settings, mails, nil),
-			Tickets:        service.NewTicketService(pool, settings, mails, telegramSvc, nil),
+			Tickets:        tickets,
 			Wallet:         service.NewWalletService(pool, sealer, settings, nil),
 			Shop:           shop,
 			Finance:        shop,
@@ -302,6 +331,7 @@ func runServer(args []string) error {
 			Reach:          reachSvc,
 			Hosts:          hosts,
 			Uploads:        uploads,
+			Agents:         agents,
 			Cookie:         api.CookieConfig{Secure: secureCookie},
 			TrustedProxies: trusted,
 		}),
@@ -384,6 +414,7 @@ func toAuthConfig(a config.AuthConfig) service.AuthConfig {
 		LoginWindow:          a.LoginWindow,
 		LoginLockout:         a.LoginLockout,
 		LoginMaxTrackedKeys:  a.LoginMaxTrackedKeys,
+		ReauthWindow:         a.ReauthWindow,
 	}
 }
 
@@ -411,34 +442,80 @@ func (b billingSyncer) AdvanceUsers(ctx context.Context) (int, error) {
 	return b.shop.AdvanceUsers(ctx)
 }
 
-func runAdminCreate(args []string) error {
-	fs := flag.NewFlagSet(cmdAdminCreate, flag.ContinueOnError)
+// adminCommand 解析 admin-* 子命令的公共参数（-f、-username），连上数据库后执行 fn。
+func adminCommand(name string, args []string, fn func(ctx context.Context, rbac *service.RBACService, username string) error) error {
+	fs := flag.NewFlagSet(name, flag.ContinueOnError)
 	configPath := fs.String(flagConfig, defaultConfigPath, flagConfigUsage)
-	username := fs.String("username", "", "super admin username")
+	username := fs.String(flagUsername, "", flagUsernameUsage)
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if *username == "" {
-		return errors.New("admin-create: -username is required")
+		return fmt.Errorf("%s: -%s is required", name, flagUsername)
 	}
-	secret, err := readNewCredential(os.Stdin, os.Stderr)
-	if err != nil {
-		return err
-	}
-
 	ctx := context.Background()
 	_, pool, err := loadConfigAndPool(ctx, *configPath)
 	if err != nil {
 		return err
 	}
 	defer pool.Close()
-
-	admin, err := service.NewRBACService(pool).BootstrapSuperAdmin(ctx, *username, secret)
-	if err != nil {
-		return fmt.Errorf("admin-create: %w", err)
+	if err := fn(ctx, service.NewRBACService(pool), *username); err != nil {
+		return fmt.Errorf("%s: %w", name, err)
 	}
-	slog.Info("super admin created", "id", admin.ID, "username", admin.Username)
 	return nil
+}
+
+func runAdminCreate(args []string) error {
+	return adminCommand(cmdAdminCreate, args, func(ctx context.Context, rbac *service.RBACService, username string) error {
+		secret, err := readNewCredential(os.Stdin, os.Stderr)
+		if err != nil {
+			return err
+		}
+		admin, err := rbac.BootstrapSuperAdmin(ctx, username, secret)
+		if err != nil {
+			return err
+		}
+		slog.Info("super admin created", "id", admin.ID, "username", admin.Username, "is_owner", admin.IsOwner)
+		return nil
+	})
+}
+
+// runAdminOwnerSet 指定或转移所有者（R11，Ruling-99）。
+func runAdminOwnerSet(args []string) error {
+	return adminCommand(cmdAdminOwnerSet, args, func(ctx context.Context, rbac *service.RBACService, username string) error {
+		previous, err := rbac.TransferOwner(ctx, username)
+		if err != nil {
+			return err
+		}
+		slog.Info("owner set", "username", username, "previous_owner_id", previous)
+		return nil
+	})
+}
+
+// runAdminTOTPReset 清除两步验证并吊销其全部会话（Ruling-98）。
+func runAdminTOTPReset(args []string) error {
+	return adminCommand(cmdAdminTOTPReset, args, func(ctx context.Context, rbac *service.RBACService, username string) error {
+		if err := rbac.ResetAdminTOTPByUsername(ctx, username); err != nil {
+			return err
+		}
+		slog.Info("admin totp reset", "username", username)
+		return nil
+	})
+}
+
+// runAdminPasswordReset 重设密码并吊销其全部会话（Ruling-98）；口令从终端读入，不经命令行参数。
+func runAdminPasswordReset(args []string) error {
+	return adminCommand(cmdAdminPasswordReset, args, func(ctx context.Context, rbac *service.RBACService, username string) error {
+		secret, err := readNewCredential(os.Stdin, os.Stderr)
+		if err != nil {
+			return err
+		}
+		if err := rbac.ResetAdminPasswordByUsername(ctx, username, secret); err != nil {
+			return err
+		}
+		slog.Info("admin password reset", "username", username)
+		return nil
+	})
 }
 
 // telegramSenderFromEnv 按环境变量创建 Telegram 发送器；没配 token 返回 nil（Telegram 不可用）。

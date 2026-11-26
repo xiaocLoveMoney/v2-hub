@@ -4,6 +4,8 @@ import { api, csrfHeader, toApiError, type ApiError, type Server, type ServerHos
 import { ErrorAlert } from '../../components/ErrorAlert'
 import { FormModal } from '../../components/FormModal'
 import { MAX_PORT, MIN_PORT } from '../form-limits'
+import { CredentialSecretField } from './CredentialSecretField'
+import { useCredentialSecret } from './credential-secret'
 import { DEFAULT_SSH_PORT, MAX_HOST_ADDRESS_LEN, hostnameOfUrl, validateHostAddressField } from './host-list'
 import { SshCredentialSelect } from './SshCredentialSelect'
 
@@ -11,6 +13,8 @@ interface HostBindForm {
   address: string
   sshPort: number
   credentialId: number
+  /** 凭据是密码类型时再次输入的密码（Ruling-97）；提交后清空。 */
+  credentialSecret?: string
 }
 
 type BoundServer = Pick<Server, 'id' | 'name' | 'baseUrl'>
@@ -40,14 +44,17 @@ function HostBindBody({ server, onBound }: Pick<HostBindModalProps, 'server' | '
   const { message } = App.useApp()
   const [error, setError] = useState<ApiError | null>(null)
   const [isBusy, setIsBusy] = useState(false)
+  // 绑定 SSH 用密码凭据时总要再输一次密码（Ruling-97）
+  const secret = useCredentialSecret(form)
 
   const handleFinish = async (v: HostBindForm) => {
     setIsBusy(true)
     setError(null)
+    secret.clear()
     try {
       const { data, error: apiError } = await api.PUT('/api/admin/servers/{id}/host', {
         params: { ...csrfHeader(), path: { id: server.id } },
-        body: { address: v.address.trim(), sshPort: v.sshPort, credentialId: v.credentialId },
+        body: { address: v.address.trim(), sshPort: v.sshPort, credentialId: v.credentialId, ...secret.bodyPart(v.credentialSecret) },
       })
       if (apiError !== undefined || data?.data === undefined) {
         setError(toApiError(apiError))
@@ -79,8 +86,9 @@ function HostBindBody({ server, onBound }: Pick<HostBindModalProps, 'server' | '
           <InputNumber min={MIN_PORT} max={MAX_PORT} precision={0} className="full-width" />
         </Form.Item>
         <Form.Item name="credentialId" label="SSH 凭据" extra="登录用户须是 root 或能免密 sudo" rules={[{ required: true, message: '请选择 SSH 凭据' }]}>
-          <SshCredentialSelect />
+          <SshCredentialSelect onAuthTypeChange={secret.onAuthTypeChange} />
         </Form.Item>
+        {secret.isNeeded && <CredentialSecretField />}
         <Button type="primary" htmlType="submit" loading={isBusy}>
           绑定并校验
         </Button>

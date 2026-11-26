@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: v2-hub API
-  version: 0.16.2
+  version: 0.18.0
   description: |
     v2-hub 对外接口契约（hub-server 提供，v2-hub-admin-web / v2-hub-user-web 消费）。
     - 管理端接口前缀 /api/admin，客户端接口前缀 /api/user，订阅端点前缀 /sub。
@@ -34,6 +34,15 @@ info:
       billing、traffic、host；连接测试结果的 status 同样换成 resources；新增 PUT /api/admin/servers/{id}/billing、GET /api/admin/servers/{id}/metrics、
       GET /api/admin/servers/trends；系统设置增加 latency 分组。
     0.16.2：公告与教程的图片上传（Ruling-89）——新增 POST /api/admin/uploads（multipart，content:write），返回站内路径 /uploads/…。
+    0.17.0：管理员分级加固（Ruling-95 – Ruling-100）——新增 PUT /api/admin/auth/password（本人改密码）、POST /api/admin/auth/reauth（二次验证）；
+      Session 加 isSuperAdmin、isOwner、totpSetupRequired，Admin 加 isOwner，Permission 加 superOnly；admin:* 与 host:* 改为超管专属；
+      主机批量新建 / 测试 / 修改 / 绑定 SSH / 重置主机密钥加只写的 credentialSecret；修改服务器时面板类型或地址有变化须重新提交 apiToken；
+      新增错误码 reauth_required、totp_setup_required（均 403）与可复用响应 ReauthRequired。
+    0.18.0：二级代理（docs/03 §5.23，Ruling-101 – Ruling-104）——Session 加 kind；新增超管侧代理管理 /api/admin/agents*、用户划转 PUT /api/admin/users/{id}/agent，
+      User 加 agent、用户列表加 agentId 筛选，InviteCode 的 kind 加 agent 并带 agentId / agentUsername；新增代理专用接口 /api/admin/agent/*（tag agent）；
+      新增错误码 agent_pool_insufficient、agent_user_limit（均 409）与可复用响应 AgentQuotaConflict。
+      隔离（Ruling-101）：代理账号调用 admin-auth 以外的现有管理端接口一律 403 permission_denied，只有 admin-auth 下的本人接口与 /api/admin/agent/* 可用；
+      员工调用 /api/admin/agent/* 同样 403 permission_denied；代理按 id 访问不在名下的对象一律 404 not_found。
 servers:
   - url: http://127.0.0.1:8080
     description: 本地开发
@@ -41,15 +50,22 @@ tags:
   - name: system
     description: 探活与系统信息
   - name: admin-auth
-    description: 管理员登录、登出、当前会话
+    description: 管理员登录、登出、当前会话；员工与代理共用（代理只能用本组接口与 tag agent 的接口，Ruling-101）
   - name: admin-rbac
-    description: 管理员、角色、权限码（需 admin:read / admin:write）
+    description: 管理员、角色、权限码（需 admin:read / admin:write，超管专属，Ruling-95）
+  - name: admin-agents
+    description: 二级代理的管理与用户划转（读 admin:read、写 admin:write，超管专属；写操作须二次验证），docs/03 §5.23
+  - name: agent
+    description: |
+      代理专用接口（docs/03 §5.23，Ruling-101）：只接受代理会话，员工调用 403 permission_denied；不看权限码。
+      每个查询都限定在当前代理名下，身份只取自会话；按 id 访问不在名下的用户、工单、邀请码一律 404 not_found。
+      写操作带 X-CSRF-Token，合计每小时最多 120 次（agent.writeRatePerHour），超出 429 rate_limited。
   - name: admin-audit
     description: 审计日志（需 audit:read）
   - name: admin-panel
     description: 服务器（server:*）、入站与节点（node:*），docs/03 §5.1
   - name: admin-hosts
-    description: SSH 凭据、托管主机、部署与运维任务（host:*），docs/03 §5.22
+    description: SSH 凭据、托管主机、部署与运维任务（host:*，超管专属，Ruling-95），docs/03 §5.22
   - name: admin-users
     description: 套餐（plan:*）与用户（user:*），docs/03 §5.2
   - name: admin-settings
@@ -214,7 +230,7 @@ paths:
     post:
       tags: [admin-auth]
       operationId: adminTotpDisable
-      summary: 提交当前验证码关闭两步验证
+      summary: 提交当前验证码关闭两步验证（超管 409，Ruling-98）
       parameters:
         - $ref: "#/components/parameters/CsrfHeader"
       requestBody:
@@ -228,6 +244,57 @@ paths:
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "403": { $ref: "#/components/responses/PermissionDenied" }
         "409": { $ref: "#/components/responses/Conflict" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /api/admin/auth/password:
+    put:
+      tags: [admin-auth]
+      operationId: adminChangePassword
+      summary: 修改自己的密码（任何已登录管理员；须提交旧密码，Ruling-96）
+      description: |
+        旧密码错误返回 400 并计入频控；成功后当前会话保留、本人其余会话全部失效。
+        超管未开启两步验证时本接口仍可用（Ruling-98 豁免）。
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AdminPasswordChangeInput" }
+      responses:
+        "200": { $ref: "#/components/responses/Ok" }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /api/admin/auth/reauth:
+    post:
+      tags: [admin-auth]
+      operationId: adminReauth
+      summary: 高危操作前重新验证身份（任何已登录管理员，Ruling-100）
+      description: |
+        已开启两步验证的账号必须给 totpCode，否则给 password；成功后 reauthUntil 之前高危接口不再返回 reauth_required。
+        验证失败返回 400 invalid_argument（不用 401，以免前端当成会话失效），计入频控并写审计。
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AdminReauthInput" }
+      responses:
+        "200":
+          description: 验证通过
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/AdminReauthResult" }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
         "429": { $ref: "#/components/responses/RateLimited" }
 
   /api/admin/dashboard:
@@ -248,6 +315,7 @@ paths:
                     properties:
                       data: { $ref: "#/components/schemas/AdminDashboard" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
   /api/admin/analytics/users:
     get:
       tags: [admin-dashboard]
@@ -354,6 +422,7 @@ paths:
                     properties:
                       data: { $ref: "#/components/schemas/AnalyticsBacklog" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
   /api/admin/permissions:
     get:
       tags: [admin-rbac]
@@ -397,7 +466,7 @@ paths:
     post:
       tags: [admin-rbac]
       operationId: createRole
-      summary: 新建角色（admin:write；权限须为操作者子集，R2）
+      summary: 新建角色（admin:write；权限码含超管专属码时 400，Ruling-95）
       parameters:
         - $ref: "#/components/parameters/CsrfHeader"
       requestBody:
@@ -413,7 +482,7 @@ paths:
               schema: { $ref: "#/components/schemas/RoleEnvelope" }
         "400": { $ref: "#/components/responses/InvalidArgument" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
-        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "403": { $ref: "#/components/responses/ReauthRequired" }
         "409": { $ref: "#/components/responses/Conflict" }
   /api/admin/roles/{id}:
     parameters:
@@ -421,7 +490,7 @@ paths:
     put:
       tags: [admin-rbac]
       operationId: updateRole
-      summary: 修改角色名称与权限码（admin:write；内置角色不可改，R2、R6）
+      summary: 修改角色名称与权限码（admin:write；权限码含超管专属码时 400；内置角色含四个预设均不可改，R6、Ruling-95）
       parameters:
         - $ref: "#/components/parameters/CsrfHeader"
       requestBody:
@@ -437,26 +506,26 @@ paths:
               schema: { $ref: "#/components/schemas/RoleEnvelope" }
         "400": { $ref: "#/components/responses/InvalidArgument" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
-        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "403": { $ref: "#/components/responses/ReauthRequired" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
     delete:
       tags: [admin-rbac]
       operationId: deleteRole
-      summary: 删除角色（admin:write；内置或被引用的角色不可删，R6）
+      summary: 删除角色（admin:write；内置角色含四个预设、或被引用的角色不可删，R6、Ruling-95）
       parameters:
         - $ref: "#/components/parameters/CsrfHeader"
       responses:
         "200": { $ref: "#/components/responses/Ok" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
-        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "403": { $ref: "#/components/responses/ReauthRequired" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
   /api/admin/admins:
     get:
       tags: [admin-rbac]
       operationId: listAdmins
-      summary: 分页列出管理员（admin:read）
+      summary: 分页列出管理员（admin:read）；只含员工，不含代理（代理见 /api/admin/agents，Ruling-101）
       parameters:
         - $ref: "#/components/parameters/Page"
         - $ref: "#/components/parameters/PageSize"
@@ -484,7 +553,7 @@ paths:
     post:
       tags: [admin-rbac]
       operationId: createAdmin
-      summary: 新建管理员（admin:write；只能分配权限为自己子集的角色，R3）
+      summary: 新建管理员（admin:write，超管专属，Ruling-95）
       parameters:
         - $ref: "#/components/parameters/CsrfHeader"
       requestBody:
@@ -500,7 +569,7 @@ paths:
               schema: { $ref: "#/components/schemas/AdminEnvelope" }
         "400": { $ref: "#/components/responses/InvalidArgument" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
-        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "403": { $ref: "#/components/responses/ReauthRequired" }
         "409": { $ref: "#/components/responses/Conflict" }
   /api/admin/admins/{id}:
     parameters:
@@ -508,7 +577,8 @@ paths:
     put:
       tags: [admin-rbac]
       operationId: updateAdmin
-      summary: 修改管理员角色与禁用状态（admin:write；R3、R4、R5、R7）
+      summary: 修改管理员角色与禁用状态（admin:write；R4、R5、R7；目标是所有者时 403，Ruling-99）
+      description: 目标是代理账号时 409 conflict，改用 `PUT /api/admin/agents/{id}`（代理不能持有角色，Ruling-101）。
       parameters:
         - $ref: "#/components/parameters/CsrfHeader"
       requestBody:
@@ -524,7 +594,7 @@ paths:
               schema: { $ref: "#/components/schemas/AdminEnvelope" }
         "400": { $ref: "#/components/responses/InvalidArgument" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
-        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "403": { $ref: "#/components/responses/ReauthRequired" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
   /api/admin/admins/{id}/password:
@@ -534,6 +604,9 @@ paths:
       tags: [admin-rbac]
       operationId: resetAdminPassword
       summary: 重置管理员密码（admin:write；对方全部会话失效，R7）
+      description: |
+        对自己 409，改自己的密码用 `PUT /api/admin/auth/password`（Ruling-96）；目标是所有者时 403（Ruling-99）。
+        目标是代理账号时照常可用（docs/03 §5.23）。
       parameters:
         - $ref: "#/components/parameters/CsrfHeader"
       requestBody:
@@ -549,15 +622,381 @@ paths:
         "200": { $ref: "#/components/responses/Ok" }
         "400": { $ref: "#/components/responses/InvalidArgument" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
-        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "403": { $ref: "#/components/responses/ReauthRequired" }
         "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
   /api/admin/admins/{id}/totp:
     parameters:
       - $ref: "#/components/parameters/IdPath"
     delete:
       tags: [admin-rbac]
       operationId: resetAdminTotp
-      summary: 清除他人的两步验证（遗失设备时；admin:write，R3、R4；对方全部会话失效）
+      summary: 清除他人的两步验证（遗失设备时；admin:write，R4；对方全部会话失效；目标是所有者时 403，Ruling-99）
+      description: 目标是代理账号时照常可用（docs/03 §5.23）。
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      responses:
+        "200": { $ref: "#/components/responses/Ok" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/ReauthRequired" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /api/admin/agents:
+    get:
+      tags: [admin-agents]
+      operationId: listAgents
+      summary: 代理分页，按创建时间倒序（admin:read，docs/03 §5.23）
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+        - { name: keyword, in: query, description: 按用户名模糊匹配, schema: { type: string, maxLength: 64 } }
+      responses:
+        "200":
+          description: 代理分页
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/AgentPage" }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+    post:
+      tags: [admin-agents]
+      operationId: createAgent
+      summary: 新建代理账号与其配额（admin:write，Ruling-103、Ruling-104）
+      description: |
+        账号与配额同一事务建出；用户名与管理员共用一个命名空间，重名 409。
+        planIds 里有不存在的套餐、或流量 / 时长任一为“不限”的套餐，400 invalid_argument。
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AgentCreateInput" }
+      responses:
+        "200":
+          description: 新建的代理
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AgentEnvelope" }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/ReauthRequired" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /api/admin/agents/{id}:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    get:
+      tags: [admin-agents]
+      operationId: getAgent
+      summary: 代理详情（admin:read）；id 不是代理账号时 404
+      responses:
+        "200":
+          description: 代理
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AgentEnvelope" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    put:
+      tags: [admin-agents]
+      operationId: updateAgent
+      summary: 修改代理的备注、配额、白名单与停用状态（整体替换；admin:write，Ruling-103、Ruling-104）
+      description: |
+        trafficPoolTotal 低于当前已用量 409 conflict；planIds 含不存在或流量 / 时长任一为“不限”的套餐 400 invalid_argument。
+        maxUsers 可以调到低于当前名下用户数：已有用户不受影响，只是不能再新增（docs/03 §5.23 用户数上限）。
+        停用时其全部会话立即失效、邀请码不可用，名下用户不受影响。id 不是代理账号时 404。
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AgentUpdateInput" }
+      responses:
+        "200":
+          description: 修改后的代理
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AgentEnvelope" }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/ReauthRequired" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /api/admin/agents/{id}/allocations:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    get:
+      tags: [admin-agents]
+      operationId: listAgentAllocations
+      summary: 该代理的开通记录，按时间倒序（admin:read，线下结算的依据，Ruling-103）
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+        - { name: from, in: query, description: 创建时间下限（含）, schema: { type: string, format: date-time } }
+        - { name: to, in: query, description: 创建时间上限（不含）, schema: { type: string, format: date-time } }
+      responses:
+        "200":
+          description: 开通记录分页
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/AgentAllocationPage" }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/admin/agent/summary:
+    get:
+      tags: [agent]
+      operationId: agentGetSummary
+      summary: 我的配额与用量（仅代理会话）
+      responses:
+        "200":
+          description: 配额与用量
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/AgentSummary" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+  /api/admin/agent/plans:
+    get:
+      tags: [agent]
+      operationId: agentListPlans
+      summary: 我可以分配的套餐（白名单），按套餐排序字段升序
+      description: 只返回额度字段与本次开通将扣减的流量，不带全站人数、价格、节点组等平台数据。
+      responses:
+        "200":
+          description: 白名单套餐
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { type: array, items: { $ref: "#/components/schemas/AgentPlan" } }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+  /api/admin/agent/users:
+    get:
+      tags: [agent]
+      operationId: agentListUsers
+      summary: 名下用户分页（不含待删除的），按创建时间倒序
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+        - { name: keyword, in: query, description: 按用户名、邮箱或备注模糊匹配, schema: { type: string, maxLength: 64 } }
+        - { name: status, in: query, schema: { $ref: "#/components/schemas/UserStatus" } }
+        - { name: planId, in: query, schema: { type: integer, format: int64, minimum: 1 } }
+      responses:
+        "200":
+          description: 名下用户分页
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/AgentUserPage" }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+    post:
+      tags: [agent]
+      operationId: agentCreateUser
+      summary: 新建名下用户，同时分配一个白名单套餐（扣流量池，写开通记录 kind = create）
+      description: |
+        planId 不在白名单 400 invalid_argument；名下未删除用户数已达上限 409 agent_user_limit；
+        流量池不够这次扣减 409 agent_pool_insufficient（不建用户、不部分开通）；用户名或邮箱重复 409 conflict。
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AgentUserCreateInput" }
+      responses:
+        "200":
+          description: 新建的用户
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AgentUserEnvelope" }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "409": { $ref: "#/components/responses/AgentQuotaConflict" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /api/admin/agent/users/{id}:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    get:
+      tags: [agent]
+      operationId: agentGetUser
+      summary: 名下用户详情；不在名下或待删除一律 404
+      responses:
+        "200":
+          description: 用户
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AgentUserEnvelope" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    put:
+      tags: [agent]
+      operationId: agentUpdateUser
+      summary: 修改名下用户的备注与启用 / 停用
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AgentUserUpdateInput" }
+      responses:
+        "200":
+          description: 修改后的用户
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AgentUserEnvelope" }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+    delete:
+      tags: [agent]
+      operationId: agentDeleteUser
+      summary: 删除名下用户（高危，须二次验证；流量池不退回）
+      description: 流程同管理端删除用户（面板不可达时记为待删除）；删除后其订单与余额流水不再对代理可见，开通记录保留（docs/03 §5.23）。
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      responses:
+        "200": { $ref: "#/components/responses/Ok" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/ReauthRequired" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /api/admin/agent/users/{id}/plan:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    post:
+      tags: [agent]
+      operationId: agentAssignUserPlan
+      summary: 给名下用户分配或续期白名单套餐（扣流量池，写开通记录 kind = assign）
+      description: |
+        与用户自己下单同一规则（Ruling-108）：与用户当前套餐相同 = 续期，未到期的从原到期日顺延；不同套餐或用户没有套餐 = 换购，立即生效、原剩余时长作废；已用流量清零。
+        planId 不在白名单 400 invalid_argument；流量池不够 409 agent_pool_insufficient（不部分开通）。
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AgentPlanAssignInput" }
+      responses:
+        "200":
+          description: 分配后的用户
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AgentUserEnvelope" }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/AgentQuotaConflict" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /api/admin/agent/users/{id}/quota:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    put:
+      tags: [agent]
+      operationId: agentUpdateUserQuota
+      summary: 调低名下用户的流量额度、把到期时间提前（只能收紧，Ruling-103）
+      description: |
+        两个字段都可省略（省略 = 不改），但至少给一个。trafficLimit 必须大于 0 且不超过当前额度（当前为不限时任意正数都算调低）；
+        expiresAt 不能为 null、不能晚于当前到期时间（当前不过期时任意时间都算提前；用户还在等首次使用、尚未开始计时时不能改，400）。
+        违反任一条 400 invalid_argument。不改流量池、不写开通记录。
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AgentUserQuotaInput" }
+      responses:
+        "200":
+          description: 修改后的用户
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AgentUserEnvelope" }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /api/admin/agent/users/{id}/password:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    put:
+      tags: [agent]
+      operationId: agentResetUserPassword
+      summary: 重置名下用户的客户后台登录密码（高危，须二次验证）
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, required: [password], properties: { password: { $ref: "#/components/schemas/UserPassword" } } }
+      responses:
+        "200": { $ref: "#/components/responses/Ok" }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/ReauthRequired" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /api/admin/agent/users/{id}/totp:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    delete:
+      tags: [agent]
+      operationId: agentClearUserTotp
+      summary: 清除名下用户的两步验证（高危，须二次验证），其全部会话失效
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      responses:
+        "200": { $ref: "#/components/responses/Ok" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/ReauthRequired" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /api/admin/agent/users/{id}/subscription/reset:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    post:
+      tags: [agent]
+      operationId: agentResetUserSubscription
+      summary: 重置名下用户的订阅地址并轮换连接凭据；旧地址与旧凭据立即失效并触发对账
       parameters:
         - $ref: "#/components/parameters/CsrfHeader"
       responses:
@@ -565,7 +1004,273 @@ paths:
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "403": { $ref: "#/components/responses/PermissionDenied" }
         "404": { $ref: "#/components/responses/NotFound" }
-        "409": { $ref: "#/components/responses/Conflict" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /api/admin/agent/invite-codes:
+    get:
+      tags: [agent]
+      operationId: agentListInviteCodes
+      summary: 我的邀请码分页（kind 恒为 agent）
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+      responses:
+        "200":
+          description: 邀请码分页
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/InviteCodePage" }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+    post:
+      tags: [agent]
+      operationId: agentCreateInviteCode
+      summary: 新建我的邀请码，码由服务端生成；经它注册的用户归我名下（Ruling-102）
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/InviteCodeInput" }
+      responses:
+        "200":
+          description: 新建的邀请码
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/InviteCode" }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /api/admin/agent/invite-codes/{id}:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    put:
+      tags: [agent]
+      operationId: agentUpdateInviteCode
+      summary: 修改我的邀请码的次数、到期、备注与停用；不是我的码 404
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/InviteCodeInput" }
+      responses:
+        "200":
+          description: 修改后的邀请码
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/InviteCode" }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+    delete:
+      tags: [agent]
+      operationId: agentDeleteInviteCode
+      summary: 删除我的邀请码（已注册用户的归属不变）；不是我的码 404
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      responses:
+        "200": { $ref: "#/components/responses/Ok" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /api/admin/agent/tickets:
+    get:
+      tags: [agent]
+      operationId: agentListTickets
+      summary: 名下用户的工单分页，按最近回复倒序
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+        - { name: status, in: query, schema: { $ref: "#/components/schemas/TicketStatus" } }
+        - { name: userId, in: query, description: 不在名下的 id 返回空列表, schema: { type: integer, format: int64, minimum: 1 } }
+      responses:
+        "200":
+          description: 工单分页
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/TicketPage" }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+  /api/admin/agent/tickets/{id}:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    get:
+      tags: [agent]
+      operationId: agentGetTicket
+      summary: 工单与全部消息；不是名下用户的工单 404
+      description: 消息的 authorName：代理本人的回复为代理用户名，平台员工的回复为空串（不向代理暴露员工账号）。
+      responses:
+        "200":
+          description: 工单与全部消息
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/TicketDetail" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/admin/agent/tickets/{id}/messages:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    post:
+      tags: [agent]
+      operationId: agentReplyTicket
+      summary: 代理回复，状态变为 answered；用户侧与员工回复一样显示为“客服”
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TicketMessageInput" }
+      responses:
+        "200":
+          description: 回复后的工单
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/TicketDetail" }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /api/admin/agent/tickets/{id}/close:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    post:
+      tags: [agent]
+      operationId: agentCloseTicket
+      summary: 关闭名下用户的工单
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      responses:
+        "200":
+          description: 关闭后的工单
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/TicketDetail" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /api/admin/agent/orders:
+    get:
+      tags: [agent]
+      operationId: agentListOrders
+      summary: 名下（未删除）用户的订单分页，按时间倒序，只读
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+        - { name: userId, in: query, description: 不在名下的 id 返回空列表, schema: { type: integer, format: int64, minimum: 1 } }
+        - { name: kind, in: query, schema: { $ref: "#/components/schemas/OrderKind" } }
+        - { name: from, in: query, description: 创建时间下限（含）, schema: { type: string, format: date-time } }
+        - { name: to, in: query, description: 创建时间上限（不含）, schema: { type: string, format: date-time } }
+      responses:
+        "200":
+          description: 订单分页
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/OrderPage" }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+  /api/admin/agent/wallet-ledger:
+    get:
+      tags: [agent]
+      operationId: agentListWalletLedger
+      summary: 名下（未删除）用户的余额流水分页，按时间倒序，只读
+      description: adminUsername 恒为空串（不向代理暴露员工账号）。
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+        - { name: userId, in: query, description: 不在名下的 id 返回空列表, schema: { type: integer, format: int64, minimum: 1 } }
+        - { name: kind, in: query, schema: { $ref: "#/components/schemas/LedgerKind" } }
+      responses:
+        "200":
+          description: 余额流水分页
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/LedgerPage" }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+  /api/admin/agent/allocations:
+    get:
+      tags: [agent]
+      operationId: agentListAllocations
+      summary: 我的开通记录，按时间倒序（含已删除用户的记录）
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+        - { name: from, in: query, description: 创建时间下限（含）, schema: { type: string, format: date-time } }
+        - { name: to, in: query, description: 创建时间上限（不含）, schema: { type: string, format: date-time } }
+      responses:
+        "200":
+          description: 开通记录分页
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/AgentAllocationPage" }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/PermissionDenied" }
+
   /api/admin/audit-logs:
     get:
       tags: [admin-audit]
@@ -635,7 +1340,7 @@ paths:
               schema: { $ref: "#/components/schemas/ServerEnvelope" }
         "400": { $ref: "#/components/responses/InvalidArgument" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
-        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "403": { $ref: "#/components/responses/ReauthRequired" }
         "409": { $ref: "#/components/responses/Conflict" }
         "502": { $ref: "#/components/responses/UpstreamUnavailable" }
   /api/admin/servers/trends:
@@ -756,7 +1461,7 @@ paths:
               schema: { $ref: "#/components/schemas/ServerEnvelope" }
         "400": { $ref: "#/components/responses/InvalidArgument" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
-        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "403": { $ref: "#/components/responses/ReauthRequired" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
         "502": { $ref: "#/components/responses/UpstreamUnavailable" }
@@ -769,7 +1474,7 @@ paths:
       responses:
         "200": { $ref: "#/components/responses/Ok" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
-        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "403": { $ref: "#/components/responses/ReauthRequired" }
         "404": { $ref: "#/components/responses/NotFound" }
   /api/admin/servers/{id}/chain-apply:
     parameters:
@@ -985,7 +1690,7 @@ paths:
                     properties:
                       data: { $ref: "#/components/schemas/NodeLink" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
-        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "403": { $ref: "#/components/responses/ReauthRequired" }
         "404": { $ref: "#/components/responses/NotFound" }
   /api/admin/chain-exits/{id}/test:
     parameters:
@@ -1228,7 +1933,7 @@ paths:
                     properties:
                       data: { $ref: "#/components/schemas/InboundPanelConfig" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
-        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "403": { $ref: "#/components/responses/ReauthRequired" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
         "502": { $ref: "#/components/responses/UpstreamUnavailable" }
@@ -1488,7 +2193,7 @@ paths:
                     properties:
                       data: { $ref: "#/components/schemas/InboundPresetPreview" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
-        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "403": { $ref: "#/components/responses/ReauthRequired" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
         "429": { $ref: "#/components/responses/RateLimited" }
@@ -1524,7 +2229,7 @@ paths:
                       data: { $ref: "#/components/schemas/HostTask" }
         "400": { $ref: "#/components/responses/InvalidArgument" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
-        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "403": { $ref: "#/components/responses/ReauthRequired" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
         "429": { $ref: "#/components/responses/RateLimited" }
@@ -1572,7 +2277,7 @@ paths:
                       data: { $ref: "#/components/schemas/SshCredential" }
         "400": { $ref: "#/components/responses/InvalidArgument" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
-        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "403": { $ref: "#/components/responses/ReauthRequired" }
         "409": { $ref: "#/components/responses/Conflict" }
   /api/admin/ssh-credentials/{id}:
     parameters:
@@ -1601,7 +2306,7 @@ paths:
                       data: { $ref: "#/components/schemas/SshCredential" }
         "400": { $ref: "#/components/responses/InvalidArgument" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
-        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "403": { $ref: "#/components/responses/ReauthRequired" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
     delete:
@@ -1613,7 +2318,7 @@ paths:
       responses:
         "200": { $ref: "#/components/responses/Ok" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
-        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "403": { $ref: "#/components/responses/ReauthRequired" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
   /api/admin/dns-accounts:
@@ -1660,7 +2365,7 @@ paths:
                       data: { $ref: "#/components/schemas/DnsAccount" }
         "400": { $ref: "#/components/responses/InvalidArgument" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
-        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "403": { $ref: "#/components/responses/ReauthRequired" }
         "409": { $ref: "#/components/responses/Conflict" }
         "502": { $ref: "#/components/responses/UpstreamUnavailable" }
   /api/admin/dns-accounts/{id}:
@@ -1690,7 +2395,7 @@ paths:
                       data: { $ref: "#/components/schemas/DnsAccount" }
         "400": { $ref: "#/components/responses/InvalidArgument" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
-        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "403": { $ref: "#/components/responses/ReauthRequired" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
         "502": { $ref: "#/components/responses/UpstreamUnavailable" }
@@ -1703,7 +2408,7 @@ paths:
       responses:
         "200": { $ref: "#/components/responses/Ok" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
-        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "403": { $ref: "#/components/responses/ReauthRequired" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
   /api/admin/server-hosts:
@@ -1753,8 +2458,9 @@ paths:
                         items: { $ref: "#/components/schemas/ServerHost" }
         "400": { $ref: "#/components/responses/InvalidArgument" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
-        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "403": { $ref: "#/components/responses/ReauthRequired" }
         "409": { $ref: "#/components/responses/Conflict" }
+        "429": { $ref: "#/components/responses/RateLimited" }
   /api/admin/server-hosts/test:
     post:
       tags: [admin-hosts]
@@ -1781,7 +2487,7 @@ paths:
                       data: { $ref: "#/components/schemas/HostDetection" }
         "400": { $ref: "#/components/responses/InvalidArgument" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
-        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "403": { $ref: "#/components/responses/ReauthRequired" }
         "429": { $ref: "#/components/responses/RateLimited" }
         "502": { $ref: "#/components/responses/UpstreamUnavailable" }
   /api/admin/server-hosts/{id}:
@@ -1829,9 +2535,10 @@ paths:
                       data: { $ref: "#/components/schemas/ServerHost" }
         "400": { $ref: "#/components/responses/InvalidArgument" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
-        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "403": { $ref: "#/components/responses/ReauthRequired" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
+        "429": { $ref: "#/components/responses/RateLimited" }
     delete:
       tags: [admin-hosts]
       operationId: deleteServerHost
@@ -1841,7 +2548,7 @@ paths:
       responses:
         "200": { $ref: "#/components/responses/Ok" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
-        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "403": { $ref: "#/components/responses/ReauthRequired" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
   /api/admin/server-hosts/{id}/reset-host-key:
@@ -1853,6 +2560,11 @@ paths:
       summary: 清空已固定的主机密钥，下次连接时重新记录（host:write）
       parameters:
         - $ref: "#/components/parameters/CsrfHeader"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ServerHostResetKeyInput" }
       responses:
         "200":
           description: 修改后的主机
@@ -1864,9 +2576,11 @@ paths:
                   - type: object
                     properties:
                       data: { $ref: "#/components/schemas/ServerHost" }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
-        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "403": { $ref: "#/components/responses/ReauthRequired" }
         "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/RateLimited" }
   /api/admin/server-hosts/{id}/tasks:
     parameters:
       - $ref: "#/components/parameters/IdPath"
@@ -1920,7 +2634,7 @@ paths:
                       data: { $ref: "#/components/schemas/HostTask" }
         "400": { $ref: "#/components/responses/InvalidArgument" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
-        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "403": { $ref: "#/components/responses/ReauthRequired" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
         "429": { $ref: "#/components/responses/RateLimited" }
@@ -1946,7 +2660,7 @@ paths:
                     properties:
                       data: { $ref: "#/components/schemas/PanelLogin" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
-        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "403": { $ref: "#/components/responses/ReauthRequired" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
         "429": { $ref: "#/components/responses/RateLimited" }
@@ -1993,7 +2707,7 @@ paths:
                     properties:
                       data: { $ref: "#/components/schemas/HostTask" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
-        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "403": { $ref: "#/components/responses/ReauthRequired" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
   /api/admin/servers/{id}/host:
@@ -2024,9 +2738,10 @@ paths:
                       data: { $ref: "#/components/schemas/ServerHost" }
         "400": { $ref: "#/components/responses/InvalidArgument" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
-        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "403": { $ref: "#/components/responses/ReauthRequired" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
+        "429": { $ref: "#/components/responses/RateLimited" }
   /api/admin/endpoints/{id}:
     parameters:
       - $ref: "#/components/parameters/IdPath"
@@ -2343,6 +3058,7 @@ paths:
         - { name: keyword, in: query, description: 按用户名或备注模糊匹配, schema: { type: string, maxLength: 64 } }
         - { name: status, in: query, schema: { $ref: "#/components/schemas/UserStatus" } }
         - { name: planId, in: query, schema: { type: integer, format: int64, minimum: 1 } }
+        - { name: agentId, in: query, description: 只看该代理名下的用户（0.18.0，Ruling-102）, schema: { type: integer, format: int64, minimum: 1 } }
       responses:
         "200":
           description: 用户分页
@@ -2414,7 +3130,8 @@ paths:
     put:
       tags: [admin-users]
       operationId: updateUser
-      summary: 修改备注、停用 / 启用（docs/03 U8；user:write）
+      summary: 修改备注、停用 / 启用、邮箱（docs/03 U8；user:write）
+      description: 改备注与启停不要求二次验证；请求里的邮箱与当前值不同时须在二次验证有效期内，否则 403 reauth_required（按内容判定，Ruling-106）。
       parameters:
         - $ref: "#/components/parameters/CsrfHeader"
       requestBody:
@@ -2446,7 +3163,7 @@ paths:
       responses:
         "200": { $ref: "#/components/responses/Ok" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
-        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "403": { $ref: "#/components/responses/ReauthRequired" }
         "404": { $ref: "#/components/responses/NotFound" }
   /api/admin/users/{id}/plan:
     parameters:
@@ -2526,7 +3243,7 @@ paths:
         "200": { $ref: "#/components/responses/Ok" }
         "400": { $ref: "#/components/responses/InvalidArgument" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
-        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "403": { $ref: "#/components/responses/ReauthRequired" }
         "404": { $ref: "#/components/responses/NotFound" }
   /api/admin/users/{id}/provisions:
     parameters:
@@ -2589,7 +3306,39 @@ paths:
       responses:
         "200": { $ref: "#/components/responses/Ok" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
-        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "403": { $ref: "#/components/responses/ReauthRequired" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/admin/users/{id}/agent:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    put:
+      tags: [admin-agents]
+      operationId: transferUserAgent
+      summary: 把用户划给某个代理或收回为平台用户（admin:write，docs/03 §5.23 名下 ④，Ruling-102）
+      description: |
+        agentId 为 null = 收回；不受代理的用户数上限限制。agentId 不存在或不是代理账号 400 invalid_argument；用户不存在或待删除 404。
+        只改归属，不动额度、邀请关系与流量池；写审计 user.agent_transfer。
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UserAgentInput" }
+      responses:
+        "200":
+          description: 划转后的用户
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/User" }
+        "400": { $ref: "#/components/responses/InvalidArgument" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/ReauthRequired" }
         "404": { $ref: "#/components/responses/NotFound" }
   /api/admin/subscribe-logs:
     get:
@@ -2637,6 +3386,7 @@ paths:
       tags: [admin-settings]
       operationId: updateSettings
       summary: 修改系统设置：只改请求里出现的键，任一项不合法则整体不保存（setting:write）
+      description: site.portalUrl 与 subscription.baseUrl 只有超级管理员能改；非超管提交的这两项与当前值不同时 403 permission_denied、整体不保存（Ruling-106）。
       parameters:
         - $ref: "#/components/parameters/CsrfHeader"
       requestBody:
@@ -2657,7 +3407,7 @@ paths:
                       data: { $ref: "#/components/schemas/Settings" }
         "400": { $ref: "#/components/responses/InvalidArgument" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
-        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "403": { $ref: "#/components/responses/ReauthRequired" }
   /api/admin/settings/test-mail:
     post:
       tags: [admin-settings]
@@ -2724,7 +3474,8 @@ paths:
       parameters:
         - $ref: "#/components/parameters/Page"
         - $ref: "#/components/parameters/PageSize"
-        - { name: kind, in: query, description: 省略为全部, schema: { type: string, enum: [admin, user] } }
+        - { name: kind, in: query, description: 省略为全部, schema: { type: string, enum: [admin, user, agent] } }
+        - { name: agentId, in: query, description: 只看该代理的码（0.18.0）, schema: { type: integer, format: int64, minimum: 1 } }
       responses:
         "200":
           description: 邀请码分页
@@ -2770,7 +3521,7 @@ paths:
     put:
       tags: [admin-users]
       operationId: updateInviteCode
-      summary: 修改邀请码的次数、到期、备注与停用（个人码只能停用 / 启用；user:write）
+      summary: 修改邀请码的次数、到期、备注与停用（个人码只能停用 / 启用；代理码同管理员码；user:write）
       parameters:
         - $ref: "#/components/parameters/CsrfHeader"
       requestBody:
@@ -2796,7 +3547,7 @@ paths:
     delete:
       tags: [admin-users]
       operationId: deleteInviteCode
-      summary: 删除管理员邀请码（个人码不可删，返回 409；user:write）
+      summary: 删除管理员邀请码或代理码（个人码不可删，返回 409；user:write）
       parameters:
         - $ref: "#/components/parameters/CsrfHeader"
       responses:
@@ -3139,7 +3890,7 @@ paths:
                     properties:
                       data: { $ref: "#/components/schemas/SharedCredential" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
-        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "403": { $ref: "#/components/responses/ReauthRequired" }
         "404": { $ref: "#/components/responses/NotFound" }
   /api/admin/tickets:
     get:
@@ -3461,7 +4212,7 @@ paths:
                       data: { $ref: "#/components/schemas/TopupCodeBatch" }
         "400": { $ref: "#/components/responses/InvalidArgument" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
-        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "403": { $ref: "#/components/responses/ReauthRequired" }
   /api/admin/topup-codes/{id}:
     parameters:
       - $ref: "#/components/parameters/IdPath"
@@ -3525,7 +4276,7 @@ paths:
                     properties:
                       data: { $ref: "#/components/schemas/TopupCodeSecret" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
-        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "403": { $ref: "#/components/responses/ReauthRequired" }
         "404": { $ref: "#/components/responses/NotFound" }
   /api/admin/orders:
     get:
@@ -3697,7 +4448,7 @@ paths:
                       data: { $ref: "#/components/schemas/User" }
         "400": { $ref: "#/components/responses/InvalidArgument" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
-        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "403": { $ref: "#/components/responses/ReauthRequired" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
   /api/admin/users/{id}/impersonate:
@@ -3724,7 +4475,7 @@ paths:
                     properties:
                       data: { $ref: "#/components/schemas/ImpersonateTicket" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
-        "403": { $ref: "#/components/responses/PermissionDenied" }
+        "403": { $ref: "#/components/responses/ReauthRequired" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
   /api/user/auth/login:
@@ -5209,7 +5960,15 @@ components:
         application/json:
           schema: { $ref: "#/components/schemas/Envelope" }
     PermissionDenied:
-      description: permission_denied（缺权限码或 CSRF 校验失败）
+      description: permission_denied（缺权限码、CSRF 校验失败、代理账号调用非代理接口或员工调用 /api/admin/agent/*，Ruling-101）；管理端接口另可能返回 totp_setup_required（超管未开启两步验证，查看会话、登出、生成与确认 TOTP、改自己密码除外，Ruling-98）
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Envelope" }
+    ReauthRequired:
+      description: |
+        高危接口（Ruling-100，清单见 docs/03 §4.4）的 403：reauth_required（二次验证已过期，先调 POST /api/admin/auth/reauth 再重发原请求）、
+        totp_setup_required（超管未开启两步验证，Ruling-98）或 permission_denied（缺权限码或 CSRF 校验失败）。
+        判定顺序：认证 → CSRF → 两步验证绑定 → 权限码 → 二次验证，缺权限的人不会被要求二次验证。
       content:
         application/json:
           schema: { $ref: "#/components/schemas/Envelope" }
@@ -5261,6 +6020,22 @@ components:
       content:
         application/json:
           schema: { $ref: "#/components/schemas/Envelope" }
+    AgentQuotaConflict:
+      description: |
+        代理配额不足（docs/03 §5.23，Ruling-103）：agent_pool_insufficient（流量池不够本次扣减，data 带 poolCost 与 poolRemaining，单位字节）、
+        agent_user_limit（名下未删除用户数已达上限，只在新建用户时出现）或 conflict（用户名 / 邮箱重复等）。
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: "#/components/schemas/Envelope"
+              - type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      poolCost: { type: integer, format: int64, description: 本次需要扣减的字节数 }
+                      poolRemaining: { type: integer, format: int64, description: 流量池剩余字节数 }
   schemas:
     Health:
       type: object
@@ -5276,7 +6051,7 @@ components:
       properties:
         code:
           type: string
-          description: "\"0\" 表示成功，其余取值见 docs/03 §5"
+          description: "\"0\" 表示成功，其余取值见 docs/03 §5；管理端 403 另有 reauth_required（Ruling-100）、totp_setup_required（Ruling-98）；代理接口 409 另有 agent_pool_insufficient、agent_user_limit（Ruling-103）"
         message:
           type: string
         data: {}
@@ -5308,6 +6083,23 @@ components:
       properties:
         secret: { type: string, description: Base32 密钥，供无法扫码时手动输入 }
         otpauthUri: { type: string, description: "otpauth://totp/... 地址，前端渲染为二维码" }
+    AdminPasswordChangeInput:
+      type: object
+      required: [oldPassword, newPassword]
+      properties:
+        oldPassword: { type: string, minLength: 1, maxLength: 128 }
+        newPassword: { $ref: "#/components/schemas/Password" }
+    AdminReauthInput:
+      type: object
+      description: 二选一：已开启两步验证的账号必须给 totpCode，否则给 password（Ruling-100）
+      properties:
+        password: { type: string, minLength: 1, maxLength: 128 }
+        totpCode: { $ref: "#/components/schemas/TotpCode" }
+    AdminReauthResult:
+      type: object
+      required: [reauthUntil]
+      properties:
+        reauthUntil: { type: string, format: date-time, description: 在此之前高危接口不再要求重新验证 }
     AdminBrief:
       type: object
       required: [id, username]
@@ -5316,11 +6108,21 @@ components:
         username: { type: string }
     Session:
       type: object
-      required: [admin, permissions, csrfToken, totpEnabled, menuOrder]
+      required: [admin, kind, permissions, csrfToken, totpEnabled, menuOrder, isSuperAdmin, isOwner, totpSetupRequired]
       properties:
         admin: { $ref: "#/components/schemas/AdminBrief" }
+        kind:
+          $ref: "#/components/schemas/AdminKind"
+          description: |
+            账号类型（0.18.0，Ruling-101）。agent 时 permissions 为空数组、isSuperAdmin / isOwner / totpSetupRequired 恒为 false，
+            menuOrder 为空数组（代理菜单固定，docs/03 §5.6）；前端据此渲染代理布局。
         totpEnabled: { type: boolean }
         menuOrder: { $ref: "#/components/schemas/MenuOrder", description: "管理端侧栏菜单顺序（系统设置 menu.admin，0.7.3，Ruling-57）；空数组 = 默认顺序" }
+        isSuperAdmin: { type: boolean, description: 持有 super_admin 角色（Ruling-95） }
+        isOwner: { type: boolean, description: 是否所有者（Ruling-99） }
+        totpSetupRequired:
+          type: boolean
+          description: 超管未开启两步验证；为 true 时除豁免接口外都返回 403 totp_setup_required，管理端停在账号安全页（Ruling-98）
         permissions:
           type: array
           description: 有效权限码（super_admin 返回全部）
@@ -5334,10 +6136,11 @@ components:
             data: { $ref: "#/components/schemas/Session" }
     Permission:
       type: object
-      required: [code, name]
+      required: [code, name, superOnly]
       properties:
         code: { type: string }
         name: { type: string }
+        superOnly: { type: boolean, description: 超管专属，不能放进任何其它角色（Ruling-95） }
     Role:
       type: object
       required: [id, code, name, isBuiltin, permissions]
@@ -5345,7 +6148,7 @@ components:
         id: { type: integer, format: int64 }
         code: { type: string }
         name: { type: string }
-        isBuiltin: { type: boolean }
+        isBuiltin: { type: boolean, description: "内置角色：super_admin 与四个预设 operator / finance / ops / partner；不可改不可删，预设角色的 permissions 由代码定义（Ruling-95）" }
         permissions:
           type: array
           items: { type: string }
@@ -5370,12 +6173,13 @@ components:
             data: { $ref: "#/components/schemas/Role" }
     Admin:
       type: object
-      required: [id, username, isDisabled, totpEnabled, roles, createdAt]
+      required: [id, username, isDisabled, totpEnabled, isOwner, roles, createdAt]
       properties:
         id: { type: integer, format: int64 }
         username: { type: string }
         isDisabled: { type: boolean }
         totpEnabled: { type: boolean }
+        isOwner: { type: boolean, description: 所有者，不能经管理接口禁用、改角色、重置密码或两步验证（Ruling-99） }
         roles:
           type: array
           items: { type: string, description: 角色 code }
@@ -5406,6 +6210,182 @@ components:
         - type: object
           properties:
             data: { $ref: "#/components/schemas/Admin" }
+    AdminKind:
+      type: string
+      enum: [staff, agent]
+      description: 管理端账号类型（Ruling-101）：staff 员工 / agent 代理，创建后不可改
+    AgentBase:
+      type: object
+      required: [remark, maxUsers, trafficPoolTotal, planIds]
+      description: 代理的配额（Ruling-103）
+      properties:
+        remark: { type: string, maxLength: 255 }
+        maxUsers: { type: integer, minimum: 0, maximum: 1000000, description: 名下未删除用户数上限 }
+        trafficPoolTotal: { type: integer, format: int64, minimum: 0, description: 流量池总量（字节），累计制，不能低于已用量 }
+        planIds:
+          type: array
+          maxItems: 200
+          uniqueItems: true
+          description: 可分配的套餐白名单，整体替换；只收流量与时长都有限的套餐
+          items: { type: integer, format: int64, minimum: 1 }
+    AgentCreateInput:
+      allOf:
+        - $ref: "#/components/schemas/AgentBase"
+        - type: object
+          required: [username, password]
+          properties:
+            username: { $ref: "#/components/schemas/Username" }
+            password: { $ref: "#/components/schemas/Password" }
+    AgentUpdateInput:
+      allOf:
+        - $ref: "#/components/schemas/AgentBase"
+        - type: object
+          required: [isDisabled]
+          properties:
+            isDisabled: { type: boolean, description: 停用时其全部会话失效、邀请码不可用，名下用户不受影响 }
+    Agent:
+      allOf:
+        - $ref: "#/components/schemas/AgentBase"
+        - type: object
+          required: [id, username, isDisabled, totpEnabled, lastLoginAt, createdAt, userCount, trafficPoolUsed]
+          properties:
+            id: { type: integer, format: int64 }
+            username: { type: string }
+            isDisabled: { type: boolean }
+            totpEnabled: { type: boolean }
+            lastLoginAt: { type: [string, "null"], format: date-time }
+            createdAt: { type: string, format: date-time }
+            userCount: { type: integer, description: 名下未删除用户数；超管划转后可能超过 maxUsers }
+            trafficPoolUsed: { type: integer, format: int64, description: 流量池已用（字节），只增不减 }
+    AgentEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/Envelope"
+        - type: object
+          properties:
+            data: { $ref: "#/components/schemas/Agent" }
+    AgentPage:
+      type: object
+      required: [items, total]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/Agent" } }
+        total: { type: integer, format: int64 }
+    AgentBrief:
+      type: object
+      required: [id, username]
+      properties:
+        id: { type: integer, format: int64 }
+        username: { type: string }
+    UserAgentInput:
+      type: object
+      required: [agentId]
+      properties:
+        agentId: { type: [integer, "null"], format: int64, minimum: 1, description: 目标代理的管理员 id；null = 收回为平台用户 }
+    AgentAllocationKind:
+      type: string
+      enum: [create, assign]
+      description: create = 新建用户时选的套餐；assign = 给已有用户分配或续期
+    AgentAllocation:
+      type: object
+      required: [id, agentId, userId, username, planId, planName, trafficBytes, durationDays, kind, createdAt]
+      properties:
+        id: { type: integer, format: int64 }
+        agentId: { type: integer, format: int64 }
+        userId: { type: [integer, "null"], format: int64, description: 用户已删除为 null }
+        username: { type: string, description: 开通时的用户名 }
+        planId: { type: [integer, "null"], format: int64, description: 套餐已删除为 null }
+        planName: { type: string, description: 开通时的套餐名 }
+        trafficBytes: { type: integer, format: int64, description: 本次从流量池扣减的字节数 }
+        durationDays: { type: integer, description: 套餐时长（天） }
+        kind: { $ref: "#/components/schemas/AgentAllocationKind" }
+        createdAt: { type: string, format: date-time }
+    AgentAllocationPage:
+      type: object
+      required: [items, total]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/AgentAllocation" } }
+        total: { type: integer, format: int64 }
+    AgentSummary:
+      type: object
+      required: [maxUsers, userCount, trafficPoolTotal, trafficPoolUsed]
+      properties:
+        maxUsers: { type: integer }
+        userCount: { type: integer, description: 名下未删除用户数 }
+        trafficPoolTotal: { type: integer, format: int64 }
+        trafficPoolUsed: { type: integer, format: int64 }
+    AgentPlan:
+      type: object
+      required: [id, name, trafficLimit, durationDays, trafficReset, limitIp, poolCost]
+      properties:
+        id: { type: integer, format: int64 }
+        name: { type: string }
+        trafficLimit: { type: integer, format: int64, description: 流量额度（字节），白名单里恒大于 0 }
+        durationDays: { type: integer, description: 时长（天），白名单里恒大于 0 }
+        trafficReset: { $ref: "#/components/schemas/TrafficReset" }
+        limitIp: { type: integer, description: 同时在线 IP 数，0 不限 }
+        poolCost:
+          type: integer
+          format: int64
+          description: 开通或续期一次从流量池扣减的字节数 = 流量 × 时长内最多能用到的重置周期数（Ruling-108：never 按 1 期；hourly = 天数 × 24 + 1，daily = 天数 + 1，weekly = ⌈天数 / 7⌉ + 1，monthly = ⌈天数 / 28⌉ + 1）
+    AgentPlanAssignInput:
+      type: object
+      required: [planId]
+      properties:
+        planId: { type: integer, format: int64, minimum: 1, description: 必须在白名单内 }
+    AgentUser:
+      type: object
+      description: 代理看到的名下用户（Ruling-104）：不含下发状态、订阅凭据、邀请关系、免费续期等字段
+      required: [id, username, email, remark, status, isDisabled, planId, planName, trafficLimit, trafficUsed, expiresAt, pendingDays, balance, totpEnabled, createdAt, lastUsedAt]
+      properties:
+        id: { type: integer, format: int64 }
+        username: { type: string }
+        email: { type: [string, "null"], description: 未绑定为 null }
+        remark: { type: string }
+        status: { $ref: "#/components/schemas/UserStatus" }
+        isDisabled: { type: boolean }
+        planId: { type: [integer, "null"], format: int64 }
+        planName: { type: string, description: 没有套餐为空串 }
+        trafficLimit: { type: integer, format: int64, description: 流量额度（字节），0 不限 }
+        trafficUsed: { type: integer, format: int64 }
+        expiresAt: { type: [string, "null"], format: date-time, description: null 表示不过期或等待首次使用 }
+        pendingDays: { type: integer, description: ">0 且 expiresAt 为 null：首次使用后起算的天数" }
+        balance: { type: integer, format: int64, description: 余额（分），只读 }
+        totpEnabled: { type: boolean }
+        createdAt: { type: string, format: date-time }
+        lastUsedAt: { type: [string, "null"], format: date-time, description: 最近一次产生流量的时间 }
+    AgentUserEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/Envelope"
+        - type: object
+          properties:
+            data: { $ref: "#/components/schemas/AgentUser" }
+    AgentUserPage:
+      type: object
+      required: [items, total]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/AgentUser" } }
+        total: { type: integer, format: int64 }
+    AgentUserCreateInput:
+      type: object
+      required: [username, password, planId]
+      properties:
+        username: { $ref: "#/components/schemas/Username" }
+        password: { $ref: "#/components/schemas/UserPassword" }
+        email: { $ref: "#/components/schemas/Email" }
+        remark: { type: string, maxLength: 255 }
+        planId: { type: integer, format: int64, minimum: 1, description: 必须在白名单内 }
+    AgentUserUpdateInput:
+      type: object
+      required: [remark, isDisabled]
+      properties:
+        remark: { type: string, maxLength: 255 }
+        isDisabled: { type: boolean }
+    AgentUserQuotaInput:
+      type: object
+      minProperties: 1
+      description: 只能收紧（Ruling-103）；省略的字段不改，至少给一个
+      properties:
+        trafficLimit: { type: integer, format: int64, minimum: 1, description: 大于 0 且不超过当前额度 }
+        expiresAt: { type: string, format: date-time, description: 不能为 null、不能晚于当前到期时间 }
     AuditLog:
       type: object
       required: [id, actorType, action, createdAt]
@@ -5432,7 +6412,7 @@ components:
       properties:
         providerType: { type: string, enum: [xui] }
         baseUrl: { $ref: "#/components/schemas/PanelBaseUrl" }
-        apiToken: { type: string, maxLength: 512, description: 只写；更新时留空表示沿用原值 }
+        apiToken: { type: string, maxLength: 512, description: 只写；更新时留空表示沿用原值，但面板类型、面板地址、TLS 校验方式或证书指纹有变化时必填（Ruling-97、Ruling-107） }
         tlsMode: { $ref: "#/components/schemas/TlsMode" }
         certPinSha256: { type: string, maxLength: 128 }
     ServerInput:
@@ -5865,11 +6845,13 @@ components:
         panelPort: { type: [integer, "null"], minimum: 1, maximum: 65535 }
         dnsAccountId: { type: [integer, "null"], format: int64, minimum: 1, description: null 或不带表示不用 DNS 账号 }
         domain: { $ref: "#/components/schemas/HostDomain" }
+        credentialSecret: { type: string, maxLength: 255, writeOnly: true, description: "所选凭据的密码，再输入一次用于比对；凭据是 password 类型、且这个（地址，端口）还没用过该凭据时必填（Ruling-97）" }
     ServerHostBatchInput:
       type: object
       required: [credentialId, providerType, hosts]
       properties:
         credentialId: { type: integer, format: int64, minimum: 1 }
+        credentialSecret: { type: string, maxLength: 255, writeOnly: true, description: "所选凭据的密码，再输入一次用于比对；凭据是 password 类型、且本批中有（地址，端口）还没用过该凭据时必填，整批比对一次（Ruling-97）" }
         sshPort: { type: integer, minimum: 1, maximum: 65535, default: 22 }
         providerType: { type: string, enum: [xui] }
         panelPort: { type: [integer, "null"], minimum: 1, maximum: 65535, description: 安装时用的面板端口，整批相同；null 为各自随机 }
@@ -5894,6 +6876,7 @@ components:
         sshPort: { type: integer, minimum: 1, maximum: 65535, default: 22 }
         credentialId: { type: integer, format: int64, minimum: 1 }
         providerType: { type: string, enum: [xui] }
+        credentialSecret: { type: string, maxLength: 255, writeOnly: true, description: "所选凭据的密码，再输入一次用于比对；凭据是 password 类型时一律必填，不看目标用没用过（Ruling-107）" }
     ServerHostBindInput:
       type: object
       required: [address, credentialId]
@@ -5901,6 +6884,11 @@ components:
         address: { $ref: "#/components/schemas/HostAddress" }
         sshPort: { type: integer, minimum: 1, maximum: 65535, default: 22 }
         credentialId: { type: integer, format: int64, minimum: 1 }
+        credentialSecret: { type: string, maxLength: 255, writeOnly: true, description: "所选凭据的密码，再输入一次用于比对；凭据是 password 类型、且这个（地址，端口）还没用过该凭据时必填（Ruling-97）" }
+    ServerHostResetKeyInput:
+      type: object
+      properties:
+        credentialSecret: { type: string, maxLength: 255, writeOnly: true, description: "该主机所用凭据的密码，再输入一次用于比对；凭据是 password 类型时必填——重置后下次连接接受任何主机密钥，等同该（地址，端口）首次使用该凭据（Ruling-97）" }
     HostDetection:
       type: object
       required: [hostKeySha256, osId, arch, isPrivileged, panelState, panelVersion, plan, reason]
@@ -6179,7 +7167,7 @@ components:
       allOf:
         - $ref: "#/components/schemas/UserQuotaInput"
         - type: object
-          required: [id, username, remark, planId, planName, status, isDisabled, renewCount, provisions, createdAt]
+          required: [id, username, remark, planId, planName, status, isDisabled, renewCount, provisions, agent, createdAt]
           properties:
             id: { type: integer, format: int64 }
             username: { type: string }
@@ -6205,6 +7193,11 @@ components:
             invitedByUsername: { type: string, description: 没有邀请人时为空串（0.3.0） }
             balance: { type: integer, format: int64, description: 余额（分）（0.4.0） }
             autoRenew: { type: boolean, description: 是否开了扣余额自动续费（0.4.0） }
+            agent:
+              description: 所属代理；null = 平台用户（0.18.0，Ruling-102）
+              oneOf:
+                - $ref: "#/components/schemas/AgentBrief"
+                - type: "null"
             createdAt: { type: string, format: date-time }
     UserCreateInput:
       type: object
@@ -6221,7 +7214,7 @@ components:
       properties:
         remark: { type: string, maxLength: 255 }
         isDisabled: { type: boolean }
-        email: { type: string, maxLength: 254, description: 省略不改；空串清除；其余按邮箱校验并视为已验证（0.3.0） }
+        email: { type: string, maxLength: 254, description: 省略不改；空串清除；其余按邮箱校验并视为已验证（0.3.0）。邮箱有变化时属于高危操作，须在二次验证有效期内，否则 403 reauth_required（Ruling-106） }
     Provision:
       type: object
       required: [serverId, serverName, email, status, lastError, retryCount, syncedAt, updatedAt]
@@ -6638,9 +7631,11 @@ components:
       properties:
         id: { type: integer, format: int64 }
         code: { type: string }
-        kind: { type: string, enum: [admin, user] }
+        kind: { type: string, enum: [admin, user, agent], description: agent = 代理的码，经它注册的用户归该代理（0.18.0，Ruling-102） }
         ownerUserId: { type: [integer, "null"], format: int64 }
-        ownerUsername: { type: string, description: 管理员码为空串 }
+        ownerUsername: { type: string, description: 管理员码与代理码为空串 }
+        agentId: { type: [integer, "null"], format: int64, description: 代理码的代理 id，其余为 null（0.18.0） }
+        agentUsername: { type: string, description: 代理码的代理用户名，其余为空串（0.18.0） }
         maxUses: { type: integer, description: 个人码为设置 invite.userMaxUses 的当前值 }
         usedCount: { type: integer }
         expiresAt: { type: [string, "null"], format: date-time }

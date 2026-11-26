@@ -59,16 +59,23 @@ WHERE u.deleted_at IS NULL
   AND ($1::text IS NULL OR u.username ILIKE '%' || $1 || '%' OR u.remark ILIKE '%' || $1 || '%' OR u.email ILIKE '%' || $1 || '%') -- rule-ignore: 管理端按用户名 / 备注 / 邮箱模糊搜索，只给管理员用且有分页上限；本项目是 PostgreSQL，mysql.md 不适用
   AND ($2::text IS NULL OR u.status = $2)
   AND ($3::bigint IS NULL OR u.plan_id = $3)
+  AND ($4::bigint IS NULL OR u.agent_id = $4)
 `
 
 type CountUsersParams struct {
 	Keyword pgtype.Text
 	Status  pgtype.Text
 	PlanID  pgtype.Int8
+	AgentID pgtype.Int8
 }
 
 func (q *Queries) CountUsers(ctx context.Context, arg CountUsersParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countUsers, arg.Keyword, arg.Status, arg.PlanID)
+	row := q.db.QueryRow(ctx, countUsers,
+		arg.Keyword,
+		arg.Status,
+		arg.PlanID,
+		arg.AgentID,
+	)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -123,8 +130,8 @@ func (q *Queries) CreatePlan(ctx context.Context, arg CreatePlanParams) (int64, 
 }
 
 const createUser = `-- name: CreateUser :one
-INSERT INTO end_user (username, password_hash, remark, email_code, client_cred_enc, email, email_verified_at, invited_by, invite_code_id)
-VALUES ($1, $2, $3, $4, ''::bytea, $5, $6, $7, $8)
+INSERT INTO end_user (username, password_hash, remark, email_code, client_cred_enc, email, email_verified_at, invited_by, invite_code_id, agent_id)
+VALUES ($1, $2, $3, $4, ''::bytea, $5, $6, $7, $8, $9)
 RETURNING id
 `
 
@@ -137,6 +144,7 @@ type CreateUserParams struct {
 	EmailVerifiedAt pgtype.Timestamptz
 	InvitedBy       pgtype.Int8
 	InviteCodeID    pgtype.Int8
+	AgentID         pgtype.Int8
 }
 
 func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (int64, error) {
@@ -149,6 +157,7 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (int64, 
 		arg.EmailVerifiedAt,
 		arg.InvitedBy,
 		arg.InviteCodeID,
+		arg.AgentID,
 	)
 	var id int64
 	err := row.Scan(&id)
@@ -253,7 +262,7 @@ func (q *Queries) GetServerLinkFingerprint(ctx context.Context, serverID int64) 
 
 const getUserQuota = `-- name: GetUserQuota :one
 SELECT id, plan_id, traffic_limit, traffic_used, expires_at, pending_days, limit_ip, renew_every_days, renew_month_day,
-       renew_weekday, renew_max, renew_count, traffic_reset, traffic_reset_day, last_traffic_reset_at, is_disabled, status
+       renew_weekday, renew_max, renew_count, traffic_reset, traffic_reset_day, last_traffic_reset_at, is_disabled, status, username
 FROM end_user WHERE id = $1 AND deleted_at IS NULL
 FOR UPDATE
 `
@@ -276,9 +285,10 @@ type GetUserQuotaRow struct {
 	LastTrafficResetAt pgtype.Timestamptz
 	IsDisabled         bool
 	Status             string
+	Username           string
 }
 
-// 读写配额前加行锁，避免流量任务与管理员操作互相覆盖
+// 读写配额前加行锁，避免流量任务与管理员操作互相覆盖。行结构须与 agent.sql 的 AgentLockUser 逐字段相同。
 func (q *Queries) GetUserQuota(ctx context.Context, id int64) (GetUserQuotaRow, error) {
 	row := q.db.QueryRow(ctx, getUserQuota, id)
 	var i GetUserQuotaRow
@@ -300,6 +310,7 @@ func (q *Queries) GetUserQuota(ctx context.Context, id int64) (GetUserQuotaRow, 
 		&i.LastTrafficResetAt,
 		&i.IsDisabled,
 		&i.Status,
+		&i.Username,
 	)
 	return i, err
 }
@@ -693,17 +704,20 @@ SELECT u.id, u.username, u.remark, u.plan_id, COALESCE(p.name, '')::text AS plan
        COALESCE(iu.username, '')::text AS invited_by_username,
        (SELECT COUNT(*) FROM provision v WHERE v.user_id = u.id AND v.status = 'synced')::int AS synced_count,
        (SELECT COUNT(*) FROM provision v WHERE v.user_id = u.id AND v.status = 'pending')::int AS pending_count,
-       (SELECT COUNT(*) FROM provision v WHERE v.user_id = u.id AND v.status = 'failed')::int AS failed_count
+       (SELECT COUNT(*) FROM provision v WHERE v.user_id = u.id AND v.status = 'failed')::int AS failed_count,
+       u.agent_id, COALESCE(ag.username, '')::text AS agent_username
 FROM end_user u
 LEFT JOIN plan p ON p.id = u.plan_id
 LEFT JOIN end_user iu ON iu.id = u.invited_by AND iu.deleted_at IS NULL
+LEFT JOIN admin ag ON ag.id = u.agent_id
 WHERE u.deleted_at IS NULL
   AND ($1::bigint IS NULL OR u.id = $1)
   AND ($2::text IS NULL OR u.username ILIKE '%' || $2 || '%' OR u.remark ILIKE '%' || $2 || '%' OR u.email ILIKE '%' || $2 || '%') -- rule-ignore: 管理端按用户名 / 备注 / 邮箱模糊搜索，只给管理员用且有分页上限；本项目是 PostgreSQL，mysql.md 不适用
   AND ($3::text IS NULL OR u.status = $3)
   AND ($4::bigint IS NULL OR u.plan_id = $4)
+  AND ($5::bigint IS NULL OR u.agent_id = $5)
 ORDER BY u.id DESC
-LIMIT $6 OFFSET $5
+LIMIT $7 OFFSET $6
 `
 
 type ListUsersParams struct {
@@ -711,6 +725,7 @@ type ListUsersParams struct {
 	Keyword   pgtype.Text
 	Status    pgtype.Text
 	PlanID    pgtype.Int8
+	AgentID   pgtype.Int8
 	RowOffset int32
 	RowLimit  int32
 }
@@ -747,6 +762,8 @@ type ListUsersRow struct {
 	SyncedCount       int32
 	PendingCount      int32
 	FailedCount       int32
+	AgentID           pgtype.Int8
+	AgentUsername     string
 }
 
 func (q *Queries) ListUsers(ctx context.Context, arg ListUsersParams) ([]ListUsersRow, error) {
@@ -755,6 +772,7 @@ func (q *Queries) ListUsers(ctx context.Context, arg ListUsersParams) ([]ListUse
 		arg.Keyword,
 		arg.Status,
 		arg.PlanID,
+		arg.AgentID,
 		arg.RowOffset,
 		arg.RowLimit,
 	)
@@ -797,6 +815,8 @@ func (q *Queries) ListUsers(ctx context.Context, arg ListUsersParams) ([]ListUse
 			&i.SyncedCount,
 			&i.PendingCount,
 			&i.FailedCount,
+			&i.AgentID,
+			&i.AgentUsername,
 		); err != nil {
 			return nil, err
 		}
@@ -1004,6 +1024,29 @@ type SetServerProvisionsOnlineParams struct {
 func (q *Queries) SetServerProvisionsOnline(ctx context.Context, arg SetServerProvisionsOnlineParams) error {
 	_, err := q.db.Exec(ctx, setServerProvisionsOnline, arg.Emails, arg.ServerID)
 	return err
+}
+
+const setUserAgent = `-- name: SetUserAgent :one
+WITH before AS (
+    SELECT e.id, e.agent_id FROM end_user e WHERE e.id = $2::bigint AND e.deleted_at IS NULL
+)
+UPDATE end_user u SET agent_id = $1, updated_at = now()
+FROM before
+WHERE u.id = before.id
+RETURNING before.agent_id AS previous_agent_id
+`
+
+type SetUserAgentParams struct {
+	AgentID pgtype.Int8
+	ID      int64
+}
+
+// 超管划转或收回（Ruling-102）：只改归属，带回划转前的 agent_id 供审计（CTE 读的是更新前的快照）
+func (q *Queries) SetUserAgent(ctx context.Context, arg SetUserAgentParams) (pgtype.Int8, error) {
+	row := q.db.QueryRow(ctx, setUserAgent, arg.AgentID, arg.ID)
+	var previous_agent_id pgtype.Int8
+	err := row.Scan(&previous_agent_id)
+	return previous_agent_id, err
 }
 
 const setUserCredential = `-- name: SetUserCredential :exec

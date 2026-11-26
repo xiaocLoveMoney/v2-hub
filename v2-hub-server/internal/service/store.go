@@ -76,9 +76,15 @@ const (
 	ActionAdminTOTPEnable    = "admin.totp_enable"
 	ActionAdminTOTPDisable   = "admin.totp_disable"
 	ActionAdminTOTPReset     = "admin.totp_reset"
-	ActionRoleCreate         = "role.create"
-	ActionRoleUpdate         = "role.update"
-	ActionRoleDelete         = "role.delete"
+	// ActionAdminPasswordChange 本人改密码（Ruling-96）；ActionAdminReauth / ActionAdminReauthFailed 二次验证（Ruling-100）；
+	// ActionAdminOwnerTransfer 所有者指定或转移（Ruling-99，只由命令行触发，操作者为系统）。
+	ActionAdminPasswordChange = "admin.password_change"
+	ActionAdminReauth         = "admin.reauth"
+	ActionAdminReauthFailed   = "admin.reauth_failed"
+	ActionAdminOwnerTransfer  = "admin.owner_transfer"
+	ActionRoleCreate          = "role.create"
+	ActionRoleUpdate          = "role.update"
+	ActionRoleDelete          = "role.delete"
 
 	targetAdmin = "admin"
 	targetRole  = "role"

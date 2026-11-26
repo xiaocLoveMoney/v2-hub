@@ -58,15 +58,18 @@ SELECT u.id, u.username, u.remark, u.plan_id, COALESCE(p.name, '')::text AS plan
        COALESCE(iu.username, '')::text AS invited_by_username,
        (SELECT COUNT(*) FROM provision v WHERE v.user_id = u.id AND v.status = 'synced')::int AS synced_count,
        (SELECT COUNT(*) FROM provision v WHERE v.user_id = u.id AND v.status = 'pending')::int AS pending_count,
-       (SELECT COUNT(*) FROM provision v WHERE v.user_id = u.id AND v.status = 'failed')::int AS failed_count
+       (SELECT COUNT(*) FROM provision v WHERE v.user_id = u.id AND v.status = 'failed')::int AS failed_count,
+       u.agent_id, COALESCE(ag.username, '')::text AS agent_username
 FROM end_user u
 LEFT JOIN plan p ON p.id = u.plan_id
 LEFT JOIN end_user iu ON iu.id = u.invited_by AND iu.deleted_at IS NULL
+LEFT JOIN admin ag ON ag.id = u.agent_id
 WHERE u.deleted_at IS NULL
   AND (sqlc.narg(user_id)::bigint IS NULL OR u.id = sqlc.narg(user_id))
   AND (sqlc.narg(keyword)::text IS NULL OR u.username ILIKE '%' || sqlc.narg(keyword) || '%' OR u.remark ILIKE '%' || sqlc.narg(keyword) || '%' OR u.email ILIKE '%' || sqlc.narg(keyword) || '%') -- rule-ignore: 管理端按用户名 / 备注 / 邮箱模糊搜索，只给管理员用且有分页上限；本项目是 PostgreSQL，mysql.md 不适用
   AND (sqlc.narg(status)::text IS NULL OR u.status = sqlc.narg(status))
   AND (sqlc.narg(plan_id)::bigint IS NULL OR u.plan_id = sqlc.narg(plan_id))
+  AND (sqlc.narg(agent_id)::bigint IS NULL OR u.agent_id = sqlc.narg(agent_id))
 ORDER BY u.id DESC
 LIMIT sqlc.arg(row_limit) OFFSET sqlc.arg(row_offset);
 
@@ -75,19 +78,30 @@ SELECT COUNT(*) FROM end_user u
 WHERE u.deleted_at IS NULL
   AND (sqlc.narg(keyword)::text IS NULL OR u.username ILIKE '%' || sqlc.narg(keyword) || '%' OR u.remark ILIKE '%' || sqlc.narg(keyword) || '%' OR u.email ILIKE '%' || sqlc.narg(keyword) || '%') -- rule-ignore: 管理端按用户名 / 备注 / 邮箱模糊搜索，只给管理员用且有分页上限；本项目是 PostgreSQL，mysql.md 不适用
   AND (sqlc.narg(status)::text IS NULL OR u.status = sqlc.narg(status))
-  AND (sqlc.narg(plan_id)::bigint IS NULL OR u.plan_id = sqlc.narg(plan_id));
+  AND (sqlc.narg(plan_id)::bigint IS NULL OR u.plan_id = sqlc.narg(plan_id))
+  AND (sqlc.narg(agent_id)::bigint IS NULL OR u.agent_id = sqlc.narg(agent_id));
 
 -- name: GetUserQuota :one
--- 读写配额前加行锁，避免流量任务与管理员操作互相覆盖
+-- 读写配额前加行锁，避免流量任务与管理员操作互相覆盖。行结构须与 agent.sql 的 AgentLockUser 逐字段相同。
 SELECT id, plan_id, traffic_limit, traffic_used, expires_at, pending_days, limit_ip, renew_every_days, renew_month_day,
-       renew_weekday, renew_max, renew_count, traffic_reset, traffic_reset_day, last_traffic_reset_at, is_disabled, status
+       renew_weekday, renew_max, renew_count, traffic_reset, traffic_reset_day, last_traffic_reset_at, is_disabled, status, username
 FROM end_user WHERE id = $1 AND deleted_at IS NULL
 FOR UPDATE;
 
 -- name: CreateUser :one
-INSERT INTO end_user (username, password_hash, remark, email_code, client_cred_enc, email, email_verified_at, invited_by, invite_code_id)
-VALUES ($1, $2, $3, $4, ''::bytea, sqlc.narg(email), sqlc.narg(email_verified_at), sqlc.narg(invited_by), sqlc.narg(invite_code_id))
+INSERT INTO end_user (username, password_hash, remark, email_code, client_cred_enc, email, email_verified_at, invited_by, invite_code_id, agent_id)
+VALUES ($1, $2, $3, $4, ''::bytea, sqlc.narg(email), sqlc.narg(email_verified_at), sqlc.narg(invited_by), sqlc.narg(invite_code_id), sqlc.narg(agent_id))
 RETURNING id;
+
+-- name: SetUserAgent :one
+-- 超管划转或收回（Ruling-102）：只改归属，带回划转前的 agent_id 供审计（CTE 读的是更新前的快照）
+WITH before AS (
+    SELECT e.id, e.agent_id FROM end_user e WHERE e.id = sqlc.arg(id)::bigint AND e.deleted_at IS NULL
+)
+UPDATE end_user u SET agent_id = sqlc.narg(agent_id), updated_at = now()
+FROM before
+WHERE u.id = before.id
+RETURNING before.agent_id AS previous_agent_id;
 
 -- name: SetUserCredential :exec
 UPDATE end_user SET client_cred_enc = $2 WHERE id = $1;

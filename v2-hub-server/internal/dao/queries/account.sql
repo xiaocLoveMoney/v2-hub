@@ -2,8 +2,10 @@
 
 -- name: GetInviteCodeForUpdate :one
 -- 注册时锁住邀请码行，计数与上限的判断在同一事务内完成（并发注册不超发）
+-- agent_id：代理码的代理；owner_agent_id：个人码的主人所属的代理（新用户随邀请人归属，Ruling-102）
 SELECT c.id, c.owner_user_id, c.max_uses, c.used_count, c.expires_at, c.is_disabled,
-       (o.id IS NOT NULL AND (o.deleted_at IS NOT NULL OR o.is_disabled))::boolean AS is_owner_inactive
+       (o.id IS NOT NULL AND (o.deleted_at IS NOT NULL OR o.is_disabled))::boolean AS is_owner_inactive,
+       c.agent_id, o.agent_id AS owner_agent_id
 FROM invite_code c
 LEFT JOIN end_user o ON o.id = c.owner_user_id
 WHERE c.code = $1
@@ -27,22 +29,28 @@ UPDATE invite_code SET code = $2 WHERE owner_user_id = $1;
 SELECT username, created_at FROM end_user WHERE invited_by = $1 AND deleted_at IS NULL ORDER BY id DESC LIMIT $2;
 
 -- name: ListInviteCodes :many
+-- 三类码（Ruling-102）：个人码有 owner_user_id，代理码有 agent_id，两者都空是管理员码
 SELECT c.id, c.code, c.owner_user_id, COALESCE(o.username, '')::text AS owner_username, c.max_uses, c.used_count, c.expires_at,
-       c.is_disabled, c.remark, c.created_at
+       c.is_disabled, c.remark, c.created_at, c.agent_id, COALESCE(ag.username, '')::text AS agent_username
 FROM invite_code c
 LEFT JOIN end_user o ON o.id = c.owner_user_id
+LEFT JOIN admin ag ON ag.id = c.agent_id
 WHERE (sqlc.arg(kind)::text = ''
-       OR (sqlc.arg(kind)::text = 'admin' AND c.owner_user_id IS NULL)
-       OR (sqlc.arg(kind)::text = 'user' AND c.owner_user_id IS NOT NULL))
+       OR (sqlc.arg(kind)::text = 'admin' AND c.owner_user_id IS NULL AND c.agent_id IS NULL)
+       OR (sqlc.arg(kind)::text = 'user' AND c.owner_user_id IS NOT NULL)
+       OR (sqlc.arg(kind)::text = 'agent' AND c.agent_id IS NOT NULL))
   AND (sqlc.arg(id)::bigint = 0 OR c.id = sqlc.arg(id)::bigint)
+  AND (sqlc.arg(agent_id)::bigint = 0 OR c.agent_id = sqlc.arg(agent_id)::bigint)
 ORDER BY c.id DESC
 LIMIT sqlc.arg(row_limit) OFFSET sqlc.arg(row_offset);
 
 -- name: CountInviteCodes :one
 SELECT count(*) FROM invite_code c
 WHERE (sqlc.arg(kind)::text = ''
-       OR (sqlc.arg(kind)::text = 'admin' AND c.owner_user_id IS NULL)
-       OR (sqlc.arg(kind)::text = 'user' AND c.owner_user_id IS NOT NULL));
+       OR (sqlc.arg(kind)::text = 'admin' AND c.owner_user_id IS NULL AND c.agent_id IS NULL)
+       OR (sqlc.arg(kind)::text = 'user' AND c.owner_user_id IS NOT NULL)
+       OR (sqlc.arg(kind)::text = 'agent' AND c.agent_id IS NOT NULL))
+  AND (sqlc.arg(agent_id)::bigint = 0 OR c.agent_id = sqlc.arg(agent_id)::bigint);
 
 -- name: CreateAdminInviteCode :one
 INSERT INTO invite_code (code, max_uses, expires_at, is_disabled, remark, created_by)

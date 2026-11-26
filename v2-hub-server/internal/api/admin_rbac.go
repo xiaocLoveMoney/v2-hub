@@ -28,8 +28,9 @@ type AdminManager interface {
 // ---- VO：字段与 hub-api.yaml 的 schema 一致 ----
 
 type permissionVO struct {
-	Code string `json:"code"`
-	Name string `json:"name"`
+	Code      string `json:"code"`
+	Name      string `json:"name"`
+	SuperOnly bool   `json:"superOnly"`
 }
 
 type roleVO struct {
@@ -45,6 +46,7 @@ type adminVO struct {
 	Username    string     `json:"username"`
 	IsDisabled  bool       `json:"isDisabled"`
 	TOTPEnabled bool       `json:"totpEnabled"`
+	IsOwner     bool       `json:"isOwner"`
 	Roles       []string   `json:"roles"`
 	LastLoginAt *time.Time `json:"lastLoginAt"`
 	CreatedAt   time.Time  `json:"createdAt"`
@@ -68,7 +70,7 @@ func toRoleVO(r service.Role) roleVO {
 
 func toAdminVO(a service.Admin) adminVO {
 	return adminVO{
-		ID: a.ID, Username: a.Username, IsDisabled: a.IsDisabled, TOTPEnabled: a.TOTPEnabled,
+		ID: a.ID, Username: a.Username, IsDisabled: a.IsDisabled, TOTPEnabled: a.TOTPEnabled, IsOwner: a.IsOwner,
 		Roles: a.Roles, LastLoginAt: a.LastLoginAt, CreatedAt: a.CreatedAt,
 	}
 }
@@ -119,7 +121,9 @@ func (h *handlers) listPermissions(w http.ResponseWriter, r *http.Request, _ *se
 		writeError(w, r, err)
 		return
 	}
-	writeOK(w, mapSlice(perms, func(p service.Permission) permissionVO { return permissionVO{Code: p.Code, Name: p.Name} }))
+	writeOK(w, mapSlice(perms, func(p service.Permission) permissionVO {
+		return permissionVO{Code: p.Code, Name: p.Name, SuperOnly: p.SuperOnly}
+	}))
 }
 
 func (h *handlers) listRoles(w http.ResponseWriter, r *http.Request, _ *service.AdminPrincipal) {

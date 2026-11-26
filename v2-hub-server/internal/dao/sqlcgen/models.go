@@ -21,6 +21,8 @@ type Admin struct {
 	LastLoginAt    pgtype.Timestamptz
 	CreatedAt      pgtype.Timestamptz
 	UpdatedAt      pgtype.Timestamptz
+	IsOwner        bool
+	Kind           string
 }
 
 type AdminRole struct {
@@ -29,15 +31,44 @@ type AdminRole struct {
 }
 
 type AdminSession struct {
-	ID        int64
-	TokenHash []byte
-	AdminID   int64
-	CsrfToken string
-	ClientIp  *netip.Addr
-	UserAgent pgtype.Text
-	ExpiresAt pgtype.Timestamptz
-	IdleUntil pgtype.Timestamptz
-	CreatedAt pgtype.Timestamptz
+	ID          int64
+	TokenHash   []byte
+	AdminID     int64
+	CsrfToken   string
+	ClientIp    *netip.Addr
+	UserAgent   pgtype.Text
+	ExpiresAt   pgtype.Timestamptz
+	IdleUntil   pgtype.Timestamptz
+	CreatedAt   pgtype.Timestamptz
+	ReauthUntil pgtype.Timestamptz
+}
+
+type AgentAllocation struct {
+	ID           int64
+	AgentID      int64
+	UserID       pgtype.Int8
+	Username     string
+	PlanID       pgtype.Int8
+	PlanName     string
+	TrafficBytes int64
+	DurationDays int32
+	Kind         string
+	CreatedAt    pgtype.Timestamptz
+}
+
+type AgentPlan struct {
+	AdminID int64
+	PlanID  int64
+}
+
+type AgentProfile struct {
+	AdminID          int64
+	MaxUsers         int32
+	TrafficPoolTotal int64
+	TrafficPoolUsed  int64
+	Remark           string
+	CreatedAt        pgtype.Timestamptz
+	UpdatedAt        pgtype.Timestamptz
 }
 
 type Announcement struct {
@@ -227,6 +258,7 @@ type EndUser struct {
 	TrafficNotified    bool
 	CreatedAt          pgtype.Timestamptz
 	UpdatedAt          pgtype.Timestamptz
+	AgentID            pgtype.Int8
 }
 
 type Endpoint struct {
@@ -301,6 +333,7 @@ type InviteCode struct {
 	Remark      string
 	CreatedBy   pgtype.Int8
 	CreatedAt   pgtype.Timestamptz
+	AgentID     pgtype.Int8
 }
 
 type JobState struct {
