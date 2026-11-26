@@ -32,7 +32,7 @@ cd v2-hub-contract/deploy/it && bash run_all.sh
 - 面板是入站配置的事实来源；hub-server 缓存副本，定时同步并对账用户 client（docs/02 §3）。
 - 业务层只依赖 `manager/panel` 的 Provider 接口与中立模型，3x-ui 是 `manager/panel/xui` 一个实现（Ruling-8）。
 - 前端静态文件放 MinIO；生产单域名，管理端在 `/admin/`，Caddy 反代 `/api` 与订阅地址（Ruling-6、Ruling-61）。
-- 生产自动部署：`main` 检查全绿后由生产机上的自托管 Runner 执行 `deploy_prod.sh`（Ruling-62，docs/02 §6）。
+- 镜像与部署：`main` 检查全绿后在 GitHub 托管机构建 `v2-hub-server` / `v2-hub-init`（amd64 + arm64）推 Docker Hub `xiaoclux/` 与 GHCR `ghcr.io/xiaoclovemoney/`，再由生产机上的自托管 Runner 执行 `deploy_prod.sh` 按提交号拉镜像部署；推 `vX.Y` tag 出版本镜像与 `latest`（Ruling-62、Ruling-109，docs/02 §6）。仓库 MIT 开源，部署教程在根 README。
 
 契约（全部在 v2-hub-contract/）：`hub-api.yaml`（server → 前端）、`deploy/init.sql`（server 的表结构）、
 `upstream/3x-ui/openapi-v3.11.0.json`（3x-ui → server 的上游基准）。契约版本用 git tag `vX.Y`，当前 `v0.23`。
@@ -132,6 +132,7 @@ GitHub 仓库设置见 `docs/github-仓库设置清单.md`。
   `site.portalUrl` 与 `subscription.baseUrl` 仅超管可改；SSH 连接测试用密码凭据一律确认并按已固定主机密钥校验；改 TLS 校验方式或证书指纹须重填 token；
   代理分配套餐与用户下单同一规则（不同套餐按换购、剩余时长作废），流量池按最多能用到的周期数扣减。IT-17、IT-18 已补对应断言，IT-1 至 IT-18 在最终代码上回归通过。
   实测未覆盖：二次验证过期后各类密文查看接口的逐条检查、真实面板入站详情是否带密钥。遗留：频控是进程内的（单实例前提），跟踪表满时新 key 不受限，优惠码兑换仍是先查后记。
+- 开源与容器镜像（Ruling-109）：MIT 许可；`v2-hub-init` 一次性镜像（`v2-hub-contract/deploy/init/`）负责迁移（改记在库内表 `hub_deploy_migrations`）、上传桶、发布前端；`compose.deploy.yml` 开源用户与生产同用；工作流 `images` / `release`，`deploy` 改为先推镜像再拉镜像部署。本机已验证镜像构建、空库初始化、重复执行、旧状态文件导入与 `deploy_prod.sh` 全流程；GitHub 上首次推送（含 arm64）、Docker Hub 推送（需仓库 Secrets `DOCKERHUB_USERNAME` / `DOCKERHUB_TOKEN`）与生产机首次按镜像升级待人工验证。
 - 路线图 M3–M8、M9（链式改造）、M10（出口补全与入站预填）与 M11（SSH 托管与面板部署）已完成；后续工作待定。
 - 路线（2026-11-13，Ruling-17 – Ruling-22）：参考 SSPanel-Uim Malio 的功能与界面，自行实现；里程碑为
   M3 订阅与用户端基础 → M4 自助运营 → M5 商店与钱包 → M6 / M7 两种链式 → M8 运营，见 docs/07。
