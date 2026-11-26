@@ -1,15 +1,35 @@
-# 生产编排（单台独立服务器）：hub-server + Caddy + PostgreSQL + MinIO。
-# v2-hub 只做控制面，不转发代理流量；对外只开 80/443。
-# 由 deploy_prod.sh 同步到生产机 /opt/v2-hub 后执行（Ruling-62）；手动操作：
-#   docker compose -f /opt/v2-hub/compose.deploy.yml --env-file /opt/v2-hub/.env ps
+# 部署编排（单台独立服务器）：hub-server + init（一次性）+ Caddy + PostgreSQL + MinIO。
+# v2-hub 只做控制面，不转发代理流量；对外只开 80/443。开源用户与生产用同一份（Ruling-109），镜像见 README「容器部署」。
+#   docker compose -f compose.deploy.yml --env-file .env up -d
+# 生产由 deploy_prod.sh 同步到 /opt/v2-hub 后执行（Ruling-62），镜像仓库与标签另放 image.env：
+#   docker compose -f /opt/v2-hub/compose.deploy.yml --env-file /opt/v2-hub/.env --env-file /opt/v2-hub/image.env ps
 name: v2-hub
 x-logging: &logging
   driver: json-file
   options: { max-size: "20m", max-file: "5" }
 services:
+  # 迁移 → 上传桶与账号 → 发布前端到 MinIO，完成即退出；每次 up 都会再跑一遍（可重复执行），成功后 hub-server 才启动
+  init:
+    image: ${HUB_IMAGE_REGISTRY:-docker.io/xiaoclux}/v2-hub-init:${HUB_IMAGE_TAG:-latest}
+    restart: "no"
+    logging: *logging
+    environment:
+      PGHOST: postgres
+      PGPORT: "5432"
+      PGUSER: ${POSTGRES_USER}
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      PGDATABASE: ${POSTGRES_DB}
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      HUB_UPLOAD_USER: ${HUB_UPLOAD_USER}
+      HUB_UPLOAD_PASSWORD: ${HUB_UPLOAD_PASSWORD}
+    depends_on:
+      postgres: { condition: service_healthy }
+      minio: { condition: service_started }
+
   hub-server:
-    # 部署时以提交号为标签构建并同时打上 current；手动执行 compose 时用 current
-    image: v2-hub-server:${IMAGE_TAG:-current}
+    image: ${HUB_IMAGE_REGISTRY:-docker.io/xiaoclux}/v2-hub-server:${HUB_IMAGE_TAG:-latest}
     restart: unless-stopped
     logging: *logging
     environment:
@@ -24,10 +44,11 @@ services:
       HUB_SMTP_TLS: ${HUB_SMTP_TLS:-starttls}
       HUB_TELEGRAM_BOT_TOKEN: ${HUB_TELEGRAM_BOT_TOKEN:-}
       HUB_GLOBALPING_TOKEN: ${HUB_GLOBALPING_TOKEN:-}
-      # 公告 / 教程图片上传用的 MinIO 只写账号（Ruling-89）；deploy_prod.sh 在 .env 缺这两项时生成，留空 = 上传不可用
-      HUB_UPLOAD_USER: ${HUB_UPLOAD_USER:-}
-      HUB_UPLOAD_PASSWORD: ${HUB_UPLOAD_PASSWORD:-}
+      # 公告 / 教程图片上传用的 MinIO 只写账号（Ruling-89），由 init 建好
+      HUB_UPLOAD_USER: ${HUB_UPLOAD_USER}
+      HUB_UPLOAD_PASSWORD: ${HUB_UPLOAD_PASSWORD}
     depends_on:
+      init: { condition: service_completed_successfully }
       postgres: { condition: service_healthy }
       minio: { condition: service_started }
 

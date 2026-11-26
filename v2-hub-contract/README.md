@@ -10,10 +10,11 @@
 | `deploy/migrations/` | hub-server | 增量 SQL，幂等，手工执行，同步回 init.sql |
 | `upstream/3x-ui/openapi-v3.11.0.json` | 3x-ui → hub-server | 上游面板 API 快照，Provider(xui) 契约测试基准（Ruling-7） |
 | `deploy/docker-compose.yml` | 开发 | PostgreSQL、MinIO；`--profile xui` 另起两台 3x-ui |
-| `deploy/compose.deploy.yml` + `deploy/caddy/Caddyfile` | 生产 | hub-server + Caddy + PostgreSQL + MinIO |
-| `deploy/publish_web.sh` | 前端 → MinIO | 发布前端构建产物到 `web-admin` / `web-user` 桶 |
-| `deploy/init_uploads.sh` | hub-server → MinIO | 建图片上传桶 `uploads`（匿名只读）与 hub-server 的只写账号，`.env` 缺账号时补上（Ruling-89） |
-| `deploy/deploy_prod.sh` | 生产部署 | 自托管 Runner 在 `main` 检查全绿后执行：本地构建、迁移、compose 更新、发布前端、健康检查（Ruling-62） |
+| `deploy/compose.deploy.yml` + `deploy/caddy/Caddyfile` | 部署（开源用户与生产同用） | hub-server + init（一次性）+ Caddy + PostgreSQL + MinIO，镜像取自 Docker Hub / GHCR（Ruling-109）；`.env` 模板 `deploy/deploy.env.example` |
+| `deploy/init/` | 镜像 `v2-hub-init` | Dockerfile（构建上下文为仓库根）与入口 `init.sh`：迁移（记录在库内表 `hub_deploy_migrations`）、上传桶与账号、发布前端到 MinIO（Ruling-109） |
+| `deploy/publish_web.sh` | 开发：前端 → MinIO | 发布前端构建产物到 `web-admin` / `web-user` 桶 |
+| `deploy/init_uploads.sh` | 开发：hub-server → MinIO | 建图片上传桶 `uploads`（匿名只读）与 hub-server 的只写账号，`.env` 缺账号时补上（Ruling-89） |
+| `deploy/deploy_prod.sh` | 生产部署 | 自托管 Runner 在 `main` 检查全绿、镜像推送后执行：按提交号拉镜像、compose 更新、健康检查（Ruling-62、Ruling-109） |
 | `deploy/it/` | 黑盒联调 | `run_all.sh` 汇总 IT-N 用例 |
 
 ```bash
@@ -27,4 +28,4 @@ cd it && bash run_all.sh                           # 联调回归（会重置库
 
 - 变更纪律：提 PR；破坏性变更在 PR 描述列受影响目录并在同一 PR 改引用方（Ruling-3）。
 - 版本：git tag `vX.Y[.Z]`，最新 tag `v0.23`（主机域名解析与一键部署入站）；其后未打 tag 的契约现状为 hub-api 0.18.0、migrations 0026、IT-18（管理员分级加固与二级代理，Ruling-95 – Ruling-108）。
-- SQL 由使用者手工执行（`reset_db.sh` 重置、`migrations/` 增量），模块不自动建表。
+- 开发库的 SQL 手工执行（`reset_db.sh` 重置、`migrations/` 增量）；部署环境由 `v2-hub-init` 执行（Ruling-109）；hub-server 不自动建表。

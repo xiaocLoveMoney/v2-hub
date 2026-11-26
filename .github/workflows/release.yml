@@ -1,0 +1,21 @@
+# 版本镜像（Ruling-109）：推 vX.Y tag 时先跑三个模块的全量检查，全绿后推出 vX.Y 与 latest 标签。不部署生产。
+name: release
+on:
+  push:
+    tags: ["v*"]
+permissions:
+  contents: read
+jobs:
+  server:
+    uses: ./.github/workflows/server.yml
+  admin-web:
+    uses: ./.github/workflows/admin-web.yml
+  user-web:
+    uses: ./.github/workflows/user-web.yml
+  images:
+    needs: [server, admin-web, user-web]
+    uses: ./.github/workflows/images.yml
+    permissions:
+      contents: read
+      packages: write
+    secrets: inherit
