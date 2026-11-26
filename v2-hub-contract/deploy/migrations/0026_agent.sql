@@ -11,7 +11,8 @@ ALTER TABLE admin ADD CONSTRAINT ck_admin_owner_staff CHECK (NOT (is_owner AND k
 
 -- 名下归属（Ruling-102）：管理员不物理删除，外键不带级联
 ALTER TABLE end_user ADD COLUMN IF NOT EXISTS agent_id BIGINT REFERENCES admin (id);
-CREATE INDEX IF NOT EXISTS idx_end_user_agent_id ON end_user (agent_id) WHERE agent_id IS NOT NULL;
+-- 代理侧的列表、计数都带“未删除”并按创建时间倒序翻页，索引照这个形状建
+CREATE INDEX IF NOT EXISTS idx_end_user_agent_id ON end_user (agent_id, created_at DESC, id DESC) WHERE agent_id IS NOT NULL AND deleted_at IS NULL;
 
 -- 代理的邀请码（Ruling-102）：与用户个人码互斥
 ALTER TABLE invite_code ADD COLUMN IF NOT EXISTS agent_id BIGINT REFERENCES admin (id);
@@ -55,5 +56,8 @@ CREATE TABLE IF NOT EXISTS agent_allocation (
     CONSTRAINT ck_agent_allocation_amounts CHECK (traffic_bytes > 0 AND duration_days > 0)
 );
 CREATE INDEX IF NOT EXISTS idx_agent_allocation_agent ON agent_allocation (agent_id, created_at DESC);
+-- 用户 / 套餐被物理删除时要按这两列找引用行置空，没有索引就是整表顺扫
+CREATE INDEX IF NOT EXISTS idx_agent_allocation_user ON agent_allocation (user_id) WHERE user_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_agent_allocation_plan ON agent_allocation (plan_id) WHERE plan_id IS NOT NULL;
 
 COMMIT;
