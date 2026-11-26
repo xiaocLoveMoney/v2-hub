@@ -1,0 +1,98 @@
+# 容器镜像（Ruling-109，docs/02 §6）：v2-hub-server 与 v2-hub-init，linux/amd64 + linux/arm64，同时推 Docker Hub 与 GHCR。
+# main 上由 deploy.yml 在检查全绿后调用、tag vX.Y 由 release.yml 调用；PR 改到 Dockerfile 时只构建 amd64、不推送。
+# Docker Hub 用仓库 Secrets DOCKERHUB_USERNAME / DOCKERHUB_TOKEN，未配置时只推 GHCR（不挡部署）。
+name: images
+on:
+  workflow_call:
+  pull_request:
+    paths:
+      - "v2-hub-server/Dockerfile"
+      - "v2-hub-contract/deploy/init/**"
+      - ".github/workflows/images.yml"
+permissions:
+  contents: read
+env:
+  DOCKERHUB_NAMESPACE: xiaoclux
+  GHCR_NAMESPACE: ghcr.io/xiaoclovemoney
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: v2-hub-server
+            context: v2-hub-server
+            file: v2-hub-server/Dockerfile
+            description: v2-hub 后端：API、订阅端点、3x-ui 面板聚合与下发
+          - name: v2-hub-init
+            context: .
+            file: v2-hub-contract/deploy/init/Dockerfile
+            description: v2-hub 一次性初始化：数据库迁移、上传桶、发布管理端与用户端前端到 MinIO
+    env:
+      PUSH: ${{ github.event_name != 'pull_request' }}
+      DOCKERHUB_ENABLED: ${{ github.event_name != 'pull_request' && secrets.DOCKERHUB_TOKEN != '' }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-qemu-action@v4
+        if: env.PUSH == 'true'
+      - uses: docker/setup-buildx-action@v4
+      - name: 登录 GHCR
+        if: env.PUSH == 'true'
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: 登录 Docker Hub
+        if: env.DOCKERHUB_ENABLED == 'true'
+        uses: docker/login-action@v4
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@v6
+        env:
+          # 多架构镜像的说明写在 index 上，GHCR 包页面才显示
+          DOCKER_METADATA_ANNOTATIONS_LEVELS: manifest,index
+        with:
+          images: |
+            name=${{ env.GHCR_NAMESPACE }}/${{ matrix.name }}
+            name=docker.io/${{ env.DOCKERHUB_NAMESPACE }}/${{ matrix.name }},enable=${{ env.DOCKERHUB_ENABLED }}
+          # sha-<完整提交号> 供生产按提交部署；edge 跟随 main；vX.Y tag 出同名标签与 latest
+          tags: |
+            type=sha,format=long
+            type=edge,branch=main
+            type=ref,event=tag
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+          labels: |
+            org.opencontainers.image.title=${{ matrix.name }}
+            org.opencontainers.image.description=${{ matrix.description }}
+          annotations: |
+            org.opencontainers.image.title=${{ matrix.name }}
+            org.opencontainers.image.description=${{ matrix.description }}
+      - uses: docker/build-push-action@v7
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.file }}
+          platforms: ${{ env.PUSH == 'true' && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
+          push: ${{ env.PUSH == 'true' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          annotations: ${{ steps.meta.outputs.annotations }}
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
+      # 仓库简介同步到 Docker Hub；令牌没有写简介的权限时只告警，不挡部署
+      - name: 同步 Docker Hub 简介
+        if: env.DOCKERHUB_ENABLED == 'true' && github.ref == 'refs/heads/main'
+        continue-on-error: true
+        uses: peter-evans/dockerhub-description@v5
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          repository: ${{ env.DOCKERHUB_NAMESPACE }}/${{ matrix.name }}
+          short-description: ${{ matrix.description }}
+          readme-filepath: .github/dockerhub/README.md

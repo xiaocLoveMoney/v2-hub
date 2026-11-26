@@ -1,5 +1,5 @@
-# 生产部署（Ruling-62，docs/02 §6）：main 有推送时先跑三个模块的全量检查，全部通过才在每台生产机的自托管 Runner 上部署；
-# Actions 页可手动触发（只认 main）。PR 不经过这里，自托管 Runner 只跑 main 的部署。
+# 生产部署（Ruling-62、Ruling-109，docs/02 §6）：main 有推送时先跑三个模块的全量检查，全部通过后在托管机上构建并推送镜像，
+# 再由每台生产机的自托管 Runner 按提交号拉镜像部署；Actions 页可手动触发（只认 main）。PR 不经过这里，自托管 Runner 只跑 main 的部署。
 name: deploy
 on:
   push:
@@ -14,8 +14,16 @@ jobs:
     uses: ./.github/workflows/admin-web.yml
   user-web:
     uses: ./.github/workflows/user-web.yml
-  production:
+  images:
     needs: [server, admin-web, user-web]
+    if: github.ref == 'refs/heads/main'
+    uses: ./.github/workflows/images.yml
+    permissions:
+      contents: read
+      packages: write
+    secrets: inherit
+  production:
+    needs: [images]
     if: github.ref == 'refs/heads/main'
     # 每套生产环境一台机器、一个 Runner 标签（docs/02 §6）；各环境互不影响，一套失败不取消另一套
     strategy:
@@ -23,6 +31,9 @@ jobs:
       matrix:
         runner-label: [v2-hub-prod]
     runs-on: [self-hosted, "${{ matrix.runner-label }}"]
+    permissions:
+      contents: read
+      packages: read
     timeout-minutes: 40
     # 每套环境同一时间只部署一次；排队中的被更新的提交取代，进行中的不取消
     concurrency:
@@ -30,5 +41,15 @@ jobs:
       cancel-in-progress: false
     steps:
       - uses: actions/checkout@v7
-      - name: 构建并部署
+      # 用工作流自带的只读令牌拉 GHCR 镜像（包设为私有时也能拉），部署结束即登出，不在生产机上留凭据
+      - name: 登录 GHCR
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+      - name: 拉镜像并部署
+        env:
+          HUB_IMAGE_TAG: sha-${{ github.sha }}
         run: bash v2-hub-contract/deploy/deploy_prod.sh
+      - name: 登出 GHCR
+        if: always()
+        run: docker logout ghcr.io
